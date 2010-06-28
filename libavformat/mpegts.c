@@ -982,7 +982,7 @@ static int mpegts_push_data(MpegTSFilter *filter,
                         goto skip;
 
                     /* stream not present in PMT */
-                    if (!pes->st) {
+                    if (ts->auto_guess && !pes->st) {
                         if (ts->skip_changes)
                             goto skip;
 
