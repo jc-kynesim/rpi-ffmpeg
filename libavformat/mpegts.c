@@ -673,6 +673,8 @@ static const StreamType DESC_types[] = {
     { 0x7b, AVMEDIA_TYPE_AUDIO,             AV_CODEC_ID_DTS },
     { 0x56, AVMEDIA_TYPE_SUBTITLE, AV_CODEC_ID_DVB_TELETEXT },
     { 0x59, AVMEDIA_TYPE_SUBTITLE, AV_CODEC_ID_DVB_SUBTITLE }, /* subtitling descriptor */
+    { 0x45, AVMEDIA_TYPE_DATA,         AV_CODEC_ID_VBI_DATA }, /* VBI Data descriptor */
+    { 0x46, AVMEDIA_TYPE_DATA,     AV_CODEC_ID_VBI_TELETEXT }, /* VBI Teletext descriptor */
     { 0 },
 };
 
