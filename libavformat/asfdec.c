@@ -1536,7 +1536,18 @@ static int asf_read_seek(AVFormatContext *s, int stream_index,
     AVStream *st    = s->streams[stream_index];
     int ret = 0;
 
+    if (pts == 0) {
+      // this is a hack since av_gen_search searches the entire file in this case
+      av_log(s, AV_LOG_DEBUG, "SEEKTO: %"PRId64"\n", s->data_offset);
+      if (avio_seek(s->pb, s->data_offset, SEEK_SET) < 0)
+          return -1;
+      return 0;
+    }
+
     if (s->packet_size <= 0)
+        return -1;
+
+    if (st->codec->codec_type != AVMEDIA_TYPE_VIDEO)
         return -1;
 
     /* Try using the protocol's read_seek if available */
