@@ -585,6 +585,7 @@ typedef struct SectionHeader {
     uint8_t tid;
     uint16_t id;
     uint8_t version;
+    uint8_t current;
     uint8_t sec_num;
     uint8_t last_sec_num;
 } SectionHeader;
@@ -667,6 +668,7 @@ static int parse_section_header(SectionHeader *h,
     val = get8(pp, p_end);
     if (val < 0)
         return val;
+    h->current = val & 0x1;
     h->version = (val >> 1) & 0x1f;
     val = get8(pp, p_end);
     if (val < 0)
@@ -2014,6 +2016,8 @@ static void pat_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
     if (h->tid != PAT_TID)
         return;
     if (ts->skip_changes)
+        return;
+    if (!h->current)
         return;
 
     if (skip_identical(h, tssf))
