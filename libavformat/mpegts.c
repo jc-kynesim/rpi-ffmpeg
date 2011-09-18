@@ -90,6 +90,7 @@ struct MpegTSFilter {
     int es_id;
     int last_cc; /* last cc code (-1 if first packet) */
     int64_t last_pcr;
+    int last_version; /* last version of data on this pid */
     enum MpegTSFilterType type;
     union {
         MpegTSPESFilter pes_filter;
@@ -458,6 +459,7 @@ static MpegTSFilter *mpegts_open_filter(MpegTSContext *ts, unsigned int pid,
     filter->es_id   = -1;
     filter->last_cc = -1;
     filter->last_pcr= -1;
+    filter->last_version = -1;
 
     return filter;
 }
@@ -2008,6 +2010,10 @@ static void pat_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
         return;
     if (!h->current)
         return;
+    if (h->version == filter->last_version)
+        return;
+    filter->last_version = h->version;
+    av_dlog(ts->stream, "version=%d\n", filter->last_version);
 
     if (skip_identical(h, tssf))
         return;
