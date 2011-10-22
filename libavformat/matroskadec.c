@@ -2921,8 +2921,8 @@ static int matroska_read_seek(AVFormatContext *s, int stream_index,
     timestamp = FFMAX(timestamp, st->index_entries[0].timestamp);
 
     if ((index = av_index_search_timestamp(st, timestamp, flags)) < 0) {
-        avio_seek(s->pb, st->index_entries[st->nb_index_entries - 1].pos,
-                  SEEK_SET);
+        if (avio_seek(s->pb, st->index_entries[st->nb_index_entries-1].pos, SEEK_SET) < 0)
+            return -1;
         matroska->current_id = 0;
         while ((index = av_index_search_timestamp(st, timestamp, flags)) < 0) {
             matroska_clear_queue(matroska);
@@ -2931,16 +2931,11 @@ static int matroska_read_seek(AVFormatContext *s, int stream_index,
         }
     }
 
-    matroska_clear_queue(matroska);
     if (index < 0 || (matroska->cues_parsing_deferred < 0 && index == st->nb_index_entries - 1))
         goto err;
 
     index_min = index;
     for (i = 0; i < matroska->tracks.nb_elem; i++) {
-        tracks[i].audio.pkt_cnt        = 0;
-        tracks[i].audio.sub_packet_cnt = 0;
-        tracks[i].audio.buf_timecode   = AV_NOPTS_VALUE;
-        tracks[i].end_timecode         = 0;
         if (tracks[i].type == MATROSKA_TRACK_TYPE_SUBTITLE &&
             tracks[i].stream->discard != AVDISCARD_ALL) {
             index_sub = av_index_search_timestamp(
@@ -2954,8 +2949,18 @@ static int matroska_read_seek(AVFormatContext *s, int stream_index,
         }
     }
 
-    avio_seek(s->pb, st->index_entries[index_min].pos, SEEK_SET);
-    matroska->current_id       = 0;
+    if (avio_seek(s->pb, st->index_entries[index_min].pos, SEEK_SET) < 0)
+        return -1;
+
+    matroska_clear_queue(matroska);
+    for (i=0; i < matroska->tracks.nb_elem; i++) {
+        tracks[i].audio.pkt_cnt = 0;
+        tracks[i].audio.sub_packet_cnt = 0;
+        tracks[i].audio.buf_timecode = AV_NOPTS_VALUE;
+        tracks[i].end_timecode = 0;
+    }
+    matroska->current_id = 0;
+
     if (flags & AVSEEK_FLAG_ANY) {
         st->skip_to_keyframe = 0;
         matroska->skip_to_timecode = timestamp;
