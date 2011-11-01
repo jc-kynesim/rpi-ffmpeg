@@ -1702,6 +1702,11 @@ void ff_read_frame_flush(AVFormatContext *s)
     }
 }
 
+void av_read_frame_flush(AVFormatContext *s)
+{
+  ff_read_frame_flush(s);
+}
+
 void ff_update_cur_dts(AVFormatContext *s, AVStream *ref_st, int64_t timestamp)
 {
     int i;
