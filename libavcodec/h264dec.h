@@ -540,6 +540,8 @@ typedef struct H264Context {
      * slices) anymore */
     int setup_finished;
 
+    int got_first_iframe;
+
     int cur_chroma_format_idc;
     int cur_bit_depth_luma;
     int16_t slice_row[MAX_SLICES]; ///< to detect when MAX_SLICES is too low

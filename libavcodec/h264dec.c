@@ -442,6 +442,7 @@ void ff_h264_flush_change(H264Context *h)
 
     h->next_outputed_poc = INT_MIN;
     h->prev_interlaced_frame = 1;
+    h->got_first_iframe = 0;
     idr(h);
 
     h->poc.prev_frame_num = -1;
