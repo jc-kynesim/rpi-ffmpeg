@@ -1085,6 +1085,7 @@ void ff_h264_flush_change(H264Context *h)
     h->list_count = 0;
     h->current_slice = 0;
     h->mmco_reset = 1;
+    h->got_first_iframe = 0;
 }
 
 /* forget old pics after a seek */
