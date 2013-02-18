@@ -774,6 +774,8 @@ typedef struct H264Context {
     int missing_fields;
 
 
+    int got_first_iframe;
+
     // Timestamp stuff
     int sei_buffering_period_present;   ///< Buffering period SEI flag
     int initial_cpb_removal_delay[32];  ///< Initial timestamps for CPBs
