@@ -1170,6 +1170,7 @@ static int h264_slice_header_init(H264Context *h, int reinit)
         ff_h264_free_tables(h, 0);
     h->first_field           = 0;
     h->prev_interlaced_frame = 1;
+    h->got_first_iframe = 0;
 
     init_scan_tables(h);
     ret = ff_h264_alloc_tables(h);
