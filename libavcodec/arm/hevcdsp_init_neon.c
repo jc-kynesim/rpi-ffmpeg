@@ -23,7 +23,7 @@
 #include "libavcodec/hevcdsp.h"
 #include "hevcdsp_arm.h"
 #include "libavcodec/avcodec.h"
-#include "../bit_depth_template.c"
+#include "libavcodec/bit_depth_template.c"
 
 void ff_hevc_v_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_h_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
