@@ -176,8 +176,8 @@ static void fill_slice(AVCodecContext *avctx, DXVA_SliceInfo *slice,
 }
 
 static int commit_bitstream_and_slice_buffer(AVCodecContext *avctx,
-                                             DXVA2_DecodeBufferDesc *bs,
-                                             DXVA2_DecodeBufferDesc *sc)
+                                             D3D11_VIDEO_DECODER_BUFFER_DESC *bs,
+                                             D3D11_VIDEO_DECODER_BUFFER_DESC *sc)
 {
     const VC1Context *v = avctx->priv_data;
     struct dxva_context *ctx = avctx->hwaccel_context;
@@ -197,9 +197,9 @@ static int commit_bitstream_and_slice_buffer(AVCodecContext *avctx,
     unsigned dxva_size;
     int result;
 
-    if (FAILED(IDirectXVideoDecoder_GetBuffer(ctx->decoder,
-                                              DXVA2_BitStreamDateBufferType,
-                                              &dxva_data_ptr, &dxva_size)))
+    if (FAILED(ID3D11VideoContext_GetDecoderBuffer(ctx->context, ctx->decoder, 
+                                                   D3D11_VIDEO_DECODER_BUFFER_BITSTREAM,
+                                                   &dxva_size, &dxva_data_ptr)))
         return -1;
 
     dxva_data = dxva_data_ptr;
@@ -216,20 +216,20 @@ static int commit_bitstream_and_slice_buffer(AVCodecContext *avctx,
             memset(dxva_data + start_code_size + slice_size, 0, padding);
         slice->dwSliceBitsInBuffer = 8 * data_size;
     }
-    if (FAILED(IDirectXVideoDecoder_ReleaseBuffer(ctx->decoder,
-                                                  DXVA2_BitStreamDateBufferType)))
+    if (FAILED(ID3D11VideoContext_ReleaseDecoderBuffer(ctx->context, ctx->decoder,
+                                                       D3D11_VIDEO_DECODER_BUFFER_BITSTREAM)))
         return -1;
     if (result)
         return result;
 
     memset(bs, 0, sizeof(*bs));
-    bs->CompressedBufferType = DXVA2_BitStreamDateBufferType;
-    bs->DataSize             = data_size;
-    bs->NumMBsInBuffer       = s->mb_width * s->mb_height;
+    bs->BufferType     = D3D11_VIDEO_DECODER_BUFFER_BITSTREAM;
+    bs->DataSize       = data_size;
+    bs->NumMBsInBuffer = s->mb_width * s->mb_height;
     assert((bs->DataSize & 127) == 0);
 
     return ff_dxva2_commit_buffer(avctx, ctx, sc,
-                                  DXVA2_SliceControlBufferType,
+                                  D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL,
                                   slice, sizeof(*slice), bs->NumMBsInBuffer);
 }
 

@@ -56,14 +56,19 @@
  */
 struct dxva_context {
     /**
-     * DXVA2 decoder object
+     * D3D11 video context object
      */
-    IDirectXVideoDecoder *decoder;
+    ID3D11VideoContext *context;
 
     /**
-     * DXVA2 configuration used to create the decoder
+     * D3D11 video decoder object
      */
-    const DXVA2_ConfigPictureDecode *cfg;
+    ID3D11VideoDecoder *decoder;
+
+    /**
+     * D3D11 configuration used to create the decoder
+     */
+    const D3D11_VIDEO_DECODER_CONFIG *cfg;
 
     /**
      * The number of surface in the surface array
@@ -71,9 +76,9 @@ struct dxva_context {
     unsigned surface_count;
 
     /**
-     * The array of Direct3D surfaces used to create the decoder
+     * The array of surfaces used to create the decoder // TODO mb ID3D11Texture2DArray ??
      */
-    LPDIRECT3DSURFACE9 *surface;
+    ID3D11VideoDecoderOutputView **surface;
 
     /**
      * A bit field configuring the workarounds needed for using the decoder
