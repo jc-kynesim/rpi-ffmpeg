@@ -679,6 +679,30 @@ static void nv21ToUV_c(uint8_t *dstU, uint8_t *dstV,
     nvXXtoUV_c(dstV, dstU, src1, width);
 }
 
+static void p010ToUV_c(uint8_t *dstU, uint8_t *dstV,
+                       const uint8_t *unused0, const uint8_t *src1, const uint8_t *src2,
+                       int width, uint32_t *unused)
+{
+    uint16_t *dstU16 = (uint16_t *)dstU, *dstV16 = (uint16_t *)dstV;
+    const uint16_t *src16 = (uint16_t *)src1;
+    int i;
+    for (i = 0; i < width; i++) {
+        dstU16[i] = src16[2 * i + 0] >> 6;
+        dstV16[i] = src16[2 * i + 1] >> 6;
+    }
+}
+
+static void p010ToY_c(uint8_t *_dst, const uint8_t *_src, const uint8_t *unused1, const uint8_t *unused2, int width,
+                      uint32_t *unused)
+{
+    uint16_t *dst = (uint16_t *)_dst;
+    const uint16_t *src = (uint16_t *)_src;
+    int i;
+    for (i = 0; i < width; i++) {
+        dst[i] = src[i] >> 6;
+    }
+}
+
 #define input_pixel(pos) (isBE(origin) ? AV_RB16(pos) : AV_RL16(pos))
 
 static void bgr24ToY_c(uint8_t *_dst, const uint8_t *src, const uint8_t *unused1, const uint8_t *unused2,
@@ -909,6 +933,9 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
         break;
     case AV_PIX_FMT_NV21:
         c->chrToYV12 = nv21ToUV_c;
+        break;
+    case AV_PIX_FMT_P010:
+        c->chrToYV12 = p010ToUV_c;
         break;
     case AV_PIX_FMT_RGB8:
     case AV_PIX_FMT_BGR8:
@@ -1225,6 +1252,9 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
         c->readAlpPlanar = planar_rgb_to_a;
     case AV_PIX_FMT_GBRP:
         c->readLumPlanar = planar_rgb_to_y;
+        break;
+    case AV_PIX_FMT_P010:
+        c->lumToYV12 = p010ToY_c;
         break;
 #if HAVE_BIGENDIAN
     case AV_PIX_FMT_YUV444P9LE:

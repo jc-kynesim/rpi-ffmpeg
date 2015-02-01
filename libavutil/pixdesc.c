@@ -1966,6 +1966,30 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_PLANAR | AV_PIX_FMT_FLAG_BE,
     },
+    [AV_PIX_FMT_P010LE] = {
+        .name = "p010le",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 1, 6, 9 },        /* Y */
+            { 1, 3, 1, 6, 9 },        /* U */
+            { 1, 3, 3, 6, 9 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR,
+    },
+    [AV_PIX_FMT_P010BE] = {
+        .name = "p010be",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 1, 6, 9 },        /* Y */
+            { 1, 3, 1, 6, 9 },        /* U */
+            { 1, 3, 3, 6, 9 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR | AV_PIX_FMT_FLAG_BE,
+    },
     [AV_PIX_FMT_VDA] = {
         .name = "vda",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,

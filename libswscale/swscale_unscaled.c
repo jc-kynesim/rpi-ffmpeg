@@ -1751,8 +1751,8 @@ void ff_get_unscaled_swscale(SwsContext *c)
         (isPlanarYUV(srcFormat) && isPlanarYUV(dstFormat) &&
          c->chrDstHSubSample == c->chrSrcHSubSample &&
          c->chrDstVSubSample == c->chrSrcVSubSample &&
-         dstFormat != AV_PIX_FMT_NV12 && dstFormat != AV_PIX_FMT_NV21 &&
-         srcFormat != AV_PIX_FMT_NV12 && srcFormat != AV_PIX_FMT_NV21))
+         dstFormat != AV_PIX_FMT_NV12 && dstFormat != AV_PIX_FMT_NV21 && dstFormat != AV_PIX_FMT_P010 &&
+         srcFormat != AV_PIX_FMT_NV12 && srcFormat != AV_PIX_FMT_NV21 && srcFormat != AV_PIX_FMT_P010))
     {
         if (isPacked(c->srcFormat))
             c->swscale = packedCopyWrapper;
