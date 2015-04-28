@@ -22,6 +22,9 @@
  * @file
  * multimedia converter based on the FFmpeg libraries
  */
+ 
+#define RPI_DISPLAY
+//#define RPI_ZERO_COPY
 
 #include "config.h"
 #include <ctype.h>
@@ -67,6 +70,20 @@
 # include "libavfilter/avfilter.h"
 # include "libavfilter/buffersrc.h"
 # include "libavfilter/buffersink.h"
+
+#ifdef RPI_DISPLAY
+#include <bcm_host.h>
+#include <interface/mmal/mmal.h>
+#include <interface/mmal/mmal_parameters_camera.h>
+#include <interface/mmal/mmal_buffer.h>
+#include <interface/mmal/util/mmal_util.h>
+#include <interface/mmal/util/mmal_default_components.h>
+#include <interface/mmal/util/mmal_connection.h>
+#include <interface/mmal/util/mmal_util_params.h>
+#ifdef RPI_ZERO_COPY
+#include "libavcodec/rpi_qpu.h"
+#endif
+#endif
 
 #if HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
@@ -157,6 +174,130 @@ static int restore_tty;
 #if HAVE_PTHREADS
 static void free_input_threads(void);
 #endif
+
+#ifdef RPI_DISPLAY
+
+#define NUM_BUFFERS 4
+
+static MMAL_COMPONENT_T* rpi_display = NULL;
+static MMAL_POOL_T *rpi_pool = NULL;
+
+#ifdef RPI_ZERO_COPY
+static uint8_t *get_vc_handle(AVBufferRef *bref) {
+  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
+  return (uint8_t *)p->vc_handle;
+}
+#endif
+
+static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
+{
+    MMAL_POOL_T* pool;
+    size_t i;
+    size_t size = (w*h*3)/2;
+#ifdef RPI_ZERO_COPY
+    mmal_port_parameter_set_boolean(port, MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE); // Does this mark that the buffer contains a vc_handle?  Would have expected a vc_image?
+    pool = mmal_port_pool_create(port, NUM_BUFFERS, 0);
+    assert(pool);
+#else
+    pool = mmal_port_pool_create(port, NUM_BUFFERS, size);
+    
+    for (i = 0; i < NUM_BUFFERS; ++i)
+    {
+       MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
+       void* bufPtr = buffer->data;
+       memset(bufPtr, i*30, w*h);
+       memset(bufPtr+w*h, 128, (w*h)/2);
+    }
+#endif
+    
+    return pool;
+}
+
+static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
+  mmal_buffer_header_release(buffer);
+}
+
+static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
+{
+    MMAL_COMPONENT_T* display; 
+    MMAL_DISPLAYREGION_T region =
+    {
+        {MMAL_PARAMETER_DISPLAYREGION, sizeof(region)},
+        .set = MMAL_DISPLAY_SET_LAYER | MMAL_DISPLAY_SET_FULLSCREEN | MMAL_DISPLAY_SET_DEST_RECT,
+        .layer = 2,
+        .fullscreen = 0,
+        .dest_rect = {x, y, w, h}
+    };
+    bcm_host_init();  // TODO is this needed?
+    mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &display);
+    assert(display);
+    
+    mmal_port_parameter_set(display->input[0], &region.hdr);
+    
+    MMAL_ES_FORMAT_T* format = display->input[0]->format;
+    format->encoding = MMAL_ENCODING_I420;
+    format->es->video.width = w;
+    format->es->video.height = h;
+    format->es->video.crop.x = 0;
+    format->es->video.crop.y = 0;
+    format->es->video.crop.width = w;
+    format->es->video.crop.height = h;
+    mmal_port_format_commit(display->input[0]);
+    
+    mmal_component_enable(display);
+    
+    rpi_pool = display_alloc_pool(display->input[0], w, h);
+    
+    mmal_port_enable(display->input[0],display_cb_input);
+    mmal_port_enable(display->control,display_cb_input);
+    
+    printf("Allocated display %d %d\n",w,h);
+    
+    return display;
+}
+
+static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr) 
+{
+    int w = fr->width;
+    int h = fr->height;
+    if (!display || !rpi_pool)
+        return;
+    MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
+    if (!buf) {
+      // Running too fast so drop the frame
+      return;
+    }
+    assert(buf);
+    buf->cmd = 0;
+    buf->length = (w * h * 3)/2;
+    buf->offset = 0; // Offset to valid data
+    buf->flags = 0;
+#ifdef RPI_ZERO_COPY
+    buf->data = get_vc_handle(fr->buf[0]);
+    buf->alloc_size = (w*h*3)/2;
+#else
+    mmal_buffer_header_mem_lock(buf);
+    memcpy(buf->data, fr->data[0], w * h);
+    memcpy(buf->data+w*h, fr->data[1], w * h / 4);
+    memcpy(buf->data+w*h*5/4, fr->data[2], w * h / 4);
+    mmal_buffer_header_mem_unlock(buf);
+#endif
+    
+    mmal_port_send_buffer(display->input[0], buf);  // I assume this will automatically get released
+}
+
+static void display_exit(MMAL_COMPONENT_T* display)
+{
+    if (display) {
+        mmal_component_destroy(display);
+    }
+    if (rpi_pool) {
+        mmal_port_pool_destroy(display->input[0], rpi_pool);
+    }
+}
+
+#endif
+
 
 /* sub2video hack:
    Convert subtitles to video with alpha to insert them in filter graphs.
@@ -534,6 +675,10 @@ static void ffmpeg_cleanup(int ret)
         av_log(NULL, AV_LOG_INFO, "Conversion failed!\n");
     }
     term_exit();
+    
+#ifdef RPI_DISPLAY
+    display_exit(rpi_display);
+#endif
 }
 
 void remove_avoptions(AVDictionary **a, AVDictionary *b)
@@ -896,6 +1041,11 @@ static void do_video_out(AVFormatContext *s,
     int frame_size = 0;
     InputStream *ist = NULL;
     AVFilterContext *filter = ost->filter->filter;
+#ifdef RPI_DISPLAY
+    if (!rpi_display)
+        rpi_display = display_init(0,0,next_picture->width,next_picture->height);
+     display_frame(rpi_display,next_picture);
+#endif
 
     if (ost->source_index >= 0)
         ist = input_streams[ost->source_index];
