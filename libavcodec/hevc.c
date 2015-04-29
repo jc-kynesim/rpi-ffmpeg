@@ -931,6 +931,25 @@ static int hls_cross_component_pred(HEVCContext *s, int idx) {
     return 0;
 }
 
+#ifdef RPI
+static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, int c_idx)
+{
+    if (s->enable_rpi) {
+        HEVCLocalContext *lc = s->HEVClc;
+        HEVCPredCmd *cmd = s->univ_pred_cmds + s->num_pred_cmds++;
+        cmd->type = RPI_PRED_INTRA;
+        cmd->size = log2_trafo_size;
+        cmd->c_idx = c_idx;
+        cmd->x = x0;
+        cmd->y = y0;
+        cmd->na = (lc->na.cand_bottom_left<<4) + (lc->na.cand_left<<3) + (lc->na.cand_up_left<<2) + (lc->na.cand_up<<1) + lc->na.cand_up_right;
+        cmd->mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
+    } else {
+        s->hpc.intra_pred[log2_trafo_size - 2](s, x0, y0, c_idx);
+    }
+}
+#endif
+
 static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                               int xBase, int yBase, int cb_xBase, int cb_yBase,
                               int log2_cb_size, int log2_trafo_size,
@@ -943,8 +962,11 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
     if (lc->cu.pred_mode == MODE_INTRA) {
         int trafo_size = 1 << log2_trafo_size;
         ff_hevc_set_neighbour_available(s, x0, y0, trafo_size, trafo_size);
-
+#ifdef RPI
+        rpi_intra_pred(s, log2_trafo_size, x0, y0, 0);
+#else
         s->hpc.intra_pred[log2_trafo_size - 2](s, x0, y0, 0);
+#endif
     }
 
     if (cbf_luma || cbf_cb[0] || cbf_cr[0] ||
@@ -1030,7 +1052,11 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
             for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_set_neighbour_available(s, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
+#ifdef RPI
+                    rpi_intra_pred(s, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 1);
+#else
                     s->hpc.intra_pred[log2_trafo_size_c - 2](s, x0, y0 + (i << log2_trafo_size_c), 1);
+#endif
                 }
                 if (cbf_cb[i])
                     ff_hevc_hls_residual_coding(s, x0, y0 + (i << log2_trafo_size_c),
@@ -1059,7 +1085,11 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
             for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_set_neighbour_available(s, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
+#ifdef RPI
+                    rpi_intra_pred(s, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 2);
+#else
                     s->hpc.intra_pred[log2_trafo_size_c - 2](s, x0, y0 + (i << log2_trafo_size_c), 2);
+#endif
                 }
                 if (cbf_cr[i])
                     ff_hevc_hls_residual_coding(s, x0, y0 + (i << log2_trafo_size_c),
@@ -1088,7 +1118,11 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_set_neighbour_available(s, xBase, yBase + (i << log2_trafo_size),
                                                     trafo_size_h, trafo_size_v);
+#ifdef RPI
+                    rpi_intra_pred(s, log2_trafo_size, xBase, yBase + (i << log2_trafo_size), 1);
+#else
                     s->hpc.intra_pred[log2_trafo_size - 2](s, xBase, yBase + (i << log2_trafo_size), 1);
+#endif
                 }
                 if (cbf_cb[i])
                     ff_hevc_hls_residual_coding(s, xBase, yBase + (i << log2_trafo_size),
@@ -1098,7 +1132,11 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_set_neighbour_available(s, xBase, yBase + (i << log2_trafo_size),
                                                 trafo_size_h, trafo_size_v);
+#ifdef RPI
+                    rpi_intra_pred(s, log2_trafo_size, xBase, yBase + (i << log2_trafo_size), 2);
+#else
                     s->hpc.intra_pred[log2_trafo_size - 2](s, xBase, yBase + (i << log2_trafo_size), 2);
+#endif
                 }
                 if (cbf_cr[i])
                     ff_hevc_hls_residual_coding(s, xBase, yBase + (i << log2_trafo_size),
@@ -1110,26 +1148,46 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
             int trafo_size_h = 1 << (log2_trafo_size_c + s->ps.sps->hshift[1]);
             int trafo_size_v = 1 << (log2_trafo_size_c + s->ps.sps->vshift[1]);
             ff_hevc_set_neighbour_available(s, x0, y0, trafo_size_h, trafo_size_v);
+#ifdef RPI
+            rpi_intra_pred(s, log2_trafo_size_c, x0, y0, 1);
+            rpi_intra_pred(s, log2_trafo_size_c, x0, y0, 2);
+#else
             s->hpc.intra_pred[log2_trafo_size_c - 2](s, x0, y0, 1);
             s->hpc.intra_pred[log2_trafo_size_c - 2](s, x0, y0, 2);
+#endif
             if (s->ps.sps->chroma_format_idc == 2) {
                 ff_hevc_set_neighbour_available(s, x0, y0 + (1 << log2_trafo_size_c),
                                                 trafo_size_h, trafo_size_v);
+#ifdef RPI
+                rpi_intra_pred(s, log2_trafo_size_c, x0, y0 + (1 << log2_trafo_size_c), 1);
+                rpi_intra_pred(s, log2_trafo_size_c, x0, y0 + (1 << log2_trafo_size_c), 2);
+#else
                 s->hpc.intra_pred[log2_trafo_size_c - 2](s, x0, y0 + (1 << log2_trafo_size_c), 1);
                 s->hpc.intra_pred[log2_trafo_size_c - 2](s, x0, y0 + (1 << log2_trafo_size_c), 2);
+#endif
             }
         } else if (blk_idx == 3) {
             int trafo_size_h = 1 << (log2_trafo_size + 1);
             int trafo_size_v = 1 << (log2_trafo_size + s->ps.sps->vshift[1]);
             ff_hevc_set_neighbour_available(s, xBase, yBase,
                                             trafo_size_h, trafo_size_v);
+#ifdef RPI
+            rpi_intra_pred(s, log2_trafo_size, xBase, yBase, 1);
+            rpi_intra_pred(s, log2_trafo_size, xBase, yBase, 2);
+#else
             s->hpc.intra_pred[log2_trafo_size - 2](s, xBase, yBase, 1);
             s->hpc.intra_pred[log2_trafo_size - 2](s, xBase, yBase, 2);
+#endif
             if (s->ps.sps->chroma_format_idc == 2) {
                 ff_hevc_set_neighbour_available(s, xBase, yBase + (1 << (log2_trafo_size)),
                                                 trafo_size_h, trafo_size_v);
+#ifdef RPI
+                rpi_intra_pred(s, log2_trafo_size, xBase, yBase + (1 << (log2_trafo_size)), 1);
+                rpi_intra_pred(s, log2_trafo_size, xBase, yBase + (1 << (log2_trafo_size)), 2);
+#else
                 s->hpc.intra_pred[log2_trafo_size - 2](s, xBase, yBase + (1 << (log2_trafo_size)), 1);
                 s->hpc.intra_pred[log2_trafo_size - 2](s, xBase, yBase + (1 << (log2_trafo_size)), 2);
+#endif
             }
         }
     }
@@ -2304,6 +2362,31 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
     lc->ctb_up_left_flag = ((x_ctb > 0) && (y_ctb > 0)  && (ctb_addr_in_slice-1 >= s->ps.sps->ctb_width) && (s->ps.pps->tile_id[ctb_addr_ts] == s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs-1 - s->ps.sps->ctb_width]]));
 }
 
+#ifdef RPI
+static void rpi_execute_pred_cmds(HEVCContext *s)
+{
+  int i;
+  HEVCPredCmd *cmd = s->univ_pred_cmds;
+  HEVCLocalContext *lc = s->HEVClc;
+
+  for(i = s->num_pred_cmds; i > 0; i--, cmd++) {
+      if (cmd->type == RPI_PRED_INTRA) {
+          lc->tu.intra_pred_mode_c = lc->tu.intra_pred_mode = cmd->mode;
+          lc->na.cand_bottom_left  = (cmd->na >> 4) & 1;
+          lc->na.cand_left         = (cmd->na >> 3) & 1;
+          lc->na.cand_up_left      = (cmd->na >> 2) & 1;
+          lc->na.cand_up           = (cmd->na >> 1) & 1;
+          lc->na.cand_up_right     = (cmd->na >> 0) & 1;
+          s->hpc.intra_pred[cmd->size - 2](s, cmd->x, cmd->y, cmd->c_idx);
+      } else {
+          s->hevcdsp.transform_add[cmd->size-2](cmd->dst, cmd->buf, cmd->stride);
+      }
+  }
+  s->num_pred_cmds = 0;
+  s->num_coeffs = 0;
+}
+#endif
+
 static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 {
     HEVCContext *s  = avctxt->priv_data;
@@ -2312,6 +2395,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int x_ctb       = 0;
     int y_ctb       = 0;
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
+
+#ifdef RPI
+    s->enable_rpi = 1; // TODO this should depend on cross component and frame width etc.
+#endif
 
     if (!ctb_addr_ts && s->sh.dependent_slice_segment_flag) {
         av_log(s->avctx, AV_LOG_ERROR, "Impossible initial tile.\n");
@@ -2342,6 +2429,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
+#ifdef RPI
+        rpi_execute_pred_cmds(s);
+#endif
         if (more_data < 0) {
             s->tab_slice_address[ctb_addr_rs] = -1;
             return more_data;
@@ -2386,6 +2476,10 @@ static int hls_decode_entry_wpp(AVCodecContext *avctxt, void *input_ctb_row, int
 
     s = s1->sList[self_id];
     lc = s->HEVClc;
+
+#ifdef RPI
+    s->enable_rpi = 0;
+#endif
 
     if(ctb_row) {
         ret = init_get_bits8(&lc->gb, s->data + s->sh.offset[ctb_row - 1], s->sh.size[ctb_row - 1]);
@@ -3075,6 +3169,13 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     av_freep(&s->cabac_state);
 
+#ifdef RPI
+    av_freep(&s->unif_mv_cmds);
+    av_freep(&s->unif_xfm_cmds);
+    av_freep(&s->univ_pred_cmds);
+    av_freep(&s->coeffs_buf);
+#endif
+
     for (i = 0; i < 3; i++) {
         av_freep(&s->sao_pixel_buffer_h[i]);
         av_freep(&s->sao_pixel_buffer_v[i]);
@@ -3128,6 +3229,22 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         goto fail;
     s->HEVClcList[0] = s->HEVClc;
     s->sList[0] = s;
+
+#ifdef RPI
+    s->unif_mv_cmds = av_mallocz(sizeof(HEVCMvCmd)*RPI_MAX_MV_CMDS);
+    if (!s->unif_mv_cmds)
+        goto fail;
+    s->unif_xfm_cmds = av_mallocz(sizeof(HEVCXfmCmd)*RPI_MAX_XFM_CMDS);
+    if (!s->unif_xfm_cmds)
+        goto fail;
+    s->univ_pred_cmds = av_mallocz(sizeof(HEVCPredCmd)*RPI_MAX_PRED_CMDS);
+    if (!s->univ_pred_cmds)
+        goto fail;
+    s->coeffs_buf = av_mallocz(sizeof(int16_t)*RPI_MAX_XFM_CMDS*16);
+    if (!s->coeffs_buf)
+        goto fail;
+    s->enable_rpi = 0;
+#endif
 
     s->cabac_state = av_malloc(HEVC_CONTEXTS);
     if (!s->cabac_state)

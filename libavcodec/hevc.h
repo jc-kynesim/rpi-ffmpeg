@@ -23,6 +23,9 @@
 #ifndef AVCODEC_HEVC_H
 #define AVCODEC_HEVC_H
 
+// define RPI to split the CABAC/prediction/transform into separate stages
+#include "config.h"
+
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"
 
@@ -790,6 +793,49 @@ typedef struct HEVCLocalContext {
     int boundary_flags;
 } HEVCLocalContext;
 
+#ifdef RPI
+
+// RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
+#define RPI_MAX_WIDTH 2048
+
+// Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane
+#define RPI_MAX_MV_CMDS   (16*3*(RPI_MAX_WIDTH/4))
+#define RPI_MAX_XFM_CMDS  (16*3*(RPI_MAX_WIDTH/4))
+// Each block can have an intra prediction and a transform_add command
+#define RPI_MAX_PRED_CMDS (2*16*3*(RPI_MAX_WIDTH/4))
+
+// Command for inter prediction
+typedef struct HEVCMvCmd {
+} HEVCMvCmd;
+
+// Command for transform to process a block of coefficients
+typedef struct HEVCXfmCmd {
+} HEVCXfmCmd;
+
+// Command for intra prediction and transform_add of predictions to coefficients
+#define RPI_PRED_TRANSFORM_ADD 0
+#define RPI_PRED_INTRA 1
+typedef struct HEVCPredCmd {
+    uint8_t size;
+    uint8_t type;
+    uint8_t na;
+    uint8_t c_idx;
+    union {
+        uint8_t *dst; // RPI_PRED_TRANSFORM_ADD
+        uint32_t x;   // RPI_PRED_INTRA
+    };
+    union {
+        int16_t *buf; // RPI_PRED_TRANSFORM_ADD
+        uint32_t y;   // RPI_PRED_INTRA
+    };
+    union {
+        enum IntraPredMode mode; // RPI_PRED_TRANSFORM_ADD
+        uint32_t stride;         // RPI_PRED_INTRA
+    };
+} HEVCPredCmd;
+
+#endif
+
 typedef struct HEVCContext {
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
@@ -804,6 +850,18 @@ typedef struct HEVCContext {
 
     int                 width;
     int                 height;
+
+#ifdef RPI
+    int enable_rpi;
+    HEVCMvCmd *unif_mv_cmds;
+    HEVCXfmCmd *unif_xfm_cmds;
+    HEVCPredCmd *univ_pred_cmds;
+    int16_t *coeffs_buf;
+    int num_mv_cmds;
+    int num_xfm_cmds;
+    int num_pred_cmds;
+    int num_coeffs;
+#endif
 
     uint8_t *cabac_state;
 
