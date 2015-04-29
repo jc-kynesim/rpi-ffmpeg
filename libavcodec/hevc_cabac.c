@@ -1510,6 +1510,21 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             coeffs[i] = coeffs[i] + ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
         }
     }
+#ifdef RPI
+    if (s->enable_rpi) {
+        int16_t *c = s->coeffs_buf + s->num_coeffs;
+        int n = trafo_size * trafo_size;
+        HEVCPredCmd *cmd = s->univ_pred_cmds + s->num_pred_cmds++;
+        memcpy(c, coeffs, n * sizeof(int16_t));  // TODO change pointer earlier and we can avoid this copy
+        s->num_coeffs += n;
+        cmd->type = RPI_PRED_TRANSFORM_ADD;
+        cmd->size = log2_trafo_size;
+        cmd->buf = c;
+        cmd->dst = dst;
+        cmd->stride = stride;
+        return;
+    }
+#endif
     s->hevcdsp.transform_add[log2_trafo_size-2](dst, coeffs, stride);
 }
 
