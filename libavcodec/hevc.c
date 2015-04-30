@@ -41,6 +41,10 @@
 #include "hevc.h"
 #include "profiles.h"
 
+#ifdef RPI
+#include "rpi_qpu.h"
+#endif
+
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
 /**
@@ -2430,7 +2434,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 #ifdef RPI
-        rpi_execute_pred_cmds(s);
+        if (x_ctb + ctb_size >= s->ps.sps->width) {
+            rpi_execute_pred_cmds(s);
+        }
 #endif
         if (more_data < 0) {
             s->tab_slice_address[ctb_addr_rs] = -1;
@@ -3244,6 +3250,31 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     if (!s->coeffs_buf)
         goto fail;
     s->enable_rpi = 0;
+
+    // A little test program
+    {
+      GPU_MEM_PTR_T p;
+      int err = gpu_malloc_cached(16, &p);
+      short *q = (short *)p.arm;
+      int i;
+      int r;
+      printf("Allocated memory %d ARM 0x%x, VC 0x%x, Code 0x%x\n",err,(int)p.arm,p.vc,(int)vpu_get_fn());
+      printf("Allocated memory %d ARM 0x%x, VC 0x%x\n",err,(int)p.arm,p.vc);
+      printf("Preparing data %p\n",q);
+      for(i=0;i<16;i++)
+        q[i] = i;
+      printf("Flush cache\n");
+      gpu_cache_flush(&p);
+      printf("Executing code\n");
+      r = vpu_execute_code( vpu_get_fn(), p.vc, 0, 0, 0, 0, 0);
+      printf("Return value %d (",r);
+      for(i=0;i<16;i++)
+        printf("%d ",q[i]);
+      printf(")\n");
+      gpu_free(&p);
+      goto fail; // Early out
+    }
+
 #endif
 
     s->cabac_state = av_malloc(HEVC_CONTEXTS);

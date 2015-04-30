@@ -5,6 +5,10 @@ NAME = avcodec
 HEADERS = avcodec.h                                                     \
           avdct.h                                                       \
           avfft.h                                                       \
+          rpi_qpu.h                                                     \
+          rpi_shader.h                                                  \
+          rpi_mailbox.h                                                 \
+          rpi_hevc_transform.h                                          \
           d3d11va.h                                                     \
           dirac.h                                                       \
           dv_profile.h                                                  \
@@ -43,6 +47,9 @@ OBJS = allcodecs.o                                                      \
        resample.o                                                       \
        resample2.o                                                      \
        utils.o                                                          \
+       rpi_qpu.o                                                        \
+       rpi_shader.o                                                     \
+       rpi_mailbox.o                                                    \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 
