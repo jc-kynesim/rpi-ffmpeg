@@ -22,6 +22,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+//#define DISABLE_SAO
+//#define DISABLE_DEBLOCK
+//#define DISABLE_STRENGTHS
+
 #include "libavutil/common.h"
 #include "libavutil/internal.h"
 
@@ -273,6 +277,10 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
     edges[2]   = x_ctb == s->ps.sps->ctb_width  - 1;
     edges[3]   = y_ctb == s->ps.sps->ctb_height - 1;
 
+#ifdef DISABLE_SAO
+    return;
+#endif
+
     if (restore) {
         if (!edges[0]) {
             left_tile_edge  = no_tile_filter && s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs-1]];
@@ -495,6 +503,10 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     int pcmf = (s->ps.sps->pcm_enabled_flag &&
                 s->ps.sps->pcm.loop_filter_disable_flag) ||
                s->ps.pps->transquant_bypass_enable_flag;
+
+#ifdef DISABLE_DEBLOCK
+    return;
+#endif
 
     if (x0) {
         left_tc_offset   = s->deblock[ctb - 1].tc_offset;
@@ -725,6 +737,10 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
                            (x0 >> log2_min_pu_size)].pred_flag == PF_INTRA;
     int boundary_upper, boundary_left;
     int i, j, bs;
+
+#ifdef DISABLE_STRENGTHS
+    return;
+#endif
 
     boundary_upper = y0 > 0 && !(y0 & 7);
     if (boundary_upper &&

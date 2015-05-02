@@ -45,6 +45,8 @@
 #include "rpi_qpu.h"
 #endif
 
+// #define DISABLE_MC
+
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
 /**
@@ -1079,11 +1081,15 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                         for (i = 0; i < (size * size); i++) {
                             coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                         }
+                        printf("Cross component not supported\n"); // TODO
+                        exit(-1);
                         s->hevcdsp.transform_add[log2_trafo_size_c-2](dst, coeffs, stride);
                     }
             }
 
             if (lc->tu.cross_pf) {
+                printf("Cross component not supported\n"); // TODO
+                exit(-1);
                 hls_cross_component_pred(s, 1);
             }
             for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
@@ -1112,6 +1118,8 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                         for (i = 0; i < (size * size); i++) {
                             coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                         }
+                        printf("Cross component not supported\n"); // TODO
+                        exit(-1);
                         s->hevcdsp.transform_add[log2_trafo_size_c-2](dst, coeffs, stride);
                     }
             }
@@ -1409,6 +1417,10 @@ static void luma_mc_uni(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
                            (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
     int idx              = ff_hevc_pel_weight[block_w];
 
+#ifdef DISABLE_MC
+    return;
+#endif
+
     x_off += mv->x >> 2;
     y_off += mv->y >> 2;
     src   += y_off * srcstride + (x_off * (1 << s->ps.sps->pixel_shift));
@@ -1478,6 +1490,10 @@ static void luma_mc_uni(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
 
     uint8_t *src0  = ref0->data[0] + y_off0 * src0stride + (int)((unsigned)x_off0 << s->ps.sps->pixel_shift);
     uint8_t *src1  = ref1->data[0] + y_off1 * src1stride + (int)((unsigned)x_off1 << s->ps.sps->pixel_shift);
+
+#ifdef DISABLE_MC
+    return;
+#endif
 
     if (x_off0 < QPEL_EXTRA_BEFORE || y_off0 < QPEL_EXTRA_AFTER ||
         x_off0 >= pic_width - block_w - QPEL_EXTRA_AFTER ||
@@ -1564,6 +1580,10 @@ static void chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
     intptr_t _mx         = mx << (1 - hshift);
     intptr_t _my         = my << (1 - vshift);
 
+#ifdef DISABLE_MC
+    return;
+#endif
+
     x_off += mv->x >> (2 + hshift);
     y_off += mv->y >> (2 + vshift);
     src0  += y_off * srcstride + (x_off * (1 << s->ps.sps->pixel_shift));
@@ -1627,6 +1647,10 @@ static void chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVF
     Mv *mv1              = &current_mv->mv[1];
     int hshift = s->ps.sps->hshift[1];
     int vshift = s->ps.sps->vshift[1];
+
+#ifdef DISABLE_MC
+    return;
+#endif
 
     intptr_t mx0 = av_mod_uintp2(mv0->x, 2 + hshift);
     intptr_t my0 = av_mod_uintp2(mv0->y, 2 + vshift);
@@ -2367,6 +2391,22 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
 }
 
 #ifdef RPI
+static void rpi_execute_transform(HEVCContext *s)
+{
+    int i=2;
+    //int j;
+    //int16_t *coeffs = s->coeffs_buf_arm[i];
+    //for(j=s->num_coeffs[i]; j > 0; j-= 16*16, coeffs+=16*16) {
+    //    s->hevcdsp.idct[4-2](coeffs, 16);
+    //}
+
+    //gpu_cache_flush(&s->coeffs_buf[i]);
+    vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf[i].vc, s->num_coeffs[i] >> 8, 0, 0, 0);
+
+    for(i=0;i<4;i++)
+        s->num_coeffs[i] = 0;
+}
+
 static void rpi_execute_pred_cmds(HEVCContext *s)
 {
   int i;
@@ -2387,7 +2427,6 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
       }
   }
   s->num_pred_cmds = 0;
-  s->num_coeffs = 0;
 }
 #endif
 
@@ -2434,7 +2473,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 #ifdef RPI
-        if (x_ctb + ctb_size >= s->ps.sps->width) {
+        if (1 || x_ctb + ctb_size >= s->ps.sps->width) { // TODO watch out for deblocking!
+            rpi_execute_transform(s);
             rpi_execute_pred_cmds(s);
         }
 #endif
@@ -3179,7 +3219,9 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     av_freep(&s->unif_mv_cmds);
     av_freep(&s->unif_xfm_cmds);
     av_freep(&s->univ_pred_cmds);
-    av_freep(&s->coeffs_buf);
+    for(i = 0; i < 4; i++) {
+        gpu_free(&s->coeffs_buf[i]);
+    }
 #endif
 
     for (i = 0; i < 3; i++) {
@@ -3246,13 +3288,16 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->univ_pred_cmds = av_mallocz(sizeof(HEVCPredCmd)*RPI_MAX_PRED_CMDS);
     if (!s->univ_pred_cmds)
         goto fail;
-    s->coeffs_buf = av_mallocz(sizeof(int16_t)*RPI_MAX_XFM_CMDS*16);
-    if (!s->coeffs_buf)
-        goto fail;
+    for(i = 0; i < 4; i++) {
+        gpu_malloc_uncached(sizeof(int16_t)*RPI_MAX_XFM_CMDS*16, &s->coeffs_buf[i]); // TODO slim this down and share across sizes
+        s->coeffs_buf_arm[i] = (int16_t*) s->coeffs_buf[i].arm;
+        if (!s->coeffs_buf_arm[i])
+            goto fail;
+    }
     s->enable_rpi = 0;
 
     // A little test program
-    {
+    /*{
       GPU_MEM_PTR_T p;
       int err = gpu_malloc_cached(16, &p);
       short *q = (short *)p.arm;
@@ -3273,7 +3318,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
       printf(")\n");
       gpu_free(&p);
       goto fail; // Early out
-    }
+    }*/
 
 #endif
 

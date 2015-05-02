@@ -3,6 +3,7 @@
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 #define RPI_USE_VCSM
 #define RPI_TIME_TOTAL_QPU
+#define RPI_TIME_TOTAL_VPU
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,10 +49,47 @@ typedef int int32_t;
 #define QPU_CODE_SIZE 2048
 #define VPU_CODE_SIZE 2048
 
+const short rpi_transMatrix2even[32][16] = { // Even rows first
+{64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64},
+{90,  87,  80,  70,  57,  43,  25,   9,  -9, -25, -43, -57, -70, -80, -87, -90},
+{89,  75,  50,  18, -18, -50, -75, -89, -89, -75, -50, -18,  18,  50,  75,  89},
+{87,  57,   9, -43, -80, -90, -70, -25,  25,  70,  90,  80,  43,  -9, -57, -87},
+{83,  36, -36, -83, -83, -36,  36,  83,  83,  36, -36, -83, -83, -36,  36,  83},
+{80,   9, -70, -87, -25,  57,  90,  43, -43, -90, -57,  25,  87,  70,  -9, -80},
+{75, -18, -89, -50,  50,  89,  18, -75, -75,  18,  89,  50, -50, -89, -18,  75},
+{70, -43, -87,   9,  90,  25, -80, -57,  57,  80, -25, -90,  -9,  87,  43, -70},
+{64, -64, -64,  64,  64, -64, -64,  64,  64, -64, -64,  64,  64, -64, -64,  64},
+{57, -80, -25,  90,  -9, -87,  43,  70, -70, -43,  87,   9, -90,  25,  80, -57},
+{50, -89,  18,  75, -75, -18,  89, -50, -50,  89, -18, -75,  75,  18, -89,  50},
+{43, -90,  57,  25, -87,  70,   9, -80,  80,  -9, -70,  87, -25, -57,  90, -43},
+{36, -83,  83, -36, -36,  83, -83,  36,  36, -83,  83, -36, -36,  83, -83,  36},
+{25, -70,  90, -80,  43,   9, -57,  87, -87,  57,  -9, -43,  80, -90,  70, -25},
+{18, -50,  75, -89,  89, -75,  50, -18, -18,  50, -75,  89, -89,  75, -50,  18},
+{ 9, -25,  43, -57,  70, -80,  87, -90,  90, -87,  80, -70,  57, -43,  25,  -9},
+// Odd rows
+{90,  90,  88,  85,  82,  78,  73,  67,  61,  54,  46,  38,  31,  22,  13,   4},
+{90,  82,  67,  46,  22,  -4, -31, -54, -73, -85, -90, -88, -78, -61, -38, -13},
+{88,  67,  31, -13, -54, -82, -90, -78, -46,  -4,  38,  73,  90,  85,  61,  22},
+{85,  46, -13, -67, -90, -73, -22,  38,  82,  88,  54,  -4, -61, -90, -78, -31},
+{82,  22, -54, -90, -61,  13,  78,  85,  31, -46, -90, -67,   4,  73,  88,  38},
+{78,  -4, -82, -73,  13,  85,  67, -22, -88, -61,  31,  90,  54, -38, -90, -46},
+{73, -31, -90, -22,  78,  67, -38, -90, -13,  82,  61, -46, -88,  -4,  85,  54},
+{67, -54, -78,  38,  85, -22, -90,   4,  90,  13, -88, -31,  82,  46, -73, -61},
+{61, -73, -46,  82,  31, -88, -13,  90,  -4, -90,  22,  85, -38, -78,  54,  67},
+{54, -85,  -4,  88, -46, -61,  82,  13, -90,  38,  67, -78, -22,  90, -31, -73},
+{46, -90,  38,  54, -90,  31,  61, -88,  22,  67, -85,  13,  73, -82,   4,  78},
+{38, -88,  73,  -4, -67,  90, -46, -31,  85, -78,  13,  61, -90,  54,  22, -82},
+{31, -78,  90, -61,   4,  54, -88,  82, -38, -22,  73, -90,  67, -13, -46,  85},
+{22, -61,  85, -90,  73, -38,  -4,  46, -78,  90, -82,  54, -13, -31,  67, -88},
+{13, -38,  61, -78,  88, -90,  85, -73,  54, -31,   4,  22, -46,  67, -82,  90},
+{ 4, -13,  22, -31,  38, -46,  54, -61,  67, -73,  78, -82,  85, -88,  90, -90}
+};
+
 struct GPU
 {
   unsigned int qpu_code[QPU_CODE_SIZE];
   unsigned int vpu_code[VPU_CODE_SIZE];
+  short transMatrix2even[16*16];
   int open_count; // Number of allocated video buffers
   unsigned int vc_handle; // Handle of this memory
   int      mb; // Mailbox handle
@@ -123,6 +161,8 @@ static int gpu_init(volatile struct GPU **gpu) {
     assert(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
     memcpy((void*)ptr->vpu_code, rpi_hevc_transform, num_bytes);
   }
+  // And the transform coefficients
+  memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, 16*16*sizeof(short));
 
   return 0;
 }
@@ -274,11 +314,43 @@ unsigned int vpu_get_fn(void) {
   return gpu->vc + offsetof(struct GPU,vpu_code);
 }
 
+unsigned int vpu_get_constants(void) {
+  if (gpu==NULL) {
+    gpu_lock();
+    gpu_unlock();
+  }
+  return gpu->vc + offsetof(struct GPU,transMatrix2even);
+}
+
 unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5)
 {
   unsigned r;
+#ifdef RPI_TIME_TOTAL_VPU
+  static int last_time=0;
+  static long long on_time=0;
+  static long long off_time=0;
+  int start_time;
+  int end_time;
+  static int count=0;
+  static long long countr2=0;
+#endif
   gpu_lock();
+#ifdef RPI_TIME_TOTAL_VPU
+  start_time = Microseconds();
+  if (last_time==0)
+    last_time = start_time;
+  off_time += start_time-last_time;
+#endif
   r = execute_code(gpu->mb, code, r0, r1, r2, r3, r4, r5);
+#ifdef RPI_TIME_TOTAL_VPU
+  end_time = Microseconds();
+  last_time = end_time;
+  on_time += end_time - start_time;
+  count++;
+  countr2 += r2;
+  if ((count&0x7f)==0)
+    printf("VPU %d %lld On=%dms, Off=%dms\n",count,countr2,(int)(on_time/1000),(int)(off_time/1000));
+#endif
   gpu_unlock();
   return r;
 }

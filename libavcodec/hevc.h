@@ -40,6 +40,11 @@
 #include "thread.h"
 #include "videodsp.h"
 
+// define RPI to split the CABAC/prediction/transform into separate stages
+#ifdef RPI
+#include "rpi_qpu.h"
+#endif
+
 #define MAX_DPB_SIZE 16 // A.4.1
 #define MAX_REFS 16
 
@@ -856,11 +861,12 @@ typedef struct HEVCContext {
     HEVCMvCmd *unif_mv_cmds;
     HEVCXfmCmd *unif_xfm_cmds;
     HEVCPredCmd *univ_pred_cmds;
-    int16_t *coeffs_buf;
-    int num_mv_cmds;
+    GPU_MEM_PTR_T coeffs_buf[4];
+    int16_t *coeffs_buf_arm[4];
+    int num_coeffs[4];
     int num_xfm_cmds;
+    int num_mv_cmds;
     int num_pred_cmds;
-    int num_coeffs;
 #endif
 
     uint8_t *cabac_state;

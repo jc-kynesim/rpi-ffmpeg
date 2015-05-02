@@ -34,6 +34,7 @@ extern unsigned int qpu_get_fn(int num);
 
 // VPU specific functions
 extern unsigned int vpu_get_fn(void);
+extern unsigned int vpu_get_constants(void);
 extern unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5);
 
 // Simple test of shader code
