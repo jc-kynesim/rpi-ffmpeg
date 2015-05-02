@@ -1031,6 +1031,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int vshift = s->ps.sps->vshift[c_idx];
     uint8_t *dst = &s->frame->data[c_idx][(y0 >> vshift) * stride +
                                           ((x0 >> hshift) << s->ps.sps->pixel_shift)];
+    int use_vpu = s->enable_rpi && !lc->cu.cu_transquant_bypass_flag && !transform_skip_flag && !lc->tu.cross_pf && log2_trafo_size==4;
     int16_t *coeffs = (int16_t*)(c_idx ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
     uint8_t significant_coeff_group_flag[8][8] = {{0}};
     int explicit_rdpcm_flag = 0;
@@ -1044,6 +1045,18 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
+#ifdef RPI
+    if (s->enable_rpi) {
+        int n = trafo_size * trafo_size;
+        if (use_vpu) {
+            coeffs = s->coeffs_buf_arm[log2_trafo_size - 2] + s->num_coeffs[log2_trafo_size - 2];
+            s->num_coeffs[log2_trafo_size - 2] += n;
+        } else {
+            coeffs = s->coeffs_buf_arm[0] + s->num_coeffs[0];
+            s->num_coeffs[0] += n;
+        }
+    }
+#endif
 
     memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
 
@@ -1488,6 +1501,24 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         } else if (lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2) {
             s->hevcdsp.idct_4x4_luma(coeffs);
         } else {
+#ifdef RPI
+            if (!use_vpu) {
+              int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
+              if (max_xy == 0)
+                  s->hevcdsp.idct_dc[log2_trafo_size-2](coeffs);
+              else {
+                  int col_limit = last_significant_coeff_x + last_significant_coeff_y + 4;
+                  if (max_xy < 4)
+                      col_limit = FFMIN(4, col_limit);
+                  else if (max_xy < 8)
+                      col_limit = FFMIN(8, col_limit);
+                  else if (max_xy < 12)
+                      col_limit = FFMIN(24, col_limit);
+
+                  s->hevcdsp.idct[log2_trafo_size-2](coeffs, col_limit);
+              }
+            }
+#else
             int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
             if (max_xy == 0)
                 s->hevcdsp.idct_dc[log2_trafo_size-2](coeffs);
@@ -1501,6 +1532,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     col_limit = FFMIN(24, col_limit);
                 s->hevcdsp.idct[log2_trafo_size-2](coeffs, col_limit);
             }
+#endif
         }
     }
     if (lc->tu.cross_pf) {
@@ -1512,14 +1544,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     }
 #ifdef RPI
     if (s->enable_rpi) {
-        int16_t *c = s->coeffs_buf + s->num_coeffs;
-        int n = trafo_size * trafo_size;
         HEVCPredCmd *cmd = s->univ_pred_cmds + s->num_pred_cmds++;
-        memcpy(c, coeffs, n * sizeof(int16_t));  // TODO change pointer earlier and we can avoid this copy
-        s->num_coeffs += n;
+        //memcpy(coeffs2, coeffs, sizeof(int16_t) * trafo_size * trafo_size); // TODO
         cmd->type = RPI_PRED_TRANSFORM_ADD;
         cmd->size = log2_trafo_size;
-        cmd->buf = c;
+        cmd->buf = coeffs;
         cmd->dst = dst;
         cmd->stride = stride;
         return;
