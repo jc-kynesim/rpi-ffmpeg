@@ -76,12 +76,19 @@
 # transMatrix2: address of the constant matrix (must be at 32 byte aligned address in Videocore memory)
 # coeffs: address of the transform coefficients (must be at 32 byte aligned address in Videocore memory)
 # num: number of 16x16 transforms to be done
+# coeffs32
+# num32: number of 32x32 transforms
 #
 hevc_trans_16x16:
   push r6-r15, lr # TODO cut down number of used registers
-
+  mov r14,r3 # coeffs32
+  mov r15,r4 # num32
   mov r3, 16*2 # Stride of transMatrix2 in bytes
   vldh HX(32++,0),(r0 += r3) REP 16 # This is the 16x16 matrix, a transform is equivalent to multiplying input row vector * matrix
+
+  add r0, 16*16*2 # For 32x32 transforms we also need this matrix
+  vldh HX(32++,32),(r0 += r3) REP 16 # This is the odd 16x16 matrix
+
   # Now use r0 to describe which matrix we are working on.
   # Allows us to prefetch the next block of coefficients for efficiency.
   mov r0,0 # This describes the location where we read our coefficients from
@@ -121,6 +128,10 @@ block_loop:
   add r1,r7
 
   addcmpbgt r2,-1,0,block_loop
+
+  # Now go and do any 32x32 transforms
+  b hevc_trans_32x32
+
   pop r6-r15, pc
 
 # r1,r2,r3 r7,r8 should be preserved
@@ -136,26 +147,18 @@ col_trans_16_loop:
   # Then sum up the results and place back
   vadd VY(0,0)+r0, VY(48,0++), VY(48,8++) REP 8 CLRA SACC
   addcmpblt r0,1,r6,col_trans_16_loop
-  sub r0,16  # but r0 back to its original value
+  sub r0,16  # put r0 back to its original value
   b lr
 
 col_trans_odd_16:
   add r6,r0,16 # Final value for this loop
 col_trans_odd_16_loop:
   # First compute partial products for a single column
-  vmul32s HY(48++,0), VX(0,0)+r0, VX(32,0++) REP 16
+  vmul32s HY(48++,0), VX(0,0)+r0, VX(32,32++) REP 16
   # Then sum up the results and place back
   vadd VY(0,0)+r0, VY(48,0++), VY(48,8++) REP 8 CLRA SACC
   addcmpblt r0,1,r6,col_trans_odd_16_loop
-  sub r0,16  # but r0 back to its original value
-  b lr
-
-
-test_add:
-  vldh HX(0,0),(r0)
-  vadd HX(0,0),HX(0,0),10
-  vsth HX(0,0),(r0)
-  mov r0,7 # return value
+  sub r0,16  # put r0 back to its original value
   b lr
 
 # hevc_trans_32x32(short *transMatrix2, short *coeffs, int num)
@@ -164,18 +167,17 @@ test_add:
 # num: number of 16x16 transforms to be done
 #
 hevc_trans_32x32:
-  push r6-r15, lr # TODO cut down number of used registers
+  mov r1,r14 # coeffs
+  mov r2,r15 # num
 
-  # Fetch transform matrices
-  mov r3, 16*2 # Stride of transMatrix2 in bytes (and of coefficients)
-  vldh HX(32++,0),(r0 += r3) REP 16 # This is the even 16x16 matrix
-  add r0, 16*16*2
-  vldh HX(32++,32),(r0 += r3) REP 16 # This is the odd 16x16 matrix
+  # Fetch odd transform matrix
+  #mov r3, 16*2 # Stride of transMatrix2 in bytes (and of coefficients)
+  #vldh HX(32++,0),(r0 += r3) REP 16 # This is the even 16x16 matrix
+  #add r0, 16*16*2
+  #vldh HX(32++,32),(r0 += r3) REP 16 # This is the odd 16x16 matrix
 
   mov r3, 32*2*2 # Stride used to fetch alternate rows of our input coefficient buffer
   mov r7, 16*16*2 # Total block size
-  mov r4, 64 # Constant used for rounding first pass
-  mov r5, 1<<11 # Constant used for rounding second pass
   sub sp,sp,32*32*2+32 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned)
   # set r8 to 32byte aligned stack pointer
   add r8,sp,31
@@ -186,21 +188,27 @@ hevc_trans_32x32:
 block_loop32:
 
   # COLUMN TRANSFORM
+  mov r4, 64 # Constant used for rounding first pass
+  mov r5, 9 # left shift used for rounding first pass
+
   # Transform the first 16 columns
   mov r1,r10  # Input Coefficient buffer
   mov r8,r9   # Output temporary storage
   bl trans32
   # Transform the second 16 columns
-  add r8,32
+  add r8,32*16*2
   add r1,32
   bl trans32
 
   # ROW TRANSFORM
+  mov r4, 1<<11 # Constant used for rounding second pass
+  mov r5, 4 # left shift used for rounding second pass
+
   mov r1,r9  # Input temporary storage
   mov r8,r10   # Output Coefficient buffer
   bl trans32
   # Transform the second 16 columns
-  add r8,32
+  add r8,32*16*2
   add r1,32
   bl trans32
 
@@ -212,11 +220,12 @@ block_loop32:
   pop r6-r15, pc
 
 trans32:
+  push lr
   # We can no longer afford the VRF space to do prefetching when doing 32x32
   # Fetch the even rows
-  vldh HX(0++,0)+r0,(r1 += r3) REP 16
+  vldh HX(0++,0),(r1 += r3) REP 16
   # Fetch the odd rows
-  vldh HX(16++,0)+r0,64(r1 += r3) REP 16 # First odd row is 32 shorts ahead of r1
+  vldh HX(16++,0),64(r1 += r3) REP 16 # First odd row is 32 shorts ahead of r1
 
   # Transform the even rows using even matrix
   mov r0, 0 # Even rows
@@ -228,33 +237,32 @@ trans32:
 
   # Now apply butterfly to compute the first 16 results
   vadd HY(48++,0),HY(0++,0),HY(16++,0) REP 16
-  vadd HY(48++,0),HY(48++,0),r4 REP 32   # add on rounding,
-  vasl HY(48++,0),HY(48++,0),9 REP 32    # shift down by 7, and saturate
+  vadd HY(48++,0),HY(48++,0),r4 REP 16   # add on rounding,
+  vasl HY(48++,0),HY(48++,0),r5 REP 16    # shift down by 7, and saturate
   # 16bit results now in HX(48,32)
   mov r0,r8
   mov r6,32*2
   vsth VX(48,32++),(r0+=r6) REP 16
-  vmov VX(0,0++)+r0, HX(0++,32)+r0 REP 16    # Store transposed
 
   # Now apply butterfly to compute the second 16 results (in reverse order)
-  vsub HY(63,0),HY(0,0),HY(16,0)
-  vsub HY(62,0),HY(0,0),HY(17,0)
-  vsub HY(61,0),HY(0,0),HY(18,0)
-  vsub HY(60,0),HY(0,0),HY(19,0)
-  vsub HY(59,0),HY(0,0),HY(20,0)
-  vsub HY(58,0),HY(0,0),HY(21,0)
-  vsub HY(57,0),HY(0,0),HY(22,0)
-  vsub HY(56,0),HY(0,0),HY(23,0)
-  vsub HY(55,0),HY(0,0),HY(24,0)
-  vsub HY(54,0),HY(0,0),HY(25,0)
-  vsub HY(53,0),HY(0,0),HY(26,0)
-  vsub HY(52,0),HY(0,0),HY(27,0)
-  vsub HY(51,0),HY(0,0),HY(28,0)
-  vsub HY(50,0),HY(0,0),HY(29,0)
-  vsub HY(49,0),HY(0,0),HY(30,0)
-  vsub HY(48,0),HY(0,0),HY(31,0)
-  vadd HY(48++,0),HY(48++,0),r4 REP 32   # add on rounding,
-  vasl HY(48++,0),HY(48++,0),9 REP 32    # shift down by 7, and saturate
-  add r0,r8,16*32*2 # Move to 16th row
+  vsub HY(63,0),HY(0 ,0),HY(16,0)
+  vsub HY(62,0),HY(1 ,0),HY(17,0)
+  vsub HY(61,0),HY(2 ,0),HY(18,0)
+  vsub HY(60,0),HY(3 ,0),HY(19,0)
+  vsub HY(59,0),HY(4 ,0),HY(20,0)
+  vsub HY(58,0),HY(5 ,0),HY(21,0)
+  vsub HY(57,0),HY(6 ,0),HY(22,0)
+  vsub HY(56,0),HY(7 ,0),HY(23,0)
+  vsub HY(55,0),HY(8 ,0),HY(24,0)
+  vsub HY(54,0),HY(9 ,0),HY(25,0)
+  vsub HY(53,0),HY(10,0),HY(26,0)
+  vsub HY(52,0),HY(11,0),HY(27,0)
+  vsub HY(51,0),HY(12,0),HY(28,0)
+  vsub HY(50,0),HY(13,0),HY(29,0)
+  vsub HY(49,0),HY(14,0),HY(30,0)
+  vsub HY(48,0),HY(15,0),HY(31,0)
+  vadd HY(48++,0),HY(48++,0),r4 REP 16   # add on rounding,
+  vasl HY(48++,0),HY(48++,0),r5 REP 16    # shift down by 7, and saturate
+  add r0,r8,32
   vsth VX(48,32++),(r0+=r6) REP 16
-  b lr
+  pop pc
