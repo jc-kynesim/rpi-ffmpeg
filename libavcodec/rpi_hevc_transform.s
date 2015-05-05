@@ -78,8 +78,11 @@
 # num: number of 16x16 transforms to be done
 # coeffs32
 # num32: number of 32x32 transforms
+# command 0 for transform, 1 for memclear16(int16_t *dst,num16)
 #
 hevc_trans_16x16:
+  cmp r5,1
+  beq memclear16
   push r6-r15, lr # TODO cut down number of used registers
   mov r14,r3 # coeffs32
   mov r15,r4 # num32
@@ -266,3 +269,16 @@ trans32:
   add r0,r8,32
   vsth VX(48,32++),(r0+=r6) REP 16
   pop pc
+
+memclear16:
+  # r0 is address
+  # r1 is number of 16bits values to set to 0 (may overrun past end and clear more than specified)
+  vmov HX(0++,0),0 REP 16
+  mov r2,32
+loop:
+  vsth HX(0++,0),(r0+=r2) REP 16
+  add r0,16*16*2
+  sub r1,16*16
+  cmp r1,0
+  bgt loop
+  b lr
