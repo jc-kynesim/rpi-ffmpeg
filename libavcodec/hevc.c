@@ -2400,8 +2400,9 @@ static void rpi_execute_transform(HEVCContext *s)
     //    s->hevcdsp.idct[4-2](coeffs, 16);
     //}
 
-    //gpu_cache_flush(&s->coeffs_buf[i]);
+    gpu_cache_flush(&s->coeffs_buf[i]);
     vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf[i].vc, s->num_coeffs[i] >> 8, 0, 0, 0);
+    gpu_cache_flush(&s->coeffs_buf[i]);
 
     for(i=0;i<4;i++)
         s->num_coeffs[i] = 0;
@@ -2440,6 +2441,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
+    int start_ctb_x = (s->sh.slice_ctb_addr_rs % ((s->ps.sps->width + ctb_size - 1) >> s->ps.sps->log2_ctb_size)) << s->ps.sps->log2_ctb_size;
     s->enable_rpi = 1; // TODO this should depend on cross component and frame width etc.
 #endif
 
@@ -2473,9 +2475,17 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 #ifdef RPI
-        if (1 || x_ctb + ctb_size >= s->ps.sps->width) { // TODO watch out for deblocking!
+        if (s->enable_rpi && x_ctb + ctb_size >= s->ps.sps->width) {
+            int x;
+            // Transform all blocks
             rpi_execute_transform(s);
+            // Perform intra prediction and residual reconstruction
             rpi_execute_pred_cmds(s);
+            // Perform deblocking for CTBs in this row
+            for(x = start_ctb_x; x <= x_ctb; x += ctb_size) {  // TODO this will fail for tiles
+                ff_hevc_hls_filters(s, x, y_ctb, ctb_size);
+            }
+            start_ctb_x = 0;
         }
 #endif
         if (more_data < 0) {
@@ -2486,6 +2496,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         ctb_addr_ts++;
         ff_hevc_save_states(s, ctb_addr_ts);
+#ifdef RPI
+        if (s->enable_rpi)
+            continue;
+#endif
         ff_hevc_hls_filters(s, x_ctb, y_ctb, ctb_size);
     }
 
@@ -3289,7 +3303,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     if (!s->univ_pred_cmds)
         goto fail;
     for(i = 0; i < 4; i++) {
-        gpu_malloc_uncached(sizeof(int16_t)*RPI_MAX_XFM_CMDS*16, &s->coeffs_buf[i]); // TODO slim this down and share across sizes
+        gpu_malloc_cached(sizeof(int16_t)*RPI_MAX_XFM_CMDS*16, &s->coeffs_buf[i]); // TODO slim this down and share across sizes
         s->coeffs_buf_arm[i] = (int16_t*) s->coeffs_buf[i].arm;
         if (!s->coeffs_buf_arm[i])
             goto fail;
