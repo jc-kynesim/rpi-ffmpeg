@@ -89,7 +89,7 @@ struct GPU
 {
   unsigned int qpu_code[QPU_CODE_SIZE];
   unsigned int vpu_code[VPU_CODE_SIZE];
-  short transMatrix2even[16*16];
+  short transMatrix2even[16*16*2];
   int open_count; // Number of allocated video buffers
   unsigned int vc_handle; // Handle of this memory
   int      mb; // Mailbox handle
@@ -162,7 +162,7 @@ static int gpu_init(volatile struct GPU **gpu) {
     memcpy((void*)ptr->vpu_code, rpi_hevc_transform, num_bytes);
   }
   // And the transform coefficients
-  memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, 16*16*sizeof(short));
+  memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
 
   return 0;
 }

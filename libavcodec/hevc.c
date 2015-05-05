@@ -2400,9 +2400,11 @@ static void rpi_execute_transform(HEVCContext *s)
     //    s->hevcdsp.idct[4-2](coeffs, 16);
     //}
 
-    gpu_cache_flush(&s->coeffs_buf[i]);
-    vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf[i].vc, s->num_coeffs[i] >> 8, 0, 0, 0);
-    gpu_cache_flush(&s->coeffs_buf[i]);
+    gpu_cache_flush(&s->coeffs_buf[2]);
+    gpu_cache_flush(&s->coeffs_buf[3]);
+    vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf[2].vc, s->num_coeffs[2] >> 8, s->coeffs_buf[3].vc, s->num_coeffs[3] >> 10, 0);
+    gpu_cache_flush(&s->coeffs_buf[2]);
+    gpu_cache_flush(&s->coeffs_buf[3]);
 
     for(i=0;i<4;i++)
         s->num_coeffs[i] = 0;
