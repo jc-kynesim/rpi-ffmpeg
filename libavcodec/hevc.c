@@ -43,6 +43,8 @@
 
 #ifdef RPI
 #include "rpi_qpu.h"
+// For some unknown reason, the code seems to crash if I do a late malloc
+#define EARLY_MALLOC
 #endif
 
 // #define DISABLE_MC
@@ -61,6 +63,20 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCContext *s)
 {
+#ifdef RPI
+#ifdef EARLY_MALLOC
+#else
+    printf("pic_arrays_free\n");
+    if (s->coeffs_buf_arm[0]) {
+      gpu_free(&s->coeffs_buf_default);
+      s->coeffs_buf_arm[0] = 0;
+    }
+    if (s->coeffs_buf_arm[2]) {
+      gpu_free(&s->coeffs_buf_accelerated);
+      s->coeffs_buf_arm[2] = 0;
+    }
+#endif
+#endif
     av_freep(&s->sao);
     av_freep(&s->deblock);
 
@@ -96,6 +112,28 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
                            ((height >> log2_min_cb_size) + 1);
     int ctb_count        = sps->ctb_width * sps->ctb_height;
     int min_pu_size      = sps->min_pu_width * sps->min_pu_height;
+
+#ifdef RPI
+#ifdef EARLY_MALLOC
+#else
+    int coeffs_in_ctb = (1 << s->ps.sps->log2_ctb_size) * (1 << s->ps.sps->log2_ctb_size);
+    int coefs_per_row = sps->ctb_width * coeffs_in_ctb * 3;  // Allow space for chroma
+    printf("pic_arrays_init\n");
+    printf("Allocated %d\n",coefs_per_row);
+    gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default);
+    s->coeffs_buf_arm[0] = (int16_t*) s->coeffs_buf_default.arm;
+    if (!s->coeffs_buf_arm[0])
+        goto fail;
+    gpu_malloc_cached(sizeof(int16_t) * coefs_per_row * 2, &s->coeffs_buf_accelerated);
+    s->coeffs_buf_arm[2] = (int16_t*) s->coeffs_buf_accelerated.arm;
+    s->coeffs_buf_vc[2] = s->coeffs_buf_accelerated.vc;
+    if (!s->coeffs_buf_arm[2])
+        goto fail;
+    s->coeffs_buf_arm[3] = coefs_per_row + s->coeffs_buf_arm[2];
+    s->coeffs_buf_vc[3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[2];
+    printf("Done\n");
+#endif
+#endif
 
     s->bs_width  = (width  >> 2) + 1;
     s->bs_height = (height >> 2) + 1;
@@ -2400,11 +2438,10 @@ static void rpi_execute_transform(HEVCContext *s)
     //    s->hevcdsp.idct[4-2](coeffs, 16);
     //}
 
-    gpu_cache_flush(&s->coeffs_buf[2]);
-    gpu_cache_flush(&s->coeffs_buf[3]);
-    vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf[2].vc, s->num_coeffs[2] >> 8, s->coeffs_buf[3].vc, s->num_coeffs[3] >> 10, 0);
-    gpu_cache_flush(&s->coeffs_buf[2]);
-    gpu_cache_flush(&s->coeffs_buf[3]);
+
+    gpu_cache_flush(&s->coeffs_buf_accelerated);
+    vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
+    //gpu_cache_flush(&s->coeffs_buf_accelerated);
 
     for(i=0;i<4;i++)
         s->num_coeffs[i] = 0;
@@ -2426,7 +2463,9 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
           lc->na.cand_up_right     = (cmd->na >> 0) & 1;
           s->hpc.intra_pred[cmd->size - 2](s, cmd->x, cmd->y, cmd->c_idx);
       } else {
+          int trafo_size = 1 << cmd->size;
           s->hevcdsp.transform_add[cmd->size-2](cmd->dst, cmd->buf, cmd->stride);
+          memset(cmd->buf, 0, trafo_size * trafo_size * sizeof(int16_t)); // Clear coefficients here while they are in the cache
       }
   }
   s->num_pred_cmds = 0;
@@ -3235,9 +3274,17 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     av_freep(&s->unif_mv_cmds);
     av_freep(&s->unif_xfm_cmds);
     av_freep(&s->univ_pred_cmds);
-    for(i = 0; i < 4; i++) {
-        gpu_free(&s->coeffs_buf[i]);
+
+#ifdef EARLY_MALLOC
+    if (s->coeffs_buf_arm[0]) {
+      gpu_free(&s->coeffs_buf_default);
+      s->coeffs_buf_arm[0] = 0;
     }
+    if (s->coeffs_buf_arm[2]) {
+      gpu_free(&s->coeffs_buf_accelerated);
+      s->coeffs_buf_arm[2] = 0;
+    }
+#endif
 #endif
 
     for (i = 0; i < 3; i++) {
@@ -3281,6 +3328,16 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     return 0;
 }
 
+#ifdef RPI
+static av_cold void memclear16(int16_t *p, int n)
+{
+  vpu_execute_code( vpu_get_fn(), p, n, 0, 0, 0, 1);
+  //int i;
+  //for(i=0;i<n;i++)
+  //  p[i] = 0;
+}
+#endif
+
 static av_cold int hevc_init_context(AVCodecContext *avctx)
 {
     HEVCContext *s = avctx->priv_data;
@@ -3304,37 +3361,35 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->univ_pred_cmds = av_mallocz(sizeof(HEVCPredCmd)*RPI_MAX_PRED_CMDS);
     if (!s->univ_pred_cmds)
         goto fail;
-    for(i = 0; i < 4; i++) {
-        gpu_malloc_cached(sizeof(int16_t)*RPI_MAX_XFM_CMDS*16, &s->coeffs_buf[i]); // TODO slim this down and share across sizes
-        s->coeffs_buf_arm[i] = (int16_t*) s->coeffs_buf[i].arm;
-        if (!s->coeffs_buf_arm[i])
-            goto fail;
-    }
-    s->enable_rpi = 0;
 
-    // A little test program
-    /*{
-      GPU_MEM_PTR_T p;
-      int err = gpu_malloc_cached(16, &p);
-      short *q = (short *)p.arm;
-      int i;
-      int r;
-      printf("Allocated memory %d ARM 0x%x, VC 0x%x, Code 0x%x\n",err,(int)p.arm,p.vc,(int)vpu_get_fn());
-      printf("Allocated memory %d ARM 0x%x, VC 0x%x\n",err,(int)p.arm,p.vc);
-      printf("Preparing data %p\n",q);
-      for(i=0;i<16;i++)
-        q[i] = i;
-      printf("Flush cache\n");
-      gpu_cache_flush(&p);
-      printf("Executing code\n");
-      r = vpu_execute_code( vpu_get_fn(), p.vc, 0, 0, 0, 0, 0);
-      printf("Return value %d (",r);
-      for(i=0;i<16;i++)
-        printf("%d ",q[i]);
-      printf(")\n");
-      gpu_free(&p);
-      goto fail; // Early out
-    }*/
+    s->coeffs_buf_arm[0] = 0;
+    s->coeffs_buf_arm[2] = 0;
+
+#ifdef EARLY_MALLOC
+    int coeffs_in_ctb = 64*64;
+    int coefs_per_row = (2048/64) * coeffs_in_ctb * 3;  // Allow space for chroma
+    printf("Allocated %d\n",coefs_per_row);
+    gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default);
+    s->coeffs_buf_arm[0] = (int16_t*) s->coeffs_buf_default.arm;
+    if (!s->coeffs_buf_arm[0])
+        goto fail;
+    gpu_malloc_cached(sizeof(int16_t) * coefs_per_row * 2, &s->coeffs_buf_accelerated);
+    s->coeffs_buf_arm[2] = (int16_t*) s->coeffs_buf_accelerated.arm;
+    s->coeffs_buf_vc[2] = s->coeffs_buf_accelerated.vc;
+    if (!s->coeffs_buf_arm[2])
+        goto fail;
+    s->coeffs_buf_arm[3] = coefs_per_row + s->coeffs_buf_arm[2];
+    s->coeffs_buf_vc[3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[2];
+    printf("Done\n");
+    //memset(s->coeffs_buf_arm[0],0, sizeof(int16_t) * coefs_per_row);
+    memclear16(s->coeffs_buf_arm[0], coefs_per_row);
+    //memset(s->coeffs_buf_arm[2],0, sizeof(int16_t) * coefs_per_row);
+    memclear16(s->coeffs_buf_arm[2], coefs_per_row);
+    //memset(s->coeffs_buf_arm[3],0, sizeof(int16_t) * coefs_per_row);
+    memclear16(s->coeffs_buf_arm[3], coefs_per_row);
+#endif
+
+    s->enable_rpi = 0;
 
 #endif
 

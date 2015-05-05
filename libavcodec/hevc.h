@@ -861,8 +861,12 @@ typedef struct HEVCContext {
     HEVCMvCmd *unif_mv_cmds;
     HEVCXfmCmd *unif_xfm_cmds;
     HEVCPredCmd *univ_pred_cmds;
-    GPU_MEM_PTR_T coeffs_buf[4];
+    int buf_width;
+    GPU_MEM_PTR_T coeffs_buf_default;
+    GPU_MEM_PTR_T coeffs_buf_accelerated;
     int16_t *coeffs_buf_arm[4];
+    unsigned int coeffs_buf_vc[4];
+
     int num_coeffs[4];
     int num_xfm_cmds;
     int num_mv_cmds;

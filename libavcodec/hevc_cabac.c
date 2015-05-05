@@ -1058,9 +1058,13 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             s->num_coeffs[0] += n;
         }
     }
+    // We now do the memset after transform_add while we know the data is cached.
+    //memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
+#else
+    memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
 #endif
 
-    memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
+
 
     // Derive QP for dequant
     if (!lc->cu.cu_transquant_bypass_flag) {
@@ -1547,7 +1551,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #ifdef RPI
     if (s->enable_rpi) {
         HEVCPredCmd *cmd = s->univ_pred_cmds + s->num_pred_cmds++;
-        //memcpy(coeffs2, coeffs, sizeof(int16_t) * trafo_size * trafo_size); // TODO
         cmd->type = RPI_PRED_TRANSFORM_ADD;
         cmd->size = log2_trafo_size;
         cmd->buf = coeffs;
