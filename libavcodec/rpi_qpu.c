@@ -122,7 +122,7 @@ static void *vpu_start(void *arg);
 static pthread_cond_t post_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t post_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int vpu_cmds[MAXCMDS][7];
+static int vpu_cmds[MAXCMDS][8];
 static volatile int vpu_async_tail=0; // Contains the number of posted jobs
 static volatile int vpu_async_head=0;
 #endif
@@ -297,7 +297,7 @@ static void gpu_term(void)
 #ifdef RPI_ASYNC
   {
     void *res;
-    vpu_post_code(0, 0, 0, 0, 0, 0, -1);
+    vpu_post_code(0, 0, 0, 0, 0, 0, -1, NULL);
     pthread_join(vpu_thread, &res);    
   }
 #endif
@@ -377,10 +377,16 @@ static void *vpu_start(void *arg) {
     if (p[6] == -1) {
       break; // Last job
     }
+    if (p[7]) {
+        GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
+        //gpu_cache_flush(buf);
+    }
     vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
     
+    pthread_mutex_lock(&post_mutex);
     vpu_async_head++;
     pthread_cond_broadcast(&post_cond);
+    pthread_mutex_unlock(&post_mutex);
   }
   
   return NULL;
@@ -388,7 +394,7 @@ static void *vpu_start(void *arg) {
 
 // Post a command to the queue
 // Returns an id which we can use to wait for completion
-int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5)
+int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
 {
   pthread_mutex_lock(&post_mutex);
   {
@@ -406,6 +412,7 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
     p[4] = r3;
     p[5] = r4;
     p[6] = r5;
+    p[7] = (int) buf;
     if (num<=1)
       pthread_cond_broadcast(&post_cond); // Otherwise the vpu thread must already be awake
     pthread_mutex_unlock(&post_mutex);
