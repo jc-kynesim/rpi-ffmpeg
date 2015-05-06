@@ -1,9 +1,13 @@
 #ifdef RPI
-// Use the vcsm device for shared memory
+// define RPI_USE_VCSM to use the vcsm device for shared memory
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 #define RPI_USE_VCSM
-#define RPI_TIME_TOTAL_QPU
-#define RPI_TIME_TOTAL_VPU
+// define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
+//#define RPI_TIME_TOTAL_QPU
+// define RPI_TIME_TOTAL_VPU to print out how much time is spent in the VPI code
+//#define RPI_TIME_TOTAL_VPU
+// define RPI_ASYNC to run the VPU in a separate thread, need to make a separate call to check for completion
+#define RPI_ASYNC
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -113,6 +117,19 @@ static unsigned int Microseconds(void) {
 }
 #endif
 
+#ifdef RPI_ASYNC
+pthread_t vpu_thread;
+static void *vpu_start(void *arg);
+
+#define MAXCMDS 128
+static pthread_cond_t post_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t post_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int vpu_cmds[MAXCMDS][8];
+static volatile int vpu_async_tail=0; // Contains the number of posted jobs
+static volatile int vpu_async_head=0;
+#endif
+
 // Connect to QPU, returns 0 on success.
 static int gpu_init(volatile struct GPU **gpu) {
   int mb = mbox_open();
@@ -164,12 +181,27 @@ static int gpu_init(volatile struct GPU **gpu) {
   // And the transform coefficients
   memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
 
+#ifdef RPI_ASYNC
+  {
+    int err;
+    vpu_async_tail = 0;
+    vpu_async_head = 0;
+    err = pthread_create(&vpu_thread, NULL, vpu_start, NULL);
+    //printf("Created thread\n");
+    if (err) {
+        printf("Failed to create vpu thread\n");
+        return -4;
+    }
+  }
+#endif
+
   return 0;
 }
 
 // Make sure we have exclusive access to the mailbox, and enable qpu if necessary.
 static void gpu_lock(void) {
   pthread_mutex_lock(&gpu_mutex);
+
   if (gpu==NULL) {
     gpu_init(&gpu);
   }
@@ -264,6 +296,16 @@ static void gpu_term(void)
 	unsigned handle = gpu->vc_handle;
   if (gpu==NULL)
     return;
+
+#ifdef RPI_ASYNC
+  {
+    void *res;
+    vpu_post_code(0, 0, 0, 0, 0, 0, -1, NULL);
+    pthread_join(vpu_thread, &res);
+  }
+#endif
+
+
 	unmapmem((void*)gpu, sizeof(struct GPU));
 	mem_unlock(mb, handle);
 	mem_free(mb, handle);
@@ -322,6 +364,79 @@ unsigned int vpu_get_constants(void) {
   return gpu->vc + offsetof(struct GPU,transMatrix2even);
 }
 
+#ifdef RPI_ASYNC
+
+static void *vpu_start(void *arg) {
+  while(1) {
+    pthread_mutex_lock(&post_mutex);
+    while( vpu_async_tail - vpu_async_head <= 0)
+    {
+      //printf("Checking number %d %d\n",vpu_async_head,vpu_async_tail);
+      pthread_cond_wait(&post_cond, &post_mutex);
+    }
+    int *p = vpu_cmds[vpu_async_head%MAXCMDS];
+    pthread_mutex_unlock(&post_mutex);
+
+    if (p[6] == -1) {
+      break; // Last job
+    }
+    if (p[7]) {
+        GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
+        //gpu_cache_flush(buf);
+    }
+    vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+
+    pthread_mutex_lock(&post_mutex);
+    vpu_async_head++;
+    pthread_cond_broadcast(&post_cond);
+    pthread_mutex_unlock(&post_mutex);
+  }
+
+  return NULL;
+}
+
+// Post a command to the queue
+// Returns an id which we can use to wait for completion
+int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
+{
+  pthread_mutex_lock(&post_mutex);
+  {
+    int id = vpu_async_tail++;
+    int *p = vpu_cmds[id%MAXCMDS];
+    int num = vpu_async_tail - vpu_async_head;
+    if (num>MAXCMDS) {
+      printf("Too many commands submitted\n");
+      exit(-1);
+    }
+    p[0] = code;
+    p[1] = r0;
+    p[2] = r1;
+    p[3] = r2;
+    p[4] = r3;
+    p[5] = r4;
+    p[6] = r5;
+    p[7] = (int) buf;
+    if (num<=1)
+      pthread_cond_broadcast(&post_cond); // Otherwise the vpu thread must already be awake
+    pthread_mutex_unlock(&post_mutex);
+    return id;
+  }
+}
+
+// Wait for completion of the given command
+void vpu_wait(int id)
+{
+  pthread_mutex_lock(&post_mutex);
+  while( id + 1 - vpu_async_head > 0)
+  {
+    pthread_cond_wait(&post_cond, &post_mutex);
+  }
+  pthread_mutex_unlock(&post_mutex);
+}
+
+#endif
+
+
 unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5)
 {
   unsigned r;
@@ -334,7 +449,9 @@ unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2,
   static int count=0;
   static long long countr2=0;
 #endif
+#ifndef RPI_ASYNC
   gpu_lock();
+#endif
 #ifdef RPI_TIME_TOTAL_VPU
   start_time = Microseconds();
   if (last_time==0)
@@ -351,7 +468,9 @@ unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2,
   if ((count&0x7f)==0)
     printf("VPU %d %lld On=%dms, Off=%dms\n",count,countr2,(int)(on_time/1000),(int)(off_time/1000));
 #endif
+#ifndef RPI_ASYNC
   gpu_unlock();
+#endif
   return r;
 }
 
