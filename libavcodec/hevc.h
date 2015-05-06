@@ -896,6 +896,7 @@ typedef struct HEVCContext {
     int num_xfm_cmds;
     int num_mv_cmds;
     int num_pred_cmds;
+    int vpu_id;
 #endif
 
     uint8_t *cabac_state;
