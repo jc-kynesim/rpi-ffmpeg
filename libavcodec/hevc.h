@@ -803,14 +803,39 @@ typedef struct HEVCLocalContext {
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
 #define RPI_MAX_WIDTH 2048
 
-// Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane
-#define RPI_MAX_MV_CMDS   (16*3*(RPI_MAX_WIDTH/4))
+// Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane, * 2 for bi
+#define RPI_MAX_MV_CMDS   (2*16*3*(RPI_MAX_WIDTH/4))
 #define RPI_MAX_XFM_CMDS  (16*3*(RPI_MAX_WIDTH/4))
 // Each block can have an intra prediction and a transform_add command
 #define RPI_MAX_PRED_CMDS (2*16*3*(RPI_MAX_WIDTH/4))
 
+#define RPI_CMD_LUMA_UNI 0
+#define RPI_CMD_CHROMA_UNI 1
+#define RPI_CMD_LUMA_BI 2
+#define RPI_CMD_U_BI 3
+#define RPI_CMD_V_BI 4
+
+// RPI_PRECLEAR is not working yet - perhaps clearing on VPUs is flawed?
+// #define RPI_PRECLEAR
+
 // Command for inter prediction
 typedef struct HEVCMvCmd {
+    int cmd;
+    uint8_t *dst;
+    ptrdiff_t dststride;
+    uint8_t *src;
+    ptrdiff_t srcstride;
+    Mv mv;
+    int x_off;
+    int y_off;
+    int block_w;
+    int block_h;
+    int weight;
+    int offset;
+    uint8_t *src1;
+    ptrdiff_t srcstride1;
+    Mv mv1;
+    int8_t ref_idx[2];
 } HEVCMvCmd;
 
 // Command for transform to process a block of coefficients
