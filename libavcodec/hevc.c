@@ -46,7 +46,7 @@
 // For some unknown reason, the code seems to crash if I do a late malloc
 #define EARLY_MALLOC
 // Move Inter prediction into separate pass
-//#define RPI_INTER
+#define RPI_INTER
 #endif
 
 // #define DISABLE_MC
@@ -1448,7 +1448,7 @@ static void rpi_luma_mc_uni(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
                         AVFrame *ref, const Mv *mv, int x_off, int y_off,
                         int block_w, int block_h, int luma_weight, int luma_offset)
 {
-    HEVCMvCmd *cmd = unif_mv_cmds + s->num_mv_cmds++;
+    HEVCMvCmd *cmd = s->unif_mv_cmds + s->num_mv_cmds++;
     cmd->cmd = RPI_CMD_LUMA_UNI;
     cmd->dst = dst;
     cmd->dststride = dststride;
@@ -1467,31 +1467,29 @@ static void rpi_luma_mc_bi(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
                        AVFrame *ref0, const Mv *mv0, int x_off, int y_off,
                        int block_w, int block_h, AVFrame *ref1, const Mv *mv1, struct MvField *current_mv)
 {
-    HEVCMvCmd *cmd = unif_mv_cmds + s->num_mv_cmds++;
+    HEVCMvCmd *cmd = s->unif_mv_cmds + s->num_mv_cmds++;
     cmd->cmd = RPI_CMD_LUMA_BI;
     cmd->dst = dst;
     cmd->dststride = dststride;
-    cmd->src = ref->data[0];
-    cmd->srcstride = ref->linesize[0];
-    cmd->mv = *mv;
+    cmd->src = ref0->data[0];
+    cmd->srcstride = ref0->linesize[0];
+    cmd->mv = *mv0;
     cmd->x_off = x_off;
     cmd->y_off = y_off;
     cmd->block_w = block_w;
     cmd->block_h = block_h;
-    cmd->weight = luma_weight;
-    cmd->offset = luma_offset;
-    cmd->src1 = ref1->data[];
+    cmd->src1 = ref1->data[0];
     cmd->srcstride1 = ref1->linesize[0];
     cmd->mv1 = *mv1;
     cmd->ref_idx[0] = current_mv->ref_idx[0];
     cmd->ref_idx[1] = current_mv->ref_idx[1];
 }
 
-static void chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
+static void rpi_chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
                           ptrdiff_t dststride, uint8_t *src0, ptrdiff_t srcstride, int reflist,
                           int x_off, int y_off, int block_w, int block_h, struct MvField *current_mv, int chroma_weight, int chroma_offset)
 {
-    HEVCMvCmd *cmd = unif_mv_cmds + s->num_mv_cmds++;
+    HEVCMvCmd *cmd = s->unif_mv_cmds + s->num_mv_cmds++;
     cmd->cmd = RPI_CMD_CHROMA_UNI;
     cmd->dst = dst0;
     cmd->dststride = dststride;
@@ -1506,27 +1504,27 @@ static void chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
     cmd->offset = chroma_offset;
 }
 
-static void chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVFrame *ref0, AVFrame *ref1,
+static void rpi_chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVFrame *ref0, AVFrame *ref1,
                          int x_off, int y_off, int block_w, int block_h, struct MvField *current_mv, int cidx)
 {
-    HEVCMvCmd *cmd = unif_mv_cmds + s->num_mv_cmds++;
+    HEVCMvCmd *cmd = s->unif_mv_cmds + s->num_mv_cmds++;
     cmd->cmd = RPI_CMD_CHROMA_BI+cidx;
     cmd->dst = dst0;
     cmd->dststride = dststride;
     cmd->src = ref0->data[cidx+1];
     cmd->srcstride = ref0->linesize[cidx+1];
-    cmd->mv = current_mv->mv[reflist];
+    cmd->mv = current_mv->mv[0];
+    cmd->mv1 = current_mv->mv[1];
     cmd->x_off = x_off;
     cmd->y_off = y_off;
     cmd->block_w = block_w;
     cmd->block_h = block_h;
-    cmd->weight = chroma_weight;
-    cmd->offset = chroma_offset;
-    cmd->src = ref1->data[cidx+1];
+    cmd->src1 = ref1->data[cidx+1];
     cmd->srcstride1 = ref1->linesize[cidx+1];
     cmd->ref_idx[0] = current_mv->ref_idx[0];
     cmd->ref_idx[1] = current_mv->ref_idx[1];
 }
+
 #else
 #define RPI_REDIRECT(fn) fn
 #endif
@@ -2554,7 +2552,9 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
           lc->na.cand_up_right     = (cmd->na >> 0) & 1;
           s->hpc.intra_pred[cmd->size - 2](s, cmd->x, cmd->y, cmd->c_idx);
       } else {
+#ifdef RPI_PRECLEAR
           int trafo_size = 1 << cmd->size;
+#endif
           s->hevcdsp.transform_add[cmd->size-2](cmd->dst, cmd->buf, cmd->stride);
 #ifdef RPI_PRECLEAR
           memset(cmd->buf, 0, trafo_size * trafo_size * sizeof(int16_t)); // Clear coefficients here while they are in the cache
@@ -2563,6 +2563,61 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
   }
   s->num_pred_cmds = 0;
 }
+
+static void rpi_execute_inter_cmds(HEVCContext *s)
+{
+    HEVCMvCmd *cmd = s->unif_mv_cmds;
+    int n,cidx;
+    AVFrame myref;
+    AVFrame myref1;
+    struct MvField mymv;
+    if (s->num_mv_cmds > RPI_MAX_MV_CMDS) {
+        printf("Overflow inter_cmds\n");
+        exit(-1);
+    }
+    for(n = s->num_mv_cmds; n>0 ; n--, cmd++) {
+        switch(cmd->cmd) {
+        case RPI_CMD_LUMA_UNI:
+            myref.data[0] = cmd->src;
+            myref.linesize[0] = cmd->srcstride;
+            luma_mc_uni(s, cmd->dst, cmd->dststride, &myref, &cmd->mv, cmd->x_off, cmd->y_off, cmd->block_w, cmd->block_h, cmd->weight, cmd->offset);
+            break;
+        case RPI_CMD_LUMA_BI:
+            myref.data[0] = cmd->src;
+            myref.linesize[0] = cmd->srcstride;
+            myref1.data[0] = cmd->src1;
+            myref1.linesize[0] = cmd->srcstride1;
+            mymv.ref_idx[0] = cmd->ref_idx[0];
+            mymv.ref_idx[1] = cmd->ref_idx[1];
+            luma_mc_bi(s, cmd->dst, cmd->dststride,
+                       &myref, &cmd->mv, cmd->x_off, cmd->y_off, cmd->block_w, cmd->block_h,
+                       &myref1, &cmd->mv1, &mymv);
+            break;
+        case RPI_CMD_CHROMA_UNI:
+            mymv.mv[0] = cmd->mv;
+            chroma_mc_uni(s, cmd->dst,
+                          cmd->dststride, cmd->src, cmd->srcstride, 0,
+                          cmd->x_off, cmd->y_off, cmd->block_w, cmd->block_h, &mymv, cmd->weight, cmd->offset);
+            break;
+        case RPI_CMD_CHROMA_BI:
+        case RPI_CMD_CHROMA_BI+1:
+            cidx = cmd->cmd - RPI_CMD_CHROMA_BI;
+            myref.data[cidx+1] = cmd->src;
+            myref.linesize[cidx+1] = cmd->srcstride;
+            myref1.data[cidx+1] = cmd->src1;
+            myref1.linesize[cidx+1] = cmd->srcstride1;
+            mymv.ref_idx[0] = cmd->ref_idx[0];
+            mymv.ref_idx[1] = cmd->ref_idx[1];
+            mymv.mv[0] = cmd->mv;
+            mymv.mv[1] = cmd->mv1;
+            chroma_mc_bi(s, cmd->dst, cmd->dststride, &myref, &myref1,
+                         cmd->x_off, cmd->y_off, cmd->block_w, cmd->block_h, &mymv, cidx);
+            break;
+        }
+    }
+    s->num_mv_cmds = 0;
+}
+
 #endif
 
 static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
@@ -2611,6 +2666,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI
         if (s->enable_rpi && x_ctb + ctb_size >= s->ps.sps->width) {
             int x;
+            // Perform inter prediction
+            rpi_execute_inter_cmds(s);
             // Transform all blocks
             rpi_execute_transform(s);
             // Perform intra prediction and residual reconstruction
@@ -3422,6 +3479,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 }
 
 #ifdef RPI
+#ifdef RPI_PRECLEAR
 static av_cold void memclear16(int16_t *p, int n)
 {
   vpu_execute_code( vpu_get_fn(), p, n, 0, 0, 0, 1);
@@ -3429,6 +3487,7 @@ static av_cold void memclear16(int16_t *p, int n)
   //for(i=0;i<n;i++)
   //  p[i] = 0;
 }
+#endif
 #endif
 
 static av_cold int hevc_init_context(AVCodecContext *avctx)

@@ -812,7 +812,7 @@ typedef struct HEVCLocalContext {
 #define RPI_CMD_LUMA_UNI 0
 #define RPI_CMD_CHROMA_UNI 1
 #define RPI_CMD_LUMA_BI 2
-#define RPI_CMD_U_BI 3
+#define RPI_CMD_CHROMA_BI 3
 #define RPI_CMD_V_BI 4
 
 // RPI_PRECLEAR is not working yet - perhaps clearing on VPUs is flawed?
