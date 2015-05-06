@@ -122,7 +122,8 @@ pthread_t vpu_thread;
 static void *vpu_start(void *arg);
 
 #define MAXCMDS 128
-static pthread_cond_t post_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t post_cond_head = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t post_cond_tail = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t post_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int vpu_cmds[MAXCMDS][8];
@@ -372,7 +373,7 @@ static void *vpu_start(void *arg) {
     while( vpu_async_tail - vpu_async_head <= 0)
     {
       //printf("Checking number %d %d\n",vpu_async_head,vpu_async_tail);
-      pthread_cond_wait(&post_cond, &post_mutex);
+      pthread_cond_wait(&post_cond_tail, &post_mutex);
     }
     int *p = vpu_cmds[vpu_async_head%MAXCMDS];
     pthread_mutex_unlock(&post_mutex);
@@ -388,7 +389,7 @@ static void *vpu_start(void *arg) {
 
     pthread_mutex_lock(&post_mutex);
     vpu_async_head++;
-    pthread_cond_broadcast(&post_cond);
+    pthread_cond_broadcast(&post_cond_head);
     pthread_mutex_unlock(&post_mutex);
   }
 
@@ -417,7 +418,7 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
     p[6] = r5;
     p[7] = (int) buf;
     if (num<=1)
-      pthread_cond_broadcast(&post_cond); // Otherwise the vpu thread must already be awake
+      pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake
     pthread_mutex_unlock(&post_mutex);
     return id;
   }
@@ -429,7 +430,7 @@ void vpu_wait(int id)
   pthread_mutex_lock(&post_mutex);
   while( id + 1 - vpu_async_head > 0)
   {
-    pthread_cond_wait(&post_cond, &post_mutex);
+    pthread_cond_wait(&post_cond_head, &post_mutex);
   }
   pthread_mutex_unlock(&post_mutex);
 }
