@@ -1059,7 +1059,10 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         }
     }
     // We now do the memset after transform_add while we know the data is cached.
-    //memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
+    #ifdef RPI_PRECLEAR
+    #else
+    memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
+    #endif
 #else
     memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
 #endif
