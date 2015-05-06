@@ -2493,8 +2493,10 @@ static void rpi_execute_transform(HEVCContext *s)
     
     
     gpu_cache_flush(&s->coeffs_buf_accelerated);
-    vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
+    s->vpu_id = vpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
+    //vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
     //gpu_cache_flush(&s->coeffs_buf_accelerated);
+    //vpu_wait(s->vpu_id);
     
     for(i=0;i<4;i++)
         s->num_coeffs[i] = 0;
@@ -2630,10 +2632,12 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI
         if (s->enable_rpi && x_ctb + ctb_size >= s->sps->width) {
             int x;
-            // Perform inter prediction
-            rpi_execute_inter_cmds(s);
             // Transform all blocks
             rpi_execute_transform(s);
+            // Perform inter prediction
+            rpi_execute_inter_cmds(s);
+            // Wait for transform completion
+            vpu_wait(s->vpu_id);
             // Perform intra prediction and residual reconstruction
             rpi_execute_pred_cmds(s);
             // Perform deblocking for CTBs in this row
@@ -3548,6 +3552,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     av_freep(&s->univ_pred_cmds);
     
 #ifdef EARLY_MALLOC
+    printf("hevc_decode_free\n");
     if (s->coeffs_buf_arm[0]) {
       gpu_free(&s->coeffs_buf_default);
       s->coeffs_buf_arm[0] = 0;
