@@ -2493,7 +2493,7 @@ static void rpi_execute_transform(HEVCContext *s)
     
     
     gpu_cache_flush(&s->coeffs_buf_accelerated);
-    s->vpu_id = vpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
+    s->vpu_id = vpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0, &s->coeffs_buf_accelerated);
     //vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
     //gpu_cache_flush(&s->coeffs_buf_accelerated);
     //vpu_wait(s->vpu_id);
