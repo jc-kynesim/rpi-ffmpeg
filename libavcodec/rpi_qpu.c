@@ -105,7 +105,7 @@ struct GPU
 static pthread_mutex_t gpu_mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile struct GPU* gpu = NULL;
 
-#ifdef RPI_TIME_TOTAL_QPU
+#if defined(RPI_TIME_TOTAL_QPU) || defined(RPI_TIME_TOTAL_VPU)
 static unsigned int Microseconds(void) {
     struct timespec ts;
     unsigned int x;
