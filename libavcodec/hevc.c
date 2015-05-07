@@ -2503,6 +2503,17 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
 }
 
 #ifdef RPI
+static void rpi_execute_dblk_cmds(HEVCContext *s)
+{
+    int n;
+    int ctb_size    = 1 << s->sps->log2_ctb_size;
+    int (*p)[2] = s->dblk_cmds;
+    for(n = s->num_dblk_cmds; n>0 ;n--,p++) {
+        ff_hevc_hls_filters(s, (*p)[0], (*p)[1], ctb_size);
+    }
+    s->num_dblk_cmds = 0;
+}        
+            
 static void rpi_execute_transform(HEVCContext *s)
 {
     int i=2;
@@ -2616,7 +2627,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
-    int start_ctb_x = (s->sh.slice_ctb_addr_rs % ((s->sps->width + ctb_size - 1) >> s->sps->log2_ctb_size)) << s->sps->log2_ctb_size;
     s->enable_rpi = 1; // TODO this should depend on cross component and frame width etc.
 #endif
 
@@ -2650,7 +2660,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 #ifdef RPI
-        if (s->enable_rpi && x_ctb + ctb_size >= s->sps->width) {
+        if (s->enable_rpi) {
+          s->dblk_cmds[s->num_dblk_cmds][0] = x_ctb;
+          s->dblk_cmds[s->num_dblk_cmds++][1] = y_ctb;
+          if ( (((y_ctb + ctb_size)&63) == 0) && x_ctb + ctb_size >= s->sps->width) {
             int x;
             // Transform all blocks
             //printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
@@ -2663,10 +2676,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             // Perform intra prediction and residual reconstruction
             rpi_execute_pred_cmds(s);
             // Perform deblocking for CTBs in this row
-            for(x = start_ctb_x; x <= x_ctb; x += ctb_size) {  // TODO this will fail for tiles
-                ff_hevc_hls_filters(s, x, y_ctb, ctb_size);
-            }
-            start_ctb_x = 0;
+            rpi_execute_dblk_cmds(s);
+          }
         }
 #endif
         if (more_data < 0) {
@@ -2683,6 +2694,16 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #endif
         ff_hevc_hls_filters(s, x_ctb, y_ctb, ctb_size);
     }
+    
+#ifdef RPI
+    if (s->enable_rpi && s->num_dblk_cmds) {
+        rpi_execute_transform(s);
+        rpi_execute_inter_cmds(s);
+        vpu_wait(s->vpu_id);
+        rpi_execute_pred_cmds(s);
+        rpi_execute_dblk_cmds(s);
+    }
+#endif
 
     if (x_ctb + ctb_size >= s->ps.sps->width &&
         y_ctb + ctb_size >= s->ps.sps->height)
