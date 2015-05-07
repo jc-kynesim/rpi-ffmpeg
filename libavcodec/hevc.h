@@ -808,6 +808,8 @@ typedef struct HEVCLocalContext {
 #define RPI_MAX_XFM_CMDS  (16*3*(RPI_MAX_WIDTH/4))
 // Each block can have an intra prediction and a transform_add command
 #define RPI_MAX_PRED_CMDS (2*16*3*(RPI_MAX_WIDTH/4))
+// Worst case is 16x16 CTUs
+#define RPI_MAX_DEBLOCK_CMDS (RPI_MAX_WIDTH*4/16)
 
 #define RPI_CMD_LUMA_UNI 0
 #define RPI_CMD_CHROMA_UNI 1
@@ -867,6 +869,9 @@ typedef struct HEVCPredCmd {
 #endif
 
 typedef struct HEVCContext {
+#ifdef RPI
+    int dblk_cmds[RPI_MAX_DEBLOCK_CMDS][2];
+#endif
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
 
@@ -891,11 +896,11 @@ typedef struct HEVCContext {
     GPU_MEM_PTR_T coeffs_buf_accelerated;
     int16_t *coeffs_buf_arm[4];
     unsigned int coeffs_buf_vc[4];
-
     int num_coeffs[4];
     int num_xfm_cmds;
     int num_mv_cmds;
     int num_pred_cmds;
+    int num_dblk_cmds;
     int vpu_id;
 #endif
 
