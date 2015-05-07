@@ -25,6 +25,8 @@
 //#define DISABLE_SAO
 //#define DISABLE_DEBLOCK
 //#define DISABLE_STRENGTHS
+// define DISABLE_DEBLOCK_NONREF for a 6% speed boost (by skipping deblocking on unimportant frames)
+//#define DISABLE_DEBLOCK_NONREF
 
 #include "libavutil/common.h"
 #include "libavutil/internal.h"
@@ -504,6 +506,14 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 s->ps.sps->pcm.loop_filter_disable_flag) ||
                s->ps.pps->transquant_bypass_enable_flag;
 
+#ifdef DISABLE_DEBLOCK_NONREF
+    if (    s->nal_unit_type == NAL_TRAIL_N ||
+            s->nal_unit_type == NAL_TSA_N   ||
+            s->nal_unit_type == NAL_STSA_N  ||
+            s->nal_unit_type == NAL_RADL_N  ||
+            s->nal_unit_type == NAL_RASL_N )
+      return; // Don't deblock non-reference frames
+#endif
 #ifdef DISABLE_DEBLOCK
     return;
 #endif
