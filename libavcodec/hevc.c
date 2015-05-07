@@ -2527,7 +2527,6 @@ static void rpi_execute_transform(HEVCContext *s)
     //    s->hevcdsp.idct[4-2](coeffs, 16);
     //}
 
-
     gpu_cache_flush(&s->coeffs_buf_accelerated);
     s->vpu_id = vpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0, &s->coeffs_buf_accelerated);
     //vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
@@ -2669,6 +2668,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         if (s->enable_rpi && x_ctb + ctb_size >= s->ps.sps->width) {
             int x;
             // Transform all blocks
+            //printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
+
             rpi_execute_transform(s);
             // Perform inter prediction
             rpi_execute_inter_cmds(s);

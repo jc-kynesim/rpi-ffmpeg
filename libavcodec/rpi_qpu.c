@@ -199,6 +199,17 @@ static int gpu_init(volatile struct GPU **gpu) {
   return 0;
 }
 
+// Returns 1 if the gpu is currently idle
+static int gpu_idle(void)
+{
+  int ret = pthread_mutex_trylock(&gpu_mutex);
+  if (ret==0) {
+    pthread_mutex_unlock(&gpu_mutex);
+    return 1;
+  }
+  return 0;
+}
+
 // Make sure we have exclusive access to the mailbox, and enable qpu if necessary.
 static void gpu_lock(void) {
   pthread_mutex_lock(&gpu_mutex);
@@ -400,6 +411,13 @@ static void *vpu_start(void *arg) {
 // Returns an id which we can use to wait for completion
 int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
 {
+  // If the gpu is idle then just run the command immediately
+  // This works, but doesn't seem to give any benefit
+  // if (gpu_idle()) {
+  //   vpu_execute_code( code,  r0,  r1,  r2,  r3,  r4,  r5);
+  //   return -1; // TODO perhaps a wraparound bug here?
+  // }
+
   pthread_mutex_lock(&post_mutex);
   {
     int id = vpu_async_tail++;
