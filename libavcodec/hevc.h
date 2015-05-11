@@ -42,7 +42,11 @@
 
 // define RPI to split the CABAC/prediction/transform into separate stages
 #ifdef RPI
-#include "rpi_qpu.h"
+
+  #include "rpi_qpu.h"
+  // Use QPU for inter prediction
+  //#define RPI_INTER_QPU
+
 #endif
 
 #define MAX_DPB_SIZE 16 // A.4.1
@@ -888,7 +892,7 @@ typedef struct HEVCContext {
 
 #ifdef RPI
     int enable_rpi;
-    HEVCMvCmd *unif_mv_cmds;
+    HEVCMvCmd *unif_mv_cmds;  // TODO rename
     HEVCXfmCmd *unif_xfm_cmds;
     HEVCPredCmd *univ_pred_cmds;
     int buf_width;
@@ -902,6 +906,20 @@ typedef struct HEVCContext {
     int num_pred_cmds;
     int num_dblk_cmds;
     int vpu_id;
+    //GPU_MEM_PTR_T dummy;
+#ifdef RPI_INTER_QPU
+    GPU_MEM_PTR_T unif_mvs_ptr;
+    uint32_t *unif_mvs; // Base of memory for motion vector commands
+
+    // _base pointers are to the start of the row
+    uint32_t *mvs_base[8];
+    // these pointers are to the next free space
+    uint32_t *u_mvs[8];
+    // Function pointers
+    uint32_t mc_filter_uv;
+    uint32_t mc_filter_uv_b;
+#endif
+
 #endif
 
     uint8_t *cabac_state;

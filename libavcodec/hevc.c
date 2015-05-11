@@ -42,16 +42,44 @@
 #include "profiles.h"
 
 #ifdef RPI
-#include "rpi_qpu.h"
-// For some unknown reason, the code seems to crash if I do a late malloc
-#define EARLY_MALLOC
-// Move Inter prediction into separate pass
-#define RPI_INTER
+  #include "rpi_qpu.h"
+  // For some unknown reason, the code seems to crash if I do a late malloc
+  #define EARLY_MALLOC
+  // Move Inter prediction into separate pass
+  #define RPI_INTER
 #endif
 
 // #define DISABLE_MC
 
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
+
+
+#ifdef RPI_INTER_QPU
+
+#define RPI_CHROMA_COMMAND_WORDS 12
+// The QPU code for UV blocks only works up to a block width of 8
+#define RPI_CHROMA_BLOCK_WIDTH 8
+
+#define ENCODE_COEFFS(c0, c1, c2, c3) (((-c0) & 0xff) | ((-c1) & 0xff) << 8 | ((-c2) & 0xff) << 16 | ((-c3) & 0xff) << 24)
+
+// TODO Chroma only needs 4 taps
+static uint32_t rpi_filter_coefs[8][2] = {
+        { ENCODE_COEFFS(  0,  0,  0, 128), ENCODE_COEFFS(   0,   0,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0, -2,  58), ENCODE_COEFFS(  10,  -2,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0, -4,  54), ENCODE_COEFFS(  16,  -2,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0, -6,  46), ENCODE_COEFFS(  28,  -4,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0, -4,  36), ENCODE_COEFFS(  36,  -4,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0, -4,  28), ENCODE_COEFFS(  46,  -6,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0, -2,  16), ENCODE_COEFFS(  54,  -4,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0, -2,  10), ENCODE_COEFFS(  58,  -2,  0,  0 ) }
+};
+
+static uint32_t get_vc_address(AVBufferRef *bref) {
+  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
+  return p->vc;
+}
+
+#endif
 
 /**
  * NOTE: Each function hls_foo correspond to the function foo in the
@@ -66,6 +94,7 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 static void pic_arrays_free(HEVCContext *s)
 {
 #ifdef RPI
+
 #ifdef EARLY_MALLOC
 #else
     printf("pic_arrays_free\n");
@@ -1982,6 +2011,43 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                     s->sh.luma_offset_l0[current_mv.ref_idx[0]]);
 
         if (s->ps.sps->chroma_format_idc) {
+#ifdef RPI_INTER_QPU
+            if (s->enable_rpi) {
+                int reflist = 0;
+                int hshift           = s->ps.sps->hshift[1];
+                int vshift           = s->ps.sps->vshift[1];
+                const Mv *mv         = &current_mv.mv[reflist];
+                intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
+                intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
+                intptr_t _mx         = mx << (1 - hshift);
+                intptr_t _my         = my << (1 - vshift); // Fractional part of motion vector
+
+                int x1_c = x0_c + (mv->x >> (2 + hshift));
+                int y1_c = y0_c + (mv->y >> (2 + hshift));
+                int chan = x0>>8; // Allocate commands for the first 256 luma pixels across to the first QPU.  This is optimised for images around 1920 width
+
+                uint32_t *u = s->u_mvs[chan & 7];
+                for(int start_y=0;start_y < nPbH_c;start_y+=16) {
+                  for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 3 + start_x;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 3 + start_y;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
+                      *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
+                      // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
+                      *u++ = rpi_filter_coefs[_mx][0];
+                      *u++ = rpi_filter_coefs[_mx][1];
+                      *u++ = rpi_filter_coefs[_my][0];
+                      *u++ = rpi_filter_coefs[_my][1];
+                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                    }
+                }
+                s->u_mvs[chan & 7] = u;
+                return;
+            }
+#endif
             RPI_REDIRECT(chroma_mc_uni)(s, dst1, s->frame->linesize[1], ref0->frame->data[1], ref0->frame->linesize[1],
                           0, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
                           s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]);
@@ -2632,6 +2698,54 @@ static void rpi_execute_inter_cmds(HEVCContext *s)
 
 #endif
 
+#ifdef RPI_INTER_QPU
+static void rpi_inter_clear(HEVCContext *s)
+{
+    int i;
+    int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
+    int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
+    for(i=0;i<8;i++) {
+        s->u_mvs[i] = s->mvs_base[i];
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = pic_width;
+        *s->u_mvs[i]++ = pic_height;
+        *s->u_mvs[i]++ = s->frame->linesize[1];
+        *s->u_mvs[i]++ = s->frame->linesize[2];
+        s->u_mvs[i] += 3;  // Padding words
+    }
+}
+
+static void rpi_execute_inter_qpu(HEVCContext *s)
+{
+    int k;
+    uint32_t *unif_vc = (uint32_t *)s->unif_mvs_ptr.vc;
+
+    if (s->sh.slice_type == I_SLICE)
+        return;
+    for(k=0;k<8;k++) {
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
+    }
+
+    s->u_mvs[8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
+
+    qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
+      (uint32_t)(unif_vc+(s->mvs_base[0 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[1 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[2 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[3 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[4 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[5 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[6 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[7 ] - (uint32_t*)s->unif_mvs_ptr.arm))
+      );
+}
+#endif
+
 static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 {
     HEVCContext *s  = avctxt->priv_data;
@@ -2658,6 +2772,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         }
     }
 
+#ifdef RPI_INTER_QPU
+    rpi_inter_clear(s);
+#endif
+
     while (more_data && ctb_addr_ts < s->ps.sps->ctb_size) {
         int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
 
@@ -2679,19 +2797,30 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
           s->dblk_cmds[s->num_dblk_cmds][0] = x_ctb;
           s->dblk_cmds[s->num_dblk_cmds++][1] = y_ctb;
           if ( (((y_ctb + ctb_size)&63) == 0) && x_ctb + ctb_size >= s->ps.sps->width) {
-            int x;
+#ifdef RPI_INTER_QPU
+            // Kick off inter prediction on QPUs
+            rpi_execute_inter_qpu(s);
+#endif
             // Transform all blocks
             //printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
-
             rpi_execute_transform(s);
             // Perform inter prediction
             rpi_execute_inter_cmds(s);
             // Wait for transform completion
             vpu_wait(s->vpu_id);
+
+            // Copy back reconstructed data
+            //memcpy(s->frame->data[0],s->dummy.arm,2048*64);
+            //memcpy(s->frame->data[1],s->dummy.arm,1024*32);
+            //memcpy(s->frame->data[2],s->dummy.arm,1024*32);
+
             // Perform intra prediction and residual reconstruction
             rpi_execute_pred_cmds(s);
             // Perform deblocking for CTBs in this row
             rpi_execute_dblk_cmds(s);
+#ifdef RPI_INTER_QPU
+            rpi_inter_clear(s);
+#endif
           }
         }
 #endif
@@ -2712,6 +2841,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
 #ifdef RPI
     if (s->enable_rpi && s->num_dblk_cmds) {
+#ifdef RPI_INTER_QPU
+        rpi_execute_inter_qpu(s);
+#endif
         rpi_execute_transform(s);
         rpi_execute_inter_cmds(s);
         vpu_wait(s->vpu_id);
@@ -3451,6 +3583,14 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     av_freep(&s->unif_xfm_cmds);
     av_freep(&s->univ_pred_cmds);
 
+#ifdef RPI_INTER_QPU
+    if (s->unif_mvs) {
+        gpu_free( &s->unif_mvs_ptr );
+        s->unif_mvs = 0;
+    }
+#endif
+    //gpu_free(&s->dummy);
+
 #ifdef EARLY_MALLOC
     printf("hevc_decode_free\n");
     if (s->coeffs_buf_arm[0]) {
@@ -3541,34 +3681,59 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     if (!s->univ_pred_cmds)
         goto fail;
 
-    s->coeffs_buf_arm[0] = 0;
-    s->coeffs_buf_arm[2] = 0;
+#ifdef RPI_INTER_QPU
+    // We divide the image into blocks 256 wide and 64 high
+    // We support up to 2048 widths
+    // We compute the number of chroma motion vector commands for 4:4:4 format and 4x4 chroma blocks - assuming all blocks are B predicted
+    // Also add space for the startup command for each stream.
+
+    {
+        int uv_commands_per_qpu = (1 + (256*64*2)/(4*4)) * RPI_CHROMA_COMMAND_WORDS;
+        uint32_t *p;
+        gpu_malloc_uncached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr );
+        s->unif_mvs = (uint32_t *) s->unif_mvs_ptr.arm; // TODO support this allocation in non EARLY_MALLOC
+
+        // Set up initial locations for uniform streams
+        p = s->unif_mvs;
+        for(i = 0; i < 8; i++) {
+            s->mvs_base[i] = p;
+            p += uv_commands_per_qpu;
+        }
+        s->mc_filter_uv = qpu_get_fn(QPU_MC_FILTER_UV);
+        s->mc_filter_uv_b = qpu_get_fn(QPU_MC_FILTER_UV_B);
+
+    }
+#endif
+    //gpu_malloc_uncached(2048*64,&s->dummy);
 
 #ifdef EARLY_MALLOC
-    int coeffs_in_ctb = 64*64;
-    int coefs_per_row = (2048/64) * coeffs_in_ctb * 3;  // Allow space for chroma
-    printf("Allocated %d\n",coefs_per_row);
-    gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default);
-    s->coeffs_buf_arm[0] = (int16_t*) s->coeffs_buf_default.arm;
-    if (!s->coeffs_buf_arm[0])
-        goto fail;
-    gpu_malloc_cached(sizeof(int16_t) * coefs_per_row * 2, &s->coeffs_buf_accelerated);
-    s->coeffs_buf_arm[2] = (int16_t*) s->coeffs_buf_accelerated.arm;
-    s->coeffs_buf_vc[2] = s->coeffs_buf_accelerated.vc;
-    if (!s->coeffs_buf_arm[2])
-        goto fail;
-    s->coeffs_buf_arm[3] = coefs_per_row + s->coeffs_buf_arm[2];
-    s->coeffs_buf_vc[3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[2];
-    printf("Done\n");
+    {
+        int coeffs_in_ctb = 64*64;
+        int coefs_per_row = (2048/64) * coeffs_in_ctb * 3;  // Allow space for chroma
+        s->coeffs_buf_arm[0] = 0;
+        s->coeffs_buf_arm[2] = 0;
+        printf("Allocated %d\n",coefs_per_row);
+        gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default);
+        s->coeffs_buf_arm[0] = (int16_t*) s->coeffs_buf_default.arm;
+        if (!s->coeffs_buf_arm[0])
+            goto fail;
+        gpu_malloc_cached(sizeof(int16_t) * coefs_per_row * 2, &s->coeffs_buf_accelerated);
+        s->coeffs_buf_arm[2] = (int16_t*) s->coeffs_buf_accelerated.arm;
+        s->coeffs_buf_vc[2] = s->coeffs_buf_accelerated.vc;
+        if (!s->coeffs_buf_arm[2])
+            goto fail;
+        s->coeffs_buf_arm[3] = coefs_per_row + s->coeffs_buf_arm[2];
+        s->coeffs_buf_vc[3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[2];
+        printf("Done\n");
 #ifdef RPI_PRECLEAR
-    //memset(s->coeffs_buf_arm[0],0, sizeof(int16_t) * coefs_per_row);
-    memclear16(s->coeffs_buf_arm[0], coefs_per_row);
-    //memset(s->coeffs_buf_arm[2],0, sizeof(int16_t) * coefs_per_row);
-    memclear16(s->coeffs_buf_arm[2], coefs_per_row);
-    //memset(s->coeffs_buf_arm[3],0, sizeof(int16_t) * coefs_per_row);
-    memclear16(s->coeffs_buf_arm[3], coefs_per_row);
+        //memset(s->coeffs_buf_arm[0],0, sizeof(int16_t) * coefs_per_row);
+        memclear16(s->coeffs_buf_arm[0], coefs_per_row);
+        //memset(s->coeffs_buf_arm[2],0, sizeof(int16_t) * coefs_per_row);
+        memclear16(s->coeffs_buf_arm[2], coefs_per_row);
+        //memset(s->coeffs_buf_arm[3],0, sizeof(int16_t) * coefs_per_row);
+        memclear16(s->coeffs_buf_arm[3], coefs_per_row);
 #endif
-
+    }
 #endif
 
     s->enable_rpi = 0;
