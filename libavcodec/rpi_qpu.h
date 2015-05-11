@@ -16,6 +16,7 @@ extern void gpu_free(GPU_MEM_PTR_T *p);
 extern void gpu_cache_flush(GPU_MEM_PTR_T *p);
 
 // QPU specific functions
+extern void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8);
 extern void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8, int unifs9, int unifs10, int unifs11, int unifs12);
 
 enum {
@@ -28,6 +29,7 @@ enum {
   QPU_MC_SETUP_UV,
   QPU_MC_FILTER_UV,
   QPU_MC_FILTER_UV_B,
+  QPU_MC_INTERRUPT_EXIT8,
   QPU_MC_END
   };
 extern unsigned int qpu_get_fn(int num);
