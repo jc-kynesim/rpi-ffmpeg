@@ -866,6 +866,13 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CB
 #undef CR
 
+#ifdef RPI_INTER_QPU
+static void flush_buffer(AVBufferRef *bref) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
+    gpu_cache_flush(p);
+}
+#endif
+
 void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
 {
     int x_end = x >= s->ps.sps->width  - ctb_size;
@@ -888,9 +895,17 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
                 ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
         }
     } else if (s->threads_type & FF_THREAD_FRAME && x_end) {
-        int newh = y + ctb_size - 4;
+        //int newh = y + ctb_size - 4;
         //int currh = s->ref->tf.progress->data[0];
         //if (((y + ctb_size)&63)==0)
+        if (!(  s->nal_unit_type == NAL_TRAIL_N ||
+            s->nal_unit_type == NAL_TSA_N   ||
+            s->nal_unit_type == NAL_STSA_N  ||
+            s->nal_unit_type == NAL_RADL_N  ||
+            s->nal_unit_type == NAL_RASL_N )) {
+            flush_buffer(s->frame->buf[1]);
+            flush_buffer(s->frame->buf[2]);
+        }
         ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
     }
 }
