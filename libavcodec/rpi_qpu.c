@@ -3,7 +3,7 @@
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 #define RPI_USE_VCSM
 // define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
-//#define RPI_TIME_TOTAL_QPU
+#define RPI_TIME_TOTAL_QPU
 // define RPI_TIME_TOTAL_VPU to print out how much time is spent in the VPI code
 //#define RPI_TIME_TOTAL_VPU
 // define RPI_ASYNC to run the VPU in a separate thread, need to make a separate call to check for completion
@@ -30,7 +30,7 @@
 #endif
 
 // On Pi2 there is no way to access the VPU L2 cache
-// GPU_MEM_FLG should be 4 for uncached memory.
+// GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
 // However, if using VCSM allocated buffers, need to use C at the moment because VCSM does not allocate uncached memory correctly
 // The QPU crashes if we mix L2 cached and L2 uncached accesses due to a HW bug.
 #define GPU_MEM_FLG 0xC
@@ -549,6 +549,54 @@ void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int un
   gpu_unlock();
 }
 
+// Run a program on 8 QPUs with the given code and uniform stream (given in GPU addresses)
+void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8)
+{
+  int i;
+#ifdef RPI_TIME_TOTAL_QPU
+  static int last_time=0;
+  static long long on_time=0;
+  static long long off_time=0;
+  int start_time;
+  int end_time;
+  static int count=0;
+#endif
+
+  gpu_lock();
+#ifdef RPI_TIME_TOTAL_QPU
+  start_time = Microseconds();
+  if (last_time==0)
+    last_time = start_time;
+  off_time += start_time-last_time;
+#endif
+  for(i=0;i<8;i++) {
+    gpu->mail[i*2 + 1] = code;
+  }
+  gpu->mail[0 ] = unifs1;
+  gpu->mail[2 ] = unifs2;
+  gpu->mail[4 ] = unifs3;
+  gpu->mail[6 ] = unifs4;
+  gpu->mail[8 ] = unifs5;
+  gpu->mail[10] = unifs6;
+	gpu->mail[12] = unifs7;
+	gpu->mail[14] = unifs8;
+	execute_qpu(
+		gpu->mb,
+		8 /* Number of QPUs */,
+		gpu->vc + offsetof(struct GPU, mail),
+		1 /* no flush */,  // Don't flush VPU L1 cache
+		5000 /* timeout ms */);
+#ifdef RPI_TIME_TOTAL_QPU
+  end_time = Microseconds();
+  last_time = end_time;
+  on_time += end_time - start_time;
+  count++;
+  if ((count&0x7f)==0)
+    printf("On=%dms, Off=%dms\n",(int)(on_time/1000),(int)(off_time/1000));
+#endif
+  gpu_unlock();
+}
+
 unsigned int qpu_get_fn(int num) {
     // Make sure that the gpu is initialized
     unsigned int *fn;
@@ -584,6 +632,9 @@ unsigned int qpu_get_fn(int num) {
       break;
     case QPU_MC_FILTER_UV_B:
       fn = mc_filter_uv_b;
+      break;
+    case QPU_MC_INTERRUPT_EXIT8:
+      fn = mc_interrupt_exit8;
       break;
     case QPU_MC_END:
       fn = mc_end;
