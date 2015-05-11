@@ -24,6 +24,9 @@
  * @file
  * utils.
  */
+ 
+// Move video buffers to GPU memory
+#define RPI_GPU_BUFFERS
 
 #include "config.h"
 #include "libavutil/atomic.h"
@@ -68,6 +71,10 @@
 
 #include "libavutil/ffversion.h"
 const char av_codec_ffversion[] = "FFmpeg version " FFMPEG_VERSION;
+
+#ifdef RPI_GPU_BUFFERS
+#include "rpi_qpu.h"
+#endif
 
 #if HAVE_PTHREADS || HAVE_W32THREADS || HAVE_OS2THREADS
 static int default_lockmgr_cb(void **arg, enum AVLockOp op)
@@ -507,6 +514,47 @@ int avcodec_fill_audio_frame(AVFrame *frame, int nb_channels,
     return ret;
 }
 
+#ifdef RPI_GPU_BUFFERS
+static void rpi_buffer_default_free(void *opaque, uint8_t *data)
+{
+    GPU_MEM_PTR_T *p = opaque;
+    gpu_free(p);
+    av_free(p);
+}
+
+static AVBufferRef *rpi_buffer_alloc(int size)
+{
+    AVBufferRef *ret = NULL;
+    uint8_t    *data = NULL;
+    GPU_MEM_PTR_T *p;
+    
+    static int total=0;
+    total+=size;
+    
+    p = av_malloc(sizeof *p);
+    if (!p)
+        return NULL;
+        
+    if (gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
+        return NULL;
+
+    data = p->arm;
+    //printf("Rpi alloc %d/%d ARM=%p VC=%x\n",size,total,p->arm,p->vc);
+    //memset(data, 64, size);
+    
+    if (!data)
+        return NULL;
+
+    ret = av_buffer_create(data, size, rpi_buffer_default_free, p, 0);
+    if (!ret) {
+        gpu_free(p);
+        av_freep(&p);
+    }
+
+    return ret;
+}
+#endif
+
 static int update_frame_pool(AVCodecContext *avctx, AVFrame *frame)
 {
     FramePool *pool = avctx->internal->pool;
@@ -551,10 +599,17 @@ static int update_frame_pool(AVCodecContext *avctx, AVFrame *frame)
             av_buffer_pool_uninit(&pool->pools[i]);
             pool->linesize[i] = picture.linesize[i];
             if (size[i]) {
+#ifdef RPI_GPU_BUFFERS
+                pool->pools[i] = av_buffer_pool_init(size[i] + 16 + STRIDE_ALIGN - 1,
+                                                     CONFIG_MEMORY_POISONING ?
+                                                        NULL :
+                                                        rpi_buffer_alloc);
+#else
                 pool->pools[i] = av_buffer_pool_init(size[i] + 16 + STRIDE_ALIGN - 1,
                                                      CONFIG_MEMORY_POISONING ?
                                                         NULL :
                                                         av_buffer_allocz);
+#endif                                                        
                 if (!pool->pools[i]) {
                     ret = AVERROR(ENOMEM);
                     goto fail;
