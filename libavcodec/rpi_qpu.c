@@ -33,7 +33,8 @@
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
 // However, if using VCSM allocated buffers, need to use C at the moment because VCSM does not allocate uncached memory correctly
 // The QPU crashes if we mix L2 cached and L2 uncached accesses due to a HW bug.
-#define GPU_MEM_FLG 0xC
+#define GPU_MEM_FLG 0x4
+// GPU_MEM_MAP is meaningless on the Pi2 and should be left at 0  (On Pi1 it allows ARM to access VPU L2 cache)
 #define GPU_MEM_MAP 0x0
 
 #define vcos_verify(x) ((x)>=0)
@@ -164,6 +165,8 @@ static int gpu_init(volatile struct GPU **gpu) {
 	ptr->mb = mb;
 	ptr->vc_handle = handle;
 	ptr->vc = vc;
+
+  printf("GPU allocated at 0x%x\n",vc);
 
   *gpu = ptr;
 
@@ -304,10 +307,13 @@ int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p) {
 
 static void gpu_term(void)
 {
-	int mb = gpu->mb;
-	unsigned handle = gpu->vc_handle;
+	int mb;
+	unsigned handle;
+
   if (gpu==NULL)
     return;
+  mb = gpu->mb;
+  handle = gpu->vc_handle;
 
 #ifdef RPI_ASYNC
   {
@@ -646,6 +652,95 @@ unsigned int qpu_get_fn(int num) {
     return gpu->vc + 4*(int)(fn-rpi_shader);
     //return code[num] + gpu->vc;
 }
+
+#if 0
+typedef unsigned int uint32_t;
+
+typedef struct mvs_s {
+    GPU_MEM_PTR_T unif_mvs_ptr;
+    uint32_t *unif_mvs; // Base of memory for motion vector commands
+
+    // _base pointers are to the start of the row
+    uint32_t *mvs_base[8];
+    // these pointers are to the next free space
+    uint32_t *u_mvs[8];
+
+} HEVCContext;
+
+#define RPI_CHROMA_COMMAND_WORDS 12
+
+static void rpi_inter_clear(HEVCContext *s)
+{
+    int i;
+    for(i=0;i<8;i++) {
+        s->u_mvs[i] = s->mvs_base[i];
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 0;
+        *s->u_mvs[i]++ = 128;  // w
+        *s->u_mvs[i]++ = 128;  // h
+        *s->u_mvs[i]++ = 128;  // stride u
+        *s->u_mvs[i]++ = 128;  // stride v
+        s->u_mvs[i] += 3;  // Padding words
+    }
+}
+
+static void rpi_execute_inter_qpu(HEVCContext *s)
+{
+    int k;
+    uint32_t *unif_vc = (uint32_t *)s->unif_mvs_ptr.vc;
+
+    for(k=0;k<8;k++) {
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+4] = qpu_get_fn(QPU_MC_SETUP); //  dummy location for V
+    }
+
+    s->u_mvs[8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
+
+    qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
+      (uint32_t)(unif_vc+(s->mvs_base[0 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[1 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[2 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[3 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[4 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[5 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[6 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+      (uint32_t)(unif_vc+(s->mvs_base[7 ] - (uint32_t*)s->unif_mvs_ptr.arm))
+      );
+}
+
+void rpi_test_qpu(void)
+{
+    HEVCContext mvs;
+    HEVCContext *s = &mvs;
+    int i;
+    int uv_commands_per_qpu = (1 + (256*64*2)/(4*4)) * RPI_CHROMA_COMMAND_WORDS;
+    uint32_t *p;
+    printf("Allocate memory\n");
+    gpu_malloc_uncached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr );
+    s->unif_mvs = (uint32_t *) s->unif_mvs_ptr.arm;
+
+    // Set up initial locations for uniform streams
+    p = s->unif_mvs;
+    for(i = 0; i < 8; i++) {
+        s->mvs_base[i] = p;
+        p += uv_commands_per_qpu;
+    }
+    // Now run a simple program that should just quit immediately after a single texture fetch
+    rpi_inter_clear(s);
+    for(i=0;i<4;i++) {
+      printf("Launch QPUs\n");
+      rpi_execute_inter_qpu(s);
+      printf("Done\n");
+    }
+    printf("Free memory\n");
+    gpu_free(&s->unif_mvs_ptr);
+    return;
+}
+#endif
 
 #if 0
 

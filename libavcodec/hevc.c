@@ -60,11 +60,11 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
 
-#define ENCODE_COEFFS(c0, c1, c2, c3) (((-c0) & 0xff) | ((-c1) & 0xff) << 8 | ((-c2) & 0xff) << 16 | ((-c3) & 0xff) << 24)
+#define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
 // TODO Chroma only needs 4 taps
 static uint32_t rpi_filter_coefs[8][2] = {
-        { ENCODE_COEFFS(  0,  0,  0, 128), ENCODE_COEFFS(   0,   0,  0,  0 ) },
+        { ENCODE_COEFFS(  0,  0,  0,  64), ENCODE_COEFFS(   0,   0,  0,  0 ) },
         { ENCODE_COEFFS(  0,  0, -2,  58), ENCODE_COEFFS(  10,  -2,  0,  0 ) },
         { ENCODE_COEFFS(  0,  0, -4,  54), ENCODE_COEFFS(  16,  -2,  0,  0 ) },
         { ENCODE_COEFFS(  0,  0, -6,  46), ENCODE_COEFFS(  28,  -4,  0,  0 ) },
@@ -2729,6 +2729,7 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
     for(k=0;k<8;k++) {
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+4] = qpu_get_fn(QPU_MC_SETUP); // Also need a dummy for V
     }
 
     s->u_mvs[8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
