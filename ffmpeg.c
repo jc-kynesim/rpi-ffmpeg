@@ -220,6 +220,8 @@ static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
 static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 {
     MMAL_COMPONENT_T* display; 
+    int w2 = (w+31)&~31;
+    int h2 = (h+15)&~15;
     MMAL_DISPLAYREGION_T region =
     {
         {MMAL_PARAMETER_DISPLAYREGION, sizeof(region)},
@@ -236,17 +238,17 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     
     MMAL_ES_FORMAT_T* format = display->input[0]->format;
     format->encoding = MMAL_ENCODING_I420;
-    format->es->video.width = w;
-    format->es->video.height = h;
+    format->es->video.width = w2;
+    format->es->video.height = h2;
     format->es->video.crop.x = 0;
     format->es->video.crop.y = 0;
-    format->es->video.crop.width = w;
-    format->es->video.crop.height = h;
+    format->es->video.crop.width = w2;
+    format->es->video.crop.height = h2;
     mmal_port_format_commit(display->input[0]);
     
     mmal_component_enable(display);
     
-    rpi_pool = display_alloc_pool(display->input[0], w, h);
+    rpi_pool = display_alloc_pool(display->input[0], w2, h2);
     
     mmal_port_enable(display->input[0],display_cb_input);
     mmal_port_enable(display->control,display_cb_input);
