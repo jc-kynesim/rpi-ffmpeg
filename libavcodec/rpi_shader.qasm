@@ -270,23 +270,23 @@ add t0s, ra_x2_base, r2
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-mov r2, rb21         ; mul24 r3, r0, ra0
-nop                  ; mul24.ifnz r3, ra0 << 8, r1 << 8
-sub r2, r2, r3       ; mul24      r3, ra1 << 1, r0 << 1
+mov r2, rb21         ; mul24 r2, r0, ra0
+nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
+nop                  ; mul24      r3, ra1 << 1, r0 << 1
 nop                  ; mul24.ifnz r3, ra1 << 9, r1 << 9
-sub r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
+add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
 nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
-sub r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
+add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
 nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-sub r2, r2, r3       ; mul24    r3, ra4 << 4, r0 << 4
+add r2, r2, r3       ; mul24    r3, ra4 << 4, r0 << 4
 nop                  ; mul24.ifnz r3, ra4 << 12, r1 << 12
-sub r2, r2, r3       ; mul24    r3, ra5 << 5, r0 << 5
+add r2, r2, r3       ; mul24    r3, ra5 << 5, r0 << 5
 nop                  ; mul24.ifnz r3, ra5 << 13, r1 << 13
-sub r2, r2, r3       ; mul24    r3, ra6 << 6, r0 << 6
+add r2, r2, r3       ; mul24    r3, ra6 << 6, r0 << 6
 nop                  ; mul24.ifnz r3, ra6 << 14, r1 << 14
-sub r2, r2, r3       ; mul24    r3, ra7 << 7, r0 << 7
+add r2, r2, r3       ; mul24    r3, ra7 << 7, r0 << 7
 nop                  ; mul24.ifnz r3, ra7 << 15, r1 << 15
-sub r0, r2, r3
+add r0, r2, r3
 
 mov r3, rb31
 
@@ -302,23 +302,23 @@ sub.setf -, r3, 8 ; mov r1, ra22
 # apply horizontal filter
 brr.anyn -, r:uvloop
 max ra14, ra15, 0       ; mul24 r0, r0, r1         # last bit of context scroll, including clamp to zero
-asr r0, r0, 15          ; mov r1, ra21
+asr r0, r0, 14          ; mov r1, ra21
 min.setf ra15, r0, rb22
 
 # apply vertical filter and write to VPM
 
-nop                     ; mul24 r0, ra14, rb14
-sub r1, r1, r0          ; mul24 r0, ra13, rb13
-sub r1, r1, r0          ; mul24 r0, ra12, rb12
-sub r1, r1, r0          ; mul24 r0, ra11, rb11
-sub r1, r1, r0          ; mul24 r0, ra10, rb10
-sub r1, r1, r0          ; mul24 r0, ra9, rb9
-sub r1, r1, r0          ; mul24 r0, ra8, rb8
-sub r1, r1, r0          ; mul24 r0, ra15, rb15
-sub.ifnn r1, r1, r0     ; mov -, vw_wait
+nop                     ; mul24 r1, ra14, rb14
+nop                     ; mul24 r0, ra13, rb13
+add r1, r1, r0          ; mul24 r0, ra12, rb12
+add r1, r1, r0          ; mul24 r0, ra11, rb11
+add r1, r1, r0          ; mul24 r0, ra10, rb10
+add r1, r1, r0          ; mul24 r0, ra9, rb9
+add r1, r1, r0          ; mul24 r0, ra8, rb8
+add r1, r1, r0          ; mul24 r0, ra15, rb15
+add.ifnn r1, r1, r0     ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
 brr.anyn -, r:uvloop
-asr r1, r1, 15
+asr r1, r1, 14
 min r1, r1, rb22
 max vpm, r1, 0
 
