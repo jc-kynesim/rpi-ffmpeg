@@ -18,6 +18,7 @@ extern void gpu_cache_flush(GPU_MEM_PTR_T *p);
 // QPU specific functions
 extern void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8);
 extern void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8, int unifs9, int unifs10, int unifs11, int unifs12);
+extern void rpi_test_qpu(void);
 
 enum {
   QPU_MC_SETUP,
