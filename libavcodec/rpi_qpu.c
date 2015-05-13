@@ -172,7 +172,7 @@ static int gpu_init(volatile struct GPU **gpu) {
 
   // Now copy over the QPU code into GPU memory
   {
-    int num_bytes = qpu_get_fn(QPU_MC_END) - qpu_get_fn(QPU_MC_SETUP);
+    int num_bytes = qpu_get_fn(QPU_MC_END) - qpu_get_fn(QPU_MC_SETUP_UV);
     assert(num_bytes<=QPU_CODE_SIZE*sizeof(unsigned int));
     memcpy((void*)ptr->qpu_code, rpi_shader, num_bytes);
   }
@@ -612,24 +612,24 @@ unsigned int qpu_get_fn(int num) {
       gpu_unlock();
     }
     switch(num) {
-    case QPU_MC_SETUP:
-      fn = mc_setup;
-      break;
-    case QPU_MC_FILTER:
-      fn = mc_filter;
-      break;
+    //case QPU_MC_SETUP:
+    //  fn = mc_setup;
+    //  break;
+    //case QPU_MC_FILTER:
+    //  fn = mc_filter;
+    //  break;
     case QPU_MC_EXIT:
       fn = mc_exit;
       break;
-    case QPU_MC_INTERRUPT_EXIT:
-      fn = mc_interrupt_exit;
-      break;
-    case QPU_MC_FILTER_B:
-      fn = mc_filter_b;
-      break;
-    case QPU_MC_FILTER_HONLY:
-      fn = mc_filter_honly;
-      break;
+    //case QPU_MC_INTERRUPT_EXIT:
+    //  fn = mc_interrupt_exit;
+    //  break;
+    //case QPU_MC_FILTER_B:
+    //  fn = mc_filter_b;
+    //  break;
+    //case QPU_MC_FILTER_HONLY:
+    //  fn = mc_filter_honly;
+    //  break;
     case QPU_MC_SETUP_UV:
       fn = mc_setup_uv;
       break;
