@@ -903,8 +903,10 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             s->nal_unit_type == NAL_STSA_N  ||
             s->nal_unit_type == NAL_RADL_N  ||
             s->nal_unit_type == NAL_RASL_N )) {
-            //flush_buffer(s->frame->buf[1]);
-            //flush_buffer(s->frame->buf[2]);
+#ifdef RPI_INTER_QPU
+            flush_buffer(s->frame->buf[1]);
+            flush_buffer(s->frame->buf[2]);
+#endif
             //memcpy(s->dummy.arm,s->frame->data[0],2048*64);
             //memcpy(s->dummy.arm,s->frame->data[1],1024*32);
             //memcpy(s->dummy.arm,s->frame->data[2],1024*32);
