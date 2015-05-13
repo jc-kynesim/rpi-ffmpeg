@@ -45,7 +45,7 @@
 
   #include "rpi_qpu.h"
   // Use QPU for inter prediction
-  // #define RPI_INTER_QPU
+  #define RPI_INTER_QPU
 
 #endif
 

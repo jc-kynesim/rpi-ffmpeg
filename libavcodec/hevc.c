@@ -57,8 +57,10 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 #ifdef RPI_INTER_QPU
 
 #define RPI_CHROMA_COMMAND_WORDS 12
+#define UV_COMMANDS_PER_QPU ((1 + (256*64*2)/(4*4)) * RPI_CHROMA_COMMAND_WORDS)
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
+
 
 #define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
@@ -2024,7 +2026,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
                 int x1_c = x0_c + (mv->x >> (2 + hshift));
                 int y1_c = y0_c + (mv->y >> (2 + hshift));
-                int chan = x0>>8; // Allocate commands for the first 256 luma pixels across to the first QPU.  This is optimised for images around 1920 width
+                //int chan = x0>>8; // Allocate commands for the first 256 luma pixels across to the first QPU.  This is optimised for images around 1920 width
+                int chan = x0>>8;
 
                 uint32_t *u = s->u_mvs[chan & 7];
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
@@ -2730,6 +2733,7 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+4] = qpu_get_fn(QPU_MC_SETUP); // Also need a dummy for V
+        assert(s->u_mvs[k] - s->mvs_base[k] < UV_COMMANDS_PER_QPU);
     }
 
     s->u_mvs[8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
@@ -3689,7 +3693,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     // Also add space for the startup command for each stream.
 
     {
-        int uv_commands_per_qpu = (1 + (256*64*2)/(4*4)) * RPI_CHROMA_COMMAND_WORDS;
+        int uv_commands_per_qpu = UV_COMMANDS_PER_QPU;
         uint32_t *p;
         gpu_malloc_uncached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr );
         s->unif_mvs = (uint32_t *) s->unif_mvs_ptr.arm; // TODO support this allocation in non EARLY_MALLOC

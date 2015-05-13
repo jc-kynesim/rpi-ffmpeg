@@ -21,7 +21,7 @@
 # rb19                                          next ra16
 #
 # ra20                                          1
-# ra21                                          64
+# ra21                                          32
 # ra22                                          256
 # ra23                                          8
 #
@@ -97,7 +97,7 @@ add rb24, r1, r0
 # load constants
 
 mov ra20, 1
-mov ra21, 64
+mov ra21, 32
 mov ra22, 256
 mov ra23, 8
 
@@ -270,7 +270,7 @@ add t0s, ra_x2_base, r2
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-mov r2, rb21         ; mul24 r2, r0, ra0
+nop                  ; mul24 r2, r0, ra0
 nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
 nop                  ; mul24      r3, ra1 << 1, r0 << 1
 nop                  ; mul24.ifnz r3, ra1 << 9, r1 << 9
@@ -301,9 +301,9 @@ sub.setf -, r3, 8 ; mov r1, ra22
 
 # apply horizontal filter
 brr.anyn -, r:uvloop
-max ra14, ra15, 0       ; mul24 r0, r0, r1         # last bit of context scroll, including clamp to zero
-asr r0, r0, 14          ; mov r1, ra21
-min.setf ra15, r0, rb22
+mov ra14, ra15          ; mul24 r0, r0, r1         # last bit of context scroll
+asr ra15, r0, 8         ; nop
+nop                     ; nop  # Delay slot 3 (TODO move more of the context scroll into here)
 
 # apply vertical filter and write to VPM
 
@@ -315,12 +315,14 @@ add r1, r1, r0          ; mul24 r0, ra10, rb10
 add r1, r1, r0          ; mul24 r0, ra9, rb9
 add r1, r1, r0          ; mul24 r0, ra8, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb15
-add.ifnn r1, r1, r0     ; mov -, vw_wait
+add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
-brr.anyn -, r:uvloop
 asr r1, r1, 14
-min r1, r1, rb22
-max vpm, r1, 0
+add r1, r1, ra21
+brr.anyn -, r:uvloop
+asr r1, r1, 6          # Delay 1
+min r1, r1, rb22       # Delay 2
+max vpm, r1, 0         # Delay 3
 
 # DMA out for U
 
@@ -1161,7 +1163,7 @@ add rb24, r1, r0
 # load constants
 
 mov ra20, 1
-mov ra21, 64
+mov ra21, 32
 mov ra22, 256
 mov ra23, 8
 
