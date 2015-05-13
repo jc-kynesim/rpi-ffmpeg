@@ -2070,6 +2070,44 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                     s->sh.luma_offset_l1[current_mv.ref_idx[1]]);
 
         if (s->ps.sps->chroma_format_idc) {
+#ifdef RPI_INTER_QPU
+            if (s->enable_rpi) {
+                int reflist = 1;
+                int hshift           = s->ps.sps->hshift[1];
+                int vshift           = s->ps.sps->vshift[1];
+                const Mv *mv         = &current_mv.mv[reflist];
+                intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
+                intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
+                intptr_t _mx         = mx << (1 - hshift);
+                intptr_t _my         = my << (1 - vshift); // Fractional part of motion vector
+
+                int x1_c = x0_c + (mv->x >> (2 + hshift));
+                int y1_c = y0_c + (mv->y >> (2 + hshift));
+                //int chan = x0>>8; // Allocate commands for the first 256 luma pixels across to the first QPU.  This is optimised for images around 1920 width
+                int chan = x0>>8;
+
+                uint32_t *u = s->u_mvs[chan & 7];
+                for(int start_y=0;start_y < nPbH_c;start_y+=16) {
+                  for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 3 + start_x;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 3 + start_y;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
+                      *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
+                      // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
+                      *u++ = rpi_filter_coefs[_mx][0];
+                      *u++ = rpi_filter_coefs[_mx][1];
+                      *u++ = rpi_filter_coefs[_my][0];
+                      *u++ = rpi_filter_coefs[_my][1];
+                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                    }
+                }
+                s->u_mvs[chan & 7] = u;
+                return;
+            }
+#endif
             RPI_REDIRECT(chroma_mc_uni)(s, dst1, s->frame->linesize[1], ref1->frame->data[1], ref1->frame->linesize[1],
                           1, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
                           s->sh.chroma_weight_l1[current_mv.ref_idx[1]][0], s->sh.chroma_offset_l1[current_mv.ref_idx[1]][0]);
