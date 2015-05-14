@@ -1,7 +1,5 @@
 #ifdef RPI
-// define RPI_USE_VCSM to use the vcsm device for shared memory
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
-#define RPI_USE_VCSM
 // define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
 #define RPI_TIME_TOTAL_QPU
 // define RPI_TIME_TOTAL_VPU to print out how much time is spent in the VPI code
@@ -25,9 +23,7 @@
 #include "rpi_shader.h"
 #include "rpi_hevc_transform.h"
 
-#ifdef RPI_USE_VCSM
 #include "rpi_user_vcsm.h"
-#endif
 
 // On Pi2 there is no way to access the VPU L2 cache
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
@@ -96,7 +92,6 @@ struct GPU
   unsigned int vpu_code[VPU_CODE_SIZE];
   short transMatrix2even[16*16*2];
   int open_count; // Number of allocated video buffers
-  unsigned int vc_handle; // Handle of this memory
   int      mb; // Mailbox handle
   int      vc; // Address in GPU memory
   int mail[12]; // These are used to pass pairs of code/unifs to the QPUs
@@ -105,6 +100,7 @@ struct GPU
 // Stop more than one thread trying to allocate memory or use the processing resources at once
 static pthread_mutex_t gpu_mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile struct GPU* gpu = NULL;
+static GPU_MEM_PTR_T gpu_mem_ptr;
 
 #if defined(RPI_TIME_TOTAL_QPU) || defined(RPI_TIME_TOTAL_VPU)
 static unsigned int Microseconds(void) {
@@ -132,39 +128,27 @@ static volatile int vpu_async_tail=0; // Contains the number of posted jobs
 static volatile int vpu_async_head=0;
 #endif
 
+static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb);
+static void gpu_free_internal(GPU_MEM_PTR_T *p);
+
 // Connect to QPU, returns 0 on success.
 static int gpu_init(volatile struct GPU **gpu) {
   int mb = mbox_open();
   int vc;
-  int handle;
   volatile struct GPU* ptr;
 	if (mb < 0)
 		return -1;
 
 	if (qpu_enable(mb, 1)) return -2;
 
-#ifdef RPI_USE_VCSM
   vcsm_init();
-#endif
+  gpu_malloc_uncached_internal(sizeof(struct GPU), &gpu_mem_ptr, mb);
+  ptr = (volatile struct GPU*)gpu_mem_ptr.arm;
+  memset(ptr, 0, sizeof *ptr);
+  vc = gpu_mem_ptr.vc;
 
-  handle = mem_alloc(mb, sizeof(struct GPU), 4096, GPU_MEM_FLG);
-  if (!handle)
-  {
-    qpu_enable(mb, 0);
-    return -3;
-  }
-	vc = mem_lock(mb, handle);
-	ptr = mapmem_shared((vc+GPU_MEM_MAP)&~0xc0000000, sizeof(struct GPU));
-	if (ptr == NULL)
-	{	mem_free(mb, handle);
-		mem_unlock(mb, handle);
-		qpu_enable(mb, 0);
-		return -4;
-	}
-
-	ptr->mb = mb;
-	ptr->vc_handle = handle;
-	ptr->vc = vc;
+  ptr->mb = mb;
+  ptr->vc = vc;
 
   printf("GPU allocated at 0x%x\n",vc);
 
@@ -226,94 +210,74 @@ static void gpu_unlock(void) {
   pthread_mutex_unlock(&gpu_mutex);
 }
 
+static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb) {
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
+  assert(p->vcsm_handle);
+  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
+  assert(p->vc_handle);
+  p->arm = vcsm_lock(p->vcsm_handle);
+  assert(p->arm);
+  p->vc = mem_lock(mb, p->vc_handle);
+  assert(p->vc);
+  return 0;
+}
+
 // Allocate memory on GPU
 // Fills in structure <p> containing ARM pointer, videocore handle, videocore memory address, numbytes
 // Returns 0 on success.
 // This allocates memory that will not be cached in ARM's data cache.
 // Therefore safe to use without data cache flushing.
-int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p) {
+int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
+{
+  int r;
   gpu_lock();
-  p->vc_handle = mem_alloc(gpu->mb, numbytes, 4096, GPU_MEM_FLG);
-  p->vcsm_handle = 0;
-  if (!p->vc_handle)
-  {
-    qpu_enable(gpu->mb, 0);
-    return -3;
-  }
-  p->vc = mem_lock(gpu->mb, p->vc_handle);
-  p->arm = mapmem_shared((p->vc+GPU_MEM_MAP)&~0xc0000000,numbytes);
-  p->numbytes = numbytes;
-  if (p->arm == NULL)
-  {
-    mem_free(gpu->mb, p->vc_handle);
-    mem_unlock(gpu->mb, p->vc_handle);
-    gpu_unlock();
-    qpu_enable(gpu->mb, 0);
-    return -4;
-  }
+  r = gpu_malloc_uncached_internal(numbytes, p, gpu->mb);
   gpu->open_count++;
   gpu_unlock();
-  return 0;
+  return r;
 }
 
 void gpu_cache_flush(GPU_MEM_PTR_T *p)
 {
-  // This only works when using RPI_USE_VCSM
   void *tmp = vcsm_lock(p->vcsm_handle);
   vcsm_unlock_ptr(tmp);
+}
+
+static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
+  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
+  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
+  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
+  assert(p->vcsm_handle);
+  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
+  assert(p->vc_handle);
+  p->arm = vcsm_lock(p->vcsm_handle);
+  assert(p->arm);
+  p->vc = mem_lock(gpu->mb, p->vc_handle);
+  assert(p->vc);
+  return 0;
 }
 
 // This allocates data that will be
 //    Cached in ARM L2
 //    Uncached in VPU L2
-int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p) {
+int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
+{
+  int r;
   gpu_lock();
-#ifdef RPI_USE_VCSM
-  {
-      p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" ); // f....... locks up for VP9 - retest this?
-      //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" ); // 3b...... works
-      //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" ); //fb...... locks up
-      //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" ); // 3b works (but corrupted due to caching)
-      p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
-      p->arm = vcsm_lock(p->vcsm_handle);
-      p->vc = mem_lock(gpu->mb, p->vc_handle);
-  }
-#else
-  p->vc_handle = mem_alloc(gpu->mb, numbytes, 4096, GPU_MEM_FLG);
-  p->vcsm_handle = 0;
-  if (!p->handle)
-  {
-    qpu_enable(gpu->mb, 0);
-    return -3;
-  }
-  p->vc = mem_lock(gpu->mb, p->vc_handle);
-  printf("This mapmem_private does not seem to work\n");
-  exit(-1);
-  p->arm = mapmem_private((p->vc+GPU_MEM_MAP)&~0xc0000000,numbytes);
-  p->numbytes = numbytes;
-  if (p->arm == NULL)
-  {
-    mem_free(gpu->mb, p->handle);
-    mem_unlock(gpu->mb, p->handle);
-    gpu_unlock();
-    qpu_enable(gpu->mb, 0);
-    return -4;
-  }
-#endif
+  r = gpu_malloc_cached_internal(numbytes, p);
   gpu->open_count++;
   gpu_unlock();
-  return 0;
+  return r;
 }
 
 static void gpu_term(void)
 {
-	int mb;
-	unsigned handle;
+  int mb;
 
   if (gpu==NULL)
     return;
   mb = gpu->mb;
-  handle = gpu->vc_handle;
 
 #ifdef RPI_ASYNC
   {
@@ -323,37 +287,26 @@ static void gpu_term(void)
   }
 #endif
 
+  qpu_enable(mb, 0);
+  gpu_free_internal(&gpu_mem_ptr);
 
-	unmapmem((void*)gpu, sizeof(struct GPU));
-	mem_unlock(mb, handle);
-	mem_free(mb, handle);
-	qpu_enable(mb, 0);
-#ifdef RPI_USE_VCSM
   vcsm_exit();
-#endif
-	mbox_close(mb);
+
+  mbox_close(mb);
   gpu = NULL;
 }
 
-void gpu_free(GPU_MEM_PTR_T *p) {
+void gpu_free_internal(GPU_MEM_PTR_T *p) {
   int mb = gpu->mb;
-	unsigned handle = p->vc_handle;
+  mem_unlock(mb,p->vc_handle);
+  vcsm_unlock_ptr(p->arm);
+  vcsm_free(p->vcsm_handle);
+}
+
+void gpu_free(GPU_MEM_PTR_T *p) {
   gpu_lock();
-#ifdef RPI_USE_VCSM
-  if (p->vcsm_handle) {
-      mem_unlock(mb,p->vc_handle);
-      vcsm_unlock_ptr(p->arm);
-      vcsm_free(p->vcsm_handle);
-  } else {
-	unmapmem((void*)p->arm, sizeof(struct GPU));
-      mem_unlock(mb, handle);
-      mem_free(mb, handle);
-  }
-#else
-	unmapmem((void*)p->arm, sizeof(struct GPU));
-	mem_unlock(mb, handle);
-	mem_free(mb, handle);
-#endif
+
+  gpu_free_internal(p);
 
   gpu->open_count--;
   if (gpu->open_count==0) {
@@ -386,20 +339,21 @@ unsigned int vpu_get_constants(void) {
 
 static void *vpu_start(void *arg) {
   while(1) {
+    int *p;
     pthread_mutex_lock(&post_mutex);
     while( vpu_async_tail - vpu_async_head <= 0)
     {
       //printf("Checking number %d %d\n",vpu_async_head,vpu_async_tail);
       pthread_cond_wait(&post_cond_tail, &post_mutex);
     }
-    int *p = vpu_cmds[vpu_async_head%MAXCMDS];
+    p = vpu_cmds[vpu_async_head%MAXCMDS];
     pthread_mutex_unlock(&post_mutex);
 
     if (p[6] == -1) {
       break; // Last job
     }
     if (p[7]) {
-        GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
+        //GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
         //gpu_cache_flush(buf);
     }
     vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
