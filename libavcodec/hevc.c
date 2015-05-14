@@ -1468,7 +1468,7 @@ static int hls_pcm_sample(HEVCContext *s, int x0, int y0, int log2_cb_size)
  */
 
 #ifdef RPI_INTER
-#define RPI_REDIRECT(fn) rpi_ ## fn
+#define RPI_REDIRECT(fn) (s->enable_rpi ? rpi_ ## fn : fn)
 static void rpi_luma_mc_uni(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
                         AVFrame *ref, const Mv *mv, int x_off, int y_off,
                         int block_w, int block_h, int luma_weight, int luma_offset)
