@@ -3801,6 +3801,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
             p += uv_commands_per_qpu;
         }
         s->mc_filter_uv = qpu_get_fn(QPU_MC_FILTER_UV);
+        s->mc_filter_uv_b0 = qpu_get_fn(QPU_MC_FILTER_UV_B0);
         s->mc_filter_uv_b = qpu_get_fn(QPU_MC_FILTER_UV_B);
 
     }

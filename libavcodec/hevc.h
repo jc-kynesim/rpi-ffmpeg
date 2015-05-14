@@ -917,6 +917,7 @@ typedef struct HEVCContext {
     uint32_t *u_mvs[8];
     // Function pointers
     uint32_t mc_filter_uv;
+    uint32_t mc_filter_uv_b0;
     uint32_t mc_filter_uv_b;
 #endif
 
