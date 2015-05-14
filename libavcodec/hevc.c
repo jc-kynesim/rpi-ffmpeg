@@ -2147,7 +2147,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 uint32_t *u = s->u_mvs[chan & 7];
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b0;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 3 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 3 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
