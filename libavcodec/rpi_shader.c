@@ -220,7 +220,7 @@ unsigned int rpi_shader[] = {
 /* [0x00000600] */ 0x149dc1c0, 0xd00214e7, // and rb_x_base_next, r0, ~3
 /* [0x00000608] */ 0x159e7240, 0x10020727, // mov ra_y_next, r1
 /* [0x00000610] */ 0x0c9d3e80, 0x100206a7, // add ra_x2_base_next, rb_x_base_next, r2
-/* [0x00000618] */ 0x159dcfc0, 0x10021c67, // mov vw_setup, rb28
+/* [0x00000618] */ 0x159d5fc0, 0x10021c67, // mov vw_setup, rb21
 /* [0x00000620] */ 0x00000010, 0xe00208a7, // mov r2, 16
 /* [0x00000628] */ 0x15827d80, 0x10020827, // mov r0, unif
 /* [0x00000630] */ 0x0e9e7080, 0x10020867, // shr r1, r0, r2
@@ -346,7 +346,7 @@ unsigned int rpi_shader[] = {
 /* [0x000009e0] */ 0x0c9e7040, 0x10020827, // add r0, r0, r1
 /* [0x000009e8] */ 0x119e7080, 0x10020827, // shl r0, r0, r2
 /* [0x000009f0] */ 0x0c9db1c0, 0x100216a7, // add rb26, r0, rb27
-/* [0x000009f8] */ 0x0c9dc7c0, 0x10020c67, // add vr_setup, r3, rb28
+/* [0x000009f8] */ 0x0c9d57c0, 0x10020c67, // add vr_setup, r3, rb21
 /* [0x00000a00] */ 0x0d9c8e40, 0xd00229e7, // sub.setf -,8,r1
 /* [0x00000a08] */ 0x15827d80, 0x10020827, // mov r0, unif
 /* [0x00000a10] */ 0x4f5971c6, 0x100240e0, // asr ra3, r0, rb23;      mul24 r0, r0, ra22

@@ -26,7 +26,7 @@
 # ra23                                          8
 #
 # rb20                                          0xffffff00
-# rb21                                          vpm_setup for writing 16bit results into VPM
+# rb21                                          vpm_setup for reading/writing 16bit results into VPM
 # rb22                                          255
 # rb23                                          24
 #
@@ -370,8 +370,8 @@ and rb_x_base_next, r0, ~3
 mov ra_y_next, r1
 add ra_x2_base_next, rb_x_base_next, r2
 
-# set up VPM write
-mov vw_setup, rb28
+# set up VPM write, we need to save 16bit precision
+mov vw_setup, rb21
 
 # get width,height of block
 mov r2, 16
@@ -554,8 +554,8 @@ add r0, r0, r1 # Combine width and height of destination area
 shl r0, r0, r2 # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27
 
-# In a B frame, so also set up VPM read
-add vr_setup, r3, rb28
+# In a B frame, so also set up VPM read (reading back 16bit precision)
+add vr_setup, r3, rb21
 
 sub.setf -,8,r1 # 8-r1, so if <0 (negative) we need to use the full code
 
