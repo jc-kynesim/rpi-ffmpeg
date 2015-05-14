@@ -65,15 +65,15 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 #define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
 // TODO Chroma only needs 4 taps
-static uint32_t rpi_filter_coefs[8][2] = {
-        { ENCODE_COEFFS(  0,  0,  0,  64), ENCODE_COEFFS(   0,   0,  0,  0 ) },
-        { ENCODE_COEFFS(  0,  0, -2,  58), ENCODE_COEFFS(  10,  -2,  0,  0 ) },
-        { ENCODE_COEFFS(  0,  0, -4,  54), ENCODE_COEFFS(  16,  -2,  0,  0 ) },
-        { ENCODE_COEFFS(  0,  0, -6,  46), ENCODE_COEFFS(  28,  -4,  0,  0 ) },
-        { ENCODE_COEFFS(  0,  0, -4,  36), ENCODE_COEFFS(  36,  -4,  0,  0 ) },
-        { ENCODE_COEFFS(  0,  0, -4,  28), ENCODE_COEFFS(  46,  -6,  0,  0 ) },
-        { ENCODE_COEFFS(  0,  0, -2,  16), ENCODE_COEFFS(  54,  -4,  0,  0 ) },
-        { ENCODE_COEFFS(  0,  0, -2,  10), ENCODE_COEFFS(  58,  -2,  0,  0 ) }
+static uint32_t rpi_filter_coefs[8][1] = {
+        { ENCODE_COEFFS(   0,  64,   0,   0) },
+        { ENCODE_COEFFS(  -2,  58,  10,  -2) },
+        { ENCODE_COEFFS(  -4,  54,  16,  -2) },
+        { ENCODE_COEFFS(  -6,  46,  28,  -4) },
+        { ENCODE_COEFFS(  -4,  36,  36,  -4) },
+        { ENCODE_COEFFS(  -4,  28,  46,  -6) },
+        { ENCODE_COEFFS(  -2,  16,  54,  -4) },
+        { ENCODE_COEFFS(  -2,  10,  58,  -2) }
 };
 
 static uint32_t get_vc_address(AVBufferRef *bref) {
@@ -2027,16 +2027,16 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 3 + start_x;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 3 + start_y;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
                       *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
                       // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
                       *u++ = rpi_filter_coefs[_mx][0];
-                      *u++ = rpi_filter_coefs[_mx][1];
+                      u++;
                       *u++ = rpi_filter_coefs[_my][0];
-                      *u++ = rpi_filter_coefs[_my][1];
+                      u++;
                       *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
                       *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
@@ -2084,16 +2084,16 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 3 + start_x;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 3 + start_y;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
                       *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
                       // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
                       *u++ = rpi_filter_coefs[_mx][0];
-                      *u++ = rpi_filter_coefs[_mx][1];
+                      u++;
                       *u++ = rpi_filter_coefs[_my][0];
-                      *u++ = rpi_filter_coefs[_my][1];
+                      u++;
                       *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
                       *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
@@ -2148,29 +2148,29 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b0;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 3 + start_x;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 3 + start_y;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
                       *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
-                      *u++ = rpi_filter_coefs[_mx][1];
+                      u++;
                       *u++ = rpi_filter_coefs[_my][0];
-                      *u++ = rpi_filter_coefs[_my][1];
+                      u++;
                       *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]); // TODO this will become unused once we have a dedicated pass0 filter
                       *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
 
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = x2_c - 3 + start_x;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = y2_c - 3 + start_y;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = x2_c - 1 + start_x;
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = y2_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
                       *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
                       // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
                       *u++ = rpi_filter_coefs[_mx2][0];
-                      *u++ = rpi_filter_coefs[_mx2][1];
+                      u++;
                       *u++ = rpi_filter_coefs[_my2][0];
-                      *u++ = rpi_filter_coefs[_my2][1];
+                      u++;
                       *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
                       *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
