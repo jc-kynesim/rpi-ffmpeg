@@ -51,6 +51,14 @@
 
 // #define DISABLE_MC
 
+#ifndef av_mod_uintp2
+static av_always_inline av_const unsigned av_mod_uintp2_c(unsigned a, unsigned p)
+{
+    return a & ((1 << p) - 1);
+}
+#   define av_mod_uintp2   av_mod_uintp2_c
+#endif
+
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
 
