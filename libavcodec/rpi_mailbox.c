@@ -39,7 +39,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define MAJOR_NUM 100
 #define IOCTL_MBOX_PROPERTY _IOWR(MAJOR_NUM, 0, char *)
-#define DEVICE_FILE_NAME "/dev/char_dev"
+#define DEVICE_FILE_NAME "/dev/vcio"
 
 #include "rpi_mailbox.h"
 
