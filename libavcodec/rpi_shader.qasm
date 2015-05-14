@@ -428,22 +428,14 @@ asr vpm, r1, 6         # Delay 1 shifts down by shift2=6, but results are still 
 nop                    # Delay 2
 nop                    # Delay 3
 
+# in pass0 we don't really need to save any results, but need to discard the uniforms
 # DMA out for U
 
-mov vw_setup, rb26 # VDW setup 0
-mov vw_setup, rb29 # Stride
-mov vw_addr, unif # start the VDW    # TODO in pass0 we don't need to save any results
-
-# DMA out for V
-# We need to wait for the U to complete first, but have nothing useful to compute while we wait.
-# Could potentially push this write into the start of the next pipeline stage.
-mov r0, 16
-mov -, vw_wait
-
 bra -, ra31
-add vw_setup, rb26, r0 # VDW setup 0
-mov vw_setup, rb29 # Stride
-mov vw_addr, unif # start the VDW
+mov r0, unif           # Delay 1
+mov r0, unif           # Delay 2
+nop                    # Delay 3
+
 
 ################################################################################
 
