@@ -39,13 +39,13 @@
 # rb30                                          frame height-1
 # rb31                                          used as temp to count loop iterations
 #
-# ra24...ra30                                   15, 14, 13, 12, 11, 10, 9
 # ra24                                          clipped(row start address+8+elem_num)&~3
 # ra25                                          per-channel shifts 2
 # ra26                                          next ra24
 # ra27                                          next ra25
 # ra28                                          next y
 # ra29                                          y for next texture access
+# ra30                                          64
 #
 # ra31                                          next kernel address
 
@@ -102,6 +102,7 @@ mov ra20, 1
 mov ra21, 32
 mov ra22, 256
 mov ra23, 8
+mov ra30, 64
 
 mov rb20, 0xffffff00
 mov rb22, 255
@@ -472,7 +473,7 @@ sub.setf -, r3, 8 ; mov r1, ra22
 # apply horizontal filter
 brr.anyn -, r:uvloop_b0
 mov ra14, ra15          ; mul24 r0, r0, r1         # last bit of context scroll
-asr ra15, r0, 8         ; nop
+asr ra15, r0, 8         ; nop  # TODO isn't ra15 already in 24bit precision, may not need the sign extension here?
 nop                     ; nop  # Delay slot 3 (TODO move more of the context scroll into here)
 
 # apply vertical filter and write to VPM
@@ -487,18 +488,18 @@ add r1, r1, r0          ; mul24 r0, ra8, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb15
 add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
-asr r1, r1, 14
-add r1, r1, ra21
-brr.anyn -, r:uvloop
-asr r1, r1, 6          # Delay 1
-min r1, r1, rb22       # Delay 2
-max vpm, r1, 0         # Delay 3
+#asr r1, r1, 14
+#add r1, r1, ra21
+brr.anyn -, r:uvloop_b0
+asr vpm, r1, 14        # Delay 1 shifts down by shift2=6, but results are still in 16bit precision TODO may be able to avoid the mul24 and use more delay slots
+nop                    # Delay 2
+nop                    # Delay 3
 
 # DMA out for U
 
 mov vw_setup, rb26 # VDW setup 0
 mov vw_setup, rb29 # Stride
-mov vw_addr, unif # start the VDW
+mov vw_addr, unif # start the VDW    # TODO in pass0 we don't need to save any results
 
 # DMA out for V
 # We need to wait for the U to complete first, but have nothing useful to compute while we wait.
@@ -639,12 +640,11 @@ mov ra12, ra13
 mov ra13, ra14
 
 sub.setf -, r3, 8 ; mov r1, ra22
-
 # apply horizontal filter
 brr.anyn -, r:uvloop_b
 mov ra14, ra15          ; mul24 r0, r0, r1         # last bit of context scroll, including clamp to zero
 asr ra15, r0, 8         ; nop
-nop                     ; nop
+nop                     ; nop    # TODO improve use of delay slots
 
 # apply vertical filter and write to VPM
 
@@ -658,15 +658,13 @@ add r1, r1, r0          ; mul24 r0, ra8, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb15
 add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
-asr r1, r1, 14
-add r1, r1, ra21
-asr r1, r1, 6
-min r1, r1, rb22
-add r0, vpm, 1          # Blend in previous VPM contents at this location
+asr r1, r1, 14          # shift2=6
+add r1, r1, vpm         # Blend in previous VPM contents at this location
+add r1, r1, ra30
 brr.anyn -, r:uvloop_b
-max r1, r1, 0
-add r1, r1, r0
-shr vpm, r1, 1
+asr r1, r1, 7           # Delay 1
+min r1, r1, rb22        # Delay 2
+max vpm, r1, 0          # Delay 3
 
 
 # DMA out for U
