@@ -242,8 +242,8 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     format->es->video.height = h2;
     format->es->video.crop.x = 0;
     format->es->video.crop.y = 0;
-    format->es->video.crop.width = w2;
-    format->es->video.crop.height = h2;
+    format->es->video.crop.width = w;
+    format->es->video.crop.height = h;
     mmal_port_format_commit(display->input[0]);
     
     mmal_component_enable(display);
@@ -262,6 +262,8 @@ static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
 {
     int w = fr->width;
     int h = fr->height;
+    int w2 = (w+31)&~31;
+    int h2 = (h+15)&~15;
     if (!display || !rpi_pool)
         return;
     MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
@@ -271,18 +273,18 @@ static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
     }
     assert(buf);
     buf->cmd = 0;
-    buf->length = (w * h * 3)/2;
+    buf->length = (w2 * h2 * 3)/2;
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
 #ifdef RPI_ZERO_COPY
     buf->data = get_vc_handle(fr->buf[0]);
-    buf->alloc_size = (w*h*3)/2;
+    buf->alloc_size = (w2*h2*3)/2;
 #else
-    mmal_buffer_header_mem_lock(buf);
-    memcpy(buf->data, fr->data[0], w * h);
-    memcpy(buf->data+w*h, fr->data[1], w * h / 4);
-    memcpy(buf->data+w*h*5/4, fr->data[2], w * h / 4);
-    mmal_buffer_header_mem_unlock(buf);
+    //mmal_buffer_header_mem_lock(buf);
+    memcpy(buf->data, fr->data[0], w2 * h);
+    memcpy(buf->data+w2*h2, fr->data[1], w2 * h / 4);
+    memcpy(buf->data+w2*h2*5/4, fr->data[2], w2 * h / 4);
+    //mmal_buffer_header_mem_unlock(buf);
 #endif
     
     mmal_port_send_buffer(display->input[0], buf);  // I assume this will automatically get released
