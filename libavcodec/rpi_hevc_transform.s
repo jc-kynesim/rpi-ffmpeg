@@ -121,7 +121,7 @@ block_loop:
   bl col_trans_16
   vadd HY(0++,0)+r0,HY(0++,0)+r0,r5 REP 16   # Now add on rounding, shift down by 7, and saturate
   #vsasls HY(0++,0)+r0,HY(0++,0)+r0,4 REP 16 # 4+12=16 so this ends up with the output saturated and in the top half of the word.
-  vasl HY(0++,0)+r0,HY(0++,0)+r0,4 REP 16    # This should be saturating, but the instruction above does not assemble?
+  vasl HY(0++,0)+r0,HY(0++,0)+r0,4 REP 16    # This should be saturating, but the instruction above does not assemble?  (Probably because it ends with ls which is interpreted as a condition flag)
 
   # Save results - note there has been a transposition during the processing so we save columns
   vsth VX(0,32++)+r0, (r1 += r3) REP 16
