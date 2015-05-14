@@ -865,12 +865,12 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CB
 #undef CR
 
+#ifdef RPI_INTER_QPU
 static void flush_buffer(AVBufferRef *bref) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
     gpu_cache_flush(p);
 }
 
-#ifdef RPI_INTER_QPU
 static void ff_hevc_flush_chroma(HEVCContext *s)
 {
     if (s->enable_rpi && !(  s->nal_unit_type == NAL_TRAIL_N ||
