@@ -636,6 +636,9 @@ unsigned int qpu_get_fn(int num) {
     case QPU_MC_FILTER_UV:
       fn = mc_filter_uv;
       break;
+    case QPU_MC_FILTER_UV_B0:
+      fn = mc_filter_uv_b0;
+      break;
     case QPU_MC_FILTER_UV_B:
       fn = mc_filter_uv_b;
       break;
