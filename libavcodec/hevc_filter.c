@@ -871,6 +871,21 @@ static void flush_buffer(AVBufferRef *bref) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
     gpu_cache_flush(p);
 }
+
+static void ff_hevc_flush_chroma(HEVCContext *s)
+{
+    if (s->enable_rpi && !(  s->nal_unit_type == NAL_TRAIL_N ||
+            s->nal_unit_type == NAL_TSA_N   ||
+            s->nal_unit_type == NAL_STSA_N  ||
+            s->nal_unit_type == NAL_RADL_N  ||
+            s->nal_unit_type == NAL_RASL_N )) {
+        flush_buffer(s->frame->buf[1]);
+        flush_buffer(s->frame->buf[2]);
+        //memcpy(s->dummy.arm,s->frame->data[0],2048*64);
+        //memcpy(s->dummy.arm,s->frame->data[1],1024*32);
+        //memcpy(s->dummy.arm,s->frame->data[2],1024*32);
+    }
+}
 #endif
 
 void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
@@ -886,31 +901,29 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x - ctb_size, y);
         if (y && x_end) {
             sao_filter_CTB(s, x, y - ctb_size);
-            if (s->threads_type & FF_THREAD_FRAME )
+            if (s->threads_type & FF_THREAD_FRAME ) {
+#ifdef RPI_INTER_QPU
+                ff_hevc_flush_chroma(s);
+#endif
                 ff_thread_report_progress(&s->ref->tf, y, 0);
+            }
         }
         if (x_end && y_end) {
             sao_filter_CTB(s, x , y);
-            if (s->threads_type & FF_THREAD_FRAME )
+            if (s->threads_type & FF_THREAD_FRAME ) {
+#ifdef RPI_INTER_QPU
+                ff_hevc_flush_chroma(s);
+#endif
                 ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
+            }
         }
     } else if (s->threads_type & FF_THREAD_FRAME && x_end) {
         //int newh = y + ctb_size - 4;
         //int currh = s->ref->tf.progress->data[0];
         //if (((y + ctb_size)&63)==0)
-        if (!(  s->nal_unit_type == NAL_TRAIL_N ||
-            s->nal_unit_type == NAL_TSA_N   ||
-            s->nal_unit_type == NAL_STSA_N  ||
-            s->nal_unit_type == NAL_RADL_N  ||
-            s->nal_unit_type == NAL_RASL_N )) {
 #ifdef RPI_INTER_QPU
-            flush_buffer(s->frame->buf[1]);
-            flush_buffer(s->frame->buf[2]);
+        ff_hevc_flush_chroma(s);
 #endif
-            //memcpy(s->dummy.arm,s->frame->data[0],2048*64);
-            //memcpy(s->dummy.arm,s->frame->data[1],1024*32);
-            //memcpy(s->dummy.arm,s->frame->data[2],1024*32);
-        }
         ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
     }
 }
