@@ -221,8 +221,6 @@ add r0, r0, r1 # Combine width and height of destination area
 shl r0, r0, r2 # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27
 
-sub.setf -,8,r1 # 8-r1, so if <0 (negative) we need to use the full code
-
 # get filter coefficients
 
 mov r0, unif
@@ -410,20 +408,12 @@ add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
 nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
 add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
 nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-add r0, r2, r3
-
-mov r3, rb31
-
-mov ra12, ra13
-mov ra13, ra14
-
-sub.setf -, r3, 4 ; mov r1, ra22
-
-# apply horizontal filter
+add r0, r2, r3       ; mov r3, rb31
+sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b0
-mov ra14, ra15          ; mul24 r0, r0, r1         # last bit of context scroll
-asr ra15, r0, 8         ; nop  # TODO isn't ra15 already in 24bit precision, may not need the sign extension here?
-nop                     ; nop  # Delay slot 3 (TODO move more of the context scroll into here)
+mov ra13, ra14       # Delay slot 1
+mov ra14, ra15       # Delay slot 2
+mov ra15, r0         # Delay slot 3
 
 # apply vertical filter and write to VPM
 
@@ -432,9 +422,9 @@ nop                     ; mul24 r0, ra13, rb9
 add r1, r1, r0          ; mul24 r0, ra12, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb11
 add r1, r1, r0          ; mov -, vw_wait
-sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
+sub.setf -, r3, rb18
 brr.anyn -, r:uvloop_b0
-asr vpm, r1, 14        # Delay 1 shifts down by shift2=6, but results are still in 16bit precision TODO may be able to avoid the mul24 and use more delay slots
+asr vpm, r1, 6         # Delay 1 shifts down by shift2=6, but results are still in 16bit precision
 nop                    # Delay 2
 nop                    # Delay 3
 
@@ -554,19 +544,12 @@ add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
 nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
 add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
 nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-add r0, r2, r3
-
-mov r3, rb31
-
-mov ra12, ra13
-mov ra13, ra14
-
-sub.setf -, r3, 4 ; mov r1, ra22
-# apply horizontal filter
+add r0, r2, r3       ; mov r3, rb31
+sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b
-mov ra14, ra15          ; mul24 r0, r0, r1         # last bit of context scroll, including clamp to zero
-asr ra15, r0, 8         ; nop
-nop                     ; nop    # TODO improve use of delay slots
+mov ra13, ra14       # Delay slot 1
+mov ra14, ra15       # Delay slot 2
+mov ra15, r0         # Delay slot 3
 
 # apply vertical filter and write to VPM
 
