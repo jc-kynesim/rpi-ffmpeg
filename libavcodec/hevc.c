@@ -42,7 +42,7 @@
 #ifdef RPI
   #include "rpi_qpu.h"
   // For some unknown reason, the code seems to crash if I do a late malloc
-  #define EARLY_MALLOC
+  //#define EARLY_MALLOC
   // Move Inter prediction into separate pass
   #define RPI_INTER
 #endif
@@ -147,7 +147,8 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 #ifdef RPI
 #ifdef EARLY_MALLOC
 #else
-    int coeffs_in_ctb = (1 << s->sps->log2_ctb_size) * (1 << s->sps->log2_ctb_size);
+    assert(sps);
+    int coeffs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
     int coefs_per_row = sps->ctb_width * coeffs_in_ctb * 3;  // Allow space for chroma
     printf("pic_arrays_init\n");
     printf("Allocated %d\n",coefs_per_row);
