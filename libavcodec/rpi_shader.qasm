@@ -268,6 +268,7 @@ add t0s, ra_x2_base, r2
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
+# apply horizontal filter
 nop                  ; mul24 r2, r0, ra0
 nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
 nop                  ; mul24      r3, ra1 << 1, r0 << 1
@@ -276,20 +277,12 @@ add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
 nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
 add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
 nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-add r0, r2, r3
-
-mov r3, rb31
-
-mov ra12, ra13
-mov ra13, ra14
-
-sub.setf -, r3, 4 ; mov r1, ra22
-
-# apply horizontal filter
+add r0, r2, r3       ; mov r3, rb31
+sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop
-mov ra14, ra15          ; mul24 r0, r0, r1         # last bit of context scroll
-asr ra15, r0, 8         ; nop
-nop                     ; nop  # Delay slot 3 (TODO move more of the context scroll into here)
+mov ra13, ra14       # Delay slot 1
+mov ra14, ra15       # Delay slot 2
+mov ra15, r0         # Delay slot 3
 
 # apply vertical filter and write to VPM
 
