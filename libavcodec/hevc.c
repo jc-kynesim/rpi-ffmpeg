@@ -2903,7 +2903,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             rpi_execute_inter_qpu(s);
 #endif
             // Transform all blocks
-            //printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
+            // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
             rpi_execute_transform(s);
             // Perform inter prediction
             rpi_execute_inter_cmds(s);
