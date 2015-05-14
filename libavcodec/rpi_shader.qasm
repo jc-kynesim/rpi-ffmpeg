@@ -167,8 +167,6 @@ add t0s, r2, r1
 
 # Dump padding words
 mov r0, unif
-mov r0, unif
-mov r0, unif
 
 # submit texture requests for second line
 max r1, ra_y, 0
@@ -228,11 +226,10 @@ asr ra3, r0, rb23;      mul24 r0, r0, ra22
 asr ra2, r0, rb23;      mul24 r0, r0, ra22
 asr ra1, r0, rb23;      mul24 r0, r0, ra22
 asr ra0, r0, rb23;      mov r0, unif
-                        mov r0, unif
 asr rb11, r0, rb23;     mul24 r0, r0, ra22
 asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
-asr rb8, r0, rb23;      mov r0, unif
+asr rb8, r0, rb23
 
 # r2 is elem_num
 # r3 is loop counter
@@ -362,11 +359,10 @@ asr ra3, r0, rb23;      mul24 r0, r0, ra22
 asr ra2, r0, rb23;      mul24 r0, r0, ra22
 asr ra1, r0, rb23;      mul24 r0, r0, ra22
 asr ra0, r0, rb23;      mov r0, unif
-                        mov r0, unif
 asr rb11, r0, rb23;     mul24 r0, r0, ra22
 asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
-asr rb8, r0, rb23;      mov r0, unif
+asr rb8, r0, rb23
 
 # r2 is elem_num
 # r3 is loop counter
@@ -490,11 +486,10 @@ asr ra3, r0, rb23;      mul24 r0, r0, ra22
 asr ra2, r0, rb23;      mul24 r0, r0, ra22
 asr ra1, r0, rb23;      mul24 r0, r0, ra22
 asr ra0, r0, rb23;      mov r0, unif
-                        mov r0, unif
 asr rb11, r0, rb23;     mul24 r0, r0, ra22
 asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
-asr rb8, r0, rb23;      mov r0, unif
+asr rb8, r0, rb23
 
 # r2 is elem_num
 # r3 is loop counter
