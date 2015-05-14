@@ -491,8 +491,8 @@ mov r0, unif
 shr r1, r0, r2 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
 and r0, r0, rb22 # Extract height
-add rb17, r0, 5
-add rb18, r0, 7
+add rb17, r0, 1
+add rb18, r0, 3
 shl r0, r0, 7
 
 # r0 is currently height<<7
@@ -508,8 +508,6 @@ add rb26, r0, rb27
 # In a B frame, so also set up VPM read (reading back 16bit precision)
 add vr_setup, r3, rb21
 
-sub.setf -,8,r1 # 8-r1, so if <0 (negative) we need to use the full code
-
 # get filter coefficients
 
 mov r0, unif
@@ -517,18 +515,11 @@ asr ra3, r0, rb23;      mul24 r0, r0, ra22
 asr ra2, r0, rb23;      mul24 r0, r0, ra22
 asr ra1, r0, rb23;      mul24 r0, r0, ra22
 asr ra0, r0, rb23;      mov r0, unif
-asr ra7, r0, rb23;      mul24 r0, r0, ra22
-asr ra6, r0, rb23;      mul24 r0, r0, ra22
-asr ra5, r0, rb23;      mul24 r0, r0, ra22
-asr ra4, r0, rb23;      mov r0, unif
+                        mov r0, unif
 asr rb11, r0, rb23;     mul24 r0, r0, ra22
 asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
 asr rb8, r0, rb23;      mov r0, unif
-asr rb15, r0, rb23;     mul24 r0, r0, ra22
-asr rb14, r0, rb23;     mul24 r0, r0, ra22
-asr rb13, r0, rb23;     mul24 r0, r0, ra22
-asr rb12, r0, rb23
 
 # r2 is elem_num
 # r3 is loop counter
@@ -570,26 +561,14 @@ add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
 nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
 add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
 nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-add r2, r2, r3       ; mul24    r3, ra4 << 4, r0 << 4
-nop                  ; mul24.ifnz r3, ra4 << 12, r1 << 12
-add r2, r2, r3       ; mul24    r3, ra5 << 5, r0 << 5
-nop                  ; mul24.ifnz r3, ra5 << 13, r1 << 13
-add r2, r2, r3       ; mul24    r3, ra6 << 6, r0 << 6
-nop                  ; mul24.ifnz r3, ra6 << 14, r1 << 14
-add r2, r2, r3       ; mul24    r3, ra7 << 7, r0 << 7
-nop                  ; mul24.ifnz r3, ra7 << 15, r1 << 15
 add r0, r2, r3
 
 mov r3, rb31
 
-mov ra8, ra9
-mov ra9, ra10
-mov ra10, ra11
-mov ra11, ra12
 mov ra12, ra13
 mov ra13, ra14
 
-sub.setf -, r3, 8 ; mov r1, ra22
+sub.setf -, r3, 4 ; mov r1, ra22
 # apply horizontal filter
 brr.anyn -, r:uvloop_b
 mov ra14, ra15          ; mul24 r0, r0, r1         # last bit of context scroll, including clamp to zero
@@ -598,14 +577,10 @@ nop                     ; nop    # TODO improve use of delay slots
 
 # apply vertical filter and write to VPM
 
-nop                     ; mul24 r1, ra14, rb14
-nop                     ; mul24 r0, ra13, rb13
-add r1, r1, r0          ; mul24 r0, ra12, rb12
-add r1, r1, r0          ; mul24 r0, ra11, rb11
-add r1, r1, r0          ; mul24 r0, ra10, rb10
-add r1, r1, r0          ; mul24 r0, ra9, rb9
-add r1, r1, r0          ; mul24 r0, ra8, rb8
-add r1, r1, r0          ; mul24 r0, ra15, rb15
+nop                     ; mul24 r1, ra14, rb10
+nop                     ; mul24 r0, ra13, rb9
+add r1, r1, r0          ; mul24 r0, ra12, rb8
+add r1, r1, r0          ; mul24 r0, ra15, rb11
 add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
 asr r1, r1, 14          # shift2=6
