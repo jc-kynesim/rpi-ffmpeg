@@ -1513,9 +1513,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #ifdef RPI
             if (!use_vpu) {
               int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
-              if (max_xy == 0)
+              if (max_xy == 0) {
                   s->hevcdsp.idct_dc[log2_trafo_size-2](coeffs);
-              else {
+              } else {
                   int col_limit = last_significant_coeff_x + last_significant_coeff_y + 4;
                   if (max_xy < 4)
                       col_limit = FFMIN(4, col_limit);
