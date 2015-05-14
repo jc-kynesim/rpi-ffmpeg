@@ -1152,15 +1152,11 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                         for (i = 0; i < (size * size); i++) {
                             coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                         }
-                        printf("Cross component not supported\n"); // TODO
-                        exit(-1);
                         s->hevcdsp.transform_add[log2_trafo_size_c-2](dst, coeffs, stride);
                     }
             }
 
             if (lc->tu.cross_pf) {
-                printf("Cross component not supported\n"); // TODO
-                exit(-1);
                 hls_cross_component_pred(s, 1);
             }
             for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
@@ -1189,8 +1185,6 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                         for (i = 0; i < (size * size); i++) {
                             coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                         }
-                        printf("Cross component not supported\n"); // TODO
-                        exit(-1);
                         s->hevcdsp.transform_add[log2_trafo_size_c-2](dst, coeffs, stride);
                     }
             }
@@ -2857,7 +2851,13 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
-    s->enable_rpi = 1; // TODO this should depend on cross component and frame width etc.
+    s->enable_rpi = s->ps.sps->bit_depth == 8
+                    && s->ps.sps->width <= RPI_MAX_WIDTH
+                    && !s->ps.pps->cross_component_prediction_enabled_flag
+                    && s->ps.pps->num_tile_rows <= 1 && s->ps.pps->num_tile_columns <= 1
+                    && !(s->ps.pps->weighted_pred_flag && s->sh.slice_type == P_SLICE)
+                    && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
+
 #endif
 
     if (!ctb_addr_ts && s->sh.dependent_slice_segment_flag) {
