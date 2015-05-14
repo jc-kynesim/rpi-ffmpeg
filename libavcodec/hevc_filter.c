@@ -871,7 +871,7 @@ static void flush_buffer(AVBufferRef *bref) {
 }
 
 #ifdef RPI_INTER_QPU
-void ff_hevc_flush_chroma(HEVCContext *s)
+static void ff_hevc_flush_chroma(HEVCContext *s)
 {
     if (s->enable_rpi && !(  s->nal_unit_type == NAL_TRAIL_N ||
             s->nal_unit_type == NAL_TSA_N   ||
