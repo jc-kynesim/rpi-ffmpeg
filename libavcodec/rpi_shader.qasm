@@ -9,7 +9,12 @@
 #                                               (ra15 isn't clamped to zero - this happens during the
 #                                                copy to ra14, and during its use in the vertical filter)
 #
-# rb8...rb15                                    eight vertical filter coefficients
+# rb8...rb11                                    eight vertical filter coefficients
+
+# rb12 offset to add before shift
+# rb13 shift
+# rb14 weight (U on left, V on right)
+# rb15 offset (U on left, V on right)
 #
 # ra16                                          clipped(row start address+elem_num)&~3
 # ra17                                          per-channel shifts
@@ -165,6 +170,9 @@ add r2, r2, r0 ; mul24 r1, r1, rb_pitch
 add t0s, r0, r1 ; mov ra_x2_base, r2
 add t0s, r2, r1
 
+mov rb12,unif # offset before shift
+mov rb13,unif # offset after shift
+
 # Dump padding words
 mov r0, unif
 
@@ -231,11 +239,21 @@ asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
 asr rb8, r0, rb23
 
+mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+
+mov r0, unif # U offset/weight
+asr rb15, r0, r2  # Compute offset from MSBs
+shl r0, r0, r2
+asr rb14, r0, r2  # Compute weight from LSBs
+mov r0, unif # V offset/weight
+asr.ifnz rb15, r0, r2
+shl r0, r0, r2
+asr.ifnz rb14, r0, r2
+
 # r2 is elem_num
 # r3 is loop counter
 
 mov r5rep, -8
-mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -279,6 +297,11 @@ mov ra13, ra14       # Delay slot 1
 mov ra14, ra15       # Delay slot 2
 mov ra15, r0         # Delay slot 3
 
+mov rb12,32
+mov rb13,6
+mov rb14,1
+mov rb15,0
+
 # apply vertical filter and write to VPM
 
 nop                     ; mul24 r1, ra14, rb10
@@ -288,9 +311,11 @@ add r1, r1, r0          ; mul24 r0, ra15, rb11
 add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
 asr r1, r1, 14
-add r1, r1, ra21
+nop                     ; mul24 r1, r1, rb14
+add r1, r1, rb12
+asr r1, r1, rb13
 brr.anyn -, r:uvloop
-asr r1, r1, 6          # Delay 1
+add r1, r1, rb15       # Delay 1
 min r1, r1, rb22       # Delay 2
 max vpm, r1, 0         # Delay 3
 
@@ -363,6 +388,9 @@ asr rb11, r0, rb23;     mul24 r0, r0, ra22
 asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
 asr rb8, r0, rb23
+
+mov r0, unif # U offset/weight
+mov r0, unif # V offset/weight
 
 # r2 is elem_num
 # r3 is loop counter
@@ -490,6 +518,9 @@ asr rb11, r0, rb23;     mul24 r0, r0, ra22
 asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
 asr rb8, r0, rb23
+
+mov r0, unif # U offset/weight
+mov r0, unif # V offset/weight
 
 # r2 is elem_num
 # r3 is loop counter
