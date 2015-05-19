@@ -2943,15 +2943,15 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
           s->dblk_cmds[s->num_dblk_cmds][0] = x_ctb;
           s->dblk_cmds[s->num_dblk_cmds++][1] = y_ctb;
           if ( (((y_ctb + ctb_size)&63) == 0) && x_ctb + ctb_size >= s->ps.sps->width) {
-#ifdef RPI_INTER_QPU
-            // Kick off inter prediction on QPUs
-            rpi_execute_inter_qpu(s);
-#endif
             // Transform all blocks
             // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
             rpi_execute_transform(s);
             // Perform inter prediction
             rpi_execute_inter_cmds(s);
+#ifdef RPI_INTER_QPU
+            // Kick off inter prediction on QPUs
+            rpi_execute_inter_qpu(s);
+#endif
             // Wait for transform completion
             vpu_wait(s->vpu_id);
 
