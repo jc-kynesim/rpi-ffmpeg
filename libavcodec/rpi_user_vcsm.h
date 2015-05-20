@@ -418,6 +418,28 @@ int vcsm_unlock_hdl( unsigned int handle );
 */
 int vcsm_unlock_hdl_sp( unsigned int handle, int cache_no_flush );
 
+/* Clean and/or invalidate the memory associated with this user opaque handle
+**
+** Returns:        non-zero on error
+**
+** structure contains a list of flush/invalidate commands. Commands are:
+** 0: nop
+** 1: invalidate given physical range in L2
+** 2: clean      given physical range in L2
+** 3: clean+invalidate all of L1
+** 4: flush      all of L2 and all of L1
+*/
+struct vcsm_user_clean_invalid_s {
+    struct {
+       unsigned int cmd;
+       unsigned int addr;
+       unsigned int size;
+    } s[8];
+};
+
+int vcsm_clean_invalid( unsigned int handle, struct vcsm_user_clean_invalid_s *s );
+
+
 #ifdef __cplusplus
 }
 #endif

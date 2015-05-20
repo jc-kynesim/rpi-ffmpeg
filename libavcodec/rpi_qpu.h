@@ -49,4 +49,6 @@ extern int rpi_test_shader(void);
 extern void rpi_do_block(const unsigned char *in_buffer_vc, int src_pitch, unsigned char *dst_vc, int dst_pitch, unsigned char *dst);
 extern void rpi_do_block_arm(const unsigned char *in_buffer, int src_pitch, unsigned char *dst, int dst_pitch);
 
+extern int gpu_get_mailbox(void);
+
 #endif
