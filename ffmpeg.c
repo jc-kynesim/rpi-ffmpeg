@@ -1048,7 +1048,8 @@ static void do_video_out(AVFormatContext *s,
 #ifdef RPI_DISPLAY
     if (!rpi_display)
         rpi_display = display_init(0,0,next_picture->width,next_picture->height);
-     display_frame(rpi_display,next_picture);
+    if (next_picture)
+        display_frame(rpi_display,next_picture);
 #endif
 
     if (ost->source_index >= 0)
