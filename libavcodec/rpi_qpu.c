@@ -237,6 +237,12 @@ int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
   return r;
 }
 
+int gpu_get_mailbox(void)
+{
+  assert(gpu);
+  return gpu->mb;
+}
+
 void gpu_cache_flush(GPU_MEM_PTR_T *p)
 {
   void *tmp = vcsm_lock(p->vcsm_handle);
