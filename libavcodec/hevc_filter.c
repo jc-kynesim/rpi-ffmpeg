@@ -37,6 +37,11 @@
 
 #include "bit_depth_template.c"
 
+#ifdef RPI
+#include "rpi_user_vcsm.h"
+#include "rpi_qpu.h"
+#endif
+
 #define LUMA 0
 #define CB 1
 #define CR 2
@@ -872,15 +877,46 @@ static void flush_buffer(AVBufferRef *bref) {
     gpu_cache_flush(p);
 }
 
-static void ff_hevc_flush_chroma(HEVCContext *s)
+// Return Physical address for this image
+static int ff_hevc_buf_base(AVBufferRef *bref) {
+  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
+  return p->vc & 0x3fffffff;
+}
+
+static void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && !(  s->nal_unit_type == NAL_TRAIL_N ||
             s->nal_unit_type == NAL_TSA_N   ||
             s->nal_unit_type == NAL_STSA_N  ||
             s->nal_unit_type == NAL_RADL_N  ||
             s->nal_unit_type == NAL_RASL_N )) {
+#define RPI_FAST_CACHEFLUSH
+#ifdef RPI_FAST_CACHEFLUSH
+        struct vcsm_user_clean_invalid_s iocache = {};
+        int curr_y = f->progress->data[0];
+        int sz,base;
+        if (curr_y < 0) curr_y = 0;
+        if (n<=curr_y) return; // Should not happen
+        sz = s->frame->linesize[1] * (n-curr_y);
+        base = s->frame->linesize[1] * curr_y;
+        iocache.s[0].cmd = 3; // Flush L1 cache
+        iocache.s[0].addr = 0;
+        iocache.s[0].size  = 0;
+
+        iocache.s[1].cmd = 2;
+        iocache.s[1].addr = ff_hevc_buf_base(s->frame->buf[1]) + base;
+        iocache.s[1].size  = sz;
+
+        iocache.s[2].cmd = 2;
+        iocache.s[2].addr = ff_hevc_buf_base(s->frame->buf[2]) + base;
+        iocache.s[2].size  = sz;
+
+        vcsm_clean_invalid( gpu_get_mailbox(), &iocache );
+
+#else
         flush_buffer(s->frame->buf[1]);
         flush_buffer(s->frame->buf[2]);
+#endif
         //memcpy(s->dummy.arm,s->frame->data[0],2048*64);
         //memcpy(s->dummy.arm,s->frame->data[1],1024*32);
         //memcpy(s->dummy.arm,s->frame->data[2],1024*32);
@@ -903,7 +939,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x, y - ctb_size);
             if (s->threads_type & FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
-                ff_hevc_flush_chroma(s);
+                ff_hevc_flush_chroma(s,&s->ref->tf, y);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y, 0);
             }
@@ -912,7 +948,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x , y);
             if (s->threads_type & FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
-                ff_hevc_flush_chroma(s);
+                ff_hevc_flush_chroma(s, &s->ref->tf, y + ctb_size);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
             }
@@ -922,7 +958,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
         //int currh = s->ref->tf.progress->data[0];
         //if (((y + ctb_size)&63)==0)
 #ifdef RPI_INTER_QPU
-        ff_hevc_flush_chroma(s);
+        ff_hevc_flush_chroma(s, &s->ref->tf, y + ctb_size - 4);
 #endif
         ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
     }
