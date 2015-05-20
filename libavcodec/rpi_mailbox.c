@@ -276,6 +276,53 @@ unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigne
    return p[5];
 }
 
+void execute_multi(int file_desc,
+   unsigned num_qpus, unsigned control, unsigned noflush, unsigned timeout,
+   unsigned num_qpus_2, unsigned control_2, unsigned noflush_2, unsigned timeout_2,
+   unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
+   unsigned code_2, unsigned r0_2, unsigned r1_2, unsigned r2_2, unsigned r3_2, unsigned r4_2, unsigned r5_2) {
+   int i=0;
+   unsigned p[32];
+
+   p[i++] = 0; // size
+   p[i++] = 0x00000000; // process request
+   p[i++] = 0x30018; // (the tag id)
+   p[i++] = 88; // (size of the buffer)
+   p[i++] = 88; // (size of the data)
+
+   p[i++] = num_qpus;
+   p[i++] = control;
+   p[i++] = noflush;
+   p[i++] = timeout; // ms
+
+   p[i++] = num_qpus_2;
+   p[i++] = control_2;
+   p[i++] = noflush_2;
+   p[i++] = timeout_2; // ms
+
+   p[i++] = code;
+   p[i++] = r0;
+   p[i++] = r1;
+   p[i++] = r2;
+   p[i++] = r3;
+   p[i++] = r4;
+   p[i++] = r5;
+
+   p[i++] = code_2;
+   p[i++] = r0_2;
+   p[i++] = r1_2;
+   p[i++] = r2_2;
+   p[i++] = r3_2;
+   p[i++] = r4_2;
+   p[i++] = r5_2;
+
+   p[i++] = 0x00000000; // end tag
+   p[0] = i*sizeof *p; // actual size
+
+   mbox_property(file_desc, p);
+   return;
+}
+
 int mbox_open() {
    int file_desc;
 

@@ -47,6 +47,11 @@
   //#define EARLY_MALLOC
   // Move Inter prediction into separate pass
   #define RPI_INTER
+
+  #ifdef RPI_INTER_QPU
+    // Define RPI_MULTI_MAILBOX to use the updated mailbox that can launch both QPU and VPU
+    #define RPI_MULTI_MAILBOX
+  #endif
 #endif
 
 // #define DISABLE_MC
@@ -2843,10 +2848,14 @@ static void rpi_inter_clear(HEVCContext *s)
 static void rpi_execute_inter_qpu(HEVCContext *s)
 {
     int k;
+    int i;
     uint32_t *unif_vc = (uint32_t *)s->unif_mvs_ptr.vc;
-
-    if (s->sh.slice_type == I_SLICE)
-        return;
+    if (s->sh.slice_type == I_SLICE) {
+#ifdef RPI_MULTI_MAILBOX
+      rpi_execute_transform(s);
+      return;
+#endif
+    }
     for(k=0;k<8;k++) {
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP_UV); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
@@ -2856,6 +2865,22 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
 
     s->u_mvs[8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
 
+#ifdef RPI_MULTI_MAILBOX
+    gpu_cache_flush(&s->coeffs_buf_accelerated);
+    s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0,
+                                   qpu_get_fn(QPU_MC_SETUP_UV),
+                                   (uint32_t)(unif_vc+(s->mvs_base[0 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+                                   (uint32_t)(unif_vc+(s->mvs_base[1 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+                                   (uint32_t)(unif_vc+(s->mvs_base[2 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+                                   (uint32_t)(unif_vc+(s->mvs_base[3 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+                                   (uint32_t)(unif_vc+(s->mvs_base[4 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+                                   (uint32_t)(unif_vc+(s->mvs_base[5 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+                                   (uint32_t)(unif_vc+(s->mvs_base[6 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
+                                   (uint32_t)(unif_vc+(s->mvs_base[7 ] - (uint32_t*)s->unif_mvs_ptr.arm))
+                                 );
+    for(i=0;i<4;i++)
+        s->num_coeffs[i] = 0;
+#else
     qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
       (uint32_t)(unif_vc+(s->mvs_base[0 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
       (uint32_t)(unif_vc+(s->mvs_base[1 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
@@ -2866,6 +2891,7 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
       (uint32_t)(unif_vc+(s->mvs_base[6 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
       (uint32_t)(unif_vc+(s->mvs_base[7 ] - (uint32_t*)s->unif_mvs_ptr.arm))
       );
+#endif
 }
 #endif
 
@@ -2945,6 +2971,12 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
           if ( (((y_ctb + ctb_size)&63) == 0) && x_ctb + ctb_size >= s->ps.sps->width) {
             // Transform all blocks
             // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
+#ifdef RPI_MULTI_MAILBOX
+            // Kick off inter prediction on QPUs
+            rpi_execute_inter_qpu(s);
+            // Perform luma inter prediction
+            rpi_execute_inter_cmds(s);
+#else
             rpi_execute_transform(s);
             // Perform inter prediction
             rpi_execute_inter_cmds(s);
@@ -2952,6 +2984,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             // Kick off inter prediction on QPUs
             rpi_execute_inter_qpu(s);
 #endif
+#endif
+
             // Wait for transform completion
             vpu_wait(s->vpu_id);
 

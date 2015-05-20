@@ -123,7 +123,7 @@ static pthread_cond_t post_cond_head = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t post_cond_tail = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t post_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int vpu_cmds[MAXCMDS][8];
+static int vpu_cmds[MAXCMDS][16];
 static volatile int vpu_async_tail=0; // Contains the number of posted jobs
 static volatile int vpu_async_head=0;
 #endif
@@ -346,6 +346,7 @@ unsigned int vpu_get_constants(void) {
 static void *vpu_start(void *arg) {
   while(1) {
     int *p;
+    int qpu_code;
     pthread_mutex_lock(&post_mutex);
     while( vpu_async_tail - vpu_async_head <= 0)
     {
@@ -358,12 +359,25 @@ static void *vpu_start(void *arg) {
     if (p[6] == -1) {
       break; // Last job
     }
-    if (p[7]) {
+    qpu_code = p[7];
+    //if (p[7]) {
         //GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
         //gpu_cache_flush(buf);
-    }
-    vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+    //}
+    if (!qpu_code) {
+      vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+    } else {
+      int i;
+      for(i=0;i<8;i++) {
+        gpu->mail[i*2] = p[8+i];
+        gpu->mail[i*2 + 1] = qpu_code;
+      }
 
+      execute_multi(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
+                              0, 0, 0, 0,
+                              p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
+                              0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
+    }
     pthread_mutex_lock(&post_mutex);
     vpu_async_head++;
     pthread_cond_broadcast(&post_cond_head);
@@ -400,7 +414,43 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
     p[4] = r3;
     p[5] = r4;
     p[6] = r5;
-    p[7] = (int) buf;
+    p[7] = 0;
+    if (num<=1)
+      pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake
+    pthread_mutex_unlock(&post_mutex);
+    return id;
+  }
+}
+
+int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
+                      int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8)
+{
+
+  pthread_mutex_lock(&post_mutex);
+  {
+    int id = vpu_async_tail++;
+    int *p = vpu_cmds[id%MAXCMDS];
+    int num = vpu_async_tail - vpu_async_head;
+    if (num>MAXCMDS) {
+      printf("Too many commands submitted\n");
+      exit(-1);
+    }
+    p[0] = vpu_code;
+    p[1] = r0;
+    p[2] = r1;
+    p[3] = r2;
+    p[4] = r3;
+    p[5] = r4;
+    p[6] = r5;
+    p[7] = qpu_code;
+    p[8 ] = unifs1;
+    p[9 ] = unifs2;
+    p[10] = unifs3;
+    p[11] = unifs4;
+    p[12] = unifs5;
+    p[13] = unifs6;
+    p[14] = unifs7;
+    p[15] = unifs8;
     if (num<=1)
       pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake
     pthread_mutex_unlock(&post_mutex);
@@ -964,6 +1014,7 @@ void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, i
     gpu_free(&unifs_ptr);
     //gpu_free(&out_buffer_ptr);
 }
+
 
 
 #endif
