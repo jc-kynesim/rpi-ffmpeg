@@ -2834,6 +2834,7 @@ static void rpi_inter_clear(HEVCContext *s)
         *s->u_mvs[i]++ = pic_height;
         *s->u_mvs[i]++ = s->frame->linesize[1];
         *s->u_mvs[i]++ = s->frame->linesize[2];
+        *s->u_mvs[i]++ = i;
         if (weight_flag) {
             *s->u_mvs[i]++ = 1 << (s->sh.chroma_log2_weight_denom + 6 - 1);
             *s->u_mvs[i]++ = s->sh.chroma_log2_weight_denom + 6;
@@ -2841,7 +2842,6 @@ static void rpi_inter_clear(HEVCContext *s)
             *s->u_mvs[i]++ = 1 << 5;
             *s->u_mvs[i]++ = 6;
         }
-        s->u_mvs[i] += 1;  // Padding words
     }
 }
 
