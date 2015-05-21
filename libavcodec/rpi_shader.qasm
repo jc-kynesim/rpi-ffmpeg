@@ -133,8 +133,8 @@ mov ra14, 0
 mov ra15, 0
 
 # Compute part of VPM to use for DMA output
-mov r2, qpu_num
-shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
+mov r3, unif
+shl r2, r3, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
 and r2, r2, 15
 mov r1, r2
 asr r1, r1, 2
@@ -147,8 +147,7 @@ shl r0, r0, 5
 add rb27, r0, r1
 
 # Compute part of VPM to save data into
-mov r2, qpu_num   # qpu_num = abcd
-shl r2, r2, 1
+shl r2, r3, 1
 and r2, r2, 15    # r2 = bcd0
 mov r1, r2        # r1 = bcd0
 asr r1, r1, 2     # r1 = bc
@@ -180,9 +179,6 @@ add t0s, r2, r1
 
 mov rb12,unif # offset before shift
 mov rb13,unif # offset after shift
-
-# Dump padding words
-mov r0, unif
 
 # submit texture requests for second line
 max r1, ra_y, 0
