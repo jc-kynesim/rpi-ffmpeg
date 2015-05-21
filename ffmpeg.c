@@ -1046,10 +1046,12 @@ static void do_video_out(AVFormatContext *s,
     InputStream *ist = NULL;
     AVFilterContext *filter = ost->filter->filter;
 #ifdef RPI_DISPLAY
-    if (!rpi_display)
-        rpi_display = display_init(0,0,next_picture->width,next_picture->height);
     if (next_picture)
+    {
+	if (!rpi_display)
+           rpi_display = display_init(0,0,next_picture->width,next_picture->height);
         display_frame(rpi_display,next_picture);
+    }
 #endif
 
     if (ost->source_index >= 0)
