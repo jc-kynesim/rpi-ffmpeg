@@ -883,36 +883,35 @@ static int ff_hevc_buf_base(AVBufferRef *bref) {
   return p->vc & 0x3fffffff;
 }
 
-static void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n)
+void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n);
+void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && !(  s->nal_unit_type == NAL_TRAIL_N ||
             s->nal_unit_type == NAL_TSA_N   ||
             s->nal_unit_type == NAL_STSA_N  ||
             s->nal_unit_type == NAL_RADL_N  ||
             s->nal_unit_type == NAL_RASL_N )) {
-#define RPI_FAST_CACHEFLUSH
 #ifdef RPI_FAST_CACHEFLUSH
         struct vcsm_user_clean_invalid_s iocache = {};
-        int curr_y = f->progress->data[0];
+        int curr_y = ((int *)f->progress->data)[0];
+        int curr_uv = curr_y >> s->ps.sps->vshift[1];
+        int n_uv = n >> s->ps.sps->vshift[1];
         int sz,base;
-        if (curr_y < 0) curr_y = 0;
-        if (n<=curr_y) return; // Should not happen
-        sz = s->frame->linesize[1] * (n-curr_y);
-        base = s->frame->linesize[1] * curr_y;
-        iocache.s[0].cmd = 3; // Flush L1 cache
-        iocache.s[0].addr = 0;
-        iocache.s[0].size  = 0;
-
-        iocache.s[1].cmd = 2;
-        iocache.s[1].addr = ff_hevc_buf_base(s->frame->buf[1]) + base;
+        if (curr_uv < 0) curr_uv = 0;
+        if (n_uv<=curr_uv) { assert(0); return; } // Should not happen
+        sz = s->frame->linesize[1] * (n_uv-curr_uv);
+        base = s->frame->linesize[1] * curr_uv;
+        GPU_MEM_PTR_T *p = av_buffer_pool_opaque(s->frame->buf[1]);
+        iocache.s[0].handle = p->vcsm_handle;
+        iocache.s[0].cmd = 3; // clean+invalidate
+        iocache.s[0].addr = p->arm + base;
+        iocache.s[0].size  = sz;
+        p = av_buffer_pool_opaque(s->frame->buf[2]);
+        iocache.s[1].handle = p->vcsm_handle;
+        iocache.s[1].cmd = 3; // clean+invalidate
+        iocache.s[1].addr = p->arm + base;
         iocache.s[1].size  = sz;
-
-        iocache.s[2].cmd = 2;
-        iocache.s[2].addr = ff_hevc_buf_base(s->frame->buf[2]) + base;
-        iocache.s[2].size  = sz;
-
-        vcsm_clean_invalid( gpu_get_mailbox(), &iocache );
-
+        vcsm_clean_invalid( &iocache );
 #else
         flush_buffer(s->frame->buf[1]);
         flush_buffer(s->frame->buf[2]);

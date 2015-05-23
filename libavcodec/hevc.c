@@ -3575,9 +3575,13 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
     }
 
 fail:
-    if (s->ref && s->threads_type == FF_THREAD_FRAME)
+    if (s->ref && s->threads_type == FF_THREAD_FRAME) {
+#ifdef RPI_INTER_QPU
+        void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n);
+        ff_hevc_flush_chroma(s, &s->ref->tf, s->ps.sps->height);
+#endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
-
+    }
     return ret;
 }
 
