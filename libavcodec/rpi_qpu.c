@@ -211,6 +211,7 @@ static void gpu_unlock(void) {
 }
 
 static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb) {
+  p->numbytes = numbytes;
   p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
   assert(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
@@ -243,13 +244,25 @@ int gpu_get_mailbox(void)
   return gpu->mb;
 }
 
+// Call this to clean and invalidate a region of memory
 void gpu_cache_flush(GPU_MEM_PTR_T *p)
 {
-  void *tmp = vcsm_lock(p->vcsm_handle);
-  vcsm_unlock_ptr(tmp);
+#define RPI_FAST_CACHEFLUSH
+#ifdef RPI_FAST_CACHEFLUSH
+    struct vcsm_user_clean_invalid_s iocache = {};
+    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].cmd = 3; // clean+invalidate
+    iocache.s[0].addr = p->arm;
+    iocache.s[0].size  = p->numbytes;
+    vcsm_clean_invalid( &iocache );
+#else
+    void *tmp = vcsm_lock(p->vcsm_handle);
+    vcsm_unlock_ptr(tmp);
+#endif
 }
 
 static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
+  p->numbytes = numbytes;
   p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
