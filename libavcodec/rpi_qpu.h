@@ -1,6 +1,8 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
+#define RPI_FAST_CACHEFLUSH
+
 typedef struct gpu_mem_ptr_s {
   unsigned char *arm; // Pointer to memory mapped on ARM side
   int vc_handle;   // Videocore handle of relocatable memory
