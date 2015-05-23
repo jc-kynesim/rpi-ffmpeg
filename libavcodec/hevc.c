@@ -3007,7 +3007,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI_INTER_QPU
         rpi_execute_inter_qpu(s);
 #endif
+#ifndef RPI_MULTI_MAILBOX
         rpi_execute_transform(s);
+#endif
         rpi_execute_inter_cmds(s);
         vpu_wait(s->vpu_id);
         rpi_execute_pred_cmds(s);
