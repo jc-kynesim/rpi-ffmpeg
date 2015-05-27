@@ -22,6 +22,7 @@
 #include "libavutil/arm/cpu.h"
 #include "libavcodec/hevcdsp.h"
 #include "hevcdsp_arm.h"
+#include "libavcodec/avcodec.h"
 #include "../bit_depth_template.c"
 
 void ff_hevc_v_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
@@ -48,6 +49,7 @@ void ff_hevc_sao_band_w8_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_d
 void ff_hevc_sao_band_w16_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t * offset_table);
 void ff_hevc_sao_band_w32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t * offset_table);
 void ff_hevc_sao_band_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t * offset_table);
+void ff_hevc_sao_edge_eo1_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 
 #define PUT_PIXELS(name) \
     void name(int16_t *dst, uint8_t *src, \
@@ -195,6 +197,50 @@ static void ff_hevc_sao_band_neon_wrapper(uint8_t *_dst, uint8_t *_src, ptrdiff_
     }
 }
 
+#define CMP(a, b) ((a) > (b) ? 1 : ((a) == (b) ? 0 : -1))
+static void ff_hevc_sao_edge_neon_wrapper(uint8_t *_dst /* align 16 */, uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
+                                          int16_t *_sao_offset_val, int eo, int width, int height)
+{
+    static const uint8_t edge_idx[] = { 1, 2, 0, 3, 4 };
+    static const int8_t pos[4][2][2] = {
+        { { -1,  0 }, {  1, 0 } }, // horizontal
+        { {  0, -1 }, {  0, 1 } }, // vertical
+        { { -1, -1 }, {  1, 1 } }, // 45 degree
+        { {  1, -1 }, { -1, 1 } }, // 135 degree
+    };
+    int8_t sao_offset_val[8];  // padding of 3 for vld
+    ptrdiff_t stride_src = (2*MAX_PB_SIZE + FF_INPUT_BUFFER_PADDING_SIZE);
+    pixel *dst = (pixel *)_dst;
+    pixel *src = (pixel *)_src;
+    int a_stride, b_stride;
+    int x, y;
+
+    for (x = 0; x < 5; x++) {
+        sao_offset_val[x] = _sao_offset_val[x];
+    }
+
+    stride_src /= sizeof(pixel);
+    stride_dst /= sizeof(pixel);
+
+    if (eo == 1 && width == 64) {
+        ff_hevc_sao_edge_eo1_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
+    } else {
+        a_stride = pos[eo][0][0] + pos[eo][0][1] * stride_src;
+        b_stride = pos[eo][1][0] + pos[eo][1][1] * stride_src;
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++) {
+                int diff0         = CMP(src[x], src[x + a_stride]);
+                int diff1         = CMP(src[x], src[x + b_stride]);
+                int offset_val    = edge_idx[2 + diff0 + diff1];
+                dst[x] = av_clip_pixel(src[x] + sao_offset_val[offset_val]);
+            }
+            src += stride_src;
+            dst += stride_dst;
+        }
+    }
+}
+#undef CMP
+
 av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
 {
     if (bit_depth == 8) {
@@ -216,6 +262,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->idct_4x4_luma               = ff_hevc_transform_luma_4x4_neon_8;
         for (x = 0; x < sizeof c->sao_band_filter / sizeof *c->sao_band_filter; x++) {
           c->sao_band_filter[x]        = ff_hevc_sao_band_neon_wrapper;
+          c->sao_edge_filter[x]        = ff_hevc_sao_edge_neon_wrapper;
         }
         put_hevc_qpel_neon[1][0]       = ff_hevc_put_qpel_v1_neon_8;
         put_hevc_qpel_neon[2][0]       = ff_hevc_put_qpel_v2_neon_8;
