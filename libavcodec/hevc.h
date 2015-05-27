@@ -44,9 +44,13 @@
 #ifdef RPI
 
   #include "rpi_qpu.h"
-  // Use QPU for inter prediction
+  // Define RPI_INTER_QPU to use QPU for chroma inter prediction
   #define RPI_INTER_QPU
 
+  #ifdef RPI_INTER_QPU
+    // Define RPI_LUMA_QPU to also use QPU for luma inter prediction
+    #define RPI_LUMA_QPU
+  #endif
 #endif
 
 #define MAX_DPB_SIZE 16 // A.4.1
@@ -809,7 +813,6 @@ typedef struct HEVCLocalContext {
 
 // Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane, * 2 for bi
 #define RPI_MAX_MV_CMDS   (2*16*3*(RPI_MAX_WIDTH/4))
-#define RPI_MAX_XFM_CMDS  (16*3*(RPI_MAX_WIDTH/4))
 // Each block can have an intra prediction and a transform_add command
 #define RPI_MAX_PRED_CMDS (2*16*3*(RPI_MAX_WIDTH/4))
 // Worst case is 16x16 CTUs
@@ -844,9 +847,6 @@ typedef struct HEVCMvCmd {
     int8_t ref_idx[2];
 } HEVCMvCmd;
 
-// Command for transform to process a block of coefficients
-typedef struct HEVCXfmCmd {
-} HEVCXfmCmd;
 
 // Command for intra prediction and transform_add of predictions to coefficients
 #define RPI_PRED_TRANSFORM_ADD 0
@@ -892,8 +892,7 @@ typedef struct HEVCContext {
 
 #ifdef RPI
     int enable_rpi;
-    HEVCMvCmd *unif_mv_cmds;  // TODO rename
-    HEVCXfmCmd *unif_xfm_cmds;
+    HEVCMvCmd *unif_mv_cmds;
     HEVCPredCmd *univ_pred_cmds;
     int buf_width;
     GPU_MEM_PTR_T coeffs_buf_default;
@@ -919,6 +918,15 @@ typedef struct HEVCContext {
     uint32_t mc_filter_uv;
     uint32_t mc_filter_uv_b0;
     uint32_t mc_filter_uv_b;
+#endif
+#ifdef RPI_LUMA_QPU
+    GPU_MEM_PTR_T y_unif_mvs_ptr;
+    uint32_t *y_unif_mvs; // Base of memory for motion vector commands
+    uint32_t *y_mvs_base[12];
+    uint32_t *y_mvs[12];
+    // Function pointers
+    uint32_t mc_filter;
+    uint32_t mc_filter_b;
 #endif
 
 #endif
@@ -1165,6 +1173,10 @@ void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size);
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                  int log2_trafo_size, enum ScanType scan_idx,
                                  int c_idx);
+
+#ifdef RPI_INTER_QPU
+extern void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n);
+#endif
 
 void ff_hevc_hls_mvd_coding(HEVCContext *s, int x0, int y0, int log2_cb_size);
 

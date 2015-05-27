@@ -1,9 +1,11 @@
 #ifdef RPI
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 // define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
-#define RPI_TIME_TOTAL_QPU
+//#define RPI_TIME_TOTAL_QPU
 // define RPI_TIME_TOTAL_VPU to print out how much time is spent in the VPI code
 //#define RPI_TIME_TOTAL_VPU
+// define RPI_TIME_TOTAL_POSTED to print out how much time is spent in the multi execute QPU/VPU combined
+//#define RPI_TIME_TOTAL_POSTED
 // define RPI_ASYNC to run the VPU in a separate thread, need to make a separate call to check for completion
 #define RPI_ASYNC
 
@@ -94,7 +96,8 @@ struct GPU
   int open_count; // Number of allocated video buffers
   int      mb; // Mailbox handle
   int      vc; // Address in GPU memory
-  int mail[12]; // These are used to pass pairs of code/unifs to the QPUs
+  int mail[12*2]; // These are used to pass pairs of code/unifs to the QPUs for the first QPU task
+  int mail2[12*2]; // These are used to pass pairs of code/unifs to the QPUs for the second QPU task
 };
 
 // Stop more than one thread trying to allocate memory or use the processing resources at once
@@ -102,7 +105,7 @@ static pthread_mutex_t gpu_mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile struct GPU* gpu = NULL;
 static GPU_MEM_PTR_T gpu_mem_ptr;
 
-#if defined(RPI_TIME_TOTAL_QPU) || defined(RPI_TIME_TOTAL_VPU)
+#if defined(RPI_TIME_TOTAL_QPU) || defined(RPI_TIME_TOTAL_VPU) || defined(RPI_TIME_TOTAL_POSTED)
 static unsigned int Microseconds(void) {
     struct timespec ts;
     unsigned int x;
@@ -123,7 +126,7 @@ static pthread_cond_t post_cond_head = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t post_cond_tail = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t post_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int vpu_cmds[MAXCMDS][16];
+static int vpu_cmds[MAXCMDS][32];
 static volatile int vpu_async_tail=0; // Contains the number of posted jobs
 static volatile int vpu_async_head=0;
 #endif
@@ -247,7 +250,6 @@ int gpu_get_mailbox(void)
 // Call this to clean and invalidate a region of memory
 void gpu_cache_flush(GPU_MEM_PTR_T *p)
 {
-#define RPI_FAST_CACHEFLUSH
 #ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};
     iocache.s[0].handle = p->vcsm_handle;
@@ -257,6 +259,34 @@ void gpu_cache_flush(GPU_MEM_PTR_T *p)
     vcsm_clean_invalid( &iocache );
 #else
     void *tmp = vcsm_lock(p->vcsm_handle);
+    vcsm_unlock_ptr(tmp);
+#endif
+}
+
+void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2)
+{
+#ifdef RPI_FAST_CACHEFLUSH
+    struct vcsm_user_clean_invalid_s iocache = {};
+    iocache.s[0].handle = p0->vcsm_handle;
+    iocache.s[0].cmd = 3; // clean+invalidate
+    iocache.s[0].addr = (int) p0->arm;
+    iocache.s[0].size  = p0->numbytes;
+    iocache.s[1].handle = p1->vcsm_handle;
+    iocache.s[1].cmd = 3; // clean+invalidate
+    iocache.s[1].addr = (int) p1->arm;
+    iocache.s[1].size  = p1->numbytes;
+    iocache.s[2].handle = p2->vcsm_handle;
+    iocache.s[2].cmd = 3; // clean+invalidate
+    iocache.s[2].addr = (int) p2->arm;
+    iocache.s[2].size  = p2->numbytes;
+    vcsm_clean_invalid( &iocache );
+#else
+    void *tmp;
+    tmp = vcsm_lock(p0->vcsm_handle);
+    vcsm_unlock_ptr(tmp);
+    tmp = vcsm_lock(p1->vcsm_handle);
+    vcsm_unlock_ptr(tmp);
+    tmp = vcsm_lock(p2->vcsm_handle);
     vcsm_unlock_ptr(tmp);
 #endif
 }
@@ -357,9 +387,19 @@ unsigned int vpu_get_constants(void) {
 #ifdef RPI_ASYNC
 
 static void *vpu_start(void *arg) {
+#ifdef RPI_TIME_TOTAL_POSTED
+  int last_time=0;
+  long long on_time=0;
+  long long off_time=0;
+  int start_time;
+  int end_time;
+  int count=0;
+#endif
   while(1) {
+    int i;
     int *p;
     int qpu_code;
+    int qpu_codeb;
     pthread_mutex_lock(&post_mutex);
     while( vpu_async_tail - vpu_async_head <= 0)
     {
@@ -373,24 +413,49 @@ static void *vpu_start(void *arg) {
       break; // Last job
     }
     qpu_code = p[7];
+    qpu_codeb = p[16];
     //if (p[7]) {
         //GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
         //gpu_cache_flush(buf);
     //}
+
+#ifdef RPI_TIME_TOTAL_POSTED
+    start_time = Microseconds();
+    if (last_time==0)
+      last_time = start_time;
+    off_time += start_time-last_time;
+#endif
+
     if (!qpu_code) {
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
     } else {
-      int i;
       for(i=0;i<8;i++) {
         gpu->mail[i*2] = p[8+i];
         gpu->mail[i*2 + 1] = qpu_code;
       }
-
-      execute_multi(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
-                              0, 0, 0, 0,
+      for(i=0;i<12;i++) {
+        gpu->mail2[i*2] = p[17+i];
+        gpu->mail2[i*2 + 1] = qpu_codeb;
+      }
+#if (0)
+      vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+      execute_qpu(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */);
+#else
+      execute_multi(gpu->mb,
+                              12,gpu->vc + offsetof(struct GPU, mail2), 1, 5000,
+                              8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
                               p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
                               0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
+#endif
     }
+#ifdef RPI_TIME_TOTAL_POSTED
+    end_time = Microseconds();
+    last_time = end_time;
+    on_time += end_time - start_time;
+    count++;
+    if ((count&0x7f)==0)
+      printf("Posted %d On=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(off_time/1000));
+#endif
     pthread_mutex_lock(&post_mutex);
     vpu_async_head++;
     pthread_cond_broadcast(&post_cond_head);
@@ -436,7 +501,9 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
 }
 
 int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
-                      int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8)
+                      int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8,
+                      int qpu_codeb, int unifs1b, int unifs2b, int unifs3b, int unifs4b, int unifs5b, int unifs6b, int unifs7b, int unifs8b, int unifs9b, int unifs10b, int unifs11b, int unifs12b
+                      )
 {
 
   pthread_mutex_lock(&post_mutex);
@@ -464,6 +531,21 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
     p[13] = unifs6;
     p[14] = unifs7;
     p[15] = unifs8;
+
+    p[16] = qpu_codeb;
+    p[17] = unifs1b;
+    p[18] = unifs2b;
+    p[19] = unifs3b;
+    p[20] = unifs4b;
+    p[21] = unifs5b;
+    p[22] = unifs6b;
+    p[23] = unifs7b;
+    p[24] = unifs8b;
+    p[25] = unifs9b;
+    p[26] = unifs10b;
+    p[27] = unifs11b;
+    p[28] = unifs12b;
+
     if (num<=1)
       pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake
     pthread_mutex_unlock(&post_mutex);
@@ -544,27 +626,27 @@ void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int un
   off_time += start_time-last_time;
 #endif
   for(i=0;i<num;i++) {
-    gpu->mail[i*2 + 1] = code;
+    gpu->mail2[i*2 + 1] = code;
   }
   for(;i<num+num2;i++) {
-    gpu->mail[i*2 + 1] = code2;
+    gpu->mail2[i*2 + 1] = code2;
   }
-  gpu->mail[0 ] = unifs1;
-  gpu->mail[2 ] = unifs2;
-  gpu->mail[4 ] = unifs3;
-  gpu->mail[6 ] = unifs4;
-  gpu->mail[8 ] = unifs5;
-  gpu->mail[10] = unifs6;
-	gpu->mail[12] = unifs7;
-	gpu->mail[14] = unifs8;
-	gpu->mail[16] = unifs9;
-	gpu->mail[18] = unifs10;
-	gpu->mail[20] = unifs11;
-	gpu->mail[22] = unifs12;
+  gpu->mail2[0 ] = unifs1;
+  gpu->mail2[2 ] = unifs2;
+  gpu->mail2[4 ] = unifs3;
+  gpu->mail2[6 ] = unifs4;
+  gpu->mail2[8 ] = unifs5;
+  gpu->mail2[10] = unifs6;
+	gpu->mail2[12] = unifs7;
+	gpu->mail2[14] = unifs8;
+	gpu->mail2[16] = unifs9;
+	gpu->mail2[18] = unifs10;
+	gpu->mail2[20] = unifs11;
+	gpu->mail2[22] = unifs12;
 	execute_qpu(
 		gpu->mb,
 		12 /* Number of QPUs */,
-		gpu->vc + offsetof(struct GPU, mail),
+		gpu->vc + offsetof(struct GPU, mail2),
 		1 /* no flush */,  // Don't flush VPU L1 cache
 		5000 /* timeout ms */);
 #ifdef RPI_TIME_TOTAL_QPU
@@ -635,21 +717,21 @@ unsigned int qpu_get_fn(int num) {
       gpu_unlock();
     }
     switch(num) {
-    //case QPU_MC_SETUP:
-    //  fn = mc_setup;
-    //  break;
-    //case QPU_MC_FILTER:
-    //  fn = mc_filter;
-    //  break;
+    case QPU_MC_SETUP:
+      fn = mc_setup;
+      break;
+    case QPU_MC_FILTER:
+      fn = mc_filter;
+      break;
     case QPU_MC_EXIT:
       fn = mc_exit;
       break;
-    //case QPU_MC_INTERRUPT_EXIT:
-    //  fn = mc_interrupt_exit;
-    //  break;
-    //case QPU_MC_FILTER_B:
-    //  fn = mc_filter_b;
-    //  break;
+    case QPU_MC_INTERRUPT_EXIT12:
+      fn = mc_interrupt_exit12;
+      break;
+    case QPU_MC_FILTER_B:
+      fn = mc_filter_b;
+      break;
     //case QPU_MC_FILTER_HONLY:
     //  fn = mc_filter_honly;
     //  break;
