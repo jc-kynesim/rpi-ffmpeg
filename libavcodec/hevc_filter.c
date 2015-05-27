@@ -883,8 +883,7 @@ static int ff_hevc_buf_base(AVBufferRef *bref) {
   return p->vc & 0x3fffffff;
 }
 
-void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n);
-void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n)
+void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && !(  s->nal_unit_type == NAL_TRAIL_N ||
             s->nal_unit_type == NAL_TSA_N   ||
@@ -911,10 +910,24 @@ void ff_hevc_flush_chroma(HEVCContext *s, ThreadFrame *f, int n)
         iocache.s[1].cmd = 3; // clean+invalidate
         iocache.s[1].addr = p->arm + base;
         iocache.s[1].size  = sz;
+
+#ifdef RPI_LUMA_QPU
+        p = av_buffer_pool_opaque(s->frame->buf[0]);
+        sz = s->frame->linesize[0] * (n-curr_y);
+        base = s->frame->linesize[0] * curr_y;
+        iocache.s[2].handle = p->vcsm_handle;
+        iocache.s[2].cmd = 3; // clean+invalidate
+        iocache.s[2].addr = p->arm + base;
+        iocache.s[2].size  = sz;
+#endif
         vcsm_clean_invalid( &iocache );
 #else
         flush_buffer(s->frame->buf[1]);
         flush_buffer(s->frame->buf[2]);
+#ifdef RPI_LUMA_QPU
+        flush_buffer(s->frame->buf[1]);
+#endif
+
 #endif
         //memcpy(s->dummy.arm,s->frame->data[0],2048*64);
         //memcpy(s->dummy.arm,s->frame->data[1],1024*32);
@@ -938,7 +951,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x, y - ctb_size);
             if (s->threads_type & FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
-                ff_hevc_flush_chroma(s,&s->ref->tf, y);
+                ff_hevc_flush_buffer(s,&s->ref->tf, y);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y, 0);
             }
@@ -947,7 +960,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x , y);
             if (s->threads_type & FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
-                ff_hevc_flush_chroma(s, &s->ref->tf, y + ctb_size);
+                ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
             }
@@ -957,7 +970,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
         //int currh = s->ref->tf.progress->data[0];
         //if (((y + ctb_size)&63)==0)
 #ifdef RPI_INTER_QPU
-        ff_hevc_flush_chroma(s, &s->ref->tf, y + ctb_size - 4);
+        ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size - 4);
 #endif
         ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
     }
