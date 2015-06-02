@@ -3397,11 +3397,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     }
 
 #endif
-    s->used_for_ref = !(s->nal_unit_type == NAL_TRAIL_N ||
-                        s->nal_unit_type == NAL_TSA_N   ||
-                        s->nal_unit_type == NAL_STSA_N  ||
-                        s->nal_unit_type == NAL_RADL_N  ||
-                        s->nal_unit_type == NAL_RASL_N);
 
     if (!ctb_addr_ts && s->sh.dependent_slice_segment_flag) {
         av_log(s->avctx, AV_LOG_ERROR, "Impossible initial tile.\n");
@@ -3925,6 +3920,16 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
         if (ret < 0)
             return ret;
 
+        s->used_for_ref = !(s->nal_unit_type == NAL_TRAIL_N ||
+                        s->nal_unit_type == NAL_TSA_N   ||
+                        s->nal_unit_type == NAL_STSA_N  ||
+                        s->nal_unit_type == NAL_RADL_N  ||
+                        s->nal_unit_type == NAL_RASL_N);
+
+        if (!s->used_for_ref && s->avctx->skip_frame >= AVDISCARD_NONREF) {
+            s->is_decoded = 0;
+            break;
+        }
         if (s->max_ra == INT_MAX) {
             if (s->nal_unit_type == NAL_CRA_NUT || IS_BLA(s)) {
                 s->max_ra = s->poc;
