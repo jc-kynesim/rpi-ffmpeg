@@ -539,7 +539,7 @@ static AVBufferRef *rpi_buffer_alloc(int size)
         return NULL;
 
     data = p->arm;
-    //printf("Rpi alloc %d/%d ARM=%p VC=%x\n",size,total,p->arm,p->vc);
+    printf("Rpi alloc %d/%d ARM=%p VC=%x->%x\n",size,total,p->arm,p->vc,p->vc+size);
     //memset(data, 64, size);
     
     if (!data)
