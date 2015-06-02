@@ -149,8 +149,8 @@ add t0s, r0, r1 ; mov ra_frame_base, r2
 add t1s, r2, r1
 
 mov r2,8
-shl rb12,unif, r2 # offset before shift
-add rb13,unif,r2  # offset after shift
+shl rb12,unif,r2 # offset before shift
+add rb13,unif,r2  # denominator
 
 # Compute part of VPM to use for DMA output
 mov r2, unif
@@ -185,7 +185,7 @@ add t1s, r1, ra_frame_base
 
 ################################################################################
 
-# mc_filter_uv(next_kernel, x, y, frame_u_base, frame_v_base, height, hcoeffs[0], hcoeffs[1], vcoeffs[0], vcoeffs[1], this_u_dst, this_v_dst)
+# mc_filter_uv(next_kernel, x, y, frame_u_base, frame_v_base, width_height, hcoeffs, vcoeffs, offset_weight_u, offset_weight_v, this_u_dst, this_v_dst)
 
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
