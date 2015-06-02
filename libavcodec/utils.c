@@ -535,7 +535,6 @@ static AVBufferRef *rpi_buffer_alloc(int size)
     if (!p)
         return NULL;
         
-    size *= 2;
     if (gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
         return NULL;
 
