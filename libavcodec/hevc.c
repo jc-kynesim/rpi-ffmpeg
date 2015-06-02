@@ -83,11 +83,9 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 
 // Split image of 2048 into parts 64 wide
 // So some QPUs will have 3 blocks of 64 to do, and others 2 blocks for an image 2048 wide with 32 blocks across
-// Each block of 64*64
-// Smallest CTU size is 16x16, so smallest block is 8x8
-// Corresponds to a total of 83kbytes over all 12 QPUs
+// For each block of 64*64 the smallest block size is 8x4
 #define RPI_LUMA_COMMAND_WORDS 9
-#define Y_COMMANDS_PER_QPU ((1+3*(64*64)/(8*8)) * RPI_LUMA_COMMAND_WORDS)
+#define Y_COMMANDS_PER_QPU ((1+3*(64*64)/(8*4)) * RPI_LUMA_COMMAND_WORDS)
 
 #define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
@@ -2042,11 +2040,13 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             uint32_t *y = s->y_mvs[chan % 12];
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
+                  int bw = nPbW-start_x;
+                  int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
-                  *y++ = ( (nPbW<16 ? nPbW : 16) << 16 ) + (nPbH<16 ? nPbH : 16);
+                  *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
                       *y++ = (s->sh.luma_offset_l0[current_mv.ref_idx[reflist]] << 16) + (s->sh.luma_weight_l0[current_mv.ref_idx[reflist]] & 0xffff);
@@ -2089,12 +2089,14 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 uint32_t *u = s->u_mvs[chan & 7];
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
+                      int bw = nPbW_c-start_x;
+                      int bh = nPbH_c-start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
-                      *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
+                      *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
                       if (weight_flag) {
@@ -2141,11 +2143,13 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             uint32_t *y = s->y_mvs[chan % 12];
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
+                  int bw = nPbW-start_x;
+                  int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
-                  *y++ = ( (nPbW<16 ? nPbW : 16) << 16 ) + (nPbH<16 ? nPbH : 16);
+                  *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
                       *y++ = (s->sh.luma_offset_l0[current_mv.ref_idx[reflist]] << 16) + (s->sh.luma_weight_l0[current_mv.ref_idx[reflist]] & 0xffff);
@@ -2189,12 +2193,14 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 uint32_t *u = s->u_mvs[chan & 7];
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
+                      int bw = nPbW_c-start_x;
+                      int bh = nPbH_c-start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
-                      *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
+                      *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
@@ -2246,11 +2252,13 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             uint32_t *y = s->y_mvs[chan % 12];
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=8) { // B blocks work 8 at a time
+                  int bw = nPbW-start_x;
+                  int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y2 - 3 + start_y) << 16) + ( (x2 - 3 + start_x) & 0xffff); // Second fetch is for ref1
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
-                  *y++ = ( (nPbW<8 ? nPbW : 8) << 16 ) + (nPbH<16 ? nPbH : 16);
+                  *y++ = ( (bw<8 ? bw : 8) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   *y++ = 1; // B frame weighted prediction not supported
                   *y++ = (get_vc_address(s->frame->buf[0]) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
@@ -2293,12 +2301,14 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 uint32_t *u = s->u_mvs[chan & 7];
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
+                      int bw = nPbW_c-start_x;
+                      int bh = nPbH_c-start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b0;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
-                      *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
+                      *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
                       u+=2; // Weights not supported in B slices
@@ -2309,7 +2319,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y2_c - 1 + start_y;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
                       u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
-                      *u++ = ( (nPbW_c<RPI_CHROMA_BLOCK_WIDTH ? nPbW_c : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (nPbH_c<16 ? nPbH_c : 16);
+                      *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx2][0];
                       *u++ = rpi_filter_coefs[_my2][0];
                       u+=2; // Weights not supported in B slices
@@ -3178,14 +3188,15 @@ static void rpi_simulate_inter_chroma(HEVCContext *s,uint32_t *p)
 }
 
 // mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, next_kernel)
-static void rpi_simulate_inter_luma(HEVCContext *s,uint32_t *p)
+static void rpi_simulate_inter_luma(HEVCContext *s,uint32_t *p,int chan)
 {
   uint32_t next_kernel;
   int y_x,y2_x2;
-  uint32_t x0;
-  uint32_t y0;
-  uint32_t x2;
-  uint32_t y2;
+  int x0;
+  int y0;
+  int x2;
+  int y2;
+  uint32_t *p0 = p;
   uint8_t *ref_y_base;
   uint8_t *ref_y2_base;
   uint32_t frame_width_height = p[4];
@@ -3215,13 +3226,15 @@ static void rpi_simulate_inter_luma(HEVCContext *s,uint32_t *p)
       uint8_t *this_dst = compute_arm_addr(s,p[7],0);
       uint32_t width = width_height >> 16;
       uint32_t height = (width_height << 16) >> 16;
+      uint8_t *dst_base = s->frame->data[0];
       ref_y_base = compute_arm_addr(s,p[1-9],0);
       ref_y2_base = compute_arm_addr(s,p[3-9],0);
       for (y=0; y<height; ++y) {
         for (x=0; x<width; ++x) {
           if (next_kernel==s->mc_filter) {
             int32_t refa = filter8_luma(ref_y_base,x+x0, y+y0, pitch, my2_mx2_my_mx, offset_weight,offset_before,denom,frame_width,frame_height);
-            this_dst[x+y*dst_pitch] = av_clip_uint8(refa);
+            refa = av_clip_uint8(refa);
+            this_dst[x+y*dst_pitch] = refa;
           }
           else {
             int32_t refa = filter8_luma(ref_y_base, x+x0, y+y0, pitch, my2_mx2_my_mx, 1, 0, 0, frame_width, frame_height);
@@ -3248,7 +3261,7 @@ static void rpi_simulate_inter_qpu(HEVCContext *s)
   }
   for(i=0;i<12;i++)
   {
-    rpi_simulate_inter_luma(s,s->y_mvs_base[i]);
+    rpi_simulate_inter_luma(s,s->y_mvs_base[i],i);
   }
 }
 
@@ -3290,7 +3303,6 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
 
 #ifdef RPI_SIMULATE_QPUS
     rpi_simulate_inter_qpu(s);
-    s->vpu_id = -1;
     return;
 #endif
 
