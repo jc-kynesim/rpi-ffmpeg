@@ -3397,6 +3397,11 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     }
 
 #endif
+    s->used_for_ref = !(s->nal_unit_type == NAL_TRAIL_N ||
+                        s->nal_unit_type == NAL_TSA_N   ||
+                        s->nal_unit_type == NAL_STSA_N  ||
+                        s->nal_unit_type == NAL_RADL_N  ||
+                        s->nal_unit_type == NAL_RASL_N);
 
     if (!ctb_addr_ts && s->sh.dependent_slice_segment_flag) {
         av_log(s->avctx, AV_LOG_ERROR, "Impossible initial tile.\n");

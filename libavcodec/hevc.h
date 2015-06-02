@@ -890,6 +890,8 @@ typedef struct HEVCContext {
     int                 width;
     int                 height;
 
+    int used_for_ref;
+
 #ifdef RPI
     int enable_rpi;
     HEVCMvCmd *unif_mv_cmds;
