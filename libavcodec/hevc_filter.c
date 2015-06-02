@@ -512,16 +512,14 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                s->ps.pps->transquant_bypass_enable_flag;
 
 #ifdef DISABLE_DEBLOCK_NONREF
-    if (    s->nal_unit_type == NAL_TRAIL_N ||
-            s->nal_unit_type == NAL_TSA_N   ||
-            s->nal_unit_type == NAL_STSA_N  ||
-            s->nal_unit_type == NAL_RADL_N  ||
-            s->nal_unit_type == NAL_RASL_N )
+    if (!s->used_for_ref)
       return; // Don't deblock non-reference frames
 #endif
 #ifdef DISABLE_DEBLOCK
     return;
 #endif
+    if (!s->used_for_ref && s->avctx->skip_loop_filter >= AVDISCARD_NONREF)
+        return;
 
     if (x0) {
         left_tc_offset   = s->deblock[ctb - 1].tc_offset;
@@ -885,11 +883,7 @@ static int ff_hevc_buf_base(AVBufferRef *bref) {
 
 void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 {
-    if (s->enable_rpi && !(  s->nal_unit_type == NAL_TRAIL_N ||
-            s->nal_unit_type == NAL_TSA_N   ||
-            s->nal_unit_type == NAL_STSA_N  ||
-            s->nal_unit_type == NAL_RADL_N  ||
-            s->nal_unit_type == NAL_RASL_N )) {
+    if (s->enable_rpi && s->used_for_ref) {
 #ifdef RPI_FAST_CACHEFLUSH
         struct vcsm_user_clean_invalid_s iocache = {};
         int curr_y = ((int *)f->progress->data)[0];
