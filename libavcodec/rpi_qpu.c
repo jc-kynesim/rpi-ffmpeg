@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-#include <assert.h>
+#include "libavutil/avassert.h"
 
 #include "config.h"
 
@@ -160,13 +160,13 @@ static int gpu_init(volatile struct GPU **gpu) {
   // Now copy over the QPU code into GPU memory
   {
     int num_bytes = qpu_get_fn(QPU_MC_END) - qpu_get_fn(QPU_MC_SETUP_UV);
-    assert(num_bytes<=QPU_CODE_SIZE*sizeof(unsigned int));
+    av_assert0(num_bytes<=QPU_CODE_SIZE*sizeof(unsigned int));
     memcpy((void*)ptr->qpu_code, rpi_shader, num_bytes);
   }
   // And the VPU code
   {
     int num_bytes = sizeof(rpi_hevc_transform);
-    assert(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
+    av_assert0(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
     memcpy((void*)ptr->vpu_code, rpi_hevc_transform, num_bytes);
   }
   // And the transform coefficients
@@ -216,13 +216,13 @@ static void gpu_unlock(void) {
 static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb) {
   p->numbytes = numbytes;
   p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
-  assert(p->vcsm_handle);
+  av_assert0(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
-  assert(p->vc_handle);
+  av_assert0(p->vc_handle);
   p->arm = vcsm_lock(p->vcsm_handle);
-  assert(p->arm);
+  av_assert0(p->arm);
   p->vc = mem_lock(mb, p->vc_handle);
-  assert(p->vc);
+  av_assert0(p->vc);
   return 0;
 }
 
@@ -243,7 +243,7 @@ int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
 
 int gpu_get_mailbox(void)
 {
-  assert(gpu);
+  av_assert0(gpu);
   return gpu->mb;
 }
 
@@ -297,13 +297,13 @@ static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
-  assert(p->vcsm_handle);
+  av_assert0(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
-  assert(p->vc_handle);
+  av_assert0(p->vc_handle);
   p->arm = vcsm_lock(p->vcsm_handle);
-  assert(p->arm);
+  av_assert0(p->arm);
   p->vc = mem_lock(gpu->mb, p->vc_handle);
-  assert(p->vc);
+  av_assert0(p->vc);
   return 0;
 }
 
