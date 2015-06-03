@@ -133,11 +133,11 @@ static uint32_t get_vc_address(AVBufferRef *bref) {
 static void worker_submit_job(HEVCContext *s)
 {
   LOG_ENTER
-  //pthread_mutex_lock(&s->worker_mutex);
-  s->worker_tail++; // This is the only place that can change tail so we do not need the mutex
+  pthread_mutex_lock(&s->worker_mutex);
+  s->worker_tail++;
   s->pass0_job = (s->pass0_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
   pthread_cond_broadcast(&s->worker_cond_tail); // Let people know that the tail has moved
-  //pthread_mutex_unlock(&s->worker_mutex);
+  pthread_mutex_unlock(&s->worker_mutex);
   LOG_EXIT
 }
 
@@ -145,11 +145,11 @@ static void worker_submit_job(HEVCContext *s)
 static void worker_complete_middle_job(HEVCContext *s)
 {
   LOG_ENTER
-  //pthread_mutex_lock(&s->worker_mutex);
-  s->worker_middle++; // This is the only place that can change head so we do not need the mutex
+  pthread_mutex_lock(&s->worker_mutex);
+  s->worker_middle++;
   s->pass1_job = (s->pass1_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
-  pthread_cond_broadcast(&s->worker_cond_middle); // Let people know that the tail has moved
-  //pthread_mutex_unlock(&s->worker_mutex);
+  pthread_cond_broadcast(&s->worker_cond_middle); // Let people know that the middle has moved
+  pthread_mutex_unlock(&s->worker_mutex);
   LOG_EXIT
 }
 
@@ -157,11 +157,11 @@ static void worker_complete_middle_job(HEVCContext *s)
 static void worker_complete_job(HEVCContext *s)
 {
   LOG_ENTER
-  //pthread_mutex_lock(&s->worker_mutex);
-  s->worker_head++; // This is the only place that can change head so we do not need the mutex
+  pthread_mutex_lock(&s->worker_mutex);
+  s->worker_head++;
   s->pass2_job = (s->pass2_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
-  pthread_cond_broadcast(&s->worker_cond_head); // Let people know that the tail has moved
-  //pthread_mutex_unlock(&s->worker_mutex);
+  pthread_cond_broadcast(&s->worker_cond_head); // Let people know that the head has moved
+  pthread_mutex_unlock(&s->worker_mutex);
   LOG_EXIT
 }
 
