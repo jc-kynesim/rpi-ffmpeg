@@ -43,6 +43,7 @@
 
 #ifdef RPI
   #include "rpi_qpu.h"
+  #include "rpi_user_vcsm.h"
   // Move Inter prediction into separate pass
   #define RPI_INTER
 
@@ -3508,6 +3509,7 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
 #else
     gpu_cache_flush(&s->coeffs_buf_accelerated[job]);
 #endif
+
     s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3], s->num_coeffs[job][3] >> 10, 0,
                                    qpu_get_fn(QPU_MC_SETUP_UV),
                                    (uint32_t)(unif_vc+(s->mvs_base[job][0 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
@@ -3558,6 +3560,71 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
 }
 #endif
 
+#ifdef RPI
+
+static void flush_buffer(AVBufferRef *bref) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
+    gpu_cache_flush(p);
+}
+
+static void flush_frame(HEVCContext *s,AVFrame *frame)
+{
+#if 1
+    struct vcsm_user_clean_invalid_s iocache = {};
+    int n = s->ps.sps->height;
+    int curr_y = 0;
+    int curr_uv = 0;
+    int n_uv = n >> s->ps.sps->vshift[1];
+    int sz,base;
+    sz = s->frame->linesize[1] * (n_uv-curr_uv);
+    base = s->frame->linesize[1] * curr_uv;
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].cmd = 3; // clean+invalidate
+    iocache.s[0].addr = p->arm + base;
+    iocache.s[0].size  = sz;
+    p = av_buffer_pool_opaque(frame->buf[2]);
+    iocache.s[1].handle = p->vcsm_handle;
+    iocache.s[1].cmd = 3; // clean+invalidate
+    iocache.s[1].addr = p->arm + base;
+    iocache.s[1].size  = sz;
+    p = av_buffer_pool_opaque(frame->buf[0]);
+    sz = s->frame->linesize[0] * (n-curr_y);
+    base = s->frame->linesize[0] * curr_y;
+    iocache.s[2].handle = p->vcsm_handle;
+    iocache.s[2].cmd = 3; // clean+invalidate
+    iocache.s[2].addr = p->arm + base;
+    iocache.s[2].size  = sz;
+    vcsm_clean_invalid( &iocache );
+#else
+    flush_buffer(frame->buf[0]);
+    flush_buffer(frame->buf[1]);
+    flush_buffer(frame->buf[2]);
+#endif
+}
+
+static void flush_all(HEVCContext *s)
+{
+#if 0
+    struct vcsm_user_clean_invalid_s iocache = {};
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(s->frame->buf[0]);
+    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].cmd = 4; // Flush all
+    iocache.s[0].addr = p->arm;
+    iocache.s[0].size  = 4096;
+    vcsm_clean_invalid( &iocache );
+#else
+  int i,k;
+  for(i=0;i<2;i++) {
+    for (k = 0; k < s->sh.nb_refs[i]; k++) {
+      flush_frame(s,s->ref->refPicList[i].ref[k]->frame);
+    }
+  }
+  flush_frame(s,s->frame);
+#endif
+}
+#endif
+
 static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 {
     HEVCContext *s  = avctxt->priv_data;
@@ -3592,7 +3659,11 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         printf("Weighted B slice\n");
     }
 
+    // Now flush all reference frames and our destination frame to get everything ready for decode
+    flush_all(s);
 #endif
+
+    //printf("L0=%d L1=%d\n",s->sh.nb_refs[L1],s->sh.nb_refs[L1]);
 
     if (!ctb_addr_ts && s->sh.dependent_slice_segment_flag) {
         av_log(s->avctx, AV_LOG_ERROR, "Impossible initial tile.\n");
@@ -3664,6 +3735,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             rpi_do_all_passes(s);
 #endif
           }
+
         }
 #endif
 
