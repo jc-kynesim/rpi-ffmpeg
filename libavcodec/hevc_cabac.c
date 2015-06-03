@@ -1497,7 +1497,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 for (i = 0; i < 8; i++)
                     FFSWAP(int16_t, coeffs[i], coeffs[16 - i - 1]);
             }
-
             s->hevcdsp.transform_skip(coeffs, log2_trafo_size);
 
             if (explicit_rdpcm_flag || (s->ps.sps->implicit_rdpcm_enabled_flag &&
