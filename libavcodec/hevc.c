@@ -3569,7 +3569,7 @@ static void flush_buffer(AVBufferRef *bref) {
 
 static void flush_frame(HEVCContext *s,AVFrame *frame)
 {
-#if 1
+#ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};
     int n = s->ps.sps->height;
     int curr_y = 0;
@@ -3603,26 +3603,6 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
 #endif
 }
 
-static void flush_all(HEVCContext *s)
-{
-#if 0
-    struct vcsm_user_clean_invalid_s iocache = {};
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(s->frame->buf[0]);
-    iocache.s[0].handle = p->vcsm_handle;
-    iocache.s[0].cmd = 4; // Flush all
-    iocache.s[0].addr = p->arm;
-    iocache.s[0].size  = 4096;
-    vcsm_clean_invalid( &iocache );
-#else
-  int i,k;
-  for(i=0;i<2;i++) {
-    for (k = 0; k < s->sh.nb_refs[i]; k++) {
-      flush_frame(s,s->ref->refPicList[i].ref[k]->frame);
-    }
-  }
-  flush_frame(s,s->frame);
-#endif
-}
 #endif
 
 static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
@@ -3658,9 +3638,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
       if (s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE)
         printf("Weighted B slice\n");
     }
-
-    // Now flush all reference frames and our destination frame to get everything ready for decode
-    flush_all(s);
 #endif
 
     //printf("L0=%d L1=%d\n",s->sh.nb_refs[L1],s->sh.nb_refs[L1]);
@@ -4130,6 +4107,11 @@ static int hevc_frame_start(HEVCContext *s)
     if (!s->avctx->hwaccel)
         ff_thread_finish_setup(s->avctx);
 
+#ifdef RPI_INTER_QPU
+    // Invalidate the output data buffer so it is ready for the QPUs to write into it.
+    flush_frame(s,s->frame);
+#endif
+
     return 0;
 
 fail:
@@ -4331,6 +4313,11 @@ fail:
         ff_hevc_flush_buffer(s, &s->ref->tf, s->ps.sps->height);
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
+    } else if (s->ref) {
+#ifdef RPI_INTER_QPU
+      // When running single threaded we need to flush the whole frame
+      flush_frame(s,s->frame);
+#endif
     }
     return ret;
 }
