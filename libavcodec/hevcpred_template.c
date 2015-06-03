@@ -71,8 +71,11 @@ do {                                  \
                 AV_WN4P(&ptr[i], a);                                           \
             else                                                               \
                 a = PIXEL_SPLAT_X4(ptr[i + 3])
-
+#ifdef RPI_WORKER
+    HEVCLocalContextIntra *lc = &s->HEVClcIntra;
+#else
     HEVCLocalContext *lc = s->HEVClc;
+#endif
     int i;
     int hshift = s->sps->hshift[c_idx];
     int vshift = s->sps->vshift[c_idx];
