@@ -1051,11 +1051,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     if (s->enable_rpi) {
         int n = trafo_size * trafo_size;
         if (use_vpu) {
-            coeffs = s->coeffs_buf_arm[log2_trafo_size - 2] + s->num_coeffs[log2_trafo_size - 2];
-            s->num_coeffs[log2_trafo_size - 2] += n;
+            coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] + s->num_coeffs[s->pass0_job][log2_trafo_size - 2];
+            s->num_coeffs[s->pass0_job][log2_trafo_size - 2] += n;
         } else {
-            coeffs = s->coeffs_buf_arm[0] + s->num_coeffs[0];
-            s->num_coeffs[0] += n;
+            coeffs = s->coeffs_buf_arm[s->pass0_job][0] + s->num_coeffs[s->pass0_job][0];
+            s->num_coeffs[s->pass0_job][0] += n;
         }
     }
     // We now do the memset after transform_add while we know the data is cached.
@@ -1508,7 +1508,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 s->hevcdsp.transform_rdpcm(coeffs, log2_trafo_size, mode);
             }
         } else if (lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2) {
-            s->hevcdsp.idct_4x4_luma(coeffs);
+           s->hevcdsp.idct_4x4_luma(coeffs);
         } else {
 #ifdef RPI
             if (!use_vpu) {
@@ -1553,7 +1553,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     }
 #ifdef RPI
     if (s->enable_rpi) {
-        HEVCPredCmd *cmd = s->univ_pred_cmds + s->num_pred_cmds++;
+        HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
         cmd->type = RPI_PRED_TRANSFORM_ADD;
         cmd->size = log2_trafo_size;
         cmd->buf = coeffs;

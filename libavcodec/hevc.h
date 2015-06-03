@@ -51,6 +51,12 @@
     // Define RPI_LUMA_QPU to also use QPU for luma inter prediction
     #define RPI_LUMA_QPU
   #endif
+
+  // By passing jobs to a worker thread we hope to be able to catch up during slow frames
+  #define RPI_MAX_JOBS 2
+  // Define RPI_WORKER to launch a worker thread for pixel processing tasks
+  #define RPI_WORKER
+
 #endif
 
 #define MAX_DPB_SIZE 16 // A.4.1
@@ -806,6 +812,13 @@ typedef struct HEVCLocalContext {
     int boundary_flags;
 } HEVCLocalContext;
 
+#ifdef RPI_WORKER
+typedef struct HEVCLocalContextIntra {
+    TransformUnit tu;
+    NeighbourAvailable na;
+} HEVCLocalContextIntra;
+#endif
+
 #ifdef RPI
 
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
@@ -874,7 +887,7 @@ typedef struct HEVCPredCmd {
 
 typedef struct HEVCContext {
 #ifdef RPI
-    int dblk_cmds[RPI_MAX_DEBLOCK_CMDS][2];
+    int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
 #endif
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
@@ -883,7 +896,9 @@ typedef struct HEVCContext {
 
     HEVCLocalContext    *HEVClcList[MAX_NB_THREADS];
     HEVCLocalContext    *HEVClc;
-
+#ifdef RPI_WORKER
+    HEVCLocalContextIntra HEVClcIntra;
+#endif
     uint8_t             threads_type;
     uint8_t             threads_number;
 
@@ -894,41 +909,58 @@ typedef struct HEVCContext {
 
 #ifdef RPI
     int enable_rpi;
-    HEVCMvCmd *unif_mv_cmds;
-    HEVCPredCmd *univ_pred_cmds;
+    HEVCMvCmd *unif_mv_cmds[RPI_MAX_JOBS];
+    HEVCPredCmd *univ_pred_cmds[RPI_MAX_JOBS];
     int buf_width;
-    GPU_MEM_PTR_T coeffs_buf_default;
-    GPU_MEM_PTR_T coeffs_buf_accelerated;
-    int16_t *coeffs_buf_arm[4];
-    unsigned int coeffs_buf_vc[4];
-    int num_coeffs[4];
-    int num_xfm_cmds;
-    int num_mv_cmds;
-    int num_pred_cmds;
-    int num_dblk_cmds;
+    GPU_MEM_PTR_T coeffs_buf_default[RPI_MAX_JOBS];
+    GPU_MEM_PTR_T coeffs_buf_accelerated[RPI_MAX_JOBS];
+    int16_t *coeffs_buf_arm[RPI_MAX_JOBS][4];
+    unsigned int coeffs_buf_vc[RPI_MAX_JOBS][4];
+    int num_coeffs[RPI_MAX_JOBS][4];
+    int num_xfm_cmds[RPI_MAX_JOBS];
+    int num_mv_cmds[RPI_MAX_JOBS];
+    int num_pred_cmds[RPI_MAX_JOBS];
+    int num_dblk_cmds[RPI_MAX_JOBS];
     int vpu_id;
     //GPU_MEM_PTR_T dummy;
+    int pass0_job; // Pass0 does coefficient decode
+    int pass1_job; // Pass1 does pixel processing
+    int pass2_job; // Pass2 does reconstruction and deblocking
 #ifdef RPI_INTER_QPU
-    GPU_MEM_PTR_T unif_mvs_ptr;
-    uint32_t *unif_mvs; // Base of memory for motion vector commands
+    GPU_MEM_PTR_T unif_mvs_ptr[RPI_MAX_JOBS];
+    uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
 
     // _base pointers are to the start of the row
-    uint32_t *mvs_base[8];
+    uint32_t *mvs_base[RPI_MAX_JOBS][8];
     // these pointers are to the next free space
-    uint32_t *u_mvs[8];
+    uint32_t *u_mvs[RPI_MAX_JOBS][8];
     // Function pointers
     uint32_t mc_filter_uv;
     uint32_t mc_filter_uv_b0;
     uint32_t mc_filter_uv_b;
 #endif
 #ifdef RPI_LUMA_QPU
-    GPU_MEM_PTR_T y_unif_mvs_ptr;
-    uint32_t *y_unif_mvs; // Base of memory for motion vector commands
-    uint32_t *y_mvs_base[12];
-    uint32_t *y_mvs[12];
+    GPU_MEM_PTR_T y_unif_mvs_ptr[RPI_MAX_JOBS];
+    uint32_t *y_unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
+    uint32_t *y_mvs_base[RPI_MAX_JOBS][12];
+    uint32_t *y_mvs[RPI_MAX_JOBS][12];
     // Function pointers
     uint32_t mc_filter;
     uint32_t mc_filter_b;
+#endif
+
+#ifdef RPI_WORKER
+    pthread_t worker_thread;
+    pthread_t worker_deblock_thread;
+    pthread_cond_t worker_cond_head;
+    pthread_cond_t worker_cond_tail;
+    pthread_cond_t worker_cond_middle;
+    pthread_mutex_t worker_mutex;
+
+    int worker_tail; // Contains the number of posted jobs
+    int worker_head; // Contains the number of completed jobs
+    int worker_middle; // Contains the number of completed jobs
+    int kill_worker; // set to 1 to terminate the worker
 #endif
 
 #endif
