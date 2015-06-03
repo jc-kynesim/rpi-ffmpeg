@@ -919,7 +919,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
         flush_buffer(s->frame->buf[1]);
         flush_buffer(s->frame->buf[2]);
 #ifdef RPI_LUMA_QPU
-        flush_buffer(s->frame->buf[1]);
+        flush_buffer(s->frame->buf[0]);
 #endif
 
 #endif
