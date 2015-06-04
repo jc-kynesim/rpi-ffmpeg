@@ -3822,11 +3822,6 @@ static int hls_decode_entry_wpp(AVCodecContext *avctxt, void *input_ctb_row, int
 
 #ifdef RPI
     s->enable_rpi = 0;
-    s->used_for_ref = !(s->nal_unit_type == NAL_TRAIL_N ||
-                        s->nal_unit_type == NAL_TSA_N   ||
-                        s->nal_unit_type == NAL_STSA_N  ||
-                        s->nal_unit_type == NAL_RADL_N  ||
-                        s->nal_unit_type == NAL_RASL_N); 
     //printf("Wavefront\n");
 #endif
 
