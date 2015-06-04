@@ -67,6 +67,8 @@
   static void rpi_execute_pred_cmds(HEVCContext *s);
   static void rpi_execute_inter_cmds(HEVCContext *s);
   static void rpi_begin(HEVCContext *s);
+  static void flush_frame(HEVCContext *s,AVFrame *frame);
+  static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2);
 
   // Define INTER_PASS0 to do inter prediction in first pass
   //#define INTER_PASS0
@@ -227,6 +229,11 @@ static void *worker_start(void *arg)
     // Wait for transform completion
     vpu_wait(s->vpu_id);
 
+    // Perform intra prediction and residual reconstruction
+    rpi_execute_pred_cmds(s);
+    // Perform deblocking for CTBs in this row
+    rpi_execute_dblk_cmds(s);
+
     worker_complete_middle_job(s);
     LOG_EXIT
   }
@@ -248,10 +255,6 @@ static void *worker_deblock_start(void *arg)
       break;
     }
     LOG_ENTER
-    // Perform intra prediction and residual reconstruction
-    rpi_execute_pred_cmds(s);
-    // Perform deblocking for CTBs in this row
-    rpi_execute_dblk_cmds(s);
 
     worker_complete_job(s);
     LOG_EXIT
@@ -2983,7 +2986,7 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
 static void rpi_execute_dblk_cmds(HEVCContext *s)
 {
     int n;
-    int job = s->pass2_job;
+    int job = s->pass1_job;
     int ctb_size    = 1 << s->ps.sps->log2_ctb_size;
     int (*p)[2] = s->dblk_cmds[job];
     for(n = s->num_dblk_cmds[job]; n>0 ;n--,p++) {
@@ -3021,7 +3024,7 @@ static void rpi_execute_transform(HEVCContext *s)
 static void rpi_execute_pred_cmds(HEVCContext *s)
 {
   int i;
-  int job = s->pass2_job;
+  int job = s->pass1_job;
   HEVCPredCmd *cmd = s->univ_pred_cmds[job];
 #ifdef RPI_WORKER
   HEVCLocalContextIntra *lc = &s->HEVClcIntra;
@@ -3506,11 +3509,10 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 
 #ifdef RPI_MULTI_MAILBOX
 #ifdef RPI_CACHE_UNIF_MVS
-    gpu_cache_flush3(&s->coeffs_buf_accelerated[job],&s->y_unif_mvs_ptr[job], &s->unif_mvs_ptr[job]);
+    flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],&s->y_unif_mvs_ptr[job], &s->unif_mvs_ptr[job]);
 #else
-    gpu_cache_flush(&s->coeffs_buf_accelerated[job]);
+    flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],NULL,NULL);
 #endif
-
     s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3], s->num_coeffs[job][3] >> 10, 0,
                                    qpu_get_fn(QPU_MC_SETUP_UV),
                                    (uint32_t)(unif_vc+(s->mvs_base[job][0 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
@@ -3610,6 +3612,60 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
     flush_buffer(frame->buf[0]);
     flush_buffer(frame->buf[1]);
     flush_buffer(frame->buf[2]);
+#endif
+}
+
+static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2)
+{
+#ifdef RPI_FAST_CACHEFLUSH
+    struct vcsm_user_clean_invalid_s iocache = {};
+    int n = s->ps.sps->height;
+    int curr_y = 0;
+    int curr_uv = 0;
+    int n_uv = n >> s->ps.sps->vshift[1];
+    int sz,base;
+    sz = s->frame->linesize[1] * (n_uv-curr_uv);
+    base = s->frame->linesize[1] * curr_uv;
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].cmd = 3; // clean+invalidate
+    iocache.s[0].addr = p->arm + base;
+    iocache.s[0].size  = sz;
+    p = av_buffer_pool_opaque(frame->buf[2]);
+    iocache.s[1].handle = p->vcsm_handle;
+    iocache.s[1].cmd = 3; // clean+invalidate
+    iocache.s[1].addr = p->arm + base;
+    iocache.s[1].size  = sz;
+    p = av_buffer_pool_opaque(frame->buf[0]);
+    sz = s->frame->linesize[0] * (n-curr_y);
+    base = s->frame->linesize[0] * curr_y;
+    iocache.s[2].handle = p->vcsm_handle;
+    iocache.s[2].cmd = 3; // clean+invalidate
+    iocache.s[2].addr = p->arm + base;
+    iocache.s[2].size  = sz;
+
+    iocache.s[3].handle = p0->vcsm_handle;
+    iocache.s[3].cmd = 3; // clean+invalidate
+    iocache.s[3].addr = (int) p0->arm;
+    iocache.s[3].size  = p0->numbytes;
+    if (p1) {
+      iocache.s[4].handle = p1->vcsm_handle;
+      iocache.s[4].cmd = 3; // clean+invalidate
+      iocache.s[4].addr = (int) p1->arm;
+      iocache.s[4].size  = p1->numbytes;
+    }
+    if (p2) {
+      iocache.s[5].handle = p2->vcsm_handle;
+      iocache.s[5].cmd = 3; // clean+invalidate
+      iocache.s[5].addr = (int) p2->arm;
+      iocache.s[5].size  = p2->numbytes;
+    }
+    vcsm_clean_invalid( &iocache );
+#else
+    flush_buffer(frame->buf[0]);
+    flush_buffer(frame->buf[1]);
+    flush_buffer(frame->buf[2]);
+    gpu_cache_flush3(p0, p1, p2);
 #endif
 }
 
@@ -4126,11 +4182,6 @@ static int hevc_frame_start(HEVCContext *s)
 
     if (!s->avctx->hwaccel)
         ff_thread_finish_setup(s->avctx);
-
-#ifdef RPI_INTER_QPU
-    // Invalidate the output data buffer so it is ready for the QPUs to write into it.
-    flush_frame(s,s->frame);
-#endif
 
     return 0;
 
