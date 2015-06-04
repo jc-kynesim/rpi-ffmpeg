@@ -823,8 +823,15 @@ typedef struct HEVCLocalContext {
 
 #ifdef RPI
 
+// The processing is done in chunks
+// Each chunk corresponds to 24 64x64 luma blocks (24 so it is divisible by 8 for chroma and 12 for luma)
+// This is a distance of 1536 pixels across the screen
+// Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
+// but allocate more memory and increase the latency before data in the next frame can be processed
+#define RPI_NUM_CHUNKS 1
+
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
-#define RPI_MAX_WIDTH 2048
+#define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*24)
 
 // Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane, * 2 for bi
 #define RPI_MAX_MV_CMDS   (2*16*3*(RPI_MAX_WIDTH/4))
@@ -888,9 +895,6 @@ typedef struct HEVCPredCmd {
 #endif
 
 typedef struct HEVCContext {
-#ifdef RPI
-    int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
-#endif
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
 
@@ -928,6 +932,10 @@ typedef struct HEVCContext {
     int pass0_job; // Pass0 does coefficient decode
     int pass1_job; // Pass1 does pixel processing
     int pass2_job; // Pass2 does reconstruction and deblocking
+    int ctu_count; // Number of CTUs done in pass0 so far
+    int max_ctu_count; // Number of CTUs when we trigger a round of processing
+    int ctu_per_y_chan; // Number of CTUs per luma QPU
+    int ctu_per_uv_chan; // Number of CTUs per chroma QPU
 #ifdef RPI_INTER_QPU
     GPU_MEM_PTR_T unif_mvs_ptr[RPI_MAX_JOBS];
     uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
@@ -936,6 +944,7 @@ typedef struct HEVCContext {
     uint32_t *mvs_base[RPI_MAX_JOBS][8];
     // these pointers are to the next free space
     uint32_t *u_mvs[RPI_MAX_JOBS][8];
+    uint32_t *curr_u_mvs; // Current uniform stream to use for chroma
     // Function pointers
     uint32_t mc_filter_uv;
     uint32_t mc_filter_uv_b0;
@@ -946,6 +955,7 @@ typedef struct HEVCContext {
     uint32_t *y_unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
     uint32_t *y_mvs_base[RPI_MAX_JOBS][12];
     uint32_t *y_mvs[RPI_MAX_JOBS][12];
+    uint32_t *curr_y_mvs; // Current uniform stream for luma
     // Function pointers
     uint32_t mc_filter;
     uint32_t mc_filter_b;
@@ -1084,6 +1094,9 @@ typedef struct HEVCContext {
     uint32_t max_mastering_luminance;
     uint32_t min_mastering_luminance;
 
+#ifdef RPI
+    int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
+#endif
 } HEVCContext;
 
 int ff_hevc_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,

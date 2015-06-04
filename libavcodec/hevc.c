@@ -63,10 +63,10 @@
 
   static void rpi_execute_dblk_cmds(HEVCContext *s);
   static void rpi_execute_transform(HEVCContext *s);
-  static void rpi_execute_inter_qpu(HEVCContext *s);
+  static void rpi_launch_vpu_qpu(HEVCContext *s);
   static void rpi_execute_pred_cmds(HEVCContext *s);
   static void rpi_execute_inter_cmds(HEVCContext *s);
-  static void rpi_inter_clear(HEVCContext *s);
+  static void rpi_begin(HEVCContext *s);
 
   // Define INTER_PASS0 to do inter prediction in first pass
   //#define INTER_PASS0
@@ -90,16 +90,18 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 
 #ifdef RPI_INTER_QPU
 
+// Each luma QPU processes 2*RPI_NUM_CHUNKS 64x64 blocks
+// Each chroma QPU processes 3*RPI_NUM_CHUNKS 64x64 blocks, but requires two commands for B blocks
+// For each block of 64*64 the smallest block size is 8x4
+// We also need an extra command for the setup information
+
 #define RPI_CHROMA_COMMAND_WORDS 12
-#define UV_COMMANDS_PER_QPU ((1 + (256*64*2)/(4*4)) * RPI_CHROMA_COMMAND_WORDS)
+#define UV_COMMANDS_PER_QPU ((1 + 3*RPI_NUM_CHUNKS*(64*64)*2/(8*4)) * RPI_CHROMA_COMMAND_WORDS)
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
 
-// Split image of 2048 into parts 64 wide
-// So some QPUs will have 3 blocks of 64 to do, and others 2 blocks for an image 2048 wide with 32 blocks across
-// For each block of 64*64 the smallest block size is 8x4
 #define RPI_LUMA_COMMAND_WORDS 9
-#define Y_COMMANDS_PER_QPU ((1+3*(64*64)/(8*4)) * RPI_LUMA_COMMAND_WORDS)
+#define Y_COMMANDS_PER_QPU ((1+2*RPI_NUM_CHUNKS*(64*64)/(8*4)) * RPI_LUMA_COMMAND_WORDS)
 
 #define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
@@ -216,7 +218,7 @@ static void *worker_start(void *arg)
     LOG_ENTER
     // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
 #ifndef LAUNCH_PASS0
-    rpi_execute_inter_qpu(s);
+    rpi_launch_vpu_qpu(s);
 #endif
 #ifndef INTER_PASS0
     // Perform inter prediction
@@ -322,9 +324,14 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 
 #ifdef RPI
     av_assert0(sps);
-    int coeffs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
-    int coefs_per_row = sps->ctb_width * coeffs_in_ctb * 3;  // Allow space for chroma
+    int coefs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
+    int coefs_per_luma = 64*64*24*RPI_NUM_CHUNKS;
+    int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
+    int coefs_per_row = coefs_per_luma + coefs_per_chroma;
     int job;
+    s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
+    s->ctu_per_y_chan = s->max_ctu_count / 12;
+    s->ctu_per_uv_chan = s->max_ctu_count / 8;
     for(job=0;job<RPI_MAX_JOBS;job++) {
       printf("Allocated %d\n",coefs_per_row);
       for(job=0;job<RPI_MAX_JOBS;job++) {
@@ -2186,10 +2193,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             int my2_mx2_my_mx = (my_mx << 16) + my_mx;
             int x1 = x0 + (mv->x >> 2);
             int y1 = y0 + (mv->y >> 2);
-            int chan = x0>>6; // 64 wide blocks per QPU
             int weight_flag = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
                               (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
-            uint32_t *y = s->y_mvs[s->pass0_job][chan % 12];
+            uint32_t *y = s->curr_y_mvs;
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
                   int bw = nPbW-start_x;
@@ -2209,7 +2215,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
             }
-            s->y_mvs[s->pass0_job][chan % 12] = y;
+            s->curr_y_mvs = y;
         } else
 #endif
         {
@@ -2233,12 +2239,10 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
                 int x1_c = x0_c + (mv->x >> (2 + hshift));
                 int y1_c = y0_c + (mv->y >> (2 + hshift));
-                //int chan = x0>>8; // Allocate commands for the first 256 luma pixels across to the first QPU.  This is optimised for images around 1920 width
-                int chan = x0>>8;
                 int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
                                        (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
 
-                uint32_t *u = s->u_mvs[s->pass0_job][chan & 7];
+                uint32_t *u = s->curr_u_mvs;
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       int bw = nPbW_c-start_x;
@@ -2262,7 +2266,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
-                s->u_mvs[s->pass0_job][chan & 7] = u;
+                s->curr_u_mvs = u;
                 return;
             }
 #endif
@@ -2289,10 +2293,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             int my2_mx2_my_mx = (my_mx << 16) + my_mx;
             int x1 = x0 + (mv->x >> 2);
             int y1 = y0 + (mv->y >> 2);
-            int chan = x0>>6; // 64 wide blocks per QPU
             int weight_flag = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
                               (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
-            uint32_t *y = s->y_mvs[s->pass0_job][chan % 12];
+            uint32_t *y = s->curr_y_mvs;
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
                   int bw = nPbW-start_x;
@@ -2312,7 +2315,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
             }
-            s->y_mvs[s->pass0_job][chan % 12] = y;
+            s->curr_y_mvs = y;
         } else
 #endif
 
@@ -2337,12 +2340,10 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
                 int x1_c = x0_c + (mv->x >> (2 + hshift));
                 int y1_c = y0_c + (mv->y >> (2 + hshift));
-                //int chan = x0>>8; // Allocate commands for the first 256 luma pixels across to the first QPU.  This is optimised for images around 1920 width
-                int chan = x0>>8;
                 int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
                                        (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
 
-                uint32_t *u = s->u_mvs[s->pass0_job][chan & 7];
+                uint32_t *u = s->curr_u_mvs;
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       int bw = nPbW_c-start_x;
@@ -2367,7 +2368,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
-                s->u_mvs[s->pass0_job][chan & 7] = u;
+                s->curr_u_mvs = u;
                 return;
             }
 #endif
@@ -2400,8 +2401,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             int y1 = y0 + (mv->y >> 2);
             int x2 = x0 + (mv2->x >> 2);
             int y2 = y0 + (mv2->y >> 2);
-            int chan = x0>>6; // 64 wide blocks per QPU
-            uint32_t *y = s->y_mvs[s->pass0_job][chan % 12];
+            uint32_t *y = s->curr_y_mvs;
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=8) { // B blocks work 8 at a time
                   int bw = nPbW-start_x;
@@ -2417,7 +2417,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter_b;
                 }
             }
-            s->y_mvs[s->pass0_job][chan % 12] = y;
+            s->curr_y_mvs = y;
         } else
 #endif
         {
@@ -2448,9 +2448,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                 int x2_c = x0_c + (mv2->x >> (2 + hshift));
                 int y2_c = y0_c + (mv2->y >> (2 + hshift));
 
-                int chan = x0>>8; // Allocate commands for the first 256 luma pixels across to the first QPU.  This is optimised for images around 1920 width
 
-                uint32_t *u = s->u_mvs[s->pass0_job][chan & 7];
+                uint32_t *u = s->curr_u_mvs;
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       int bw = nPbW_c-start_x;
@@ -2479,7 +2478,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
-                s->u_mvs[s->pass0_job][chan & 7] = u;
+                s->curr_u_mvs = u;
                 return;
             }
 #endif
@@ -3114,12 +3113,8 @@ static void rpi_execute_inter_cmds(HEVCContext *s)
 
 static void rpi_do_all_passes(HEVCContext *s)
 {
-#ifdef RPI_INTER_QPU
-    // Kick off inter prediction on QPUs
-    rpi_execute_inter_qpu(s);
-#else
-    rpi_execute_transform(s);
-#endif
+    // Kick off QPUs and VPUs
+    rpi_launch_vpu_qpu(s);
     // Perform luma inter prediction
     rpi_execute_inter_cmds(s);
     // Wait for transform completion
@@ -3128,18 +3123,18 @@ static void rpi_do_all_passes(HEVCContext *s)
     rpi_execute_pred_cmds(s);
     // Perform deblocking for CTBs in this row
     rpi_execute_dblk_cmds(s);
-#ifdef RPI_INTER_QPU
-    rpi_inter_clear(s);
-#endif
+    // Prepare next batch
+    rpi_begin(s);
 }
 
 #endif
 
-#ifdef RPI_INTER_QPU
-static void rpi_inter_clear(HEVCContext *s)
+#ifdef RPI
+static void rpi_begin(HEVCContext *s)
 {
     int job = s->pass0_job;
     int i;
+#ifdef RPI_INTER_QPU
     int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
     int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
     int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
@@ -3165,6 +3160,8 @@ static void rpi_inter_clear(HEVCContext *s)
         }
         *s->u_mvs[job][i]++ = i;  // Select section of VPM (avoid collisions with 3d unit)
     }
+    s->curr_u_mvs = s->u_mvs[job][0];
+#endif
 
 #ifdef RPI_LUMA_QPU
     for(i=0;i<12;i++) {
@@ -3187,8 +3184,11 @@ static void rpi_inter_clear(HEVCContext *s)
         }
         *s->y_mvs[job][i]++ = 0; // Next kernel
     }
+    s->curr_y_mvs = s->y_mvs[job][0];
 #endif
+    s->ctu_count = 0;
 }
+#endif
 
 #ifdef RPI_SIMULATE_QPUS
 
@@ -3459,8 +3459,9 @@ static void rpi_simulate_inter_qpu(HEVCContext *s)
 
 #endif
 
+#ifdef RPI_INTER_QPU
 
-static void rpi_execute_inter_qpu(HEVCContext *s)
+static void rpi_launch_vpu_qpu(HEVCContext *s)
 {
     int k;
 #ifdef LAUNCH_PASS0
@@ -3558,6 +3559,15 @@ static void rpi_execute_inter_qpu(HEVCContext *s)
 
 
 }
+#else
+
+#ifdef RPI
+static void rpi_launch_vpu_qpu(HEVCContext *s)
+{
+  rpi_execute_transform(s);
+}
+#endif
+
 #endif
 
 #ifdef RPI
@@ -3617,29 +3627,20 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI
 #ifdef RPI_INTER_QPU
     s->enable_rpi = s->ps.sps->bit_depth == 8
-                    && s->ps.sps->width <= RPI_MAX_WIDTH
                     && !s->ps.pps->cross_component_prediction_enabled_flag
-                    && s->ps.pps->num_tile_rows <= 1 && s->ps.pps->num_tile_columns <= 1
                     && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
 #else
     s->enable_rpi = s->ps.sps->bit_depth == 8
-                    && s->ps.sps->width <= RPI_MAX_WIDTH
-                    && !s->ps.pps->cross_component_prediction_enabled_flag
-                    && s->ps.pps->num_tile_rows <= 1 && s->ps.pps->num_tile_columns <= 1;
+                    && !s->ps.pps->cross_component_prediction_enabled_flag;
 #endif
 
     if (!s->enable_rpi) {
       if (s->ps.pps->cross_component_prediction_enabled_flag)
         printf("Cross component\n");
-      if (s->ps.pps->num_tile_rows > 1 || s->ps.pps->num_tile_columns > 1)
-        printf("Tiles\n");
-      if (s->ps.pps->weighted_pred_flag && s->sh.slice_type == P_SLICE)
-        printf("Weighted P slice\n");
       if (s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE)
         printf("Weighted B slice\n");
     }
 #endif
-
     //printf("L0=%d L1=%d\n",s->sh.nb_refs[L1],s->sh.nb_refs[L1]);
 
     if (!ctb_addr_ts && s->sh.dependent_slice_segment_flag) {
@@ -3660,8 +3661,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     s->pass1_job = 0;
     s->pass2_job = 0;
 #endif
-#ifdef RPI_INTER_QPU
-    rpi_inter_clear(s);
+#ifdef RPI
+    rpi_begin(s);
 #endif
 
     while (more_data && ctb_addr_ts < s->ps.sps->ctb_size) {
@@ -3679,13 +3680,34 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         s->deblock[ctb_addr_rs].tc_offset   = s->sh.tc_offset;
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
+#ifdef RPI_INTER_QPU
+        s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count / s->ctu_per_uv_chan];
+#endif
+#ifdef RPI_LUMA_QPU
+        s->curr_y_mvs = s->y_mvs[s->pass0_job][s->ctu_count / s->ctu_per_y_chan];
+#endif
+
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
+
+#ifdef RPI_INTER_QPU
+        s->u_mvs[s->pass0_job][s->ctu_count / s->ctu_per_uv_chan] = s->curr_u_mvs;
+#endif
+#ifdef RPI_LUMA_QPU
+        s->y_mvs[s->pass0_job][s->ctu_count / s->ctu_per_y_chan] = s->curr_y_mvs;
+#endif
 
 #ifdef RPI
         if (s->enable_rpi) {
+          //av_assert0(s->num_dblk_cmds[s->pass0_job]>=0);
+          //av_assert0(s->num_dblk_cmds[s->pass0_job]<RPI_MAX_DEBLOCK_CMDS);
+          //av_assert0(s->pass0_job<RPI_MAX_JOBS);
+          //av_assert0(s->pass0_job>=0);
           s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]][0] = x_ctb;
           s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]++][1] = y_ctb;
-          if ( (((y_ctb + ctb_size)&63) == 0) && x_ctb + ctb_size >= s->ps.sps->width) {
+          s->ctu_count++;
+          //printf("%d %d/%d job=%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job);
+
+          if ( s->ctu_count >= s->max_ctu_count ) {
 #ifdef RPI_WORKER
             if (s->used_for_ref) {
               // Split work load onto separate threads so we make as rapid progress as possible with this frame
@@ -3693,7 +3715,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
               rpi_execute_inter_cmds(s);
   #endif
   #ifdef LAUNCH_PASS0
-              rpi_execute_inter_qpu(s);
+              rpi_launch_vpu_qpu(s);
   #endif
               // Pass on this job to worker thread
               worker_submit_job(s);
@@ -3701,9 +3723,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
               worker_pass0_ready(s);
 
               // Prepare the next batch of commands
-#ifdef RPI_INTER_QPU
-              rpi_inter_clear(s);
-#endif
+              rpi_begin(s);
             } else {
               // Non-ref frame so do it all on this thread
               rpi_do_all_passes(s);
@@ -3744,7 +3764,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #endif
 
     // Finish off any half-completed rows
-    if (s->enable_rpi && s->num_dblk_cmds[s->pass0_job]) {
+    if (s->enable_rpi && s->ctu_count) {
         rpi_do_all_passes(s);
     }
 
