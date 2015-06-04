@@ -3662,8 +3662,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
           //av_assert0(s->num_dblk_cmds[s->pass0_job]<RPI_MAX_DEBLOCK_CMDS);
           //av_assert0(s->pass0_job<RPI_MAX_JOBS);
           //av_assert0(s->pass0_job>=0);
-          //av_assert0(s->magic_top == 0xaffe);
-          //av_assert0(s->magic_bottom == 0xaffe);
           s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]][0] = x_ctb;
           s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]++][1] = y_ctb;
           s->ctu_count++;

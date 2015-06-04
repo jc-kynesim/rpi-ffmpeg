@@ -891,10 +891,6 @@ typedef struct HEVCPredCmd {
 #endif
 
 typedef struct HEVCContext {
-#ifdef RPI
-    int magic_top; // Unclear why this is necessary - avoids segmentation fault when decoding Dumb and dumber
-    int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
-#endif
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
 
@@ -1096,6 +1092,9 @@ typedef struct HEVCContext {
     int sei_hflip, sei_vflip;
 
     int picture_struct;
+#ifdef RPI
+    int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
+#endif
 } HEVCContext;
 
 int ff_hevc_decode_short_term_rps(HEVCContext *s, ShortTermRPS *rps,
