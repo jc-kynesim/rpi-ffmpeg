@@ -3737,19 +3737,19 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
 #ifdef RPI_INTER_QPU
-        s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count / s->ctu_per_uv_chan];
+        s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count % 8];
 #endif
 #ifdef RPI_LUMA_QPU
-        s->curr_y_mvs = s->y_mvs[s->pass0_job][s->ctu_count / s->ctu_per_y_chan];
+        s->curr_y_mvs = s->y_mvs[s->pass0_job][s->ctu_count % 12];
 #endif
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
 #ifdef RPI_INTER_QPU
-        s->u_mvs[s->pass0_job][s->ctu_count / s->ctu_per_uv_chan] = s->curr_u_mvs;
+        s->u_mvs[s->pass0_job][s->ctu_count % 8]= s->curr_u_mvs;
 #endif
 #ifdef RPI_LUMA_QPU
-        s->y_mvs[s->pass0_job][s->ctu_count / s->ctu_per_y_chan] = s->curr_y_mvs;
+        s->y_mvs[s->pass0_job][s->ctu_count % 12] = s->curr_y_mvs;
 #endif
 
 #ifdef RPI
