@@ -891,7 +891,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
         int n_uv = n >> s->ps.sps->vshift[1];
         int sz,base;
         if (curr_uv < 0) curr_uv = 0;
-        if (n_uv<=curr_uv) { assert(0); return; } // Should not happen
+        if (n_uv<=curr_uv) { return; }
         sz = s->frame->linesize[1] * (n_uv-curr_uv);
         base = s->frame->linesize[1] * curr_uv;
         GPU_MEM_PTR_T *p = av_buffer_pool_opaque(s->frame->buf[1]);
