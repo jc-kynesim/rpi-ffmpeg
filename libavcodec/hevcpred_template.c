@@ -72,7 +72,7 @@ do {                                  \
             else                                                               \
                 a = PIXEL_SPLAT_X4(ptr[i + 3])
 #ifdef RPI_WORKER
-    HEVCLocalContextIntra *lc = &s->HEVClcIntra;
+    HEVCLocalContextIntra *lc = s->enable_rpi ? &s->HEVClcIntra : (HEVCLocalContextIntra *)s->HEVClc ;
 #else
     HEVCLocalContext *lc = s->HEVClc;
 #endif

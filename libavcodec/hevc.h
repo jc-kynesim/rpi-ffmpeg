@@ -794,7 +794,17 @@ typedef struct HEVCPacket {
     int nals_allocated;
 } HEVCPacket;
 
+#ifdef RPI_WORKER
+typedef struct HEVCLocalContextIntra {
+    TransformUnit tu;
+    NeighbourAvailable na;
+} HEVCLocalContextIntra;
+#endif
+
 typedef struct HEVCLocalContext {
+    TransformUnit tu;
+    NeighbourAvailable na;  // WARNING tu and na must be the first two fields to match HEVCLocalContextIntra
+
     uint8_t cabac_state[HEVC_CONTEXTS];
 
     uint8_t stat_coeff[4];
@@ -809,8 +819,7 @@ typedef struct HEVCLocalContext {
 
     int qPy_pred;
 
-    TransformUnit tu;
-
+    
     uint8_t ctb_left_flag;
     uint8_t ctb_up_flag;
     uint8_t ctb_up_right_flag;
@@ -826,8 +835,7 @@ typedef struct HEVCLocalContext {
     int ct_depth;
     CodingUnit cu;
     PredictionUnit pu;
-    NeighbourAvailable na;
-
+    
 #define BOUNDARY_LEFT_SLICE     (1 << 0)
 #define BOUNDARY_LEFT_TILE      (1 << 1)
 #define BOUNDARY_UPPER_SLICE    (1 << 2)
@@ -837,12 +845,6 @@ typedef struct HEVCLocalContext {
     int boundary_flags;
 } HEVCLocalContext;
 
-#ifdef RPI_WORKER
-typedef struct HEVCLocalContextIntra {
-    TransformUnit tu;
-    NeighbourAvailable na;
-} HEVCLocalContextIntra;
-#endif
 
 #ifdef RPI
 
