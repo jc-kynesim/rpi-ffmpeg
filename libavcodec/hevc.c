@@ -70,11 +70,6 @@
   static void flush_frame(HEVCContext *s,AVFrame *frame);
   static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2);
 
-  // Define INTER_PASS0 to do inter prediction in first pass
-  //#define INTER_PASS0
-  // Define LAUNCH_PASS0 to launch QPU/VPU from pass0
-  //#define LAUNCH_PASS0
-
 #endif
 
 // #define DISABLE_MC
@@ -147,24 +142,12 @@ static void worker_submit_job(HEVCContext *s)
 }
 
 // Call this to say we have completed pass1
-static void worker_complete_middle_job(HEVCContext *s)
-{
-  LOG_ENTER
-  pthread_mutex_lock(&s->worker_mutex);
-  s->worker_middle++;
-  s->pass1_job = (s->pass1_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
-  pthread_cond_broadcast(&s->worker_cond_middle); // Let people know that the middle has moved
-  pthread_mutex_unlock(&s->worker_mutex);
-  LOG_EXIT
-}
-
-// Call this to say we have completed pass2
 static void worker_complete_job(HEVCContext *s)
 {
   LOG_ENTER
   pthread_mutex_lock(&s->worker_mutex);
   s->worker_head++;
-  s->pass2_job = (s->pass2_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
+  s->pass1_job = (s->pass1_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
   pthread_cond_broadcast(&s->worker_cond_head); // Let people know that the head has moved
   pthread_mutex_unlock(&s->worker_mutex);
   LOG_EXIT
@@ -208,7 +191,7 @@ static void *worker_start(void *arg)
   while(1) {
     pthread_mutex_lock(&s->worker_mutex);
 
-    while( !s->kill_worker && s->worker_tail - s->worker_middle <= 0)
+    while( !s->kill_worker && s->worker_tail - s->worker_head <= 0)
     {
       pthread_cond_wait(&s->worker_cond_tail, &s->worker_mutex);
     }
@@ -219,13 +202,9 @@ static void *worker_start(void *arg)
     }
     LOG_ENTER
     // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
-#ifndef LAUNCH_PASS0
     rpi_launch_vpu_qpu(s);
-#endif
-#ifndef INTER_PASS0
     // Perform inter prediction
     rpi_execute_inter_cmds(s);
-#endif
     // Wait for transform completion
     vpu_wait(s->vpu_id);
 
@@ -233,28 +212,6 @@ static void *worker_start(void *arg)
     rpi_execute_pred_cmds(s);
     // Perform deblocking for CTBs in this row
     rpi_execute_dblk_cmds(s);
-
-    worker_complete_middle_job(s);
-    LOG_EXIT
-  }
-  return NULL;
-}
-
-static void *worker_deblock_start(void *arg)
-{
-  HEVCContext *s = (HEVCContext *)arg;
-  while(1) {
-    pthread_mutex_lock(&s->worker_mutex);
-    while( !s->kill_worker && s->worker_middle - s->worker_head <= 0)
-    {
-      pthread_cond_wait(&s->worker_cond_middle, &s->worker_mutex);
-    }
-    pthread_mutex_unlock(&s->worker_mutex);
-
-    if (s->kill_worker) {
-      break;
-    }
-    LOG_ENTER
 
     worker_complete_job(s);
     LOG_EXIT
@@ -2998,11 +2955,7 @@ static void rpi_execute_dblk_cmds(HEVCContext *s)
 static void rpi_execute_transform(HEVCContext *s)
 {
     int i=2;
-#ifdef LAUNCH_PASS0
-    int job = s->pass0_job;
-#else
     int job = s->pass1_job;
-#endif
     //int j;
     //int16_t *coeffs = s->coeffs_buf_arm[i];
     //for(j=s->num_coeffs[i]; j > 0; j-= 16*16, coeffs+=16*16) {
@@ -3057,11 +3010,7 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
 
 static void rpi_execute_inter_cmds(HEVCContext *s)
 {
-#ifdef INTER_PASS0
-    int job = s->pass0_job;
-#else
     int job = s->pass1_job;
-#endif
     HEVCMvCmd *cmd = s->unif_mv_cmds[job];
     int n,cidx;
     AVFrame myref;
@@ -3467,11 +3416,7 @@ static void rpi_simulate_inter_qpu(HEVCContext *s)
 static void rpi_launch_vpu_qpu(HEVCContext *s)
 {
     int k;
-#ifdef LAUNCH_PASS0
-    int job = s->pass0_job;
-#else
     int job = s->pass1_job;
-#endif
     int i;
     uint32_t *unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
 #ifdef RPI_LUMA_QPU
@@ -3574,10 +3519,12 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 
 #ifdef RPI
 
+#ifndef RPI_FAST_CACHEFLUSH
 static void flush_buffer(AVBufferRef *bref) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
     gpu_cache_flush(p);
 }
+#endif
 
 static void flush_frame(HEVCContext *s,AVFrame *frame)
 {
@@ -3715,7 +3662,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI_WORKER
     s->pass0_job = 0;
     s->pass1_job = 0;
-    s->pass2_job = 0;
 #endif
 #ifdef RPI
     rpi_begin(s);
@@ -3767,12 +3713,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI_WORKER
             if (s->used_for_ref) {
               // Split work load onto separate threads so we make as rapid progress as possible with this frame
-  #ifdef INTER_PASS0
-              rpi_execute_inter_cmds(s);
-  #endif
-  #ifdef LAUNCH_PASS0
-              rpi_launch_vpu_qpu(s);
-  #endif
               // Pass on this job to worker thread
               worker_submit_job(s);
               // Make sure we have space to prepare the next job
@@ -3814,8 +3754,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     // Wait for the worker to finish all its jobs
     if (s->enable_rpi) {
         worker_wait(s);
-        av_assert0(s->pass0_job==s->pass1_job);
-        av_assert0(s->pass1_job==s->pass2_job);
     }
 #endif
 
@@ -4565,16 +4503,13 @@ static av_cold void hevc_init_worker(HEVCContext *s)
 {
     int err;
     pthread_cond_init(&s->worker_cond_head, NULL);
-    pthread_cond_init(&s->worker_cond_middle, NULL);
     pthread_cond_init(&s->worker_cond_tail, NULL);
     pthread_mutex_init(&s->worker_mutex, NULL);
 
     s->worker_tail=0;
-    s->worker_middle=0;
     s->worker_head=0;
     s->kill_worker=0;
     err = pthread_create(&s->worker_thread, NULL, worker_start, s);
-    err = pthread_create(&s->worker_deblock_thread, NULL, worker_deblock_start, s);
     if (err) {
         printf("Failed to create worker thread\n");
         exit(-1);
@@ -4586,17 +4521,13 @@ static av_cold void hevc_exit_worker(HEVCContext *s)
     void *res;
     s->kill_worker=1;
     pthread_cond_broadcast(&s->worker_cond_tail);
-    pthread_cond_broadcast(&s->worker_cond_middle);
     pthread_join(s->worker_thread, &res);
-    pthread_join(s->worker_deblock_thread, &res);
 
     pthread_cond_destroy(&s->worker_cond_head);
-    pthread_cond_destroy(&s->worker_cond_middle);
     pthread_cond_destroy(&s->worker_cond_tail);
     pthread_mutex_destroy(&s->worker_mutex);
 
     s->worker_tail=0;
-    s->worker_middle=0;
     s->worker_head=0;
     s->kill_worker=0;
 }

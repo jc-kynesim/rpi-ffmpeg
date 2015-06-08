@@ -931,7 +931,6 @@ typedef struct HEVCContext {
     //GPU_MEM_PTR_T dummy;
     int pass0_job; // Pass0 does coefficient decode
     int pass1_job; // Pass1 does pixel processing
-    int pass2_job; // Pass2 does reconstruction and deblocking
     int ctu_count; // Number of CTUs done in pass0 so far
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
     int ctu_per_y_chan; // Number of CTUs per luma QPU
@@ -963,15 +962,12 @@ typedef struct HEVCContext {
 
 #ifdef RPI_WORKER
     pthread_t worker_thread;
-    pthread_t worker_deblock_thread;
     pthread_cond_t worker_cond_head;
     pthread_cond_t worker_cond_tail;
-    pthread_cond_t worker_cond_middle;
     pthread_mutex_t worker_mutex;
 
     int worker_tail; // Contains the number of posted jobs
     int worker_head; // Contains the number of completed jobs
-    int worker_middle; // Contains the number of completed jobs
     int kill_worker; // set to 1 to terminate the worker
 #endif
 
