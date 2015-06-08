@@ -5,7 +5,7 @@
 // define RPI_TIME_TOTAL_VPU to print out how much time is spent in the VPI code
 //#define RPI_TIME_TOTAL_VPU
 // define RPI_TIME_TOTAL_POSTED to print out how much time is spent in the multi execute QPU/VPU combined
-//#define RPI_TIME_TOTAL_POSTED
+#define RPI_TIME_TOTAL_POSTED
 // define RPI_ASYNC to run the VPU in a separate thread, need to make a separate call to check for completion
 #define RPI_ASYNC
 
