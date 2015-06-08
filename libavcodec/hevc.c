@@ -68,7 +68,7 @@
   static void rpi_execute_inter_cmds(HEVCContext *s);
   static void rpi_begin(HEVCContext *s);
   static void flush_frame(HEVCContext *s,AVFrame *frame);
-  static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2);
+  static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2, int job);
 
 #endif
 
@@ -3454,9 +3454,9 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 
 #ifdef RPI_MULTI_MAILBOX
 #ifdef RPI_CACHE_UNIF_MVS
-    flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],&s->y_unif_mvs_ptr[job], &s->unif_mvs_ptr[job]);
+    flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],&s->y_unif_mvs_ptr[job], &s->unif_mvs_ptr[job], job);
 #else
-    flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],NULL,NULL);
+    flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],NULL,NULL, job);
 #endif
     s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3], s->num_coeffs[job][3] >> 10, 0,
                                    qpu_get_fn(QPU_MC_SETUP_UV),
@@ -3530,6 +3530,7 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
 {
 #ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
     int n = s->ps.sps->height;
     int curr_y = 0;
     int curr_uv = 0;
@@ -3537,22 +3538,21 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
     int sz,base;
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
     iocache.s[0].handle = p->vcsm_handle;
     iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = p->arm + base;
+    iocache.s[0].addr = (int)(p->arm) + base;
     iocache.s[0].size  = sz;
     p = av_buffer_pool_opaque(frame->buf[2]);
     iocache.s[1].handle = p->vcsm_handle;
     iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = p->arm + base;
+    iocache.s[1].addr = (int)(p->arm) + base;
     iocache.s[1].size  = sz;
     p = av_buffer_pool_opaque(frame->buf[0]);
     sz = s->frame->linesize[0] * (n-curr_y);
     base = s->frame->linesize[0] * curr_y;
     iocache.s[2].handle = p->vcsm_handle;
     iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = p->arm + base;
+    iocache.s[2].addr = (int)(p->arm) + base;
     iocache.s[2].size  = sz;
     vcsm_clean_invalid( &iocache );
 #else
@@ -3562,33 +3562,46 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
 #endif
 }
 
-static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2)
+static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2, int job)
 {
 #ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};
-    int n = s->ps.sps->height;
-    int curr_y = 0;
-    int curr_uv = 0;
-    int n_uv = n >> s->ps.sps->vshift[1];
+    int n;
+    int curr_y;
+    int curr_uv;
+    int n_uv;
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
     int sz,base;
+    int (*d)[2] = s->dblk_cmds[job];
+    int low=(*d)[1];
+    int high=(*d)[1];
+    for(n = s->num_dblk_cmds[job]; n>0 ;n--,d++) {
+        int y = (*d)[1];
+        low=FFMIN(low,y);
+        high=FFMAX(high,y);
+    }
+    curr_y = low;
+    n = high+(1 << s->ps.sps->log2_ctb_size);
+    curr_uv = curr_y >> s->ps.sps->vshift[1];
+    n_uv = n >> s->ps.sps->vshift[1];
+
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
     iocache.s[0].handle = p->vcsm_handle;
     iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = p->arm + base;
+    iocache.s[0].addr = (int)(p->arm) + base;
     iocache.s[0].size  = sz;
     p = av_buffer_pool_opaque(frame->buf[2]);
     iocache.s[1].handle = p->vcsm_handle;
     iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = p->arm + base;
+    iocache.s[1].addr = (int)(p->arm) + base;
     iocache.s[1].size  = sz;
     p = av_buffer_pool_opaque(frame->buf[0]);
     sz = s->frame->linesize[0] * (n-curr_y);
     base = s->frame->linesize[0] * curr_y;
     iocache.s[2].handle = p->vcsm_handle;
     iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = p->arm + base;
+    iocache.s[2].addr = (int)(p->arm) + base;
     iocache.s[2].size  = sz;
 
     iocache.s[3].handle = p0->vcsm_handle;
