@@ -1051,7 +1051,14 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     if (s->enable_rpi) {
         int n = trafo_size * trafo_size;
         if (use_vpu) {
-            coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] + s->num_coeffs[s->pass0_job][log2_trafo_size - 2];
+            // We support size 4 and size 5.
+            // Size 4 grows from the front  (Coeffs_buf_arm[2] points to start of buf)
+            // Size 5 grows from the back   (Coeffs_buf_arm[3] points to end of buf)
+            // num_coeffs is indexed by log2_trafo_size-2
+            if (log2_trafo_size == 4)
+                coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] + s->num_coeffs[s->pass0_job][log2_trafo_size - 2];
+            else
+                coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] - s->num_coeffs[s->pass0_job][log2_trafo_size - 2] - n;
             s->num_coeffs[s->pass0_job][log2_trafo_size - 2] += n;
         } else {
             coeffs = s->coeffs_buf_arm[s->pass0_job][0] + s->num_coeffs[s->pass0_job][0];

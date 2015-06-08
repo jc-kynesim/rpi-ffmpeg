@@ -299,12 +299,12 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
         s->coeffs_buf_arm[job][0] = (int16_t*) s->coeffs_buf_default[job].arm;
         if (!s->coeffs_buf_arm[job][0])
             goto fail;
-        gpu_malloc_cached(sizeof(int16_t) * coefs_per_row * 2, &s->coeffs_buf_accelerated[job]);
+        gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
         s->coeffs_buf_arm[job][2] = (int16_t*) s->coeffs_buf_accelerated[job].arm;
         s->coeffs_buf_vc[job][2] = s->coeffs_buf_accelerated[job].vc;
         if (!s->coeffs_buf_arm[job][2])
             goto fail;
-        s->coeffs_buf_arm[job][3] = coefs_per_row + s->coeffs_buf_arm[job][2];
+        s->coeffs_buf_arm[job][3] = coefs_per_row + s->coeffs_buf_arm[job][2];  // This points to just beyond the end of the buffer.  Coefficients fill in backwards.
         s->coeffs_buf_vc[job][3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[job][2];
       }
     }
@@ -2956,15 +2956,20 @@ static void rpi_execute_transform(HEVCContext *s)
 {
     int i=2;
     int job = s->pass1_job;
-    //int j;
-    //int16_t *coeffs = s->coeffs_buf_arm[i];
-    //for(j=s->num_coeffs[i]; j > 0; j-= 16*16, coeffs+=16*16) {
-    //    s->hevcdsp.idct[4-2](coeffs, 16);
-    //}
+    /*int j;
+    int16_t *coeffs = s->coeffs_buf_arm[job][i];
+    for(j=s->num_coeffs[job][i]; j > 0; j-= 16*16, coeffs+=16*16) {
+        s->hevcdsp.idct[4-2](coeffs, 16);
+    }
+    i=3;
+    coeffs = s->coeffs_buf_arm[job][i] - s->num_coeffs[job][i];
+    for(j=s->num_coeffs[job][i]; j > 0; j-= 32*32, coeffs+=32*32) {
+        s->hevcdsp.idct[5-2](coeffs, 32);
+    }*/
 
     gpu_cache_flush(&s->coeffs_buf_accelerated[job]);
     s->vpu_id = vpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2],
-                               s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3],
+                               s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
                                s->num_coeffs[job][3] >> 10, 0, &s->coeffs_buf_accelerated[job]);
     //vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
     //gpu_cache_flush(&s->coeffs_buf_accelerated);
@@ -3458,7 +3463,8 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #else
     flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],NULL,NULL, job);
 #endif
-    s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3], s->num_coeffs[job][3] >> 10, 0,
+    s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8,
+                                                                      s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3], s->num_coeffs[job][3] >> 10, 0,
                                    qpu_get_fn(QPU_MC_SETUP_UV),
                                    (uint32_t)(unif_vc+(s->mvs_base[job][0 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
                                    (uint32_t)(unif_vc+(s->mvs_base[job][1 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
