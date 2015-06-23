@@ -684,17 +684,6 @@ typedef struct CodingUnit {
     uint8_t cu_transquant_bypass_flag;
 } CodingUnit;
 
-typedef struct Mv {
-    int16_t x;  ///< horizontal component of motion vector
-    int16_t y;  ///< vertical component of motion vector
-} Mv;
-
-typedef struct MvField {
-    DECLARE_ALIGNED(4, Mv, mv)[2];
-    int8_t ref_idx[2];
-    int8_t pred_flag;
-} MvField;
-
 typedef struct NeighbourAvailable {
     int cand_bottom_left;
     int cand_left;
