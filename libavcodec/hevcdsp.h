@@ -42,6 +42,17 @@ typedef struct SAOParams {
     uint8_t type_idx[3];    ///< sao_type_idx
 } SAOParams;
 
+typedef struct Mv {
+    int16_t x;  ///< horizontal component of motion vector
+    int16_t y;  ///< vertical component of motion vector
+} Mv;
+
+typedef struct MvField {
+    DECLARE_ALIGNED(4, Mv, mv)[2];
+    int8_t ref_idx[2];
+    int8_t pred_flag;
+} MvField;
+
 typedef struct HEVCDSPContext {
     void (*put_pcm)(uint8_t *_dst, ptrdiff_t _stride, int width, int height,
                     struct GetBitContext *gb, int pcm_bit_depth);
@@ -120,6 +131,9 @@ typedef struct HEVCDSPContext {
     void (*hevc_v_loop_filter_chroma_c)(uint8_t *pix, ptrdiff_t stride,
                                         int32_t *tc, uint8_t *no_p,
                                         uint8_t *no_q);
+    void (*hevc_deblocking_boundary_strengths)(int pus, int dup, int in_inc, int out_inc,
+                                               int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
+                                               MvField *curr, MvField *neigh, uint8_t *bs);
 } HEVCDSPContext;
 
 void ff_hevc_dsp_init(HEVCDSPContext *hpc, int bit_depth);

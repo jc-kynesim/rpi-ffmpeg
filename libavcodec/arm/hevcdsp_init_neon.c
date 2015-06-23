@@ -290,6 +290,10 @@ static void ff_hevc_sao_edge_neon_wrapper(uint8_t *_dst /* align 16 */, uint8_t 
 }
 #undef CMP
 
+void ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,
+                                                int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
+                                                MvField *curr, MvField *neigh, uint8_t *bs);
+
 av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
 {
     if (bit_depth == 8) {
@@ -387,4 +391,9 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->put_hevc_qpel_uni[8][0][0]  = ff_hevc_put_qpel_uw_pixels_w48_neon_8;
         c->put_hevc_qpel_uni[9][0][0]  = ff_hevc_put_qpel_uw_pixels_w64_neon_8;
     }
+
+    assert(offsetof(MvField, mv) == 0);
+    assert(offsetof(MvField, ref_idx) == 8);
+    assert(offsetof(MvField, pred_flag) == 10);
+    c->hevc_deblocking_boundary_strengths = ff_hevc_deblocking_boundary_strengths_neon;
 }
