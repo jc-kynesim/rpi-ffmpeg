@@ -246,6 +246,12 @@ static void pic_arrays_free(HEVCContext *s)
       }
     }
 #endif
+#ifdef RPI_DEBLOCK_VPU
+    if (s->y_setup_arm) {
+      gpu_free(&s->y_setup_ptr);
+      s->y_setup_arm = 0;
+    }
+#endif
     av_freep(&s->sao);
     av_freep(&s->deblock);
 
@@ -283,12 +289,12 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     int min_pu_size      = sps->min_pu_width * sps->min_pu_height;
 
 #ifdef RPI
-    av_assert0(sps);
     int coefs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
     int coefs_per_luma = 64*64*24*RPI_NUM_CHUNKS;
     int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
     int coefs_per_row = coefs_per_luma + coefs_per_chroma;
     int job;
+    av_assert0(sps);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
     s->ctu_per_y_chan = s->max_ctu_count / 12;
     s->ctu_per_uv_chan = s->max_ctu_count / 8;
@@ -308,6 +314,16 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
         s->coeffs_buf_vc[job][3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[job][2];
       }
     }
+#endif
+#ifdef RPI_DEBLOCK_VPU
+    s->enable_rpi_deblock = !sps->sao_enabled;
+    s->setup_width = (sps->width+15) / 16;
+    s->setup_height = (sps->height+15) / 16;
+    gpu_malloc_uncached(sizeof(*s->y_setup_arm) * s->setup_width * s->setup_height, &s->y_setup_ptr); // TODO make this cached
+    s->y_setup_arm = (void*)s->y_setup_ptr.arm;
+    s->y_setup_vc = (void*)s->y_setup_ptr.vc;
+    memset(s->y_setup_arm, 0, s->y_setup_ptr.numbytes);
+    printf("Setup %d by %d by %d\n",s->setup_width,s->setup_height,sizeof(*s->y_setup_arm));
 #endif
 
     s->bs_width  = (width  >> 2) + 1;

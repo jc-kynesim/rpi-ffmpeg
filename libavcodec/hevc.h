@@ -57,6 +57,8 @@
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
 
+  #define RPI_DEBLOCK_VPU
+
 #endif
 
 #define MAX_DPB_SIZE 16 // A.4.1
@@ -969,6 +971,15 @@ typedef struct HEVCContext {
     int worker_tail; // Contains the number of posted jobs
     int worker_head; // Contains the number of completed jobs
     int kill_worker; // set to 1 to terminate the worker
+#endif
+
+#ifdef RPI_DEBLOCK_VPU
+    int enable_rpi_deblock;
+    GPU_MEM_PTR_T y_setup_ptr;
+    uint8_t (*y_setup_arm)[2][2][2][4];
+    uint8_t (*y_setup_vc)[2][2][2][4];
+    int setup_width; // Number of 16x16 blocks across the image
+    int setup_height; // Number of 16x16 blocks down the image
 #endif
 
 #endif
