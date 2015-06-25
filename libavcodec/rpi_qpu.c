@@ -147,7 +147,7 @@ static int gpu_init(volatile struct GPU **gpu) {
   vcsm_init();
   gpu_malloc_uncached_internal(sizeof(struct GPU), &gpu_mem_ptr, mb);
   ptr = (volatile struct GPU*)gpu_mem_ptr.arm;
-  memset(ptr, 0, sizeof *ptr);
+  memset((void*)ptr, 0, sizeof *ptr);
   vc = gpu_mem_ptr.vc;
 
   ptr->mb = mb;
@@ -254,7 +254,7 @@ void gpu_cache_flush(GPU_MEM_PTR_T *p)
     struct vcsm_user_clean_invalid_s iocache = {};
     iocache.s[0].handle = p->vcsm_handle;
     iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = p->arm;
+    iocache.s[0].addr = (int) p->arm;
     iocache.s[0].size  = p->numbytes;
     vcsm_clean_invalid( &iocache );
 #else
@@ -390,6 +390,7 @@ static void *vpu_start(void *arg) {
 #ifdef RPI_TIME_TOTAL_POSTED
   int last_time=0;
   long long on_time=0;
+  long long on_time_deblock=0;
   long long off_time=0;
   int start_time;
   int end_time;
@@ -451,10 +452,13 @@ static void *vpu_start(void *arg) {
 #ifdef RPI_TIME_TOTAL_POSTED
     end_time = Microseconds();
     last_time = end_time;
-    on_time += end_time - start_time;
+    if (p[6]==2)
+      on_time_deblock += end_time - start_time;
+    else
+      on_time += end_time - start_time;
     count++;
     if ((count&0x7f)==0)
-      printf("Posted %d On=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(off_time/1000));
+      printf("Posted %d On=%dms, On_deblock=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(on_time_deblock/1000),(int)(off_time/1000));
 #endif
     pthread_mutex_lock(&post_mutex);
     vpu_async_head++;
