@@ -656,9 +656,23 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                                    s->frame->linesize[chroma],
                                                                    c_tc, no_p, no_q);
                         } else
+#ifdef RPI_DEBLOCK_VPU
+                        if (s->enable_rpi_deblock) {
+                            uint8_t (*setup)[2][2][4];
+                            int xc = x>>s->ps.sps->hshift[chroma];
+                            int yc = y>>s->ps.sps->vshift[chroma];
+                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
+                            int a = ((yc>>3) & 1) << 1;
+                            int b = (xc>>3) & 1;
+                            setup = s->uv_setup_arm[num16];
+                            setup[0][b][0][a] = c_tc[0];
+                            setup[0][b][0][a + 1] = c_tc[1];
+                        } else
+#endif
                             s->hevcdsp.hevc_v_loop_filter_chroma(src,
                                                                  s->frame->linesize[chroma],
                                                                  c_tc, no_p, no_q);
+
                     }
                 }
 
@@ -689,6 +703,19 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                                    s->frame->linesize[chroma],
                                                                    c_tc, no_p, no_q);
                         } else
+#ifdef RPI_DEBLOCK_VPU
+                        if (s->enable_rpi_deblock) {
+                            uint8_t (*setup)[2][2][4];
+                            int xc = x>>s->ps.sps->hshift[chroma];
+                            int yc = y>>s->ps.sps->vshift[chroma];
+                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
+                            int a = ((xc>>3) & 1) << 1;
+                            int b = (yc>>3) & 1;
+                            setup = s->uv_setup_arm[num16];
+                            setup[1][b][0][a] = c_tc[0];
+                            setup[1][b][0][a + 1] = c_tc[1];
+                        } else
+#endif
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
                                                                  s->frame->linesize[chroma],
                                                                  c_tc, no_p, no_q);
@@ -1013,33 +1040,56 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 {
   // Flush image, 4 lines above to bottom of ctb stripe
-  ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 0);
+  ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
   // TODO flush buffer of beta/tc setup when it becomes cached
+
+  // Prepare three commands at once to avoid calling overhead
+  s->vpu_cmds_arm[0][0] = get_vc_address(s->frame->buf[0]) + s->frame->linesize[0] * y;
+  s->vpu_cmds_arm[0][1] = s->frame->linesize[0];
+  s->vpu_cmds_arm[0][2] = s->setup_width;
+  s->vpu_cmds_arm[0][3] = (int) ( s->y_setup_vc + s->setup_width * (y>>4) );
+  s->vpu_cmds_arm[0][4] = ctb_size>>4;
+  s->vpu_cmds_arm[0][5] = 2;
+
+  s->vpu_cmds_arm[1][0] = get_vc_address(s->frame->buf[1]) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
+  s->vpu_cmds_arm[1][1] = s->frame->linesize[1];
+  s->vpu_cmds_arm[1][2] = s->uv_setup_width;
+  s->vpu_cmds_arm[1][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
+  s->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
+  s->vpu_cmds_arm[1][5] = 3;
+
+  s->vpu_cmds_arm[2][0] = get_vc_address(s->frame->buf[2]) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
+  s->vpu_cmds_arm[2][1] = s->frame->linesize[2];
+  s->vpu_cmds_arm[2][2] = s->uv_setup_width;
+  s->vpu_cmds_arm[2][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
+  s->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
+  s->vpu_cmds_arm[2][5] = 4;
+
   // Call VPU
-  // TODO add this to a separate pipeline of VPU jobs that can be run in parallel and wait for completion
-  vpu_wait(vpu_post_code( vpu_get_fn(), get_vc_address(s->frame->buf[0]) + s->frame->linesize[0] * y, s->frame->linesize[0],
-                               s->setup_width, (int) ( s->y_setup_vc + s->setup_width * (y>>4) ),
-                               ctb_size>>4, 2, 0)); // 2 means to do the deblocking code
+  vpu_wait(vpu_post_code( vpu_get_fn(), s->vpu_cmds_vc, 3, 0, 0, 0, 5, 0)); // 5 means to do all the commands
 }
 
-static void rpi_deblock2(HEVCContext *s, int y, int ctb_size)
-{
-   int y2;
-   for(y2=y;y2<y+ctb_size;y2+=16) {
-      rpi_deblock(s,y2,16);
-   }
-}
 #endif
 
 void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
 {
     int x_end = x >= s->ps.sps->width  - ctb_size;
+#ifdef RPI_DEBLOCK_VPU
+    int done_deblock = 0;
+#endif
     if (s->avctx->skip_loop_filter < AVDISCARD_ALL)
         deblocking_filter_CTB(s, x, y);
 #ifdef RPI_DEBLOCK_VPU
     if (s->enable_rpi_deblock && x_end)
     {
-      rpi_deblock(s, y, ctb_size);
+      int y_at_end = y >= s->ps.sps->height - ctb_size;
+      int height = 64;  // Deblock in units 64 high to avoid too many VPU calls
+      int y_start = y&~63;
+      if (y_at_end) height = s->ps.sps->height - y_start;
+      if ((((y+ctb_size)&63)==0) || y_at_end) {
+        done_deblock = 1;
+        rpi_deblock(s, y_start, height);
+      }
     }
 #endif
     if (s->ps.sps->sao_enabled) {
@@ -1070,11 +1120,25 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
         //int newh = y + ctb_size - 4;
         //int currh = s->ref->tf.progress->data[0];
         //if (((y + ctb_size)&63)==0)
+#ifdef RPI_DEBLOCK_VPU
+        if (s->enable_rpi_deblock) {
+          // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
+          if (done_deblock) {
+            ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
+          }
+        } else {
+#ifdef RPI_INTER_QPU
+          ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size - 4);
+#endif
+          ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
+        }
+#else
 #ifdef RPI_INTER_QPU
         ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size - 4);
-        // TODO we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
+        // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
 #endif
         ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
+#endif
     }
 }
 

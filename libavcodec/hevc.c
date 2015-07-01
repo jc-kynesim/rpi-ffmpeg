@@ -251,6 +251,14 @@ static void pic_arrays_free(HEVCContext *s)
       gpu_free(&s->y_setup_ptr);
       s->y_setup_arm = 0;
     }
+    if (s->uv_setup_arm) {
+      gpu_free(&s->uv_setup_ptr);
+      s->uv_setup_arm = 0;
+    }
+    if (s->vpu_cmds_arm) {
+      gpu_free(&s->vpu_cmds_ptr);
+      s->vpu_cmds_arm = 0;
+    }
 #endif
     av_freep(&s->sao);
     av_freep(&s->deblock);
@@ -324,6 +332,18 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     s->y_setup_vc = (void*)s->y_setup_ptr.vc;
     memset(s->y_setup_arm, 0, s->y_setup_ptr.numbytes);
     printf("Setup %d by %d by %d\n",s->setup_width,s->setup_height,sizeof(*s->y_setup_arm));
+
+    s->uv_setup_width = ( (sps->width >> sps->hshift[1]) + 15) / 16;
+    s->uv_setup_height = ( (sps->height >> sps->vshift[1]) + 15) / 16;
+    gpu_malloc_uncached(sizeof(*s->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height, &s->uv_setup_ptr); // TODO make this cached
+    s->uv_setup_arm = (void*)s->uv_setup_ptr.arm;
+    s->uv_setup_vc = (void*)s->uv_setup_ptr.vc;
+    memset(s->uv_setup_arm, 0, s->uv_setup_ptr.numbytes);
+    printf("Setup uv %d by %d by %d\n",s->uv_setup_width,s->uv_setup_height,sizeof(*s->uv_setup_arm));
+
+    gpu_malloc_uncached(sizeof(*s->vpu_cmds_arm) * 3,&s->vpu_cmds_ptr);
+    s->vpu_cmds_arm = (void*) s->vpu_cmds_ptr.arm;
+    s->vpu_cmds_vc = s->vpu_cmds_ptr.vc;
 #endif
 
     s->bs_width  = (width  >> 2) + 1;
