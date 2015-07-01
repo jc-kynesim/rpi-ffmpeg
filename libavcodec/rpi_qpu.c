@@ -397,6 +397,8 @@ static void *vpu_start(void *arg) {
   int start_time;
   int end_time;
   int count=0;
+  int count_deblock=0;
+  int count_qpu=0;
 #endif
   while(1) {
     int i;
@@ -442,7 +444,7 @@ static void *vpu_start(void *arg) {
         break;
       }
     }
-    printf("Have_qpu = %d, have_vpu=%d\n",have_qpu,have_vpu);
+    //printf("Have_qpu = %d, have_vpu=%d\n",have_qpu,have_vpu);
 #endif
     qpu_code = p[7];
     qpu_codeb = p[16];
@@ -460,6 +462,12 @@ static void *vpu_start(void *arg) {
     off_time += start_time-last_time;
 #endif
 
+#define NO_FLUSH 1
+#define CLEAR_PROFILE 2
+#define OUTPUT_COUNTS 4
+
+#define FLAGS_FOR_PROFILING (NO_FLUSH)
+
 #ifdef RPI_COMBINE_JOBS
     if (have_qpu) {
       for(i=0;i<8;i++) {
@@ -472,14 +480,14 @@ static void *vpu_start(void *arg) {
       }
       if (have_vpu) {
         execute_multi(gpu->mb,
-                              12,gpu->vc + offsetof(struct GPU, mail2), 1, 5000,
+                              12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING, 5000,
                               8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
                               p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
                               q[0], q[1], q[2], q[3], q[4], q[5], q[6]); // VPU1
         q[0] = 0;
       } else {
         execute_multi(gpu->mb,
-                              12,gpu->vc + offsetof(struct GPU, mail2), 1, 5000,
+                              12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING, 5000,
                               8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
                               p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
                               0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
@@ -510,7 +518,7 @@ static void *vpu_start(void *arg) {
       execute_qpu(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */);
 #else
       execute_multi(gpu->mb,
-                              12,gpu->vc + offsetof(struct GPU, mail2), 1, 5000,
+                              12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING , 5000,
                               8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
                               p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
                               0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
@@ -525,17 +533,20 @@ static void *vpu_start(void *arg) {
     // There are three cases we may wish to distinguish of VPU/QPU activity
     on_time += end_time - start_time;
 #else
-    if (p[6]==2)
+    if (p[6]>1) {
+      count_deblock++;
       on_time_deblock += end_time - start_time;
-    else
+    } else {
       on_time += end_time - start_time;
+      count_qpu++;
+    }
 #endif
     count++;
     if ((count&0x7f)==0)
 #ifdef RPI_COMBINE_JOBS
-      printf("Posted %d On=%dms, On_deblock=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(on_time_deblock/1000),(int)(off_time/1000));
-#else
       printf("Posted %d On=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(off_time/1000));
+#else
+      printf("Posted %d On=%dms (%d calls), On_deblock=%dms (%d calls), Off=%dms\n",count,(int)(on_time/1000),count_qpu,(int)(on_time_deblock/1000),count_deblock,(int)(off_time/1000));
 #endif
 #endif
 job_done_early:

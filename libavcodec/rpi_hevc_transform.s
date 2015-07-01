@@ -85,6 +85,13 @@ hevc_trans_16x16:
   beq memclear16
   cmp r5,2
   beq hevc_deblock_16x16
+  cmp r5,3
+  beq hevc_uv_deblock_16x16
+  cmp r5,4
+  beq hevc_uv_deblock_16x16_with_clear
+  cmp r5,5
+  beq hevc_run_command_list
+
   push r6-r15, lr # TODO cut down number of used registers
   mov r14,r3 # coeffs32
   mov r15,r4 # num32
@@ -708,3 +715,203 @@ normal_filtering:
 
 filtering_done:
   b lr
+
+
+hevc_uv_deblock_16x16:
+  push r6-r15, lr
+  mov r14,0
+  b hevc_uv_start
+hevc_uv_deblock_16x16_with_clear:
+  push r6-r15, lr
+  mov r14,1
+  b hevc_uv_start
+
+hevc_uv_start:
+  mov r9,r4
+  mov r4,r3
+  mov r13,r2
+  mov r2,r0
+  mov r10,r0
+  subscale4 r0,r1
+  mov r8,63
+  mov r6,-3
+  vmov H(zeros,0),0
+# r7 is number of blocks still to load
+# r0 is location of current block - 4 * stride
+# r1 is stride
+# r2 is location of current block
+# r3 is offset of start of block (actual edges start at H(16,16)+r3 for horizontal and H(16,0)+r3 for vertical
+# r4 is setup
+# r5 is for temporary calculations
+# r8 holds 63
+# r6 holds -3
+# r9 holds the number of 16 high rows to process
+# r10 holds the original img base
+# r11 returns 0 if no filtering was done on the edge
+# r12 saves a copy of this
+# r13 is copy of width
+# r14 is 1 if we should clear the old contents, or 0 if not
+
+uv_process_row:
+  # First iteration does not do horizontal filtering on previous
+  mov r7, r13
+  mov r3,0
+  vldb H(12++,16)+r3,(r0 += r1) REP 4    # Load the current block
+  vldb H(16++,16)+r3,(r2 += r1) REP 16
+  vldb H(setup_input,0), (r4)  # We may wish to prefetch these
+  cmp r14,1
+  bne uv_skip0
+  vstb H(zeros,0),(r4)
+uv_skip0:
+  bl uv_vert_filter
+  add r3,8
+  vadd H(setup_input,0),H(setup_input,8),0 # Rotate to second set of 8
+  bl uv_vert_filter
+  sub r3,8
+  b uv_start_deblock_loop
+uv_deblock_loop:
+  # Middle iterations do vertical on current block and horizontal on preceding
+  vldb H(12++,16)+r3,(r0 += r1) REP 4  # load the current block
+  vldb H(16++,16)+r3,(r2 += r1) REP 16
+  vldb H(setup_input,0), (r4)
+  cmp r14,1
+  bne uv_skip1
+  vstb H(zeros,0),(r4)
+uv_skip1:
+  bl uv_vert_filter
+  add r3,8
+  vadd H(setup_input,0),H(setup_input,8),0
+  bl uv_vert_filter
+  sub r3,8
+  vldb H(setup_input,0), -16(r4)
+  cmp r14,1
+  bne uv_skip3
+  vstb H(zeros,0),-16(r4)
+uv_skip3:
+  bl uv_horz_filter
+  mov r12,r11
+  add r3,8*64
+  vadd H(setup_input,0),H(setup_input,8),0
+  bl uv_horz_filter
+  sub r3,8*64
+  addcmpbeq r12,0,0,uv_skip_save_top
+  vstb H(12++,0)+r3,-16(r0 += r1) REP 4  # Save the deblocked pixels for the previous block
+uv_skip_save_top:
+  vstb H(16++,0)+r3,-16(r2 += r1) REP 16
+uv_start_deblock_loop:
+  # move onto next 16x16 (could do this with circular buffer support instead)
+  add r3,16
+  and r3,r8
+  add r4,32
+  # Perform loop counter operations (may work with an addcmpbgt as well?)
+  add r0,16
+  add r2,16
+  sub r7,1
+  cmp r7,0 # Are there still more blocks to load
+  bgt uv_deblock_loop
+
+  # Final iteration needs to just do horizontal filtering
+  vldb H(setup_input,0), -16(r4)
+  cmp r14,1
+  bne uv_skip2
+  vstb H(zeros,0),-16(r4)
+uv_skip2:
+  bl uv_horz_filter
+  mov r12,r11
+  add r3,8*64
+  vadd H(setup_input,0),H(setup_input,8),0
+  bl uv_horz_filter
+  sub r3,64*8
+  addcmpbeq r12,0,0,uv_skip_save_top2
+  vstb H(12++,0)+r3,-16(r0 += r1) REP 4  # Save the deblocked pixels for the previous block
+uv_skip_save_top2:
+  vstb H(16++,0)+r3,-16(r2 += r1) REP 16
+
+# Now look to see if we should do another row
+  sub r9,1
+  cmp r9,0
+  bgt uv_start_again
+  pop r6-r15, pc
+uv_start_again:
+  # Need to sort out r0,r2 to point to next row down
+  addscale16 r10,r1
+  mov r2,r10
+  subscale4 r0,r2,r1
+  b uv_process_row
+
+
+# At this stage H(16,16)+r3 points to the first pixel of the 16 high edge to be filtered
+# So we can reuse the code we move the parts to be filtered into HX(P0/P1/P2/P3/Q0/Q1/Q2/Q3,0) - we will perform a final saturation step on placing them back into the correct locations
+
+uv_vert_filter:
+  push lr
+
+  vmov HX(P1,0), V(16,14)+r3
+  vmov HX(P0,0), V(16,15)+r3
+  vmov HX(Q0,0), V(16,16)+r3
+  vmov HX(Q1,0), V(16,17)+r3
+
+  bl do_chroma_filter
+
+  vadds V(16,15)+r3, HX(P0,0), 0
+  vadds V(16,16)+r3, HX(Q0,0), 0
+
+  pop pc
+
+# Filter edge at H(16,0)+r3
+uv_horz_filter:
+  push lr
+
+  vmov HX(P1,0), H(14,0)+r3
+  vmov HX(P0,0), H(15,0)+r3
+  vmov HX(Q0,0), H(16,0)+r3
+  vmov HX(Q1,0), H(17,0)+r3
+
+  bl do_chroma_filter
+
+  vadds H(15,0)+r3, HX(P0,0), 0
+  # P3 and Q3 never change so don't bother saving back
+  vadds H(16,0)+r3, HX(Q0,0), 0
+
+  pop pc
+
+# r4 points to array of beta/tc for each 4 length edge
+do_chroma_filter:
+  valtl H(setup,0),H(setup_input,0),H(setup_input,0) # tc*8
+  valtl HX(tc,0),H(setup,0),H(setup,0)
+
+  vsub HX(delta,0),HX(Q0,0),HX(P0,0)
+  vshl HX(delta,0),HX(delta,0),2 CLRA SACC
+  vsub -,HX(P1,0),HX(Q1,0) SACC
+  vmov HX(delta,0),4 SACC
+  vasr HX(delta,0),HX(delta,0),3
+  vclamps HX(delta,0), HX(delta,0), HX(tc,0)
+  vadd HX(P0,0),HX(P0,0),HX(delta,0)
+  vsub HX(Q0,0),HX(Q0,0),HX(delta,0)
+  b lr
+
+# r0 = list
+# r1 = number
+hevc_run_command_list:
+  push r6-r7, lr
+  mov r6, r0
+  mov r7, r1
+loop_cmds:
+  ld r0,(r6) # How to encode r6++?
+  add r6,4
+  ld r1,(r6)
+  add r6,4
+  ld r2,(r6)
+  add r6,4
+  ld r3,(r6)
+  add r6,4
+  ld r4,(r6)
+  add r6,4
+  ld r5,(r6)
+  add r6,4
+  bl hevc_trans_16x16
+  sub r7,1
+  cmp r7,0
+  bgt loop_cmds
+
+  pop r6-r7, pc
