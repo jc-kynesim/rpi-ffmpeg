@@ -8,6 +8,8 @@
 #define RPI_TIME_TOTAL_POSTED
 // define RPI_ASYNC to run the VPU in a separate thread, need to make a separate call to check for completion
 #define RPI_ASYNC
+// Define RPI_COMBINE_JOBS to find jobs that can be executed in parallel
+#define RPI_COMBINE_JOBS
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -398,9 +400,15 @@ static void *vpu_start(void *arg) {
 #endif
   while(1) {
     int i;
-    int *p;
+    int *p; // Pointer for a QPU/VPU job
+#ifdef RPI_COMBINE_JOBS
+    int *q = NULL; // Pointer for a VPU only job
+    int have_qpu = 0;
+    int have_vpu = 0;
+#endif
     int qpu_code;
     int qpu_codeb;
+    int num_jobs; // Number of jobs available
     pthread_mutex_lock(&post_mutex);
     while( vpu_async_tail - vpu_async_head <= 0)
     {
@@ -408,13 +416,38 @@ static void *vpu_start(void *arg) {
       pthread_cond_wait(&post_cond_tail, &post_mutex);
     }
     p = vpu_cmds[vpu_async_head%MAXCMDS];
+    num_jobs = vpu_async_tail - vpu_async_head;
     pthread_mutex_unlock(&post_mutex);
 
     if (p[6] == -1) {
       break; // Last job
     }
+    if (p[7] == 0 && p[0] == 0 && p[16]==0)
+      goto job_done_early;
+
+#ifdef RPI_COMBINE_JOBS
+    // First scan for a qpu job
+    for (int x=0;x<num_jobs;x++) {
+      p = vpu_cmds[(vpu_async_head+x)%MAXCMDS];
+      if (p[7]) {
+        have_qpu = 1;
+        break;
+      }
+    }
+    // Now scan for a non-qpu job
+    for (int x=0;x<num_jobs;x++) {
+      q = vpu_cmds[(vpu_async_head+x)%MAXCMDS];
+      if (!q[7]) {
+        have_vpu = 1;
+        break;
+      }
+    }
+    printf("Have_qpu = %d, have_vpu=%d\n",have_qpu,have_vpu);
+#endif
     qpu_code = p[7];
     qpu_codeb = p[16];
+
+
     //if (p[7]) {
         //GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
         //gpu_cache_flush(buf);
@@ -426,6 +459,40 @@ static void *vpu_start(void *arg) {
       last_time = start_time;
     off_time += start_time-last_time;
 #endif
+
+#ifdef RPI_COMBINE_JOBS
+    if (have_qpu) {
+      for(i=0;i<8;i++) {
+        gpu->mail[i*2] = p[8+i];
+        gpu->mail[i*2 + 1] = qpu_code;
+      }
+      for(i=0;i<12;i++) {
+        gpu->mail2[i*2] = p[17+i];
+        gpu->mail2[i*2 + 1] = qpu_codeb;
+      }
+      if (have_vpu) {
+        execute_multi(gpu->mb,
+                              12,gpu->vc + offsetof(struct GPU, mail2), 1, 5000,
+                              8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
+                              p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
+                              q[0], q[1], q[2], q[3], q[4], q[5], q[6]); // VPU1
+        q[0] = 0;
+      } else {
+        execute_multi(gpu->mb,
+                              12,gpu->vc + offsetof(struct GPU, mail2), 1, 5000,
+                              8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
+                              p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
+                              0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
+      }
+      p[0] = 0;
+      p[7] = 0;
+      p[16] = 0;
+    } else {
+        av_assert0(have_vpu);
+        vpu_execute_code(q[0], q[1], q[2], q[3], q[4], q[5], q[6]);
+        q[0] = 0;
+    }
+#else
 
     if (!qpu_code) {
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
@@ -449,17 +516,29 @@ static void *vpu_start(void *arg) {
                               0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
 #endif
     }
+#endif
+
 #ifdef RPI_TIME_TOTAL_POSTED
     end_time = Microseconds();
     last_time = end_time;
+#ifdef RPI_COMBINE_JOBS
+    // There are three cases we may wish to distinguish of VPU/QPU activity
+    on_time += end_time - start_time;
+#else
     if (p[6]==2)
       on_time_deblock += end_time - start_time;
     else
       on_time += end_time - start_time;
+#endif
     count++;
     if ((count&0x7f)==0)
+#ifdef RPI_COMBINE_JOBS
       printf("Posted %d On=%dms, On_deblock=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(on_time_deblock/1000),(int)(off_time/1000));
+#else
+      printf("Posted %d On=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(off_time/1000));
 #endif
+#endif
+job_done_early:
     pthread_mutex_lock(&post_mutex);
     vpu_async_head++;
     pthread_cond_broadcast(&post_cond_head);
