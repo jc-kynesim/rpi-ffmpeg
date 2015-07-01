@@ -1077,6 +1077,17 @@ nop        ; nop # delay slot 2
 ::mc_interrupt_exit12
   mov  -, vw_wait # wait on the VDW
 
+  # Dummy wait to test instructions
+#  mov r3,1000000
+#:dummy_loop
+#  sub.setf r3, r3, 1
+#  nop
+#  nop
+#  brr.anynn -, r:dummy_loop
+#  nop
+#  nop
+#  nop
+
   ldtmu0
   ldtmu0
   ldtmu1
