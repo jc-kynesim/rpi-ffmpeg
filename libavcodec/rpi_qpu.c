@@ -9,7 +9,7 @@
 // define RPI_ASYNC to run the VPU in a separate thread, need to make a separate call to check for completion
 #define RPI_ASYNC
 // Define RPI_COMBINE_JOBS to find jobs that can be executed in parallel
-#define RPI_COMBINE_JOBS
+//#define RPI_COMBINE_JOBS
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,9 +143,9 @@ static int gpu_init(volatile struct GPU **gpu) {
   volatile struct GPU* ptr;
 	if (mb < 0)
 		return -1;
-
+#ifndef RPI_ASYNC
 	if (qpu_enable(mb, 1)) return -2;
-
+#endif
   vcsm_init();
   gpu_malloc_uncached_internal(sizeof(struct GPU), &gpu_mem_ptr, mb);
   ptr = (volatile struct GPU*)gpu_mem_ptr.arm;
@@ -336,9 +336,9 @@ static void gpu_term(void)
     vpu_post_code(0, 0, 0, 0, 0, 0, -1, NULL);
     pthread_join(vpu_thread, &res);
   }
-#endif
-
+#else
   qpu_enable(mb, 0);
+#endif
   gpu_free_internal(&gpu_mem_ptr);
 
   vcsm_exit();
@@ -400,6 +400,7 @@ static void *vpu_start(void *arg) {
   int count_deblock=0;
   int count_qpu=0;
 #endif
+  int qpu_started = 0;
   while(1) {
     int i;
     int *p; // Pointer for a QPU/VPU job
@@ -426,6 +427,12 @@ static void *vpu_start(void *arg) {
     }
     if (p[7] == 0 && p[0] == 0 && p[16]==0)
       goto job_done_early;
+
+    if (!qpu_started) {
+      int result = qpu_enable(gpu->mb, 1);
+      av_assert0(result==0);
+      qpu_started = 1;
+    }
 
 #ifdef RPI_COMBINE_JOBS
     // First scan for a qpu job
@@ -554,6 +561,10 @@ job_done_early:
     vpu_async_head++;
     pthread_cond_broadcast(&post_cond_head);
     pthread_mutex_unlock(&post_mutex);
+  }
+
+  if (qpu_started) {
+    qpu_enable(gpu->mb, 0);
   }
 
   return NULL;
