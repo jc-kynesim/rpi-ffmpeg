@@ -1633,6 +1633,12 @@ again:
             case NAL_SPS_EXT:
             case NAL_AUXILIARY_SLICE:
                 break;
+            case NAL_14:
+            case NAL_15:
+            case NAL_20:
+                av_log(avctx, AV_LOG_ERROR, "NAL type: %d for MVC\n", h->nal_unit_type);
+                avctx->codec_tag = AV_CODEC_ID_H264MVC;
+                break;
             case NAL_FF_IGNORE:
                 break;
             default:
