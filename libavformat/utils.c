@@ -2453,7 +2453,7 @@ static void estimate_timings_from_bit_rate(AVFormatContext *ic)
 }
 
 #define DURATION_MAX_READ_SIZE 250000LL
-#define DURATION_MAX_RETRY 4
+#define DURATION_MAX_RETRY 6
 
 static void av_estimate_timings_from_pts2(AVFormatContext *ic, int64_t old_offset)
 {
