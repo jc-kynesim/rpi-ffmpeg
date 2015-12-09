@@ -29,6 +29,12 @@
 
 #define CABAC_MAX_BIN 31
 
+
+unsigned int rpi_residual_count = 0;
+unsigned int rpi_residual_signs = 0;
+unsigned int rpi_residual_sig_coeffs = 0;
+
+
 /**
  * number of bin by SyntaxElement.
  */
@@ -1016,6 +1022,8 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
     return GET_CABAC(elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] + inc);
 }
 
+unsigned int rpi_residual_sig_bits = 0;
+
 static av_always_inline int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 {
     int prefix = 0;
@@ -1024,17 +1032,26 @@ static av_always_inline int coeff_abs_level_remaining_decode(HEVCContext *s, int
     int i;
 
     while (prefix < CABAC_MAX_BIN && get_cabac_bypass(&s->HEVClc->cc))
+    {
         prefix++;
+        ++rpi_residual_sig_bits;
+    }
     if (prefix == CABAC_MAX_BIN)
         av_log(s->avctx, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", prefix);
     if (prefix < 3) {
         for (i = 0; i < rc_rice_param; i++)
+        {
             suffix = (suffix << 1) | get_cabac_bypass(&s->HEVClc->cc);
+            ++rpi_residual_sig_bits;
+        }
         last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
     } else {
         int prefix_minus3 = prefix - 3;
         for (i = 0; i < prefix_minus3 + rc_rice_param; i++)
+        {
             suffix = (suffix << 1) | get_cabac_bypass(&s->HEVClc->cc);
+            ++rpi_residual_sig_bits;
+        }
         last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                               << rc_rice_param) + suffix;
     }
@@ -1095,6 +1112,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
+
+    ++rpi_residual_count;
+
 #ifdef RPI
     if (s->enable_rpi) {
         int n = trafo_size * trafo_size;
@@ -1459,8 +1479,10 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
             if (!s->pps->sign_data_hiding_flag || !sign_hidden ) {
                 coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag) << (16 - nb_significant_coeff_flag);
+                rpi_residual_signs += nb_significant_coeff_flag;
             } else {
                 coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - 1) << (16 - (nb_significant_coeff_flag - 1));
+                rpi_residual_signs += nb_significant_coeff_flag - 1;
             }
 
             for (m = 0; m < n_end; m++) {
@@ -1470,6 +1492,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     trans_coeff_level = 1 + coeff_abs_level_greater1_flag[m];
                     if (trans_coeff_level == ((m == first_greater1_coeff_idx) ? 3 : 2)) {
                         int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
+                        ++rpi_residual_sig_coeffs;
 
                         trans_coeff_level += last_coeff_abs_level_remaining;
                         if (trans_coeff_level > (3 << c_rice_param))
@@ -1486,6 +1509,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     }
                 } else {
                     int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
+                    ++rpi_residual_sig_coeffs;
 
                     trans_coeff_level = 1 + last_coeff_abs_level_remaining;
                     if (trans_coeff_level > (3 << c_rice_param))

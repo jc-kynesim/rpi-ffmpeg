@@ -121,6 +121,12 @@
 
 #include "libavutil/avassert.h"
 
+extern unsigned int rpi_residual_count;
+extern unsigned int rpi_residual_signs;
+extern unsigned int rpi_residual_sig_coeffs;
+extern unsigned int rpi_residual_sig_bits;
+
+
 const char program_name[] = "ffmpeg";
 const int program_birth_year = 2000;
 
@@ -4227,6 +4233,8 @@ int main(int argc, char **argv)
     if (do_benchmark) {
         printf("bench: utime=%0.3fs\n", ti / 1000000.0);
     }
+    printf("r_count=%u, r_signs=%u, r_sig=%u, r_sbits=%u\n", rpi_residual_count, rpi_residual_signs, rpi_residual_sig_coeffs, rpi_residual_sig_bits);
+
     av_log(NULL, AV_LOG_DEBUG, "%"PRIu64" frames successfully decoded, %"PRIu64" decoding errors\n",
            decode_error_stat[0], decode_error_stat[1]);
     if ((decode_error_stat[0] + decode_error_stat[1]) * max_error_rate < decode_error_stat[1])

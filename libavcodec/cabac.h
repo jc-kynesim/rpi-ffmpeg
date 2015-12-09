@@ -46,6 +46,10 @@ extern CABAC_TABLE_CONST uint8_t ff_h264_cabac_tables[512 + 4*2*64 + 4*64 + 63];
 #define CABAC_MASK ((1<<CABAC_BITS)-1)
 
 typedef struct CABACContext{
+    uint16_t codIRange;
+    uint16_t codIOffset;
+    uint32_t b_offset;
+
     int low;
     int range;
     int outstanding_count;
