@@ -28,6 +28,8 @@
 #ifndef AVCODEC_H264_H
 #define AVCODEC_H264_H
 
+#define ALTCABAC_VER 0
+
 #include "libavutil/intreadwrite.h"
 #include "cabac.h"
 #include "error_resilience.h"

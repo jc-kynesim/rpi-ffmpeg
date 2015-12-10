@@ -42,14 +42,15 @@ extern CABAC_TABLE_CONST uint8_t ff_h264_cabac_tables[512 + 4*2*64 + 4*64 + 63];
 #define H264_MLPS_STATE_OFFSET 1024
 #define H264_LAST_COEFF_FLAG_OFFSET_8x8_OFFSET 1280
 
+#ifndef ALTCABAC_VER
+#define ALTCABAC_VER 0
+#endif
+
+#if ALTCABAC_VER == 0
 #define CABAC_BITS 16
 #define CABAC_MASK ((1<<CABAC_BITS)-1)
 
 typedef struct CABACContext{
-    uint16_t codIRange;
-    uint16_t codIOffset;
-    uint32_t b_offset;
-
     int low;
     int range;
     int outstanding_count;
@@ -58,9 +59,31 @@ typedef struct CABACContext{
     const uint8_t *bytestream_end;
     PutBitContext pb;
 }CABACContext;
+#elif ALTCABAC_VER == 1
 
+#define CABACContext Alt1CABACContext
+
+typedef struct Alt1CABACContext{
+    uint16_t codIRange;
+    uint16_t codIOffset;
+    uint32_t b_offset;
+    const uint8_t *bytestream_start;
+    const uint8_t *bytestream_end;
+} Alt1CABACContext;
+
+#define ff_init_cabac_encoder __no_such_function__
+#define ff_init_cabac_decoder ff_init_alt1cabac_decoder
+extern const uint32_t alt1cabac_inv_range[256];
+
+#else
+#error Unknown CABAC alternate
+#endif
+
+// Overriden by alt
 void ff_init_cabac_encoder(CABACContext *c, uint8_t *buf, int buf_size);
 void ff_init_cabac_decoder(CABACContext *c, const uint8_t *buf, int buf_size);
+
+// Common
 void ff_init_cabac_states(void);
 
 #endif /* AVCODEC_CABAC_H */

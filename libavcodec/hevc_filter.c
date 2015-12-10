@@ -31,7 +31,6 @@
 #include "libavutil/common.h"
 #include "libavutil/internal.h"
 
-#include "cabac_functions.h"
 #include "golomb.h"
 #include "hevc.h"
 

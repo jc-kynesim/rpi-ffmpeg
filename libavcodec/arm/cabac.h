@@ -26,7 +26,6 @@
 #include "libavutil/internal.h"
 #include "libavcodec/cabac.h"
 
-
 static inline uint32_t bmem_peek4(const void * p, const unsigned int bits)
 {
     unsigned int n;
@@ -53,8 +52,8 @@ static inline unsigned int lmbd1(const unsigned int x)
     return r;
 }
 
-
-//#define get_cabac_inline get_cabac_inline_arm
+#if ALTCABAC_VER == 0
+#define get_cabac_inline get_cabac_inline_arm
 static av_always_inline int get_cabac_inline_arm(CABACContext *c,
                                                  uint8_t *const state)
 {
@@ -131,6 +130,7 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
 
     return bit & 1;
 }
+#endif
 #endif /* HAVE_ARMV6T2_INLINE */
 
 #endif /* AVCODEC_ARM_CABAC_H */

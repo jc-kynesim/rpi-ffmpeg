@@ -23,6 +23,20 @@
 #ifndef AVCODEC_HEVC_H
 #define AVCODEC_HEVC_H
 
+// define RPI to split the CABAC/prediction/transform into separate stages
+#define RPI
+
+
+#ifdef ALTCABAC_VER
+#error Unexpected redefinition of ALTCABAC_VER
+#endif
+
+#ifdef RPI
+#define ALTCABAC_VER 1
+#else
+#define ALTCABAC_VER 0
+#endif
+
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"
 
@@ -36,8 +50,6 @@
 #include "thread.h"
 #include "videodsp.h"
 
-// define RPI to split the CABAC/prediction/transform into separate stages
-#define RPI
 
 #ifdef RPI
 

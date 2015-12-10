@@ -12,7 +12,7 @@ RPI_LIBDIRS="-L$RPI_ROOTFS/lib -L$RPI_ROOTFS/usr/lib -L$RPI_OPT_VC/lib"
  --cpu=cortex-a7\
  --target-os=linux\
  --disable-thumb\
- --extra-cflags="$RPI_DEFS $RPI_INCLUDES"\
+ --extra-cflags="-save-temps=obj $RPI_DEFS $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFS $RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS -Wl,-rpath=/opt/vc/lib,-rpath-link=$RPI_OPT_VC/lib,-rpath=/lib,-rpath=/usr/lib,-rpath-link=$RPI_ROOTFS/lib,-rpath-link=$RPI_ROOTFS/usr/lib"\
  --extra-libs="-lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm"\

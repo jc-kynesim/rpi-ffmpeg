@@ -33,11 +33,11 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/stereo3d.h"
 
+#include "hevc.h"
 #include "bswapdsp.h"
 #include "bytestream.h"
 #include "cabac_functions.h"
 #include "golomb.h"
-#include "hevc.h"
 
 #ifdef RPI
   #include "rpi_qpu.h"
@@ -2927,7 +2927,7 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
         if (y_ctb > 0 && s->tab_slice_address[ctb_addr_rs] != s->tab_slice_address[ctb_addr_rs - s->sps->ctb_width])
             lc->boundary_flags |= BOUNDARY_UPPER_SLICE;
     } else {
-        if (!ctb_addr_in_slice > 0)
+        if (ctb_addr_in_slice == 0)
             lc->boundary_flags |= BOUNDARY_LEFT_SLICE;
         if (ctb_addr_in_slice < s->sps->ctb_width)
             lc->boundary_flags |= BOUNDARY_UPPER_SLICE;
