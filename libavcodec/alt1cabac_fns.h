@@ -81,9 +81,7 @@ static inline uint32_t get_alt1cabac_bypeek22(CABACContext * c, uint32_t * pX)
 static inline void get_alt1cabac_byflush(CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
 {
     c->b_offset += n;
-    c->codIOffset =
-        ((x >> (23 - n)) -
-         (((val >> (32 - n)) & 0x1ff) * c->codIRange)) & 0x1ff;
+    c->codIOffset = (x >> (23 - n)) - (val >> (32 - n)) * c->codIRange;
 }
 
 #define get_cabac_bypass_sign get_alt1cabac_bypass_sign
