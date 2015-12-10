@@ -83,6 +83,7 @@
 #ifdef RPI_ZERO_COPY
 #include "libavcodec/rpi_qpu.h"
 #endif
+#include "libavutil/arm/v7_pmu.h"
 #endif
 
 #if HAVE_SYS_RESOURCE_H
@@ -121,11 +122,7 @@
 
 #include "libavutil/avassert.h"
 
-extern unsigned int rpi_residual_count;
-extern unsigned int rpi_residual_signs;
-extern unsigned int rpi_residual_sig_coeffs;
-extern unsigned int rpi_residual_sig_bits;
-
+#include "rpi_prof.h"
 
 const char program_name[] = "ffmpeg";
 const int program_birth_year = 2000;
@@ -4177,6 +4174,8 @@ int main(int argc, char **argv)
 {
     int ret;
     int64_t ti;
+    volatile unsigned int t, t2;
+    unsigned int i;
 
     register_exit(ffmpeg_cleanup);
 
@@ -4204,10 +4203,22 @@ int main(int argc, char **argv)
 
     term_init();
 
+    enable_pmu();
+    enable_ccnt();
+    for (i = 0; i != 3; ++i) {
+        t = read_ccnt();
+        t2 = read_ccnt();
+        printf("'Nothing' took %d cycles\n", t2 - t);
+    }
+    t = read_ccnt();
+
     /* parse options and open all input/output files */
     ret = ffmpeg_parse_options(argc, argv);
     if (ret < 0)
         exit_program(1);
+
+    t2 = read_ccnt();
+    printf("parse_options took %d cycles\n", t2 - t);
 
     if (nb_output_files <= 0 && nb_input_files == 0) {
         show_usage();
@@ -4234,6 +4245,7 @@ int main(int argc, char **argv)
         printf("bench: utime=%0.3fs\n", ti / 1000000.0);
     }
     printf("r_count=%u, r_signs=%u, r_sig=%u, r_sbits=%u\n", rpi_residual_count, rpi_residual_signs, rpi_residual_sig_coeffs, rpi_residual_sig_bits);
+    printf("r_abs=%" PRIu64 "(%u)\n", rpi_residual_abs_cycles, rpi_residual_abs_cnt);
 
     av_log(NULL, AV_LOG_DEBUG, "%"PRIu64" frames successfully decoded, %"PRIu64" decoding errors\n",
            decode_error_stat[0], decode_error_stat[1]);

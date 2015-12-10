@@ -23,17 +23,15 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
+#include "libavutil/arm/v7_pmu.h"
 
 #include "cabac_functions.h"
 #include "hevc.h"
 
+#define RPI_PROC_ALLOC
+#include "rpi_prof.h"
+
 #define CABAC_MAX_BIN 31
-
-
-unsigned int rpi_residual_count = 0;
-unsigned int rpi_residual_signs = 0;
-unsigned int rpi_residual_sig_coeffs = 0;
-
 
 /**
  * number of bin by SyntaxElement.
@@ -1022,20 +1020,59 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
     return GET_CABAC(elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] + inc);
 }
 
-unsigned int rpi_residual_sig_bits = 0;
-
 static av_always_inline int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 {
     int prefix = 0;
     int suffix = 0;
     int last_coeff_abs_level_remaining;
     int i;
+    volatile unsigned int prof1;
+    volatile unsigned int prof2;
+    uint32_t x, y;
+    unsigned int pp;
 
+    prof1 = read_ccnt();
+
+#if JC_CABAC
+    y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
+    prefix = lmbd1(~y);
+
+    if (prefix < 3) {
+        suffix = (y << (prefix + 1)) >> (32 - rc_rice_param);
+        last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
+        get_cabac_byflush(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y, x);
+    }
+    else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
+    {
+        int prefix_minus3 = prefix - 3;
+        uint32_t y2 = y << (prefix + 1);
+
+        suffix = y2 >> (32 - (prefix_minus3 + rc_rice_param));
+        last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
+                                              << rc_rice_param) + suffix;
+
+
+        get_cabac_byflush(&s->HEVClc->cc, prefix + 1 + prefix - 3 + rc_rice_param, y, x);
+    }
+    else {
+        int prefix_minus3 = prefix - 3;
+
+        get_cabac_byflush(&s->HEVClc->cc, prefix + 1, y, x);
+        y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
+
+        suffix = y >> (32 - (prefix_minus3 + rc_rice_param));
+        last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
+                                              << rc_rice_param) + suffix;
+
+        get_cabac_byflush(&s->HEVClc->cc, prefix_minus3 + rc_rice_param, y, x);
+    }
+#else
     while (prefix < CABAC_MAX_BIN && get_cabac_bypass(&s->HEVClc->cc))
     {
         prefix++;
         ++rpi_residual_sig_bits;
     }
+
     if (prefix == CABAC_MAX_BIN)
         av_log(s->avctx, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", prefix);
     if (prefix < 3) {
@@ -1055,6 +1092,18 @@ static av_always_inline int coeff_abs_level_remaining_decode(HEVCContext *s, int
         last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                               << rc_rice_param) + suffix;
     }
+#endif
+
+    prof2 = read_ccnt();
+    {
+        const unsigned int d = prof2 - prof1;
+        if (d < 5000) {
+            rpi_residual_abs_cycles += d;
+            ++rpi_residual_abs_cnt;
+        }
+    }
+//    printf("----\n");
+
     return last_coeff_abs_level_remaining;
 }
 
