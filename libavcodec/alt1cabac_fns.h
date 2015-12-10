@@ -6,34 +6,32 @@
 #endif
 
 #define get_cabac_inline get_alt1cabac_inline
-static av_always_inline int get_alt1cabac_inline(CABACContext *c, uint8_t * const state){
-    int s = *state;
-    unsigned int RangeLPS= ff_h264_lps_range[2*(c->codIRange&0xC0) + s];
-    int bit, lps_mask;
+static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t * const state){
+    unsigned int s = *state;
+    unsigned int range = c->codIRange;
+    unsigned int offset = c->codIOffset;
+    const unsigned int RangeLPS= ff_h264_lps_range[2*(range & 0xC0) + s];
+    unsigned int s3 = alt1cabac_cabac_transIdx[s];
     const unsigned int next_bits = bmem_peek4(c->bytestream_start, c->b_offset);
+    unsigned int n;
 
-    c->codIRange -= RangeLPS;
-    lps_mask= (int)(c->codIRange - (c->codIOffset + 1))>>31;
+//    printf("%02x -> s=%02x s2=%02x s3=%04x\n", bit, s, s2, s3);
 
-    c->codIOffset -= c->codIRange & lps_mask;
-    c->codIRange += (RangeLPS - c->codIRange) & lps_mask;
-
-    s^=lps_mask;
-    *state= (ff_h264_mlps_state+128)[s];
-    bit= s&1;
-
-    {
-        unsigned int n = lmbd1(c->codIRange) - 23;
-        if (n != 0) {
-            c->codIRange = (c->codIRange << n);
-            c->codIOffset = (c->codIOffset << n) | ((next_bits << (c->b_offset & 7)) >> (32 - n));
-            c->b_offset += n;
-        }
-
-//        printf("bit=%d, n=%d, range=%d, offset=%d, state=%d, nxt=%08x\n", bit, n, c->codIRange, c->codIOffset, *state, next_bits);
+    range -= RangeLPS;
+    if (offset >= range) {
+        offset -= range;
+        range = RangeLPS;
+        s ^= 1;
+        s3 >>= 8;
     }
 
-    return bit;
+    n = lmbd1(range) - 23;
+    c->codIRange = range << n;
+    c->codIOffset = (offset << n) | ((next_bits << (c->b_offset & 7)) >> (32 - n));
+    c->b_offset += n;
+    *state = s3;
+
+    return s & 1;
 }
 
 #define get_cabac_bypass get_alt1cabac_bypass
@@ -59,22 +57,9 @@ static inline uint32_t get_alt1cabac_bypeek22(CABACContext * c, uint32_t * pX)
     *pX = x;
 
     if (c->codIRange != 256) {
-//        printf("x=%08x, y=%08x, r=%d\n", x, y, c->codIRange);
         x = (uint32_t)(((uint64_t)x * (uint64_t)y) >> 32);
     }
-    x <<= 1;
-#if 0
-    {
-        char bits[33];
-        unsigned int i;
-        for (i = 0; i != 23; ++i) {
-            bits[i] = '0' + ((x >> (31 - i)) & 1);
-        }
-        bits[i] = 0;
-        printf("---- %s\n", bits);
-    }
-#endif
-    return x;
+    return x << 1;
 }
 
 #define get_cabac_byflush get_alt1cabac_byflush

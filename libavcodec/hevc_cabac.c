@@ -1503,6 +1503,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             greater1_ctx = 1;
             last_nz_pos_in_cg = significant_coeff_flag_idx[0];
 
+            PROFILE_START();
+
             for (m = 0; m < (n_end > 8 ? 8 : n_end); m++) {
                 int inc = (ctx_set << 2) + greater1_ctx;
                 coeff_abs_level_greater1_flag[m] =
@@ -1515,6 +1517,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     greater1_ctx++;
                 }
             }
+
+            PROFILE_ACC(residual_greater1);
+
             first_nz_pos_in_cg = significant_coeff_flag_idx[n_end - 1];
 
             if (lc->cu.cu_transquant_bypass_flag ||

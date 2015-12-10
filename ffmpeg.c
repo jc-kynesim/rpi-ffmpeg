@@ -4245,7 +4245,8 @@ int main(int argc, char **argv)
         printf("bench: utime=%0.3fs\n", ti / 1000000.0);
     }
     printf("r_count=%u, r_signs=%u, r_sig=%u, r_sbits=%u\n", rpi_residual_count, rpi_residual_signs, rpi_residual_sig_coeffs, rpi_residual_sig_bits);
-    printf("r_abs=%" PRIu64 "(%u)\n", rpi_residual_abs_cycles, rpi_residual_abs_cnt);
+    PROFILE_PRINTF(residual_abs);
+    PROFILE_PRINTF(residual_greater1);
 
     av_log(NULL, AV_LOG_DEBUG, "%"PRIu64" frames successfully decoded, %"PRIu64" decoding errors\n",
            decode_error_stat[0], decode_error_stat[1]);
