@@ -74,7 +74,7 @@ typedef struct Alt1CABACContext{
 #define ff_init_cabac_encoder __no_such_function__
 #define ff_init_cabac_decoder ff_init_alt1cabac_decoder
 extern const uint32_t alt1cabac_inv_range[256];
-extern const uint16_t alt1cabac_cabac_transIdx[128];
+extern const uint16_t alt1cabac_cabac_transIdx[256];
 
 #else
 #error Unknown CABAC alternate

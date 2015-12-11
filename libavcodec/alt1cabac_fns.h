@@ -21,7 +21,6 @@ static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t
     if (offset >= range) {
         offset -= range;
         range = RangeLPS;
-        s ^= 1;
         s3 >>= 8;
     }
 
@@ -29,9 +28,9 @@ static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t
     c->codIRange = range << n;
     c->codIOffset = (offset << n) | ((next_bits << (c->b_offset & 7)) >> (32 - n));
     c->b_offset += n;
-    *state = s3;
+    *state = (s3 >> 1) & 0x7f;
 
-    return s & 1;
+    return s3 & 1;
 }
 
 #define get_cabac_bypass get_alt1cabac_bypass

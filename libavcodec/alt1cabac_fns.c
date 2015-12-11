@@ -34,10 +34,11 @@ const uint32_t alt1cabac_inv_range[256] __attribute__((aligned(256))) = {
 };
 #undef I
 
-#define P(x,y) (((x) << 9) | ((y) << 1)), (((x) << 9) | ((y) << 1) | 0x101)
-#define X(x,y) (((x) << 9) | ((y) << 1) | 0x100), (((x) << 9) | ((y) << 1) | 0x001)
+#define P(x,y) (((x) << 10) | ((y) << 2) | 0x100), (((x) << 10) | ((y) << 2) | 0x203)
 
-const uint16_t alt1cabac_cabac_transIdx[128] __attribute__((aligned(256))) =
+#define X(x,y) (((x) << 10) | ((y) << 2) | 0x300), (((x) << 10) | ((y) << 2) | 0x003)
+
+const uint16_t alt1cabac_cabac_transIdx[256] __attribute__((aligned(256))) =
 {
 	X(0,1), P(0,2), P(1,3), P(2,4), P(2,5), P(4,6), P(4,7), P(5,8),
 	P(6,9), P(7,10), P(8,11), P(9,12), P(9,13), P(11,14), P(11,15), P(12,16),
