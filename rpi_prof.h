@@ -18,6 +18,10 @@ X uint64_t rpi_residual_greater1_cycles Z;
 X unsigned int rpi_residual_greater1_cnt Z;
 #define RPI_residual_greater1_MAX_DURATION 10000
 
+X uint64_t rpi_residual_core_cycles Z;
+X unsigned int rpi_residual_core_cnt Z;
+#define RPI_residual_core_MAX_DURATION 100000
+
 #undef X
 #undef Z
 

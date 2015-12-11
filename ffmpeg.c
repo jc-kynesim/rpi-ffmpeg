@@ -4247,6 +4247,7 @@ int main(int argc, char **argv)
     printf("r_count=%u, r_signs=%u, r_sig=%u, r_sbits=%u\n", rpi_residual_count, rpi_residual_signs, rpi_residual_sig_coeffs, rpi_residual_sig_bits);
     PROFILE_PRINTF(residual_abs);
     PROFILE_PRINTF(residual_greater1);
+    PROFILE_PRINTF(residual_core);
 
     av_log(NULL, AV_LOG_DEBUG, "%"PRIu64" frames successfully decoded, %"PRIu64" decoding errors\n",
            decode_error_stat[0], decode_error_stat[1]);
