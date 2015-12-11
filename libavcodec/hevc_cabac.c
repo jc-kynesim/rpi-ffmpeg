@@ -1120,6 +1120,21 @@ static av_always_inline int coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
     return ret;
 }
 
+
+static uint32_t get_greater1_bits(CABACContext * const c, const unsigned int n, uint8_t * const state0)
+{
+    unsigned int rv = 0;
+    unsigned int i;
+    PROFILE_START();
+
+    for (i = 0; i != n; ++i) {
+        const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
+        rv = (rv << 2) | get_cabac(c, state0 + idx);
+    }
+    PROFILE_ACC(residual_greater1);
+    return rv << (32 - 2 * n);
+}
+
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 int log2_trafo_size, enum ScanType scan_idx,
                                 int c_idx)
@@ -1500,15 +1515,36 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             if (!(i == num_last_subset) && greater1_ctx == 0)
                 ctx_set++;
-            greater1_ctx = 1;
             last_nz_pos_in_cg = significant_coeff_flag_idx[0];
 
-            PROFILE_START();
-
+#if 1
+            greater1_ctx = 1;
+            {
+                const unsigned int m_count = (unsigned int)n_end > 8 ? 8 : (unsigned int)n_end;
+                const unsigned int idx0 = elem_offset[COEFF_ABS_LEVEL_GREATER1_FLAG] +
+                    (c_idx > 0 ? 16 : 0) +
+                    (ctx_set << 2);
+                unsigned int rv = get_greater1_bits(&s->HEVClc->cc, m_count, s->HEVClc->cabac_state + idx0);
+                for (m = 0; m < m_count; ++m) {
+                    coeff_abs_level_greater1_flag[m] = (rv >> (m_count - 1 - m)) & 1;
+//                    printf("m=%d, b=%d\n", m, coeff_abs_level_greater1_flag[m]);
+                    if (coeff_abs_level_greater1_flag[m]) {
+                        greater1_ctx = 0;
+                        if (first_greater1_coeff_idx == -1)
+                            first_greater1_coeff_idx = m;
+                    }
+                    else if (greater1_ctx > 0 && greater1_ctx < 3) {
+                        greater1_ctx++;
+                    }
+                }
+            }
+#else
+            greater1_ctx = 1;
             for (m = 0; m < (n_end > 8 ? 8 : n_end); m++) {
                 int inc = (ctx_set << 2) + greater1_ctx;
                 coeff_abs_level_greater1_flag[m] =
                     coeff_abs_level_greater1_flag_decode(s, c_idx, inc);
+//                printf("m=%d, b=%d, inc=%d, c_idx=%d\n", m, coeff_abs_level_greater1_flag[m], inc, c_idx);
                 if (coeff_abs_level_greater1_flag[m]) {
                     greater1_ctx = 0;
                     if (first_greater1_coeff_idx == -1)
@@ -1517,8 +1553,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     greater1_ctx++;
                 }
             }
-
-            PROFILE_ACC(residual_greater1);
+#endif
 
             first_nz_pos_in_cg = significant_coeff_flag_idx[n_end - 1];
 
