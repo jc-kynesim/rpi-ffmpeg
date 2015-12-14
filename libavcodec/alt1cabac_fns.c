@@ -1,3 +1,5 @@
+#include "config.h"
+
 #define ALTCABAC_VER 1
 #include "cabac_functions.h"
 

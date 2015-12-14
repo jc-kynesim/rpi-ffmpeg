@@ -1025,10 +1025,8 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
     int prefix = 0;
     int suffix = 0;
     int last_coeff_abs_level_remaining;
-    volatile unsigned int prof1;
-    volatile unsigned int prof2;
 
-    prof1 = read_ccnt();
+    PROFILE_START();
 
 #ifdef get_cabac_bypeek22
     {
@@ -1072,7 +1070,6 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
         while (prefix < CABAC_MAX_BIN && get_cabac_bypass(&s->HEVClc->cc))
         {
             prefix++;
-            ++rpi_residual_sig_bits;
         }
 
         if (prefix == CABAC_MAX_BIN)
@@ -1081,7 +1078,6 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
             for (i = 0; i < rc_rice_param; i++)
             {
                 suffix = (suffix << 1) | get_cabac_bypass(&s->HEVClc->cc);
-                ++rpi_residual_sig_bits;
             }
             last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
         } else {
@@ -1089,7 +1085,6 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
             for (i = 0; i < prefix_minus3 + rc_rice_param; i++)
             {
                 suffix = (suffix << 1) | get_cabac_bypass(&s->HEVClc->cc);
-                ++rpi_residual_sig_bits;
             }
             last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                                   << rc_rice_param) + suffix;
@@ -1097,14 +1092,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
     }
 #endif
 
-    prof2 = read_ccnt();
-    {
-        const unsigned int d = prof2 - prof1;
-        if (d < 5000) {
-            rpi_residual_abs_cycles += d;
-            ++rpi_residual_abs_cnt;
-        }
-    }
+    PROFILE_ACC(residual_abs);
 //    printf("----\n");
 
     return last_coeff_abs_level_remaining;
@@ -1180,7 +1168,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
 
-    ++rpi_residual_count;
 
 #ifdef RPI
     if (s->enable_rpi) {
@@ -1498,11 +1485,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int sign_hidden;
             int sb_type;
             uint32_t coded_vals = 0;
+            int ctx_set = (i > 0 && c_idx == 0) ? 2 : 0;
 
             PROFILE_START();
 
             // initialize first elem of coeff_bas_level_greater1_flag
-            int ctx_set = (i > 0 && c_idx == 0) ? 2 : 0;
 
             if (s->sps->persistent_rice_adaptation_enabled_flag) {
                 if (!transform_skip_flag && !lc->cu.cu_transquant_bypass_flag)
@@ -1521,15 +1508,15 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 const unsigned int idx0 = elem_offset[COEFF_ABS_LEVEL_GREATER1_FLAG] +
                     (c_idx > 0 ? 16 : 0) +
                     (ctx_set << 2);
-                unsigned int rv = get_greater1_bits(&s->HEVClc->cc, m_count, s->HEVClc->cabac_state + idx0);
-                unsigned int first_g1 = lmbd1(rv);
+                const unsigned int rv = get_greater1_bits(&s->HEVClc->cc, m_count, s->HEVClc->cabac_state + idx0);
+                const unsigned int first_g1 = __builtin_clz(rv);
 
                 prev_subset_coded = (rv != 0);
                 coded_vals = ((~rv << 3) & 0x88888888U) | rv;
 
                 // Add coding
                 if (prev_subset_coded) {
-                    unsigned int gt2 = coeff_abs_level_greater2_flag_decode(s, c_idx, ctx_set);
+                    const unsigned int gt2 = coeff_abs_level_greater2_flag_decode(s, c_idx, ctx_set);
                     coded_vals ^= (gt2 ? 3 : 8) << (31 - first_g1);
                 }
             }
@@ -1547,10 +1534,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             if (!s->pps->sign_data_hiding_flag || !sign_hidden ) {
                 coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag) << (16 - nb_significant_coeff_flag);
-                rpi_residual_signs += nb_significant_coeff_flag;
             } else {
                 coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - 1) << (16 - (nb_significant_coeff_flag - 1));
-                rpi_residual_signs += nb_significant_coeff_flag - 1;
             }
 
             for (m = 0; m < n_end; m++) {
@@ -1561,8 +1546,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     trans_coeff_level = (v & 3) + 1;
                     if ((v & 8) == 0)
                     {
-                        int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
-                        ++rpi_residual_sig_coeffs;
+                        const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
 
                         trans_coeff_level += last_coeff_abs_level_remaining;
                         if (trans_coeff_level > (3 << c_rice_param))

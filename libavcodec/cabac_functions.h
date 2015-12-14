@@ -36,13 +36,14 @@
 #define UNCHECKED_BITSTREAM_READER !CONFIG_SAFE_BITSTREAM_READER
 #endif
 
-#if ARCH_AARCH64
+// No asm or support for alcabac in aarch64 or x86 yet
+#if ARCH_AARCH64 && ALTCABAC_VER == 0
 #   include "aarch64/cabac.h"
 #endif
 #if ARCH_ARM
 #   include "arm/cabac.h"
 #endif
-#if ARCH_X86
+#if ARCH_X86 && ALTCABAC_VER == 0
 #   include "x86/cabac.h"
 #endif
 
@@ -56,7 +57,7 @@ static CABAC_TABLE_CONST uint8_t * const ff_h264_last_coeff_flag_offset_8x8 = ff
 #endif
 
 
-#ifndef get_cabac_bypass
+#if !defined(get_cabac_bypass) || !defined(get_cabac_terminate)
 static void refill(CABACContext *c){
 #if CABAC_BITS == 16
         c->low+= (c->bytestream[0]<<9) + (c->bytestream[1]<<1);

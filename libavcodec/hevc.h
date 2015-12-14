@@ -24,14 +24,17 @@
 #define AVCODEC_HEVC_H
 
 // define RPI to split the CABAC/prediction/transform into separate stages
+#include "config.h"
+#if ARCH_ARM
 #define RPI
-
+#endif
 
 #ifdef ALTCABAC_VER
 #error Unexpected redefinition of ALTCABAC_VER
 #endif
 
 #ifdef RPI
+#error XXX
 #define ALTCABAC_VER 1
 #else
 #define ALTCABAC_VER 0

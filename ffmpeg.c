@@ -22,11 +22,13 @@
  * @file
  * multimedia converter based on the FFmpeg libraries
  */
+#include "config.h"
  
+#if ARCH_ARM
 #define RPI_DISPLAY
 //#define RPI_ZERO_COPY
+#endif
 
-#include "config.h"
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
@@ -83,8 +85,8 @@
 #ifdef RPI_ZERO_COPY
 #include "libavcodec/rpi_qpu.h"
 #endif
-#include "libavutil/arm/v7_pmu.h"
 #endif
+#include "rpi_prof.h"
 
 #if HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
@@ -121,8 +123,6 @@
 #include "cmdutils.h"
 
 #include "libavutil/avassert.h"
-
-#include "rpi_prof.h"
 
 const char program_name[] = "ffmpeg";
 const int program_birth_year = 2000;
@@ -4174,8 +4174,6 @@ int main(int argc, char **argv)
 {
     int ret;
     int64_t ti;
-    volatile unsigned int t, t2;
-    unsigned int i;
 
     register_exit(ffmpeg_cleanup);
 
@@ -4202,23 +4200,23 @@ int main(int argc, char **argv)
     show_banner(argc, argv, options);
 
     term_init();
-
+#if RPI_PROFILE
     enable_pmu();
     enable_ccnt();
-    for (i = 0; i != 3; ++i) {
-        t = read_ccnt();
-        t2 = read_ccnt();
-        printf("'Nothing' took %d cycles\n", t2 - t);
+    {
+        volatile uint32_t t[4];
+        t[0] = read_ccnt();
+        t[1] = read_ccnt();
+        t[2] = read_ccnt();
+        t[3] = read_ccnt();
+        printf("'Nothing' took %u, %u, %u cycles\n", t[1] - t[0], t[2] - t[1], t[3] - t[2]);
     }
-    t = read_ccnt();
+ #endif
 
     /* parse options and open all input/output files */
     ret = ffmpeg_parse_options(argc, argv);
     if (ret < 0)
         exit_program(1);
-
-    t2 = read_ccnt();
-    printf("parse_options took %d cycles\n", t2 - t);
 
     if (nb_output_files <= 0 && nb_input_files == 0) {
         show_usage();
@@ -4244,7 +4242,6 @@ int main(int argc, char **argv)
     if (do_benchmark) {
         printf("bench: utime=%0.3fs\n", ti / 1000000.0);
     }
-    printf("r_count=%u, r_signs=%u, r_sig=%u, r_sbits=%u\n", rpi_residual_count, rpi_residual_signs, rpi_residual_sig_coeffs, rpi_residual_sig_bits);
     PROFILE_PRINTF(residual_abs);
     PROFILE_PRINTF(residual_greater1);
     PROFILE_PRINTF(residual_core);

@@ -5,6 +5,23 @@
 #error Unexpected CABAC VAR
 #endif
 
+#if ARCH_ARM
+#   include "arm/cabac.h"
+#else
+// Helper fns
+static inline uint32_t bmem_peek4(const void * buf, const unsigned int offset)
+{
+    const uint8_t * const p = (const uint8_t *)buf + (offset >> 3);
+    return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) << (offset & 7);
+}
+
+static inline unsigned int lmbd1(const uint32_t x)
+{
+    return __builtin_clz(x);
+}
+
+#endif
+
 #define get_cabac_inline get_alt1cabac_inline
 static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t * const state){
     unsigned int s = *state;
