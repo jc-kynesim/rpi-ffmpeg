@@ -1107,6 +1107,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int trafo_size = 1 << log2_trafo_size;
     int i;
     int qp,shift,scale,scale_m;
+    int rounding;
     const uint8_t level_scale[] = { 40, 45, 51, 57, 64, 72 };
     const uint8_t *scale_matrix = NULL;
     uint8_t dc_scale;
@@ -1197,7 +1198,21 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         }
 
         shift    = s->ps.sps->bit_depth + log2_trafo_size - 5;
-        scale    = level_scale[rem6[qp]] << (div6[qp]);
+#if 0
+        scale = level_scale[rem6[qp]] << div6[qp];
+#else
+        scale = level_scale[rem6[qp]];
+        if (div6[qp] >= shift) {
+            scale <<= (div6[qp] - shift);
+            shift = 0;
+            rounding = 0;
+        }
+        else
+        {
+            shift -= div6[qp];
+            rounding = (1 << (shift - 1));
+        }
+#endif
         scale_m  = 16; // default when no custom scaling lists.
         dc_scale = 16;
 
@@ -1216,6 +1231,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         shift        = 0;
         scale        = 0;
         dc_scale     = 0;
+        rounding     = 0;
     }
 
     if (lc->cu.pred_mode == MODE_INTER && s->ps.sps->explicit_rdpcm_enabled_flag &&
@@ -1295,7 +1311,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
     for (i = num_last_subset; i >= 0; i--) {
         int n, m;
-        int x_cg, y_cg, x_c, y_c, pos;
+        int x_cg, y_cg, x_c, y_c;
         int implicit_non_zero_coeff = 0;
         int prev_sig = 0;
         int offset = i << 4;
@@ -1523,6 +1539,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 if(!lc->cu.cu_transquant_bypass_flag) {
                     if (s->ps.sps->scaling_list_enable_flag && !(transform_skip_flag && log2_trafo_size > 2)) {
                         if(y_c || x_c || log2_trafo_size < 4) {
+                            int pos;
                             switch(log2_trafo_size) {
                                 case 3: pos = (y_c << 3) + x_c; break;
                                 case 4: pos = ((y_c >> 1) << 3) + (x_c >> 1); break;
@@ -1539,10 +1556,14 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     // putting the result into a 16-bit array
                     // So trans_coeff_level must fit in 16 bits too (7.4.9.1 definition of coeff_abs_level_remaining)
                     // scale is uint8_t
-                    // scale_m is [40 - 72]
-                    // add is 1 << (shift -1) - so small
-                    // so everything fits in 32 bits
-                    trans_coeff_level = (trans_coeff_level * (int)(scale * scale_m) + (1 << (shift - 1))) >> shift;
+                    //
+                    // scale_m is [40 - 72] << [0..12] - worst case is (45 << 12)
+                    // shift = s->ps.sps->bit_depth (max 16, min 8) + log2_trafo_size (max 5, min 2?) - 5 = max 16 min 5?
+                    // however the scale shift is substracted from shift to a min 0 so scale_m worst = 45 << 6
+                    // This can still theoretically lead to overflow but the coding would have to be very odd (& inefficient)
+                    // to achieve it
+                    trans_coeff_level = (trans_coeff_level * (int)(scale * scale_m) + rounding) >> shift;
+
                     if (trans_coeff_level < -32768) {
                         trans_coeff_level = -32768;
                     }
