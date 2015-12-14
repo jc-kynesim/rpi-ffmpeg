@@ -1545,9 +1545,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             else
                 sign_hidden = (last_nz_pos_in_cg - first_nz_pos_in_cg >= 4);
 
-//            if (first_greater1_coeff_idx != -1) {
-//                coeff_abs_level_greater1_flag[first_greater1_coeff_idx] += coeff_abs_level_greater2_flag_decode(s, c_idx, ctx_set);
-//            }
             if (!s->pps->sign_data_hiding_flag || !sign_hidden ) {
                 coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag) << (16 - nb_significant_coeff_flag);
                 rpi_residual_signs += nb_significant_coeff_flag;
