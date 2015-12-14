@@ -1031,6 +1031,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int vshift = s->ps.sps->vshift[c_idx];
     uint8_t *dst = &s->frame->data[c_idx][(y0 >> vshift) * stride +
                                           ((x0 >> hshift) << s->ps.sps->pixel_shift)];
+#ifdef RPI
+    int use_vpu = s->enable_rpi && !lc->cu.cu_transquant_bypass_flag && !transform_skip_flag && !lc->tu.cross_pf && log2_trafo_size>=4;
+#endif
     int16_t *coeffs = (int16_t*)(c_idx ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
     uint8_t significant_coeff_group_flag[8][8] = {{0}};
     int explicit_rdpcm_flag = 0;
@@ -1044,8 +1047,34 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
-
+#ifdef RPI
+    if (s->enable_rpi) {
+        int n = trafo_size * trafo_size;
+        if (use_vpu) {
+            // We support size 4 and size 5.
+            // Size 4 grows from the front  (Coeffs_buf_arm[2] points to start of buf)
+            // Size 5 grows from the back   (Coeffs_buf_arm[3] points to end of buf)
+            // num_coeffs is indexed by log2_trafo_size-2
+            if (log2_trafo_size == 4)
+                coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] + s->num_coeffs[s->pass0_job][log2_trafo_size - 2];
+            else
+                coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] - s->num_coeffs[s->pass0_job][log2_trafo_size - 2] - n;
+            s->num_coeffs[s->pass0_job][log2_trafo_size - 2] += n;
+        } else {
+            coeffs = s->coeffs_buf_arm[s->pass0_job][0] + s->num_coeffs[s->pass0_job][0];
+            s->num_coeffs[s->pass0_job][0] += n;
+        }
+    }
+    // We now do the memset after transform_add while we know the data is cached.
+    #ifdef RPI_PRECLEAR
+    #else
     memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
+    #endif
+#else
+    memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
+#endif
+
+    
 
     // Derive QP for dequant
     if (!lc->cu.cu_transquant_bypass_flag) {
@@ -1458,7 +1487,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
         }
     }
-
+    
     if (lc->cu.cu_transquant_bypass_flag) {
         if (explicit_rdpcm_flag || (s->ps.sps->implicit_rdpcm_enabled_flag &&
                                     (pred_mode_intra == 10 || pred_mode_intra == 26))) {
@@ -1475,7 +1504,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 for (i = 0; i < 8; i++)
                     FFSWAP(int16_t, coeffs[i], coeffs[16 - i - 1]);
             }
-
             s->hevcdsp.transform_skip(coeffs, log2_trafo_size);
 
             if (explicit_rdpcm_flag || (s->ps.sps->implicit_rdpcm_enabled_flag &&
@@ -1486,8 +1514,26 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 s->hevcdsp.transform_rdpcm(coeffs, log2_trafo_size, mode);
             }
         } else if (lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2) {
-            s->hevcdsp.idct_4x4_luma(coeffs);
+           s->hevcdsp.idct_4x4_luma(coeffs);
         } else {
+#ifdef RPI
+            if (!use_vpu) {
+              int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
+              if (max_xy == 0) {
+                  s->hevcdsp.idct_dc[log2_trafo_size-2](coeffs);
+              } else {
+                  int col_limit = last_significant_coeff_x + last_significant_coeff_y + 4;
+                  if (max_xy < 4)
+                      col_limit = FFMIN(4, col_limit);
+                  else if (max_xy < 8)
+                      col_limit = FFMIN(8, col_limit);
+                  else if (max_xy < 12)
+                      col_limit = FFMIN(24, col_limit);
+
+                  s->hevcdsp.idct[log2_trafo_size-2](coeffs, col_limit);
+              }
+            }
+#else
             int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
             if (max_xy == 0)
                 s->hevcdsp.idct_dc[log2_trafo_size-2](coeffs);
@@ -1501,6 +1547,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     col_limit = FFMIN(24, col_limit);
                 s->hevcdsp.idct[log2_trafo_size-2](coeffs, col_limit);
             }
+#endif
         }
     }
     if (lc->tu.cross_pf) {
@@ -1510,6 +1557,17 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             coeffs[i] = coeffs[i] + ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
         }
     }
+#ifdef RPI
+    if (s->enable_rpi) {
+        HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
+        cmd->type = RPI_PRED_TRANSFORM_ADD;
+        cmd->size = log2_trafo_size;
+        cmd->buf = coeffs;
+        cmd->dst = dst;
+        cmd->stride = stride;
+        return;
+    }
+#endif
     s->hevcdsp.transform_add[log2_trafo_size-2](dst, coeffs, stride);
 }
 
