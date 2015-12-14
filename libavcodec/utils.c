@@ -26,9 +26,13 @@
  */
  
 // Move video buffers to GPU memory
-#define RPI_GPU_BUFFERS
 
 #include "config.h"
+
+#if ARCH_ARM
+#define RPI_GPU_BUFFERS
+#endif
+
 #include "libavutil/atomic.h"
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"

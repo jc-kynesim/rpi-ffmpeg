@@ -23,6 +23,22 @@
 #ifndef AVCODEC_HEVC_H
 #define AVCODEC_HEVC_H
 
+// define RPI to split the CABAC/prediction/transform into separate stages
+#include "config.h"
+#if ARCH_ARM
+#define RPI
+#endif
+
+#ifdef ALTCABAC_VER
+#error Unexpected redefinition of ALTCABAC_VER
+#endif
+
+#ifdef RPI
+#define ALTCABAC_VER 1
+#else
+#define ALTCABAC_VER 0
+#endif
+
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"
 
@@ -36,8 +52,6 @@
 #include "thread.h"
 #include "videodsp.h"
 
-// define RPI to split the CABAC/prediction/transform into separate stages
-#define RPI
 
 #ifdef RPI
 
@@ -51,9 +65,10 @@
   #endif
   
   // By passing jobs to a worker thread we hope to be able to catch up during slow frames
-  #define RPI_MAX_JOBS 2
+//  #define RPI_MAX_JOBS 2
+  #define RPI_MAX_JOBS 1
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
-  #define RPI_WORKER
+//  #define RPI_WORKER
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
   //#define RPI_DEBLOCK_VPU
   

@@ -36,13 +36,14 @@
 #define UNCHECKED_BITSTREAM_READER !CONFIG_SAFE_BITSTREAM_READER
 #endif
 
-#if ARCH_AARCH64
+// No asm or support for alcabac in aarch64 or x86 yet
+#if ARCH_AARCH64 && ALTCABAC_VER == 0
 #   include "aarch64/cabac.h"
 #endif
 #if ARCH_ARM
 #   include "arm/cabac.h"
 #endif
-#if ARCH_X86
+#if ARCH_X86 && ALTCABAC_VER == 0
 #   include "x86/cabac.h"
 #endif
 
@@ -51,6 +52,12 @@ static const uint8_t * const ff_h264_lps_range = ff_h264_cabac_tables + H264_LPS
 static const uint8_t * const ff_h264_mlps_state = ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET;
 static const uint8_t * const ff_h264_last_coeff_flag_offset_8x8 = ff_h264_cabac_tables + H264_LAST_COEFF_FLAG_OFFSET_8x8_OFFSET;
 
+#if ALTCABAC_VER == 1
+#include "alt1cabac_fns.h"
+#endif
+
+
+#if !defined(get_cabac_bypass) || !defined(get_cabac_terminate)
 static void refill(CABACContext *c){
 #if CABAC_BITS == 16
         c->low+= (c->bytestream[0]<<9) + (c->bytestream[1]<<1);
@@ -63,7 +70,9 @@ static void refill(CABACContext *c){
 #endif
         c->bytestream += CABAC_BITS / 8;
 }
+#endif
 
+#ifndef get_cabac_terminate
 static inline void renorm_cabac_decoder_once(CABACContext *c){
     int shift= (uint32_t)(c->range - 0x100)>>31;
     c->range<<= shift;
@@ -71,6 +80,7 @@ static inline void renorm_cabac_decoder_once(CABACContext *c){
     if(!(c->low & CABAC_MASK))
         refill(c);
 }
+#endif
 
 #ifndef get_cabac_inline
 static void refill2(CABACContext *c){
@@ -94,7 +104,10 @@ static void refill2(CABACContext *c){
 #endif
         c->bytestream += CABAC_BITS/8;
 }
+#endif
 
+
+#ifndef get_cabac_inline
 static av_always_inline int get_cabac_inline(CABACContext *c, uint8_t * const state){
     int s = *state;
     int RangeLPS= ff_h264_lps_range[2*(c->range&0xC0) + s];
@@ -113,6 +126,9 @@ static av_always_inline int get_cabac_inline(CABACContext *c, uint8_t * const st
     lps_mask= ff_h264_norm_shift[c->range];
     c->range<<= lps_mask;
     c->low  <<= lps_mask;
+
+//    printf("bit=%d, n=%d, range=%d, offset=%d, state=%d\n", bit, lps_mask, c->range, c->low >> (CABAC_BITS+1), *state);
+
     if(!(c->low & CABAC_MASK))
         refill2(c);
     return bit;
@@ -136,10 +152,13 @@ static int av_unused get_cabac_bypass(CABACContext *c){
         refill(c);
 
     range= c->range<<(CABAC_BITS+1);
+
     if(c->low < range){
+//        printf("bypass 0: o=%u, r=%u\n", c->low >> (CABAC_BITS + 1), c->range);
         return 0;
     }else{
         c->low -= range;
+//        printf("bypass 1: o=%u, r=%u\n", c->low >> (CABAC_BITS + 1), c->range);
         return 1;
     }
 }
@@ -166,6 +185,7 @@ static av_always_inline int get_cabac_bypass_sign(CABACContext *c, int val){
  *
  * @return the number of bytes read or 0 if no end
  */
+#ifndef get_cabac_terminate
 static int av_unused get_cabac_terminate(CABACContext *c){
     c->range -= 2;
     if(c->low < c->range<<(CABAC_BITS+1)){
@@ -175,11 +195,13 @@ static int av_unused get_cabac_terminate(CABACContext *c){
         return c->bytestream - c->bytestream_start;
     }
 }
+#endif
 
 /**
  * Skip @p n bytes and reset the decoder.
  * @return the address of the first skipped byte or NULL if there's less than @p n bytes left
  */
+#ifndef skip_bytes
 static av_unused const uint8_t* skip_bytes(CABACContext *c, int n) {
     const uint8_t *ptr = c->bytestream;
 
@@ -196,5 +218,6 @@ static av_unused const uint8_t* skip_bytes(CABACContext *c, int n) {
 
     return ptr;
 }
+#endif
 
 #endif /* AVCODEC_CABAC_FUNCTIONS_H */

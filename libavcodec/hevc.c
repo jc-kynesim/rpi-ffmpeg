@@ -33,11 +33,11 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/stereo3d.h"
 
+#include "hevc.h"
 #include "bswapdsp.h"
 #include "bytestream.h"
 #include "cabac_functions.h"
 #include "golomb.h"
-#include "hevc.h"
 
 #ifdef RPI
   #include "rpi_qpu.h"
@@ -2176,8 +2176,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             int my2_mx2_my_mx = (my_mx << 16) + my_mx;
             int x1 = x0 + (mv->x >> 2);
             int y1 = y0 + (mv->y >> 2);
-            int weight_flag = (s->sh.slice_type == P_SLICE && s->pps->weighted_pred_flag) ||
-                              (s->sh.slice_type == B_SLICE && s->pps->weighted_bipred_flag);    
+            int weight_flag = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
+                              (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
             uint32_t *y = s->curr_y_mvs;      
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
@@ -2212,8 +2212,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 #ifdef RPI_INTER_QPU
             if (s->enable_rpi) {
                 int reflist = 0;
-                int hshift           = s->sps->hshift[1];
-                int vshift           = s->sps->vshift[1];
+                int hshift           = s->ps.sps->hshift[1];
+                int vshift           = s->ps.sps->vshift[1];
                 const Mv *mv         = &current_mv.mv[reflist];
                 intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
                 intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
@@ -2222,8 +2222,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
                 int x1_c = x0_c + (mv->x >> (2 + hshift));
                 int y1_c = y0_c + (mv->y >> (2 + hshift));
-                int weight_flag      = (s->sh.slice_type == P_SLICE && s->pps->weighted_pred_flag) ||
-                                       (s->sh.slice_type == B_SLICE && s->pps->weighted_bipred_flag);
+                int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
+                                       (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
                 
                 uint32_t *u = s->curr_u_mvs;      
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {  
@@ -2276,8 +2276,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             int my2_mx2_my_mx = (my_mx << 16) + my_mx;
             int x1 = x0 + (mv->x >> 2);
             int y1 = y0 + (mv->y >> 2);
-            int weight_flag = (s->sh.slice_type == P_SLICE && s->pps->weighted_pred_flag) ||
-                              (s->sh.slice_type == B_SLICE && s->pps->weighted_bipred_flag);    
+            int weight_flag = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
+                              (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
             uint32_t *y = s->curr_y_mvs;      
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
@@ -2313,8 +2313,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 #ifdef RPI_INTER_QPU
             if (s->enable_rpi) {
                 int reflist = 1;
-                int hshift           = s->sps->hshift[1];
-                int vshift           = s->sps->vshift[1];
+                int hshift           = s->ps.sps->hshift[1];
+                int vshift           = s->ps.sps->vshift[1];
                 const Mv *mv         = &current_mv.mv[reflist];
                 intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
                 intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
@@ -2323,8 +2323,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
                 int x1_c = x0_c + (mv->x >> (2 + hshift));
                 int y1_c = y0_c + (mv->y >> (2 + hshift));
-                int weight_flag      = (s->sh.slice_type == P_SLICE && s->pps->weighted_pred_flag) ||
-                                       (s->sh.slice_type == B_SLICE && s->pps->weighted_bipred_flag);
+                int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
+                                       (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
                 
                 uint32_t *u = s->curr_u_mvs;      
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {  
@@ -2412,8 +2412,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
         if (s->ps.sps->chroma_format_idc) {
 #ifdef RPI_INTER_QPU
             if (s->enable_rpi) {
-                int hshift           = s->sps->hshift[1];
-                int vshift           = s->sps->vshift[1];
+                int hshift           = s->ps.sps->hshift[1];
+                int vshift           = s->ps.sps->vshift[1];
                 const Mv *mv         = &current_mv.mv[0];
                 intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
                 intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
@@ -2967,7 +2967,7 @@ static void rpi_execute_dblk_cmds(HEVCContext *s)
 {
     int n;
     int job = s->pass1_job;
-    int ctb_size    = 1 << s->sps->log2_ctb_size;
+    int ctb_size    = 1 << s->ps.sps->log2_ctb_size;
     int (*p)[2] = s->dblk_cmds[job];
     for(n = s->num_dblk_cmds[job]; n>0 ;n--,p++) {
         ff_hevc_hls_filters(s, (*p)[0], (*p)[1], ctb_size);
@@ -3115,10 +3115,10 @@ static void rpi_begin(HEVCContext *s)
     int job = s->pass0_job;
     int i;
 #ifdef RPI_INTER_QPU
-    int pic_width        = s->sps->width >> s->sps->hshift[1];
-    int pic_height       = s->sps->height >> s->sps->vshift[1];
-    int weight_flag      = (s->sh.slice_type == P_SLICE && s->pps->weighted_pred_flag) ||
-                           (s->sh.slice_type == B_SLICE && s->pps->weighted_bipred_flag);
+    int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
+    int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
+    int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
+                           (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
                                        
     for(i=0;i<8;i++) {
         s->u_mvs[job][i] = s->mvs_base[job][i];
@@ -3150,7 +3150,7 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = 0; // ref_y_base
         *s->y_mvs[job][i]++ = 0; // y2_x2
         *s->y_mvs[job][i]++ = 0; // ref_y2_base
-        *s->y_mvs[job][i]++ = (s->sps->width << 16) + s->sps->height;
+        *s->y_mvs[job][i]++ = (s->ps.sps->width << 16) + s->ps.sps->height;
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst_pitch
         if (weight_flag) {
@@ -3259,8 +3259,8 @@ static int32_t filter8_luma(uint8_t *data, int x0, int y0, int pitch, int my_mx,
 
 static uint8_t *test_frame(HEVCContext *s,uint32_t p, AVFrame *frame, int cIdx)
 {
-  //int pic_width        = s->sps->width >> s->sps->hshift[cIdx];
-  int pic_height       = s->sps->height >> s->sps->vshift[cIdx];
+  //int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[cIdx];
+  int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[cIdx];
   int pitch = frame->linesize[cIdx];
   uint32_t base = get_vc_address(frame->buf[cIdx]);
   if (p>=base && p<base+pitch*pic_height) {
@@ -3560,10 +3560,10 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
 #ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
-    int n = s->sps->height;
+    int n = s->ps.sps->height;
     int curr_y = 0;
     int curr_uv = 0;
-    int n_uv = n >> s->sps->vshift[1];
+    int n_uv = n >> s->ps.sps->vshift[1];
     int sz,base;
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
@@ -3610,9 +3610,9 @@ static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM
         high=FFMAX(high,y);
     }
     curr_y = low;
-    n = high+(1 << s->sps->log2_ctb_size);
-    curr_uv = curr_y >> s->sps->vshift[1];
-    n_uv = n >> s->sps->vshift[1];
+    n = high+(1 << s->ps.sps->log2_ctb_size);
+    curr_uv = curr_y >> s->ps.sps->vshift[1];
+    n_uv = n >> s->ps.sps->vshift[1];
    
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
@@ -4308,7 +4308,7 @@ fail:
 
     if (s->ref && s->threads_type == FF_THREAD_FRAME) {
 #ifdef RPI_INTER_QPU
-        ff_hevc_flush_buffer(s, &s->ref->tf, s->sps->height);
+        ff_hevc_flush_buffer(s, &s->ref->tf, s->ps.sps->height);
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
     } else if (s->ref) {

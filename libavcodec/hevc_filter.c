@@ -31,7 +31,6 @@
 #include "libavutil/common.h"
 #include "libavutil/internal.h"
 
-#include "cabac_functions.h"
 #include "golomb.h"
 #include "hevc.h"
 
@@ -659,8 +658,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #ifdef RPI_DEBLOCK_VPU
                         if (s->enable_rpi_deblock) {
                             uint8_t (*setup)[2][2][4];
-                            int xc = x>>s->sps->hshift[chroma];
-                            int yc = y>>s->sps->vshift[chroma];
+                            int xc = x>>s->ps.sps->hshift[chroma];
+                            int yc = y>>s->ps.sps->vshift[chroma];
                             int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
                             int a = ((yc>>3) & 1) << 1;
                             int b = (xc>>3) & 1;
@@ -706,8 +705,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #ifdef RPI_DEBLOCK_VPU
                         if (s->enable_rpi_deblock) {
                             uint8_t (*setup)[2][2][4];
-                            int xc = x>>s->sps->hshift[chroma];
-                            int yc = y>>s->sps->vshift[chroma];
+                            int xc = x>>s->ps.sps->hshift[chroma];
+                            int yc = y>>s->ps.sps->vshift[chroma];
                             int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
                             int a = ((xc>>3) & 1) << 1;
                             int b = (yc>>3) & 1;
@@ -900,8 +899,8 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
         struct vcsm_user_clean_invalid_s iocache = {};
         int curr_y = start;
         int n = end;
-        int curr_uv = curr_y >> s->sps->vshift[1];
-        int n_uv = n >> s->sps->vshift[1];
+        int curr_uv = curr_y >> s->ps.sps->vshift[1];
+        int n_uv = n >> s->ps.sps->vshift[1];
         int sz,base;
         GPU_MEM_PTR_T *p;
         if (curr_uv < 0) curr_uv = 0;
@@ -949,8 +948,8 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 #ifdef RPI_FAST_CACHEFLUSH
         struct vcsm_user_clean_invalid_s iocache = {};
         int curr_y = ((int *)f->progress->data)[0];
-        int curr_uv = curr_y >> s->sps->vshift[1];
-        int n_uv = n >> s->sps->vshift[1];
+        int curr_uv = curr_y >> s->ps.sps->vshift[1];
+        int n_uv = n >> s->ps.sps->vshift[1];
         int sz,base;
         GPU_MEM_PTR_T *p;
         if (curr_uv < 0) curr_uv = 0;
@@ -1009,18 +1008,18 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   s->vpu_cmds_arm[0][4] = ctb_size>>4;
   s->vpu_cmds_arm[0][5] = 2;
   
-  s->vpu_cmds_arm[1][0] = get_vc_address(s->frame->buf[1]) + s->frame->linesize[1] * (y>> s->sps->vshift[1]);
+  s->vpu_cmds_arm[1][0] = get_vc_address(s->frame->buf[1]) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
   s->vpu_cmds_arm[1][1] = s->frame->linesize[1];
   s->vpu_cmds_arm[1][2] = s->uv_setup_width;
-  s->vpu_cmds_arm[1][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->sps->vshift[1]) );
-  s->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->sps->vshift[1];
+  s->vpu_cmds_arm[1][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
+  s->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
   s->vpu_cmds_arm[1][5] = 3;
   
-  s->vpu_cmds_arm[2][0] = get_vc_address(s->frame->buf[2]) + s->frame->linesize[2] * (y>> s->sps->vshift[2]);
+  s->vpu_cmds_arm[2][0] = get_vc_address(s->frame->buf[2]) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
   s->vpu_cmds_arm[2][1] = s->frame->linesize[2];
   s->vpu_cmds_arm[2][2] = s->uv_setup_width;
-  s->vpu_cmds_arm[2][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->sps->vshift[1]) );
-  s->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->sps->vshift[1];
+  s->vpu_cmds_arm[2][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
+  s->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
   s->vpu_cmds_arm[2][5] = 4;
   
   // Call VPU
@@ -1040,10 +1039,10 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
 #ifdef RPI_DEBLOCK_VPU
     if (s->enable_rpi_deblock && x_end)
     {
-      int y_at_end = y >= s->sps->height - ctb_size;
+      int y_at_end = y >= s->ps.sps->height - ctb_size;
       int height = 64;  // Deblock in units 64 high to avoid too many VPU calls
       int y_start = y&~63;
-      if (y_at_end) height = s->sps->height - y_start;
+      if (y_at_end) height = s->ps.sps->height - y_start;
       if ((((y+ctb_size)&63)==0) || y_at_end) {
         done_deblock = 1;
         rpi_deblock(s, y_start, height);
