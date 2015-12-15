@@ -37,6 +37,12 @@ X unsigned int rpi_residual_core_cnt Z;
 #undef X
 #undef Z
 
+#define PROFILE_INIT()\
+do {\
+    enable_pmu();\
+    enable_ccnt();\
+} while (0)
+
 #define PROFILE_START()\
 do {\
     volatile uint32_t perf_1 = read_ccnt();\
@@ -61,6 +67,7 @@ do {\
 #else
 
 // No profile
+#define PROFILE_INIT()
 #define PROFILE_START()
 #define PROFILE_ACC(x)
 #define PROFILE_PRINTF(x)

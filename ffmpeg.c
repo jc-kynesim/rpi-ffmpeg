@@ -4428,18 +4428,7 @@ int main(int argc, char **argv)
     show_banner(argc, argv, options);
 
     term_init();
-#if RPI_PROFILE
-    enable_pmu();
-    enable_ccnt();
-    {
-        volatile uint32_t t[4];
-        t[0] = read_ccnt();
-        t[1] = read_ccnt();
-        t[2] = read_ccnt();
-        t[3] = read_ccnt();
-        printf("'Nothing' took %u, %u, %u cycles\n", t[1] - t[0], t[2] - t[1], t[3] - t[2]);
-    }
- #endif
+    PROFILE_INIT();
 
     /* parse options and open all input/output files */
     ret = ffmpeg_parse_options(argc, argv);
@@ -4482,3 +4471,4 @@ int main(int argc, char **argv)
     exit_program(received_nb_signals ? 255 : main_return_code);
     return main_return_code;
 }
+
