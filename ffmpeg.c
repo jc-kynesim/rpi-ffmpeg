@@ -85,6 +85,8 @@
 #endif
 #endif
 
+#include "rpi_prof.h"
+
 #if HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
 #include <sys/types.h>

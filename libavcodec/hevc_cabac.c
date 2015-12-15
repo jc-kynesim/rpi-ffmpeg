@@ -27,6 +27,9 @@
 #include "cabac_functions.h"
 #include "hevc.h"
 
+#define RPI_PROC_ALLOC 1
+#include "rpi_prof.h"
+
 #define CABAC_MAX_BIN 31
 
 /**
@@ -1414,7 +1417,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int sign_hidden;
             int sb_type;
 
-            PROFILE_START()
+            PROFILE_START();
 
             // initialize first elem of coeff_bas_level_greater1_flag
             int ctx_set = (i > 0 && c_idx == 0) ? 2 : 0;
