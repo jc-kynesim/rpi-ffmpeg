@@ -970,13 +970,13 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
     return GET_CABAC(elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] + inc);
 }
 
-static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
+static inline int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 {
     int prefix = 0;
     int suffix = 0;
     int last_coeff_abs_level_remaining;
 
-    PROFILE_START();
+//    PROFILE_START();
 
 #ifdef get_cabac_bypeek22
     {
@@ -1037,7 +1037,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
     }
 #endif
 
-    PROFILE_ACC(residual_abs);
+//    PROFILE_ACC(residual_abs);
 //    printf("----\n");
 
     return last_coeff_abs_level_remaining;
@@ -1045,12 +1045,19 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 
 static av_always_inline int coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
 {
+#ifdef get_cabac_bypeek22
+    uint32_t x, y;
+    y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
+    get_cabac_byflush(&s->HEVClc->cc, nb, y, x);
+    return y >> (32 - nb);
+#else
     int i;
     int ret = 0;
 
     for (i = 0; i < nb; i++)
         ret = (ret << 1) | get_cabac_bypass(&s->HEVClc->cc);
     return ret;
+#endif
 }
 
 
@@ -1067,6 +1074,55 @@ static uint32_t get_greater1_bits(CABACContext * const c, const unsigned int n, 
     PROFILE_ACC(residual_greater1);
     return rv << (32 - 4 * n);
 }
+
+// extended_precision_processing_flag must be false given we are
+// putting the result into a 16-bit array
+// So trans_coeff_level must fit in 16 bits too (7.4.9.1 definition of coeff_abs_level_remaining)
+// scale_m is uint8_t
+//
+// scale is [40 - 72] << [0..12] based on qp- worst case is (45 << 12)
+//   or it can be 2 (if we have transquant_bypass)
+// shift is set to one less than we really want but would normally be
+//   s->ps.sps->bit_depth (max 16, min 8) + log2_trafo_size (max 5, min 2?) - 5 = max 16 min 5?
+// however the scale shift is substracted from shift to a min 0 so scale_m worst = 45 << 6
+// This can still theoretically lead to overflow but the coding would have to be very odd (& inefficient)
+// to achieve it
+
+#if ARCH_ARM
+static inline int trans_scale_sat(const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
+{
+    int rv;
+    __asm__ (
+	"mul %[rv], %[scale], %[level]  \n\t"
+	"mul %[rv], %[rv], %[scale_m]   \n\t"
+	"asr %[rv], %[rv], %[shift]     \n\t"
+	"add %[rv], %[rv], #1           \n\t"
+	"ssat %[rv], #16, %[rv], ASR #1 \n\t"
+    : [rv]"=&r"(rv)
+    : [level]"r"(level),
+	  [scale]"r"(scale),
+      [scale_m]"r"(scale_m),
+      [shift]"r"(shift)
+    :
+    );
+    return rv;
+}
+#else
+static inline int trans_scale_sat(const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
+{
+    int trans_coeff_level = (((level * (int)(scale * scale_m)) >> shift) + 1) >> 1;
+
+    if (trans_coeff_level < -32768) {
+        trans_coeff_level = -32768;
+    }
+    else if (trans_coeff_level > 32767) {
+        trans_coeff_level = 32767;
+    }
+
+    return trans_coeff_level;
+}
+#endif
+
 
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 int log2_trafo_size, enum ScanType scan_idx,
@@ -1097,6 +1153,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t *dst = &s->frame->data[c_idx][(y0 >> vshift) * stride +
                                           ((x0 >> hshift) << s->ps.sps->pixel_shift)];
 #ifdef RPI
+    //***** transform_skip_flag decoded later!
     int use_vpu = s->enable_rpi && !lc->cu.cu_transquant_bypass_flag && !transform_skip_flag && !lc->tu.cross_pf && log2_trafo_size>=4;
 #endif
     int16_t *coeffs = (int16_t*)(c_idx ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
@@ -1106,9 +1163,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
     int trafo_size = 1 << log2_trafo_size;
     int i;
-    int qp,shift,scale,scale_m;
-    int rounding;
-    const uint8_t level_scale[] = { 40, 45, 51, 57, 64, 72 };
+    int qp,shift,scale;
+    static const uint8_t level_scale[] = { 40, 45, 51, 57, 64, 72 };
     const uint8_t *scale_matrix = NULL;
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
@@ -1197,7 +1253,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             qp += s->ps.sps->qp_bd_offset;
         }
 
-        shift    = s->ps.sps->bit_depth + log2_trafo_size - 5;
+//        shift    = s->ps.sps->bit_depth + log2_trafo_size - 5;
+        shift    = s->ps.sps->bit_depth + log2_trafo_size - 6;
 #if 0
         scale = level_scale[rem6[qp]] << div6[qp];
 #else
@@ -1205,33 +1262,57 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         if (div6[qp] >= shift) {
             scale <<= (div6[qp] - shift);
             shift = 0;
-            rounding = 0;
+//            rounding = 0;
         }
         else
         {
             shift -= div6[qp];
-            rounding = (1 << (shift - 1));
+//            rounding = (1 << (shift - 1));
         }
 #endif
-        scale_m  = 16; // default when no custom scaling lists.
-        dc_scale = 16;
 
         if (s->ps.sps->scaling_list_enable_flag && !(transform_skip_flag && log2_trafo_size > 2)) {
             const ScalingList *sl = s->ps.pps->scaling_list_data_present_flag ?
-            &s->ps.pps->scaling_list : &s->ps.sps->scaling_list;
+                &s->ps.pps->scaling_list : &s->ps.sps->scaling_list;
             int matrix_id = lc->cu.pred_mode != MODE_INTRA;
 
             matrix_id = 3 * matrix_id + c_idx;
 
             scale_matrix = sl->sl[log2_trafo_size - 2][matrix_id];
+            dc_scale = scale_matrix[0];
             if (log2_trafo_size >= 4)
                 dc_scale = sl->sl_dc[log2_trafo_size - 4][matrix_id];
         }
+        else
+        {
+            static const uint8_t sixteen_scale[64] = {
+                16, 16, 16, 16, 16, 16, 16, 16,
+                16, 16, 16, 16, 16, 16, 16, 16,
+                16, 16, 16, 16, 16, 16, 16, 16,
+                16, 16, 16, 16, 16, 16, 16, 16,
+                16, 16, 16, 16, 16, 16, 16, 16,
+                16, 16, 16, 16, 16, 16, 16, 16,
+                16, 16, 16, 16, 16, 16, 16, 16,
+                16, 16, 16, 16, 16, 16, 16, 16
+            };
+            scale_matrix = sixteen_scale;
+            dc_scale = 16;
+        }
     } else {
+        static const uint8_t unit_scale[64] = {
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1,
+        };
+        scale_matrix = unit_scale;
         shift        = 0;
-        scale        = 0;
-        dc_scale     = 0;
-        rounding     = 0;
+        scale        = 2;  // We will shift right to kill this
+        dc_scale     = 1;
     }
 
     if (lc->cu.pred_mode == MODE_INTER && s->ps.sps->explicit_rdpcm_enabled_flag &&
@@ -1310,8 +1391,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     num_last_subset = (num_coeff - 1) >> 4;
 
     for (i = num_last_subset; i >= 0; i--) {
-        int n, m;
-        int x_cg, y_cg, x_c, y_c;
+        int m;
+        int x_cg, y_cg;
         int implicit_non_zero_coeff = 0;
         int prev_sig = 0;
         int offset = i << 4;
@@ -1364,6 +1445,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             };
             const uint8_t *ctx_idx_map_p;
             int scf_offset = 0;
+            int n;
             if (s->ps.sps->transform_skip_context_enabled_flag &&
                 (transform_skip_flag || lc->cu.cu_transquant_bypass_flag)) {
                 ctx_idx_map_p = (uint8_t*) &ctx_idx_map[4 * 16];
@@ -1439,8 +1521,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int first_nz_pos_in_cg;
             int last_nz_pos_in_cg;
             int c_rice_param = 0;
-//            int first_greater1_coeff_idx = -1;
-//            uint8_t coeff_abs_level_greater1_flag[8];
             uint16_t coeff_sign_flag;
             int sum_abs = 0;
             int sign_hidden;
@@ -1484,7 +1564,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             first_nz_pos_in_cg = significant_coeff_flag_idx[n_end - 1];
 
-            if (lc->cu.cu_transquant_bypass_flag ||
+            if (!s->ps.pps->sign_data_hiding_flag || lc->cu.cu_transquant_bypass_flag ||
                 (lc->cu.pred_mode ==  MODE_INTRA  &&
                  s->ps.sps->implicit_rdpcm_enabled_flag  &&  transform_skip_flag  &&
                  (pred_mode_intra == 10 || pred_mode_intra  ==  26 )) ||
@@ -1493,7 +1573,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             else
                 sign_hidden = (last_nz_pos_in_cg - first_nz_pos_in_cg >= 4);
 
-            if (!s->ps.pps->sign_data_hiding_flag || !sign_hidden ) {
+            if (!sign_hidden ) {
                 coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag) << (16 - nb_significant_coeff_flag);
             } else {
                 coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - 1) << (16 - (nb_significant_coeff_flag - 1));
@@ -1525,53 +1605,31 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 }
                 coded_vals <<= 4;
 
-                n = significant_coeff_flag_idx[m];
-                GET_COORD(offset, n);
-
-                if (s->ps.pps->sign_data_hiding_flag && sign_hidden) {
+                if (sign_hidden) {
                     sum_abs += trans_coeff_level;
-                    if (n == first_nz_pos_in_cg && (sum_abs&1))
+                    if (m == n_end - 1 && (sum_abs&1))
                         trans_coeff_level = -trans_coeff_level;
                 }
                 if (coeff_sign_flag >> 15)
                     trans_coeff_level = -trans_coeff_level;
                 coeff_sign_flag <<= 1;
-                if(!lc->cu.cu_transquant_bypass_flag) {
-                    if (s->ps.sps->scaling_list_enable_flag && !(transform_skip_flag && log2_trafo_size > 2)) {
-                        if(y_c || x_c || log2_trafo_size < 4) {
-                            int pos;
-                            switch(log2_trafo_size) {
-                                case 3: pos = (y_c << 3) + x_c; break;
-                                case 4: pos = ((y_c >> 1) << 3) + (x_c >> 1); break;
-                                case 5: pos = ((y_c >> 2) << 3) + (x_c >> 2); break;
-                                default: pos = (y_c << 2) + x_c; break;
-                            }
-                            scale_m = scale_matrix[pos];
-                        } else {
-                            scale_m = dc_scale;
-                        }
+
+
+                {
+                    uint8_t scale_m = dc_scale;
+                    unsigned int x_c = (x_cg << 2) + scan_x_off[significant_coeff_flag_idx[m]];
+                    unsigned int y_c = (y_cg << 2) + scan_y_off[significant_coeff_flag_idx[m]];
+                    unsigned int t_offset = (y_c << log2_trafo_size) + x_c;
+
+                    if (t_offset != 0)
+                    {
+                        int n_shr = log2_trafo_size  - 3;
+                        unsigned int pos = ((y_c >> n_shr) << 3) + (x_c >> n_shr);
+                        scale_m = scale_matrix[n_shr >= 0 ? pos : t_offset];
                     }
 
-                    // extended_precision_processing_flag must be false given we are
-                    // putting the result into a 16-bit array
-                    // So trans_coeff_level must fit in 16 bits too (7.4.9.1 definition of coeff_abs_level_remaining)
-                    // scale is uint8_t
-                    //
-                    // scale_m is [40 - 72] << [0..12] - worst case is (45 << 12)
-                    // shift = s->ps.sps->bit_depth (max 16, min 8) + log2_trafo_size (max 5, min 2?) - 5 = max 16 min 5?
-                    // however the scale shift is substracted from shift to a min 0 so scale_m worst = 45 << 6
-                    // This can still theoretically lead to overflow but the coding would have to be very odd (& inefficient)
-                    // to achieve it
-                    trans_coeff_level = (trans_coeff_level * (int)(scale * scale_m) + rounding) >> shift;
-
-                    if (trans_coeff_level < -32768) {
-                        trans_coeff_level = -32768;
-                    }
-                    else if (trans_coeff_level > 32767) {
-                        trans_coeff_level = 32767;
-                    }
+                    coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_m, shift);
                 }
-                coeffs[(y_c << log2_trafo_size) + x_c] = trans_coeff_level;
             }
             PROFILE_ACC(residual_core);
         }

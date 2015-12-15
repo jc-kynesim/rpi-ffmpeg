@@ -516,7 +516,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #ifdef DISABLE_DEBLOCK
     return;
 #endif
-    // ?MERGE? This has a skip head didn't
     if (!s->used_for_ref && s->avctx->skip_loop_filter >= AVDISCARD_NONREF)
         return;
 

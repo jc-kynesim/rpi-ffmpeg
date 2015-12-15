@@ -4176,7 +4176,6 @@ static int decode_nal_unit(HEVCContext *s, const HEVCNAL *nal)
                         s->nal_unit_type == NAL_STSA_N  ||
                         s->nal_unit_type == NAL_RADL_N  ||
                         s->nal_unit_type == NAL_RASL_N);     
-                        
         if (!s->used_for_ref && s->avctx->skip_frame >= AVDISCARD_NONREF) {
             s->is_decoded = 0;
             break;
