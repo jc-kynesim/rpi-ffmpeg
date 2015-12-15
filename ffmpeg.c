@@ -4197,6 +4197,7 @@ int main(int argc, char **argv)
     show_banner(argc, argv, options);
 
     term_init();
+    PROFILE_INIT();
 
     /* parse options and open all input/output files */
     ret = ffmpeg_parse_options(argc, argv);
@@ -4223,6 +4224,9 @@ int main(int argc, char **argv)
     current_time = ti = getutime();
     if (transcode() < 0)
         exit_program(1);
+
+    PROFILE_PRINTF(residual_core);
+
     ti = getutime() - ti;
     if (do_benchmark) {
         printf("bench: utime=%0.3fs\n", ti / 1000000.0);
