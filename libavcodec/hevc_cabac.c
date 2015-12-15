@@ -1043,20 +1043,20 @@ static inline int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_p
     return last_coeff_abs_level_remaining;
 }
 
-static av_always_inline int coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
+static av_always_inline uint32_t coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
 {
 #ifdef get_cabac_bypeek22
     uint32_t x, y;
     y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
     get_cabac_byflush(&s->HEVClc->cc, nb, y, x);
-    return y >> (32 - nb);
+    return y;
 #else
     int i;
-    int ret = 0;
+    uint32_t ret = 0;
 
     for (i = 0; i < nb; i++)
         ret = (ret << 1) | get_cabac_bypass(&s->HEVClc->cc);
-    return ret;
+    return ret << (32 - nb);
 #endif
 }
 
@@ -1521,7 +1521,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int first_nz_pos_in_cg;
             int last_nz_pos_in_cg;
             int c_rice_param = 0;
-            uint16_t coeff_sign_flag;
+            uint32_t coeff_sign_flag;
             int sum_abs = 0;
             int sign_hidden;
             int sb_type;
@@ -1573,11 +1573,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             else
                 sign_hidden = (last_nz_pos_in_cg - first_nz_pos_in_cg >= 4);
 
-            if (!sign_hidden ) {
-                coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag) << (16 - nb_significant_coeff_flag);
-            } else {
-                coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - 1) << (16 - (nb_significant_coeff_flag - 1));
-            }
+            coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - sign_hidden);
 
             for (m = 0; m < n_end; m++) {
                 int trans_coeff_level;
@@ -1610,7 +1606,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     if (m == n_end - 1 && (sum_abs&1))
                         trans_coeff_level = -trans_coeff_level;
                 }
-                if (coeff_sign_flag >> 15)
+                if ((coeff_sign_flag & 0x80000000) != 0)
                     trans_coeff_level = -trans_coeff_level;
                 coeff_sign_flag <<= 1;
 
