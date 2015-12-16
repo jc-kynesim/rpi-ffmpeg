@@ -970,7 +970,7 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
     return GET_CABAC(elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] + inc);
 }
 
-static inline int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
+static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 {
     int prefix = 0;
     int suffix = 0;
@@ -1399,7 +1399,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         int implicit_non_zero_coeff = 0;
         int prev_sig = 0;
         int offset = i << 4;
-        int rice_init = 0;
 
         uint8_t significant_coeff_flag_idx[16];
         uint8_t nb_significant_coeff_flag = 0;
@@ -1521,22 +1520,14 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         if (n_end) {
             int first_nz_pos_in_cg;
             int last_nz_pos_in_cg;
-            int c_rice_param = 0;
             uint32_t coeff_sign_flag;
-            int sum_abs = 0;
             int sign_hidden;
-            int sb_type;
             uint32_t coded_vals = 0;
             int ctx_set = (i > 0 && c_idx == 0) ? 2 : 0;
 
             PROFILE_START();
 
             // initialize first elem of coeff_bas_level_greater1_flag
-
-            if (s->ps.sps->persistent_rice_adaptation_enabled_flag) {
-                sb_type = 2 * (c_idx == 0 ? 1 : 0) + trans_skip_or_bypass;
-                c_rice_param = lc->stat_coeff[sb_type] / 4;
-            }
 
             if (!(i == num_last_subset) && prev_subset_coded)
                 ctx_set++;
@@ -1571,49 +1562,62 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             else
                 sign_hidden = (last_nz_pos_in_cg - first_nz_pos_in_cg >= 4);
 
+            // ?????? cabac_bypass_alignment_enabled_flag
+            // ?????? extended_precision_processing_flag
+
             coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - sign_hidden);
 
-            for (m = 0; m < n_end; m++) {
-                int trans_coeff_level;
+            {
+                int levels[16]; // Should be able to get away with int16_t but it fails some conf
 
                 {
-                    unsigned int v = coded_vals >> 28;
-                    trans_coeff_level = (v & 3) + 1;
-                    if ((v & 8) == 0)
-                    {
-                        const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
+                    const int rice_adaptation_enabled = s->ps.sps->persistent_rice_adaptation_enabled_flag;
+                    uint8_t * const stat_coeff = lc->stat_coeff + (c_idx == 0 ? 2 : 0) + trans_skip_or_bypass;
+                    int c_rice_param = !rice_adaptation_enabled ? 0 : *stat_coeff >> 2;
+                    int sum_abs = 0;
 
-                        trans_coeff_level += last_coeff_abs_level_remaining;
-                        if (trans_coeff_level > (3 << c_rice_param))
-                            c_rice_param = s->ps.sps->persistent_rice_adaptation_enabled_flag ? c_rice_param + 1 : FFMIN(c_rice_param + 1, 4);
-                        if (s->ps.sps->persistent_rice_adaptation_enabled_flag && !rice_init) {
-                            int c_rice_p_init = lc->stat_coeff[sb_type] / 4;
-                            if (last_coeff_abs_level_remaining >= (3 << c_rice_p_init))
-                                lc->stat_coeff[sb_type]++;
-                            else if (2 * last_coeff_abs_level_remaining < (1 << c_rice_p_init))
-                                if (lc->stat_coeff[sb_type] > 0)
-                                    lc->stat_coeff[sb_type]--;
-                            rice_init = 1;
+                    m = 0;
+                    do {
+                        int trans_coeff_level;
+                        unsigned int v = coded_vals >> 28;
+
+                        trans_coeff_level = (v & 3) + 1;
+                        if ((v & 8) == 0)
+                        {
+                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
+
+                            trans_coeff_level += last_coeff_abs_level_remaining;
+                            if (trans_coeff_level > (3 << c_rice_param))
+                                c_rice_param = rice_adaptation_enabled ? c_rice_param + 1 : FFMIN(c_rice_param + 1, 4);
+                            if (rice_adaptation_enabled && m == 0)
+                            {
+                                const unsigned int x = last_coeff_abs_level_remaining >> c_rice_param;
+                                if (x >= 3)
+                                    (*stat_coeff)++;
+                                else if (x == 0 && *stat_coeff > 0)
+                                    (*stat_coeff)--;
+                            }
                         }
+                        coded_vals <<= 4;
+                        levels[m] = trans_coeff_level;
+                        sum_abs += trans_coeff_level;
+                    } while (++m < n_end);
+
+                    if (sign_hidden && (sum_abs & 1) != 0) {
+                        levels[n_end - 1] = -levels[n_end - 1];
                     }
                 }
-                coded_vals <<= 4;
 
-                if (sign_hidden) {
-                    sum_abs += trans_coeff_level;
-                    if (m == n_end - 1 && (sum_abs&1))
-                        trans_coeff_level = -trans_coeff_level;
-                }
-                if ((coeff_sign_flag & 0x80000000) != 0)
-                    trans_coeff_level = -trans_coeff_level;
-                coeff_sign_flag <<= 1;
-
-
-                {
+                for (m = 0; m < n_end; m++) {
                     uint8_t scale_m = dc_scale;
                     unsigned int x_c = (x_cg << 2) + scan_x_off[significant_coeff_flag_idx[m]];
                     unsigned int y_c = (y_cg << 2) + scan_y_off[significant_coeff_flag_idx[m]];
                     unsigned int t_offset = (y_c << log2_trafo_size) + x_c;
+                    int trans_coeff_level = levels[m];
+
+                    if ((coeff_sign_flag & 0x80000000) != 0)
+                        trans_coeff_level = -trans_coeff_level;
+                    coeff_sign_flag <<= 1;
 
                     if (t_offset != 0)
                     {
