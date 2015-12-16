@@ -59,9 +59,14 @@ typedef struct CABACContext{
 #define CABACContext Alt1CABACContext
 
 typedef struct Alt1CABACContext{
+    uint8_t by_count;
+    uint8_t by_count2;
     uint16_t codIRange;
     uint16_t codIOffset;
     uint32_t b_offset;
+    uint32_t by_inv;
+    uint32_t by_acc;
+    uint32_t by_acc2;
     const uint8_t *bytestream_start;
     const uint8_t *bytestream_end;
 } Alt1CABACContext;

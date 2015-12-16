@@ -979,6 +979,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 //    PROFILE_START();
 
 #ifdef get_cabac_bypeek22
+#if 0
     {
         uint32_t x, y;
         y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
@@ -987,7 +988,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
         if (prefix < 3) {
             suffix = (y << (prefix + 1)) >> (32 - rc_rice_param);
             last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
-            get_cabac_byflush(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y, x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y, x);
         }
         else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
         {
@@ -999,21 +1000,46 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
                                                   << rc_rice_param) + suffix;
 
 
-            get_cabac_byflush(&s->HEVClc->cc, prefix + 1 + prefix - 3 + rc_rice_param, y, x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + prefix - 3 + rc_rice_param, y, x);
         }
         else {
             int prefix_minus3 = prefix - 3;
 
-            get_cabac_byflush(&s->HEVClc->cc, prefix + 1, y, x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1, y, x);
             y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
 
             suffix = y >> (32 - (prefix_minus3 + rc_rice_param));
             last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                                   << rc_rice_param) + suffix;
 
-            get_cabac_byflush(&s->HEVClc->cc, prefix_minus3 + rc_rice_param, y, x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix_minus3 + rc_rice_param, y, x);
         }
     }
+#else
+    {
+        uint32_t y;
+        y = alt1cabac_bypeek(&s->HEVClc->cc, 20);
+        prefix = lmbd1(~y);
+
+        if (prefix < 3) {
+            suffix = (y << (prefix + 1)) >> (32 - rc_rice_param);
+            last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
+            alt1cabac_byflush(&s->HEVClc->cc, prefix + 1 + rc_rice_param);
+        }
+        else {
+            const unsigned int prefix_minus3 = prefix - 3;
+
+            alt1cabac_byflush(&s->HEVClc->cc, prefix + 1);
+            y = alt1cabac_bypeek(&s->HEVClc->cc, prefix_minus3 + rc_rice_param);
+
+            suffix = y >> (32 - (prefix_minus3 + rc_rice_param));
+            last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
+                                                  << rc_rice_param) + suffix;
+
+            alt1cabac_byflush(&s->HEVClc->cc, prefix_minus3 + rc_rice_param);
+        }
+    }
+#endif
 #else
     {
         int i;
@@ -1046,10 +1072,17 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 static av_always_inline uint32_t coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
 {
 #ifdef get_cabac_bypeek22
+#if 0
     uint32_t x, y;
     y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
-    get_cabac_byflush(&s->HEVClc->cc, nb, y, x);
+    get_cabac_byflush22(&s->HEVClc->cc, nb, y, x);
     return y;
+#else
+    uint32_t y;
+    y = alt1cabac_bypeek(&s->HEVClc->cc, nb);
+    alt1cabac_byflush(&s->HEVClc->cc, nb);
+    return y;
+#endif
 #else
     int i;
     uint32_t ret = 0;
@@ -1564,6 +1597,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             // ?????? cabac_bypass_alignment_enabled_flag
             // ?????? extended_precision_processing_flag
+            alt1cabac_bystart(&s->HEVClc->cc);
 
             coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - sign_hidden);
 
@@ -1575,6 +1609,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     uint8_t * const stat_coeff = lc->stat_coeff + (c_idx == 0 ? 2 : 0) + trans_skip_or_bypass;
                     int c_rice_param = !rice_adaptation_enabled ? 0 : *stat_coeff >> 2;
                     int sum_abs = 0;
+
 
                     m = 0;
                     do {
@@ -1606,6 +1641,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     if (sign_hidden && (sum_abs & 1) != 0) {
                         levels[n_end - 1] = -levels[n_end - 1];
                     }
+
+                    alt1cabac_byfinish(&s->HEVClc->cc);
                 }
 
                 for (m = 0; m < n_end; m++) {
