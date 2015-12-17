@@ -6,8 +6,8 @@ RPI_OPT_VC=$RPI_ROOTFS/opt/vc
 RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_ROOTFS/usr/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
 RPI_DEFS="-D__VCCOREVER__=0x04000000"
 RPI_LIBDIRS="-L$RPI_ROOTFS/lib -L$RPI_ROOTFS/usr/lib -L$RPI_OPT_VC/lib"
-RPI_KEEPS="-save-temps=obj"
-#RPI_KEEPS=""
+#RPI_KEEPS="-save-temps=obj"
+RPI_KEEPS=""
 
 ./configure --enable-cross-compile\
  --arch=armv71\

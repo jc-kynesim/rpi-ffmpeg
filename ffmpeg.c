@@ -4461,6 +4461,7 @@ int main(int argc, char **argv)
     }
     PROFILE_PRINTF(residual_abs);
     PROFILE_PRINTF(residual_greater1);
+    PROFILE_PRINTF(residual_n_end_1);
     PROFILE_PRINTF(residual_core);
 
     av_log(NULL, AV_LOG_DEBUG, "%"PRIu64" frames successfully decoded, %"PRIu64" decoding errors\n",
