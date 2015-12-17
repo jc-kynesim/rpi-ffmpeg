@@ -1094,18 +1094,38 @@ static av_always_inline uint32_t coeff_sign_flag_decode(HEVCContext *s, uint8_t 
 }
 
 
-static uint32_t get_greater1_bits(CABACContext * const c, const unsigned int n, uint8_t * const state0)
+static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n, int * const levels,
+    int * const pprev_subset_coded,
+    uint8_t * const state0, uint8_t * const state_gt2)
 {
     unsigned int rv = 0;
     unsigned int i;
+
     PROFILE_START();
 
     for (i = 0; i != n; ++i) {
         const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
-        rv = (rv << 4) | get_cabac(c, state0 + idx);
+        const unsigned int b = get_cabac(c, state0 + idx);
+        rv = (rv << 1) | b;
+        levels[i] = 1;
     }
+
+    *pprev_subset_coded = 0;
+    rv <<= (32 - n);
+    if (rv != 0)
+    {
+        *pprev_subset_coded = 1;
+        i = __builtin_clz(rv);
+        levels[i] = 2;
+        if (get_cabac(c, state_gt2) == 0)
+        {
+            // Unset first coded bit
+            rv &= ~(0x80000000U >> i);
+        }
+    }
+
     PROFILE_ACC(residual_greater1);
-    return rv << (32 - 4 * n);
+    return rv;
 }
 
 // extended_precision_processing_flag must be false given we are
@@ -1557,6 +1577,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int sign_hidden;
             uint32_t coded_vals = 0;
             int ctx_set = (i > 0 && c_idx == 0) ? 2 : 0;
+            int levels[16]; // Should be able to get away with int16_t but it fails some conf
 
             PROFILE_START();
 
@@ -1568,10 +1589,22 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             {
                 const unsigned int m_count = (unsigned int)n_end > 8 ? 8 : (unsigned int)n_end;
+                const unsigned int idx_delta = (c_idx > 0 ? 4 : 0) + ctx_set;
                 const unsigned int idx0 = elem_offset[COEFF_ABS_LEVEL_GREATER1_FLAG] +
-                    (c_idx > 0 ? 16 : 0) +
-                    (ctx_set << 2);
-                const unsigned int rv = get_greater1_bits(&s->HEVClc->cc, m_count, s->HEVClc->cabac_state + idx0);
+                    (idx_delta << 2);
+                const unsigned int idx_gt2 = elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] +
+                    idx_delta;
+                coded_vals = get_greaterx_bits(&s->HEVClc->cc, m_count, levels, &prev_subset_coded,
+                    s->HEVClc->cabac_state + idx0, s->HEVClc->cabac_state + idx_gt2);
+
+                if (n_end > 8) {
+                    coded_vals |= 0xff0000; // --- Kludge
+                    for (m = 8; m != 16; ++m) {
+                        levels[m] = 0;
+                    }
+                }
+
+#if 0
                 const unsigned int first_g1 = __builtin_clz(rv);
 
                 prev_subset_coded = (rv != 0);
@@ -1582,6 +1615,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     const unsigned int gt2 = coeff_abs_level_greater2_flag_decode(s, c_idx, ctx_set);
                     coded_vals ^= (gt2 ? 3 : 8) << (31 - first_g1);
                 }
+#endif
             }
 
             first_nz_pos_in_cg = significant_coeff_flag_idx[n_end - 1];
@@ -1601,7 +1635,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - sign_hidden);
 
             {
-                int levels[16]; // Should be able to get away with int16_t but it fails some conf
 
                 {
                     const int rice_adaptation_enabled = s->ps.sps->persistent_rice_adaptation_enabled_flag;
@@ -1613,10 +1646,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     m = 0;
                     do {
                         int trans_coeff_level;
-                        unsigned int v = coded_vals >> 28;
 
-                        trans_coeff_level = (v & 3) + 1;
-                        if ((v & 8) == 0)
+                        trans_coeff_level = levels[m];
+                        if ((coded_vals & 0x80000000) != 0)
                         {
                             const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
 
@@ -1633,7 +1665,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 c_rice_param = rice_adaptation_enabled ? c_rice_param + 1 : FFMIN(c_rice_param + 1, 4);
                             stat_coeff = NULL;
                         }
-                        coded_vals <<= 4;
+                        coded_vals <<= 1;
                         levels[m] = trans_coeff_level;
                         sum_abs += trans_coeff_level;
                     } while (++m < n_end);
