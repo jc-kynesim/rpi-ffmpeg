@@ -150,7 +150,7 @@ static void av_unused alt1cabac_byfill(Alt1CABACContext * const c)
     return;
 }
 
-static void av_unused alt1cabac_byfinish(Alt1CABACContext * const c)
+static void av_noinline alt1cabac_byfinish(Alt1CABACContext * const c)
 {
     // Bits remaining uneaten
     unsigned int t_count = c->by_count + c->by_count2;

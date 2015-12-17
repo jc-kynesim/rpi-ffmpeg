@@ -979,7 +979,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 //    PROFILE_START();
 
 #ifdef get_cabac_bypeek22
-#if 0
+#if 1
     {
         uint32_t x, y;
         y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
@@ -1072,7 +1072,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 static av_always_inline uint32_t coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
 {
 #ifdef get_cabac_bypeek22
-#if 0
+#if 1
     uint32_t x, y;
     y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
     get_cabac_byflush22(&s->HEVClc->cc, nb, y, x);
@@ -1597,7 +1597,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             // ?????? cabac_bypass_alignment_enabled_flag
             // ?????? extended_precision_processing_flag
-            alt1cabac_bystart(&s->HEVClc->cc);
 
             coeff_sign_flag = coeff_sign_flag_decode(s, nb_significant_coeff_flag - sign_hidden);
 
@@ -1606,10 +1605,10 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                 {
                     const int rice_adaptation_enabled = s->ps.sps->persistent_rice_adaptation_enabled_flag;
-                    uint8_t * const stat_coeff = lc->stat_coeff + (c_idx == 0 ? 2 : 0) + trans_skip_or_bypass;
+                    uint8_t * stat_coeff = !rice_adaptation_enabled ? NULL :
+                        lc->stat_coeff + (c_idx == 0 ? 2 : 0) + trans_skip_or_bypass;
                     int c_rice_param = !rice_adaptation_enabled ? 0 : *stat_coeff >> 2;
                     int sum_abs = 0;
-
 
                     m = 0;
                     do {
@@ -1622,9 +1621,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                             const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
 
                             trans_coeff_level += last_coeff_abs_level_remaining;
-                            if (trans_coeff_level > (3 << c_rice_param))
-                                c_rice_param = rice_adaptation_enabled ? c_rice_param + 1 : FFMIN(c_rice_param + 1, 4);
-                            if (rice_adaptation_enabled && m == 0)
+                            if (stat_coeff != NULL)
                             {
                                 const unsigned int x = last_coeff_abs_level_remaining >> c_rice_param;
                                 if (x >= 3)
@@ -1632,6 +1629,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 else if (x == 0 && *stat_coeff > 0)
                                     (*stat_coeff)--;
                             }
+                            if (trans_coeff_level > (3 << c_rice_param))
+                                c_rice_param = rice_adaptation_enabled ? c_rice_param + 1 : FFMIN(c_rice_param + 1, 4);
+                            stat_coeff = NULL;
                         }
                         coded_vals <<= 4;
                         levels[m] = trans_coeff_level;
@@ -1641,8 +1641,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     if (sign_hidden && (sum_abs & 1) != 0) {
                         levels[n_end - 1] = -levels[n_end - 1];
                     }
-
-                    alt1cabac_byfinish(&s->HEVClc->cc);
                 }
 
                 for (m = 0; m < n_end; m++) {
