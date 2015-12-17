@@ -1595,10 +1595,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             PROFILE_START();
 
-            if (n_end == 1) {
-                ++rpi_residual_n_end_1_cnt;
-            }
-
             // initialize first elem of coeff_bas_level_greater1_flag
 
             if (!(i == num_last_subset) && prev_subset_coded)
