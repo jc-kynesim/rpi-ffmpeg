@@ -17,7 +17,7 @@ static inline uint32_t bmem_peek4(const void * buf, const unsigned int offset)
 
 static inline unsigned int lmbd1(const uint32_t x)
 {
-    return __builtin_clz(x);
+    return x == 0 ? 32 : __builtin_clz(x);
 }
 
 #endif
@@ -42,9 +42,11 @@ static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t
     }
 
     n = lmbd1(range) - 23;
-    c->codIRange = range << n;
-    c->codIOffset = (offset << n) | ((next_bits << (c->b_offset & 7)) >> (32 - n));
-    c->b_offset += n;
+    if (n != 0) {
+        c->codIRange = range << n;
+        c->codIOffset = (offset << n) | ((next_bits << (c->b_offset & 7)) >> (32 - n));
+        c->b_offset += n;
+    }
     *state = (s3 >> 1) & 0x7f;
 
     return s3 & 1;
