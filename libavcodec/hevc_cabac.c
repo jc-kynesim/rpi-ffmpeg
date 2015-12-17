@@ -1107,7 +1107,7 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n, 
         const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
         const unsigned int b = get_cabac(c, state0 + idx);
         rv = (rv << 1) | b;
-        levels[i] = 1;
+        levels[i] = 1 + b;
     }
 
     *pprev_subset_coded = 0;
@@ -1116,11 +1116,12 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n, 
     {
         *pprev_subset_coded = 1;
         i = __builtin_clz(rv);
-        levels[i] = 2;
+        levels[i] = 3;
         if (get_cabac(c, state_gt2) == 0)
         {
             // Unset first coded bit
             rv &= ~(0x80000000U >> i);
+            levels[i] = 2;
         }
     }
 
@@ -1600,7 +1601,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 if (n_end > 8) {
                     coded_vals |= 0xff0000; // --- Kludge
                     for (m = 8; m != 16; ++m) {
-                        levels[m] = 0;
+                        levels[m] = 1;
                     }
                 }
 
