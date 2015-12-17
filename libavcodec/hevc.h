@@ -26,7 +26,7 @@
 // define RPI to split the CABAC/prediction/transform into separate stages
 #include "config.h"
 #if ARCH_ARM
-#define RPI
+// #define RPI
 #endif
 
 #ifdef ALTCABAC_VER
@@ -36,7 +36,7 @@
 #ifdef RPI
 #define ALTCABAC_VER 1
 #else
-#define ALTCABAC_VER 0
+#define ALTCABAC_VER 1
 #endif
 
 #include "libavutil/buffer.h"

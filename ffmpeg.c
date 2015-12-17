@@ -25,7 +25,7 @@
 #include "config.h"
  
 #if ARCH_ARM
-#define RPI_DISPLAY
+//#define RPI_DISPLAY
 //#define RPI_ZERO_COPY
 #endif
 

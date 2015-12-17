@@ -30,7 +30,7 @@
 #include "config.h"
 
 #if ARCH_ARM
-#define RPI_GPU_BUFFERS
+//#define RPI_GPU_BUFFERS
 #endif
 
 #include "libavutil/atomic.h"

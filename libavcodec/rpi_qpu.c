@@ -17,7 +17,8 @@
 #include "libavutil/avassert.h"
 
 #include "config.h"
-#if ARCH_ARM
+//#if ARCH_ARM
+#if 0
 
 #include <pthread.h>
 #include <time.h>
