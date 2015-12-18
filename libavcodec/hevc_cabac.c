@@ -978,7 +978,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 
 //    PROFILE_START();
 
-#ifdef get_cabac_bypeek22
+//#ifdef get_cabac_bypeek22
 #if 1
     {
         uint32_t x, y;
@@ -986,16 +986,16 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
         prefix = lmbd1(~y);
 
         if (prefix < 3) {
-            suffix = (y << (prefix + 1)) >> (32 - rc_rice_param);
+            suffix = LSR32M(y << (prefix + 1), rc_rice_param);
             last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
             get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y, x);
         }
         else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
         {
-            int prefix_minus3 = prefix - 3;
+            unsigned int prefix_minus3 = prefix - 3;
             uint32_t y2 = y << (prefix + 1);
 
-            suffix = y2 >> (32 - (prefix_minus3 + rc_rice_param));
+            suffix = LSR32M(y2, prefix_minus3 + rc_rice_param);
             last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                                   << rc_rice_param) + suffix;
 
@@ -1008,7 +1008,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
             get_cabac_byflush22(&s->HEVClc->cc, prefix + 1, y, x);
             y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
 
-            suffix = y >> (32 - (prefix_minus3 + rc_rice_param));
+            suffix = LSR32M(y, prefix_minus3 + rc_rice_param);
             last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                                   << rc_rice_param) + suffix;
 
@@ -1017,32 +1017,11 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
     }
 #else
     {
-        uint32_t y;
-        y = alt1cabac_bypeek(&s->HEVClc->cc, 20);
-        prefix = lmbd1(~y);
-
-        if (prefix < 3) {
-            suffix = (y << (prefix + 1)) >> (32 - rc_rice_param);
-            last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
-            alt1cabac_byflush(&s->HEVClc->cc, prefix + 1 + rc_rice_param);
-        }
-        else {
-            const unsigned int prefix_minus3 = prefix - 3;
-
-            alt1cabac_byflush(&s->HEVClc->cc, prefix + 1);
-            y = alt1cabac_bypeek(&s->HEVClc->cc, prefix_minus3 + rc_rice_param);
-
-            suffix = y >> (32 - (prefix_minus3 + rc_rice_param));
-            last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
-                                                  << rc_rice_param) + suffix;
-
-            alt1cabac_byflush(&s->HEVClc->cc, prefix_minus3 + rc_rice_param);
-        }
-    }
-#endif
-#else
-    {
         int i;
+
+        uint32_t x;
+        get_cabac_bypeek22(&s->HEVClc->cc, &x);
+
         while (prefix < CABAC_MAX_BIN && get_cabac_bypass(&s->HEVClc->cc))
             prefix++;
         if (prefix == CABAC_MAX_BIN) {
@@ -1072,23 +1051,17 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 static av_always_inline uint32_t coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
 {
 #ifdef get_cabac_bypeek22
-#if 1
     uint32_t x, y;
     y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
     get_cabac_byflush22(&s->HEVClc->cc, nb, y, x);
-    return y;
-#else
-    uint32_t y;
-    y = alt1cabac_bypeek(&s->HEVClc->cc, nb);
-    alt1cabac_byflush(&s->HEVClc->cc, nb);
-    return y;
-#endif
+    return y & ~(0xffffffffU >> nb);
 #else
     int i;
     uint32_t ret = 0;
 
     for (i = 0; i < nb; i++)
         ret = (ret << 1) | get_cabac_bypass(&s->HEVClc->cc);
+
     return ret << (32 - nb);
 #endif
 }

@@ -5,21 +5,35 @@
 #error Unexpected CABAC VAR
 #endif
 
+// Bypeek method
+//  0   no bypeek
+//  1   requires a stash
+//  2   stashless but an extra multiply
+#define ALT1CABAC_BYPEEK 2
+
 #if ARCH_ARM
 #   include "arm/cabac.h"
+
+// >> 32 is safe on ARM (= 0)
+#define LSR32M(x, y) ((uint32_t)(x) >> (32 - (y)))
 #else
 // Helper fns
 static inline uint32_t bmem_peek4(const void * buf, const unsigned int offset)
 {
     const uint8_t * const p = (const uint8_t *)buf + (offset >> 3);
-    return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) << (offset & 7);
+    return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
 }
 
 static inline unsigned int lmbd1(const uint32_t x)
 {
-    return __builtin_clz(x);
+    return x == 0 ? 32 : __builtin_clz(x);
 }
 
+// >> 32 is not safe on x86
+static inline uint32_t LSR32M(const uint32_t x, const unsigned int y)
+{
+    return y == 0 ? 0 : x >> (32 - y);
+}
 #endif
 
 #define get_cabac_inline get_alt1cabac_inline
@@ -33,6 +47,9 @@ static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t
     unsigned int n;
 
 //    printf("%02x -> s=%02x s2=%02x s3=%04x\n", bit, s, s2, s3);
+#if CABAC_TRACE_STATE
+    printf("--- range=%d, offset=%d, state=%d\n", range, offset, s);
+#endif
 
     range -= RangeLPS;
     if (offset >= range) {
@@ -42,8 +59,15 @@ static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t
     }
 
     n = lmbd1(range) - 23;
-    c->codIRange = range << n;
-    c->codIOffset = (offset << n) | ((next_bits << (c->b_offset & 7)) >> (32 - n));
+    range <<= n;
+    offset <<= n;
+
+#if CABAC_TRACE_STATE
+    printf("bit=%d, n=%d, range=%d, offset=%d, state=%d\n", s3 & 1, n, range, offset, (s3 >> 1) & 0x7f);
+#endif
+
+    c->codIOffset = offset | LSR32M(next_bits << (c->b_offset & 7), n);
+    c->codIRange = range;
     c->b_offset += n;
     *state = (s3 >> 1) & 0x7f;
 
@@ -58,142 +82,32 @@ static inline int get_alt1cabac_bypass(CABACContext *c){
         ((c->bytestream_start[c->b_offset >> 3] >> (~c->b_offset & 7)) & 1);
     ++c->b_offset;
     if (c->codIOffset < c->codIRange) {
-//        printf("bypass 0: o=%u, r=%u\n", c->codIOffset, c->codIRange);
+#if CABAC_TRACE_STATE
+        printf("bypass 0: o=%u, r=%u\n", c->codIOffset, c->codIRange);
+#endif
         return 0;
     }
     c->codIOffset -= c->codIRange;
-//    printf("bypass 1: o=%u, r=%u\n", c->codIOffset, c->codIRange);
+#if CABAC_TRACE_STATE
+    printf("bypass 1: o=%u, r=%u\n", c->codIOffset, c->codIRange);
+#endif
     return 1;
 }
 
-#if 1
-
-#define BYTRACE 0
-
-static void av_unused alt1cabac_bystart(Alt1CABACContext * const c)
+#if CABAC_TRACE_STATE
+static inline char * hibin2str(uint32_t x, char * const buf, const unsigned int n)
 {
-    const uint32_t nb = bmem_peek4(c->bytestream_start, c->b_offset) << (c->b_offset & 7);
-    uint32_t x2 = (c->codIOffset << 22) | (nb >> 10);
-    uint32_t x = x2;
-
-    c->by_inv = (alt1cabac_inv_range - 256)[c->codIRange];
-
-    if (c->codIRange != 256) {
-        x = (uint32_t)(((uint64_t)x * (uint64_t)c->by_inv) >> 32);
+    char * p = buf;
+    unsigned int i;
+    for (i = 0; i != n; ++i, ++p, x <<= 1) {
+        *p = ((x & 0x80000000) != 0) ? '1' : '0';
     }
-    x <<= 2;
-
-    c->codIOffset = x2 - (x >> 10) * c->codIRange;
-
-    c->by_count = 22;
-    c->by_count2 = 0;
-    c->by_acc = x & ~0x3ff;
-    c->by_acc2 = 0;
-#if BYTRACE
-    printf("bystart: acc=%08x\n", c->by_acc);
-    fflush(stdout);
-#endif
+    *p = 0;
+    return buf;
 }
-
-static void av_unused alt1cabac_byfill(Alt1CABACContext * const c)
-{
-    unsigned int t_count = c->by_count + c->by_count2;
-
-#if BYTRACE
-    printf("byfill: t_count=%d\n", t_count);
-    fflush(stdout);
 #endif
 
-    if (t_count < 32)
-    {
-        c->by_acc |= c->by_acc2 >> c->by_count;
-        c->by_count = t_count;
-
-        // "flush"
-        c->b_offset += 22;
-
-        // refill acc2
-        {
-            const uint32_t nb = bmem_peek4(c->bytestream_start, c->b_offset) << (c->b_offset & 7);
-            uint32_t x2 = (c->codIOffset << 22) | (nb >> 10);
-            uint32_t x = x2;
-
-            if (c->codIRange != 256) {
-                x = (uint32_t)(((uint64_t)x * (uint64_t)c->by_inv) >> 32);
-            }
-            x <<= 2;
-
-            c->codIOffset = x2 - (x >> 10) * c->codIRange;
-            c->by_count2 = 22;
-            c->by_acc2 = x & ~0x3ff;
-            t_count += 22;
-        }
-    }
-
-    if (t_count >= 32) {
-        c->by_acc |= c->by_acc2 >> c->by_count;
-        c->by_acc2 <<= 32 - c->by_count;
-        c->by_count2 = t_count - 32;
-        c->by_count = 32;
-    }
-    else
-    {
-        c->by_acc |= c->by_acc2 >> c->by_count;
-        c->by_acc2 = 0;
-        c->by_count = t_count;
-        c->by_count2 = 0;
-    }
-
-#if BYTRACE
-    printf("byfill: count=%d/%d\n", c->by_count, c->by_count2);
-#endif
-    return;
-}
-
-static void av_noinline alt1cabac_byfinish(Alt1CABACContext * const c)
-{
-    // Bits remaining uneaten
-    unsigned int t_count = c->by_count + c->by_count2;
-
-    uint64_t x = ((uint64_t)(c->by_acc >> (32 - c->by_count)) << c->by_count2) |
-        ((uint64_t)(c->by_acc2 >> (32 - c->by_count2)));
-
-    c->codIOffset = ((uint64_t)c->codIOffset + x * (u_int64_t)c->codIRange) >> t_count;
-    c->b_offset = (c->b_offset + 22) - t_count;
-
-#if BYTRACE
-    printf("byfinish: t_finish=%d, b_offset=%d\n", t_count, c->b_offset);
-#endif
-}
-
-static inline unsigned int alt1cabac_bypeek(Alt1CABACContext * const c, const unsigned int n)
-{
-    if (c->by_count < n) {
-        alt1cabac_byfill(c);
-    }
-
-#if BYTRACE
-    printf("bypeek:  acc=%08x, n=%d\n", c->by_acc, n);
-    fflush(stdout);
-#endif
-
-    return c->by_acc;
-}
-
-static inline void alt1cabac_byflush(Alt1CABACContext * const c, const unsigned int n)
-{
-    c->by_acc <<= n;
-    c->by_count -= n;
-
-#if BYTRACE
-    printf("byflush: acc=%08x, n=%d, count=%d\n", c->by_acc, n, c->by_count);
-#endif
-}
-
-
-#endif
-
-#if 0
+#if ALT1CABAC_BYPEEK == 1
 
 #define get_cabac_bypeek22 get_alt1cabac_bypeek22
 static inline uint32_t get_alt1cabac_bypeek22(CABACContext * c, uint32_t * pX)
@@ -206,16 +120,26 @@ static inline uint32_t get_alt1cabac_bypeek22(CABACContext * c, uint32_t * pX)
     if (c->codIRange != 256) {
         x = (uint32_t)(((uint64_t)x * (uint64_t)y) >> 32);
     }
-    return x << 1;
+    x <<= 1;
+
+#if CABAC_TRACE_STATE
+    {
+        char buf[33];
+        printf("--- %s\n", hibin2str(x, buf, 22));
+    }
+#endif
+
+    return x;
 }
 
 #define get_cabac_byflush22 get_alt1cabac_byflush22
 static inline void get_alt1cabac_byflush22(CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
 {
+    assert(n >= 1);
     c->b_offset += n;
     c->codIOffset = (x >> (23 - n)) - (val >> (32 - n)) * c->codIRange;
 }
-#else
+#elif ALT1CABAC_BYPEEK == 2
 
 #define get_cabac_bypeek22 get_alt1cabac_bypeek22
 static inline uint32_t get_alt1cabac_bypeek22(CABACContext * const c, uint32_t * const pX)
@@ -230,6 +154,13 @@ static inline uint32_t get_alt1cabac_bypeek22(CABACContext * const c, uint32_t *
     }
     x <<= 2;
 
+#if CABAC_TRACE_STATE
+    {
+        char buf[33];
+        printf("--- %s\n", hibin2str(x, buf, 22));
+    }
+#endif
+
     c->codIOffset = x2 - (x >> 10) * c->codIRange;
     return x;
 }
@@ -238,7 +169,7 @@ static inline uint32_t get_alt1cabac_bypeek22(CABACContext * const c, uint32_t *
 static inline void get_alt1cabac_byflush22(CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
 {
     c->b_offset += n;
-    c->codIOffset = (c->codIOffset + (((val << n) >> (10 + n)) * c->codIRange)) >> (22 - n);
+    c->codIOffset = (c->codIOffset +  ((val & (0xffffffffU >> n)) >> 10) * c->codIRange) >> (22 - n);
 }
 
 #endif
@@ -257,16 +188,17 @@ static int av_unused get_alt1cabac_terminate(CABACContext *c){
         return (c->b_offset + 7) >> 3;
     }
 
+#if CABAC_TRACE_STATE
+    printf("terminate 0: range=%d, offset=%d\n", c->codIRange, c->codIOffset);
+#endif
+
     // renorm
     {
-        int n = (int)lmbd1(c->codIRange) - 23;
-        if (n > 0)
-        {
-            const unsigned int next_bits = bmem_peek4(c->bytestream_start, c->b_offset);
-            c->codIRange <<= n;
-            c->codIOffset = (c->codIOffset << n) | ((next_bits << (c->b_offset & 7)) >> (32 - n));
-            c->b_offset += n;
-        }
+        unsigned int n = lmbd1(c->codIRange) - 23;
+        const unsigned int next_bits = bmem_peek4(c->bytestream_start, c->b_offset);
+        c->codIRange <<= n;
+        c->codIOffset = (c->codIOffset << n) | LSR32M(next_bits << (c->b_offset & 7), n);
+        c->b_offset += n;
     }
     return 0;
 }
