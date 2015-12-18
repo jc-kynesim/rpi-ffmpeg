@@ -36,7 +36,7 @@
 #ifdef RPI
 #define ALTCABAC_VER 1
 #else
-#define ALTCABAC_VER 1
+#define ALTCABAC_VER 0
 #endif
 
 #include "libavutil/buffer.h"

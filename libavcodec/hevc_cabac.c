@@ -978,8 +978,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 
 //    PROFILE_START();
 
-//#ifdef get_cabac_bypeek22
-#if 1
+#ifdef get_cabac_bypeek22
     {
         uint32_t x, y;
         y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
@@ -1018,9 +1017,6 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 #else
     {
         int i;
-
-        uint32_t x;
-        get_cabac_bypeek22(&s->HEVClc->cc, &x);
 
         while (prefix < CABAC_MAX_BIN && get_cabac_bypass(&s->HEVClc->cc))
             prefix++;
@@ -1163,8 +1159,7 @@ static inline int trans_scale_sat(const int level, const unsigned int scale, con
 #endif
 
 
-//#if ARCH_ARM
-#if 0
+#if ARCH_ARM
 static inline void update_rice(uint8_t * const stat_coeff,
     const unsigned int last_coeff_abs_level_remaining,
     const unsigned int c_rice_param)
@@ -1197,6 +1192,8 @@ static inline void update_rice(uint8_t * const stat_coeff,
         (*stat_coeff)--;
 }
 #endif
+
+
 
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 int log2_trafo_size, enum ScanType scan_idx,
@@ -1491,9 +1488,12 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 significant_coeff_group_flag_decode(s, c_idx, ctx_cg);
             implicit_non_zero_coeff = 1;
         } else {
-            significant_coeff_group_flag[x_cg][y_cg] =
-            ((x_cg == x_cg_last_sig && y_cg == y_cg_last_sig) ||
-             (x_cg == 0 && y_cg == 0));
+// Was:
+//          significant_coeff_group_flag[x_cg][y_cg] =
+//            ((x_cg == x_cg_last_sig && y_cg == y_cg_last_sig) ||
+//             (x_cg == 0 && y_cg == 0));
+// but this is implied by the condition that got us here
+            significant_coeff_group_flag[x_cg][y_cg] = 1;
         }
 
         last_scan_pos = num_coeff - offset - 1;
@@ -1739,6 +1739,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     }
                 }
 
+                PROFILE_START();
+
                 for (m = 0; m < n_end; m++) {
                     uint8_t scale_m = dc_scale;
                     unsigned int x_c = (x_cg << 2) + scan_x_off[significant_coeff_flag_idx[m]];
@@ -1759,6 +1761,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                     coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_m, shift);
                 }
+
+                PROFILE_ACC(residual_n_end_1);
             }
             PROFILE_ACC(residual_core);
         }
