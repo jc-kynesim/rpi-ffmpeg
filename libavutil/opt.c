@@ -85,8 +85,9 @@ static int write_number(void *obj, const AVOption *o, void *dst, double num, int
 {
     if (o->type != AV_OPT_TYPE_FLAGS &&
         (o->max * den < num * intnum || o->min * den > num * intnum)) {
+        num = den ? num*intnum/den : (num*intnum ? INFINITY : NAN);
         av_log(obj, AV_LOG_ERROR, "Value %f for parameter '%s' out of range [%g - %g]\n",
-               num*intnum/den, o->name, o->min, o->max);
+               num, o->name, o->min, o->max);
         return AVERROR(ERANGE);
     }
     if (o->type == AV_OPT_TYPE_FLAGS) {
@@ -1176,20 +1177,17 @@ int av_opt_show2(void *obj, void *av_log_obj, int req_flags, int rej_flags)
 
 void av_opt_set_defaults(void *s)
 {
-#if FF_API_OLD_AVOPTIONS
     av_opt_set_defaults2(s, 0, 0);
 }
 
 void av_opt_set_defaults2(void *s, int mask, int flags)
 {
-#endif
     const AVOption *opt = NULL;
     while ((opt = av_opt_next(s, opt))) {
         void *dst = ((uint8_t*)s) + opt->offset;
-#if FF_API_OLD_AVOPTIONS
+
         if ((opt->flags & mask) != flags)
             continue;
-#endif
 
         if (opt->flags & AV_OPT_FLAG_READONLY)
             continue;

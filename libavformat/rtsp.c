@@ -179,7 +179,8 @@ static void rtsp_parse_range_npt(const char *p, int64_t *start, int64_t *end)
     if (*p == '-') {
         p++;
         get_word_sep(buf, sizeof(buf), "-", &p);
-        av_parse_time(end, buf, 1);
+        if (av_parse_time(end, buf, 1) < 0)
+            av_log(NULL, AV_LOG_DEBUG, "Failed to parse interval end specification '%s'\n", buf);
     }
 }
 
@@ -1135,6 +1136,7 @@ int ff_rtsp_read_reply(AVFormatContext *s, RTSPMessageHeader *reply,
     unsigned char ch;
     const char *p;
     int ret, content_length, line_count = 0, request = 0;
+    int first_line = 1;
     unsigned char *content = NULL;
 
 start:
@@ -1154,8 +1156,7 @@ start:
                 return AVERROR_EOF;
             if (ch == '\n')
                 break;
-            if (ch == '$') {
-                /* XXX: only parse it if first char on line ? */
+            if (ch == '$' && first_line && q == buf) {
                 if (return_on_interleaved_data) {
                     return 1;
                 } else
@@ -1166,6 +1167,7 @@ start:
             }
         }
         *q = '\0';
+        first_line = 0;
 
         av_log(s, AV_LOG_TRACE, "line='%s'\n", buf);
 

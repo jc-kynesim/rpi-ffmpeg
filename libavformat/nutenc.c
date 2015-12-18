@@ -280,7 +280,7 @@ static void put_tt(NUTContext *nut, AVRational *time_base, AVIOContext *bc, uint
  */
 static void put_str(AVIOContext *bc, const char *string)
 {
-    int len = strlen(string);
+    size_t len = strlen(string);
 
     ff_put_v(bc, len);
     avio_write(bc, string, len);
@@ -933,6 +933,7 @@ static int write_sm_data(AVFormatContext *s, AVIOContext *bc, AVPacket *pkt, int
                 break;
             case AV_PKT_DATA_METADATA_UPDATE:
             case AV_PKT_DATA_STRINGS_METADATA:
+            case AV_PKT_DATA_QUALITY_STATS:
                 // belongs into meta, not side data
                 break;
             }

@@ -93,7 +93,7 @@ probeframes(){
 
 ffmpeg(){
     dec_opts="-hwaccel $hwaccel -threads $threads -thread_type $thread_type"
-    ffmpeg_args="-nostats -cpuflags $cpuflags"
+    ffmpeg_args="-nostdin -nostats -cpuflags $cpuflags"
     for arg in $@; do
         [ x${arg} = x-i ] && ffmpeg_args="${ffmpeg_args} ${dec_opts}"
         ffmpeg_args="${ffmpeg_args} ${arg}"
@@ -102,11 +102,11 @@ ffmpeg(){
 }
 
 framecrc(){
-    ffmpeg "$@" -flags +bitexact -f framecrc -
+    ffmpeg "$@" -flags +bitexact -fflags +bitexact -f framecrc -
 }
 
 framemd5(){
-    ffmpeg "$@" -flags +bitexact -f framemd5 -
+    ffmpeg "$@" -flags +bitexact -fflags +bitexact -f framemd5 -
 }
 
 crc(){
@@ -124,7 +124,7 @@ pcm(){
 fmtstdout(){
     fmt=$1
     shift 1
-    ffmpeg -flags +bitexact "$@" -f $fmt -
+    ffmpeg -flags +bitexact -fflags +bitexact "$@" -f $fmt -
 }
 
 enc_dec_pcm(){
@@ -137,7 +137,7 @@ enc_dec_pcm(){
     cleanfiles=$encfile
     encfile=$(target_path ${encfile})
     ffmpeg -i $src_file "$@" -f $out_fmt -y ${encfile} || return
-    ffmpeg -flags +bitexact -i ${encfile} -c:a pcm_${pcm_fmt} -f ${dec_fmt} -
+    ffmpeg -flags +bitexact -fflags +bitexact -i ${encfile} -c:a pcm_${pcm_fmt} -f ${dec_fmt} -
 }
 
 FLAGS="-flags +bitexact -sws_flags +accurate_rnd+bitexact -fflags +bitexact"
@@ -187,7 +187,7 @@ video_filter(){
     raw_src="${target_path}/tests/vsynth1/%02d.pgm"
     printf '%-20s' $label
     ffmpeg $DEC_OPTS -f image2 -vcodec pgmyuv -i $raw_src \
-        $FLAGS $ENC_OPTS -vf "$filters" -vcodec rawvideo $* -f nut md5:
+        $FLAGS $ENC_OPTS -vf "$filters" -vcodec rawvideo -frames:v 5 $* -f nut md5:
 }
 
 pixfmts(){
@@ -195,6 +195,7 @@ pixfmts(){
     filter=${filter%_*}
     filter_args=$1
     prefilter_chain=$2
+    nframes=${3:-1}
 
     showfiltfmts="$target_exec $target_path/libavfilter/filtfmts-test"
     scale_exclude_fmts=${outfile}_scale_exclude_fmts
@@ -213,7 +214,7 @@ pixfmts(){
     outertest=$test
     for pix_fmt in $pix_fmts; do
         test=$pix_fmt
-        video_filter "${prefilter_chain}format=$pix_fmt,$filter=$filter_args" -pix_fmt $pix_fmt
+        video_filter "${prefilter_chain}format=$pix_fmt,$filter=$filter_args" -pix_fmt $pix_fmt -frames:v $nframes
     done
 
     rm $in_fmts $scale_in_fmts $scale_out_fmts $scale_exclude_fmts
@@ -230,16 +231,16 @@ gapless(){
     cleanfiles="$cleanfiles $decfile1 $decfile2 $decfile3"
 
     # test packet data
-    ffmpeg $extra_args -i "$sample" -flags +bitexact -c:a copy -f framecrc -y $decfile1
+    ffmpeg $extra_args -i "$sample" -flags +bitexact -fflags +bitexact -c:a copy -f framecrc -y $decfile1
     do_md5sum $decfile1
     # test decoded (and cut) data
-    ffmpeg $extra_args -i "$sample" -flags +bitexact -f wav md5:
+    ffmpeg $extra_args -i "$sample" -flags +bitexact -fflags +bitexact -f wav md5:
     # the same as above again, with seeking to the start
-    ffmpeg $extra_args -ss 0 -seek_timestamp 1 -i "$sample" -flags +bitexact -c:a copy -f framecrc -y $decfile2
+    ffmpeg $extra_args -ss 0 -seek_timestamp 1 -i "$sample" -flags +bitexact -fflags +bitexact -c:a copy -f framecrc -y $decfile2
     do_md5sum $decfile2
-    ffmpeg $extra_args -ss 0 -seek_timestamp 1 -i "$sample" -flags +bitexact -f wav md5:
+    ffmpeg $extra_args -ss 0 -seek_timestamp 1 -i "$sample" -flags +bitexact -fflags +bitexact -f wav md5:
     # test packet data, with seeking to a specific position
-    ffmpeg $extra_args -ss 5 -seek_timestamp 1 -i "$sample" -flags +bitexact -c:a copy -f framecrc -y $decfile3
+    ffmpeg $extra_args -ss 5 -seek_timestamp 1 -i "$sample" -flags +bitexact -fflags +bitexact -c:a copy -f framecrc -y $decfile3
     do_md5sum $decfile3
 }
 

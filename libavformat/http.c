@@ -25,6 +25,7 @@
 #include <zlib.h>
 #endif /* CONFIG_ZLIB */
 
+#include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 
@@ -44,6 +45,14 @@
  * path names). */
 #define BUFFER_SIZE   MAX_URL_SIZE
 #define MAX_REDIRECTS 8
+#define HTTP_SINGLE   1
+#define HTTP_MUTLI    2
+typedef enum {
+    LOWER_PROTO,
+    READ_HEADERS,
+    WRITE_REPLY_HEADERS,
+    FINISH
+}HandshakeState;
 
 typedef struct HTTPContext {
     const AVClass *class;
@@ -97,6 +106,11 @@ typedef struct HTTPContext {
     char *method;
     int reconnect;
     int listen;
+    char *resource;
+    int reply_code;
+    int is_multi_client;
+    HandshakeState handshake_step;
+    int is_connected_server;
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -126,9 +140,11 @@ static const AVOption options[] = {
     { "location", "The actual location of the data received", OFFSET(location), AV_OPT_TYPE_STRING, { 0 }, 0, 0, D | E },
     { "offset", "initial byte offset", OFFSET(off), AV_OPT_TYPE_INT64, { .i64 = 0 }, 0, INT64_MAX, D },
     { "end_offset", "try to limit the request to bytes preceding this offset", OFFSET(end_off), AV_OPT_TYPE_INT64, { .i64 = 0 }, 0, INT64_MAX, D },
-    { "method", "Override the HTTP method", OFFSET(method), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
+    { "method", "Override the HTTP method or set the expected HTTP method from a client", OFFSET(method), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
     { "reconnect", "auto reconnect after disconnect before EOF", OFFSET(reconnect), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, D },
-    { "listen", "listen on HTTP", OFFSET(listen), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, D | E },
+    { "listen", "listen on HTTP", OFFSET(listen), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 2, D | E },
+    { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
+    { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
     { NULL }
 };
 
@@ -299,28 +315,142 @@ int ff_http_averror(int status_code, int default_averror)
         return default_averror;
 }
 
+static int http_write_reply(URLContext* h, int status_code)
+{
+    int ret, body = 0, reply_code, message_len;
+    const char *reply_text, *content_type;
+    HTTPContext *s = h->priv_data;
+    char message[BUFFER_SIZE];
+    content_type = "text/plain";
+
+    if (status_code < 0)
+        body = 1;
+    switch (status_code) {
+    case AVERROR_HTTP_BAD_REQUEST:
+    case 400:
+        reply_code = 400;
+        reply_text = "Bad Request";
+        break;
+    case AVERROR_HTTP_FORBIDDEN:
+    case 403:
+        reply_code = 403;
+        reply_text = "Forbidden";
+        break;
+    case AVERROR_HTTP_NOT_FOUND:
+    case 404:
+        reply_code = 404;
+        reply_text = "Not Found";
+        break;
+    case 200:
+        reply_code = 200;
+        reply_text = "OK";
+        content_type = "application/octet-stream";
+        break;
+    case AVERROR_HTTP_SERVER_ERROR:
+    case 500:
+        reply_code = 500;
+        reply_text = "Internal server error";
+        break;
+    default:
+        return AVERROR(EINVAL);
+    }
+    if (body) {
+        s->chunked_post = 0;
+        message_len = snprintf(message, sizeof(message),
+                 "HTTP/1.1 %03d %s\r\n"
+                 "Content-Type: %s\r\n"
+                 "Content-Length: %zu\r\n"
+                 "\r\n"
+                 "%03d %s\r\n",
+                 reply_code,
+                 reply_text,
+                 content_type,
+                 strlen(reply_text) + 6, // 3 digit status code + space + \r\n
+                 reply_code,
+                 reply_text);
+    } else {
+        s->chunked_post = 1;
+        message_len = snprintf(message, sizeof(message),
+                 "HTTP/1.1 %03d %s\r\n"
+                 "Content-Type: %s\r\n"
+                 "Transfer-Encoding: chunked\r\n"
+                 "\r\n",
+                 reply_code,
+                 reply_text,
+                 content_type);
+    }
+    av_log(h, AV_LOG_TRACE, "HTTP reply header: \n%s----\n", message);
+    if ((ret = ffurl_write(s->hd, message, message_len)) < 0)
+        return ret;
+    return 0;
+}
+
+static void handle_http_errors(URLContext *h, int error)
+{
+    av_assert0(error < 0);
+    http_write_reply(h, error);
+}
+
+static int http_handshake(URLContext *c)
+{
+    int ret, err, new_location;
+    HTTPContext *ch = c->priv_data;
+    URLContext *cl = ch->hd;
+    switch (ch->handshake_step) {
+    case LOWER_PROTO:
+        av_log(c, AV_LOG_TRACE, "Lower protocol\n");
+        if ((ret = ffurl_handshake(cl)) > 0)
+            return 2 + ret;
+        if (ret < 0)
+            return ret;
+        ch->handshake_step = READ_HEADERS;
+        ch->is_connected_server = 1;
+        return 2;
+    case READ_HEADERS:
+        av_log(c, AV_LOG_TRACE, "Read headers\n");
+        if ((err = http_read_header(c, &new_location)) < 0) {
+            handle_http_errors(c, err);
+            return err;
+        }
+        ch->handshake_step = WRITE_REPLY_HEADERS;
+        return 1;
+    case WRITE_REPLY_HEADERS:
+        av_log(c, AV_LOG_TRACE, "Reply code: %d\n", ch->reply_code);
+        if ((err = http_write_reply(c, ch->reply_code)) < 0)
+            return err;
+        ch->handshake_step = FINISH;
+        return 1;
+    case FINISH:
+        return 0;
+    }
+    // this should never be reached.
+    return AVERROR(EINVAL);
+}
+
 static int http_listen(URLContext *h, const char *uri, int flags,
                        AVDictionary **options) {
     HTTPContext *s = h->priv_data;
     int ret;
-    static const char header[] = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\n\r\n";
-    char hostname[1024];
+    char hostname[1024], proto[10];
     char lower_url[100];
-    int port, new_location;
-    av_url_split(NULL, 0, NULL, 0, hostname, sizeof(hostname), &port,
+    const char *lower_proto = "tcp";
+    int port;
+    av_url_split(proto, sizeof(proto), NULL, 0, hostname, sizeof(hostname), &port,
                  NULL, 0, uri);
-    ff_url_join(lower_url, sizeof(lower_url), "tcp", NULL, hostname, port,
+    if (!strcmp(proto, "https"))
+        lower_proto = "tls";
+    ff_url_join(lower_url, sizeof(lower_url), lower_proto, NULL, hostname, port,
                 NULL);
-    av_dict_set(options, "listen", "1", 0);
+    if ((ret = av_dict_set_int(options, "listen", s->listen, 0)) < 0)
+        goto fail;
     if ((ret = ffurl_open(&s->hd, lower_url, AVIO_FLAG_READ_WRITE,
                           &h->interrupt_callback, options)) < 0)
         goto fail;
-    if ((ret = ffurl_write(s->hd, header, strlen(header))) < 0)
-        goto fail;
-    if ((ret = http_read_header(h, &new_location)) < 0)
-         goto fail;
-    return 0;
-
+    s->handshake_step = LOWER_PROTO;
+    if (s->listen == HTTP_SINGLE) { /* single client */
+        s->reply_code = 200;
+        while ((ret = http_handshake(h)) > 0);
+    }
 fail:
     av_dict_free(&s->chained_options);
     return ret;
@@ -346,9 +476,16 @@ static int http_open(URLContext *h, const char *uri, int flags,
 
     if (s->headers) {
         int len = strlen(s->headers);
-        if (len < 2 || strcmp("\r\n", s->headers + len - 2))
+        if (len < 2 || strcmp("\r\n", s->headers + len - 2)) {
             av_log(h, AV_LOG_WARNING,
                    "No trailing CRLF found in HTTP header.\n");
+            ret = av_reallocp(&s->headers, len + 3);
+            if (ret < 0)
+                return ret;
+            s->headers[len]     = '\r';
+            s->headers[len + 1] = '\n';
+            s->headers[len + 2] = '\0';
+        }
     }
 
     if (s->listen) {
@@ -357,6 +494,26 @@ static int http_open(URLContext *h, const char *uri, int flags,
     ret = http_open_cnx(h, options);
     if (ret < 0)
         av_dict_free(&s->chained_options);
+    return ret;
+}
+
+static int http_accept(URLContext *s, URLContext **c)
+{
+    int ret;
+    HTTPContext *sc = s->priv_data;
+    HTTPContext *cc;
+    URLContext *sl = sc->hd;
+    URLContext *cl = NULL;
+
+    av_assert0(sc->listen);
+    if ((ret = ffurl_alloc(c, s->filename, s->flags, &sl->interrupt_callback)) < 0)
+        goto fail;
+    cc = (*c)->priv_data;
+    if ((ret = ffurl_accept(sl, &cl)) < 0)
+        goto fail;
+    cc->hd = cl;
+    cc->is_multi_client = 1;
+fail:
     return ret;
 }
 
@@ -542,7 +699,8 @@ static int process_line(URLContext *h, char *line, int line_count,
                         int *new_location)
 {
     HTTPContext *s = h->priv_data;
-    char *tag, *p, *end;
+    const char *auto_method =  h->flags & AVIO_FLAG_READ ? "POST" : "GET";
+    char *tag, *p, *end, *method, *resource, *version;
     int ret;
 
     /* end of header */
@@ -553,16 +711,66 @@ static int process_line(URLContext *h, char *line, int line_count,
 
     p = line;
     if (line_count == 0) {
-        while (!av_isspace(*p) && *p != '\0')
-            p++;
-        while (av_isspace(*p))
-            p++;
-        s->http_code = strtol(p, &end, 10);
+        if (s->is_connected_server) {
+            // HTTP method
+            method = p;
+            while (*p && !av_isspace(*p))
+                p++;
+            *(p++) = '\0';
+            av_log(h, AV_LOG_TRACE, "Received method: %s\n", method);
+            if (s->method) {
+                if (av_strcasecmp(s->method, method)) {
+                    av_log(h, AV_LOG_ERROR, "Received and expected HTTP method do not match. (%s expected, %s received)\n",
+                           s->method, method);
+                    return ff_http_averror(400, AVERROR(EIO));
+                }
+            } else {
+                // use autodetected HTTP method to expect
+                av_log(h, AV_LOG_TRACE, "Autodetected %s HTTP method\n", auto_method);
+                if (av_strcasecmp(auto_method, method)) {
+                    av_log(h, AV_LOG_ERROR, "Received and autodetected HTTP method did not match "
+                           "(%s autodetected %s received)\n", auto_method, method);
+                    return ff_http_averror(400, AVERROR(EIO));
+                }
+                if (!(s->method = av_strdup(method)))
+                    return AVERROR(ENOMEM);
+            }
 
-        av_log(h, AV_LOG_TRACE, "http_code=%d\n", s->http_code);
+            // HTTP resource
+            while (av_isspace(*p))
+                p++;
+            resource = p;
+            while (!av_isspace(*p))
+                p++;
+            *(p++) = '\0';
+            av_log(h, AV_LOG_TRACE, "Requested resource: %s\n", resource);
+            if (!(s->resource = av_strdup(resource)))
+                return AVERROR(ENOMEM);
 
-        if ((ret = check_http_code(h, s->http_code, end)) < 0)
-            return ret;
+            // HTTP version
+            while (av_isspace(*p))
+                p++;
+            version = p;
+            while (*p && !av_isspace(*p))
+                p++;
+            *p = '\0';
+            if (av_strncasecmp(version, "HTTP/", 5)) {
+                av_log(h, AV_LOG_ERROR, "Malformed HTTP version string.\n");
+                return ff_http_averror(400, AVERROR(EIO));
+            }
+            av_log(h, AV_LOG_TRACE, "HTTP version string: %s\n", version);
+        } else {
+            while (!av_isspace(*p) && *p != '\0')
+                p++;
+            while (av_isspace(*p))
+                p++;
+            s->http_code = strtol(p, &end, 10);
+
+            av_log(h, AV_LOG_TRACE, "http_code=%d\n", s->http_code);
+
+            if ((ret = check_http_code(h, s->http_code, end)) < 0)
+                return ret;
+        }
     } else {
         while (*p != '\0' && *p != ':')
             p++;
@@ -1174,7 +1382,8 @@ static int http_shutdown(URLContext *h, int flags)
     HTTPContext *s = h->priv_data;
 
     /* signal end of chunked encoding if used */
-    if ((flags & AVIO_FLAG_WRITE) && s->chunked_post) {
+    if (((flags & AVIO_FLAG_WRITE) && s->chunked_post) ||
+        ((flags & AVIO_FLAG_READ) && s->chunked_post && s->listen)) {
         ret = ffurl_write(s->hd, footer, sizeof(footer) - 1);
         ret = ret > 0 ? 0 : ret;
         s->end_chunked_post = 1;
@@ -1276,6 +1485,8 @@ HTTP_CLASS(http);
 URLProtocol ff_http_protocol = {
     .name                = "http",
     .url_open2           = http_open,
+    .url_accept          = http_accept,
+    .url_handshake       = http_handshake,
     .url_read            = http_read,
     .url_write           = http_write,
     .url_seek            = http_seek,

@@ -402,17 +402,17 @@ static int decode_slice(AVCodecContext *c, void *arg)
     fs->slice_rct_ry_coef = 1;
 
     if (f->version > 2) {
-        if (ffv1_init_slice_state(f, fs) < 0)
+        if (ff_ffv1_init_slice_state(f, fs) < 0)
             return AVERROR(ENOMEM);
         if (decode_slice_header(f, fs) < 0) {
             fs->slice_damaged = 1;
             return AVERROR_INVALIDDATA;
         }
     }
-    if ((ret = ffv1_init_slice_state(f, fs)) < 0)
+    if ((ret = ff_ffv1_init_slice_state(f, fs)) < 0)
         return ret;
     if (f->cur->key_frame || fs->slice_reset_contexts)
-        ffv1_clear_slice_state(f, fs);
+        ff_ffv1_clear_slice_state(f, fs);
 
     width  = fs->slice_width;
     height = fs->slice_height;
@@ -441,7 +441,7 @@ static int decode_slice(AVCodecContext *c, void *arg)
             decode_plane(fs, p->data[2] + ps*cx+cy*p->linesize[2], chroma_width, chroma_height, p->linesize[2], 1);
         }
         if (fs->transparency)
-            decode_plane(fs, p->data[3] + ps*x + y*p->linesize[3], width, height, p->linesize[3], 2);
+            decode_plane(fs, p->data[3] + ps*x + y*p->linesize[3], width, height, p->linesize[3], (f->version >= 4 && !f->chroma_planes) ? 1 : 2);
     } else {
         uint8_t *planes[3] = { p->data[0] + ps * x + y * p->linesize[0],
                                p->data[1] + ps * x + y * p->linesize[1],
@@ -476,7 +476,7 @@ static int read_quant_table(RangeCoder *c, int16_t *quant_table, int scale)
     for (v = 0; i < 128; v++) {
         unsigned len = get_symbol(c, state, 0) + 1;
 
-        if (len > 128 - i)
+        if (len > 128 - i || !len)
             return AVERROR_INVALIDDATA;
 
         while (len--) {
@@ -513,6 +513,7 @@ static int read_extra_header(FFV1Context *f)
     uint8_t state[CONTEXT_SIZE];
     int i, j, k, ret;
     uint8_t state2[32][CONTEXT_SIZE];
+    unsigned crc = 0;
 
     memset(state2, 128, sizeof(state2));
     memset(state, 128, sizeof(state));
@@ -528,6 +529,8 @@ static int read_extra_header(FFV1Context *f)
     if (f->version > 2) {
         c->bytestream_end -= 4;
         f->micro_version = get_symbol(c, state, 0);
+        if (f->micro_version < 0)
+            return AVERROR_INVALIDDATA;
     }
     f->ac = f->avctx->coder_type = get_symbol(c, state, 0);
     if (f->ac > 1) {
@@ -544,6 +547,12 @@ static int read_extra_header(FFV1Context *f)
     f->plane_count                = 1 + (f->chroma_planes || f->version<4) + f->transparency;
     f->num_h_slices               = 1 + get_symbol(c, state, 0);
     f->num_v_slices               = 1 + get_symbol(c, state, 0);
+
+    if (f->chroma_h_shift > 4U || f->chroma_v_shift > 4U) {
+        av_log(f->avctx, AV_LOG_ERROR, "chroma shift parameters %d %d are invalid\n",
+               f->chroma_h_shift, f->chroma_v_shift);
+        return AVERROR_INVALIDDATA;
+    }
 
     if (f->num_h_slices > (unsigned)f->width  || !f->num_h_slices ||
         f->num_v_slices > (unsigned)f->height || !f->num_v_slices
@@ -563,7 +572,7 @@ static int read_extra_header(FFV1Context *f)
             return AVERROR_INVALIDDATA;
         }
     }
-    if ((ret = ffv1_allocate_initial_states(f)) < 0)
+    if ((ret = ff_ffv1_allocate_initial_states(f)) < 0)
         return ret;
 
     for (i = 0; i < f->quant_table_count; i++)
@@ -586,15 +595,16 @@ static int read_extra_header(FFV1Context *f)
         unsigned v;
         v = av_crc(av_crc_get_table(AV_CRC_32_IEEE), 0,
                    f->avctx->extradata, f->avctx->extradata_size);
-        if (v) {
+        if (v || f->avctx->extradata_size < 4) {
             av_log(f->avctx, AV_LOG_ERROR, "CRC mismatch %X!\n", v);
             return AVERROR_INVALIDDATA;
         }
+        crc = AV_RB32(f->avctx->extradata + f->avctx->extradata_size - 4);
     }
 
     if (f->avctx->debug & FF_DEBUG_PICT_INFO)
         av_log(f->avctx, AV_LOG_DEBUG,
-               "global: ver:%d.%d, coder:%d, colorspace: %d bpr:%d chroma:%d(%d:%d), alpha:%d slices:%dx%d qtabs:%d ec:%d intra:%d\n",
+               "global: ver:%d.%d, coder:%d, colorspace: %d bpr:%d chroma:%d(%d:%d), alpha:%d slices:%dx%d qtabs:%d ec:%d intra:%d CRC:0x%08X\n",
                f->version, f->micro_version,
                f->ac,
                f->colorspace,
@@ -604,7 +614,8 @@ static int read_extra_header(FFV1Context *f)
                f->num_h_slices, f->num_v_slices,
                f->quant_table_count,
                f->ec,
-               f->intra
+               f->intra,
+               crc
               );
     return 0;
 }
@@ -637,6 +648,8 @@ static int read_header(FFV1Context *f)
         chroma_h_shift      = get_symbol(c, state, 0);
         chroma_v_shift      = get_symbol(c, state, 0);
         transparency        = get_rac(c, state);
+        if (colorspace == 0 && f->avctx->skip_alpha)
+            transparency = 0;
 
         if (f->plane_count) {
             if (colorspace          != f->colorspace                 ||
@@ -650,6 +663,12 @@ static int read_header(FFV1Context *f)
             }
         }
 
+        if (chroma_h_shift > 4U || chroma_v_shift > 4U) {
+            av_log(f->avctx, AV_LOG_ERROR, "chroma shift parameters %d %d are invalid\n",
+                   chroma_h_shift, chroma_v_shift);
+            return AVERROR_INVALIDDATA;
+        }
+
         f->colorspace                 = colorspace;
         f->avctx->bits_per_raw_sample = bits_per_raw_sample;
         f->chroma_planes              = chroma_planes;
@@ -661,7 +680,6 @@ static int read_header(FFV1Context *f)
     }
 
     if (f->colorspace == 0) {
-        if (f->avctx->skip_alpha) f->transparency = 0;
         if (!f->transparency && !f->chroma_planes) {
             if (f->avctx->bits_per_raw_sample <= 8)
                 f->avctx->pix_fmt = AV_PIX_FMT_GRAY8;
@@ -837,13 +855,13 @@ static av_cold int decode_init(AVCodecContext *avctx)
     FFV1Context *f = avctx->priv_data;
     int ret;
 
-    if ((ret = ffv1_common_init(avctx)) < 0)
+    if ((ret = ff_ffv1_common_init(avctx)) < 0)
         return ret;
 
     if (avctx->extradata && (ret = read_extra_header(f)) < 0)
         return ret;
 
-    if ((ret = ffv1_init_slice_contexts(f)) < 0)
+    if ((ret = ff_ffv1_init_slice_contexts(f)) < 0)
         return ret;
 
     avctx->internal->allocate_progress = 1;
@@ -932,6 +950,9 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPac
                 }
                 fs->slice_damaged = 1;
             }
+            if (avctx->debug & FF_DEBUG_PICT_INFO) {
+                av_log(avctx, AV_LOG_DEBUG, "slice %d, CRC: 0x%08X\n", i, AV_RB32(buf_p + v - 4));
+            }
         }
 
         if (i) {
@@ -1006,7 +1027,7 @@ static int init_thread_copy(AVCodecContext *avctx)
     f->picture.f      = av_frame_alloc();
     f->last_picture.f = av_frame_alloc();
 
-    if ((ret = ffv1_init_slice_contexts(f)) < 0)
+    if ((ret = ff_ffv1_init_slice_contexts(f)) < 0)
         return ret;
 
     return 0;
@@ -1091,10 +1112,10 @@ AVCodec ff_ffv1_decoder = {
     .id             = AV_CODEC_ID_FFV1,
     .priv_data_size = sizeof(FFV1Context),
     .init           = decode_init,
-    .close          = ffv1_close,
+    .close          = ff_ffv1_close,
     .decode         = decode_frame,
     .init_thread_copy = ONLY_IF_THREADS_ENABLED(init_thread_copy),
     .update_thread_context = ONLY_IF_THREADS_ENABLED(update_thread_context),
-    .capabilities   = CODEC_CAP_DR1 /*| CODEC_CAP_DRAW_HORIZ_BAND*/ |
-                      CODEC_CAP_FRAME_THREADS | CODEC_CAP_SLICE_THREADS,
+    .capabilities   = AV_CODEC_CAP_DR1 /*| AV_CODEC_CAP_DRAW_HORIZ_BAND*/ |
+                      AV_CODEC_CAP_FRAME_THREADS | AV_CODEC_CAP_SLICE_THREADS,
 };

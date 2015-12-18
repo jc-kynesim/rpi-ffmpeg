@@ -1317,7 +1317,7 @@ DERING_CORE((%0, %1, 8)    ,(%%REGd, %1, 4),%%mm2,%%mm4,%%mm0,%%mm3,%%mm5,%%mm1,
         "1:                        \n\t"
         : : "r" (src), "r" ((x86_reg)stride), "m" (c->pQPb), "m"(c->pQPb2), "q"(tmp)
           NAMED_CONSTRAINTS_ADD(deringThreshold,b00,b02,b08)
-        : "%"REG_a, "%"REG_d, "%"REG_SP
+        : "%"REG_a, "%"REG_d, "%"REG_sp
     );
 #else // HAVE_7REGS && (TEMPLATE_PP_MMXEXT || TEMPLATE_PP_3DNOW)
     int y;
@@ -1383,7 +1383,7 @@ DERING_CORE((%0, %1, 8)    ,(%%REGd, %1, 4),%%mm2,%%mm4,%%mm0,%%mm3,%%mm5,%%mm1,
 #ifdef DEBUG_DERING_THRESHOLD
                     __asm__ volatile("emms\n\t":);
                     {
-                    static long long numPixels=0;
+                    static uint64_t numPixels=0;
                     if(x!=1 && x!=8 && y!=1 && y!=8) numPixels++;
 //                    if((max-min)<20 || (max-min)*QP<200)
 //                    if((max-min)*QP < 500)
@@ -3372,7 +3372,7 @@ static void RENAME(postProcess)(const uint8_t src[], int srcStride, uint8_t dst[
         int i;
         uint64_t maxClipped;
         uint64_t clipped;
-        double scale;
+        AVRational scale;
 
         c.frameNum++;
         // first frame is fscked so we ignore it
@@ -3383,7 +3383,7 @@ static void RENAME(postProcess)(const uint8_t src[], int srcStride, uint8_t dst[
         }
 
         /* We always get a completely black picture first. */
-        maxClipped= (uint64_t)(sum * c.ppMode.maxClippedThreshold);
+        maxClipped= av_rescale(sum, c.ppMode.maxClippedThreshold.num, c.ppMode.maxClippedThreshold.den);
 
         clipped= sum;
         for(black=255; black>0; black--){
@@ -3397,13 +3397,13 @@ static void RENAME(postProcess)(const uint8_t src[], int srcStride, uint8_t dst[
             clipped-= yHistogram[white];
         }
 
-        scale= (double)(c.ppMode.maxAllowedY - c.ppMode.minAllowedY) / (double)(white-black);
+        scale = (AVRational){c.ppMode.maxAllowedY - c.ppMode.minAllowedY, white - black};
 
 #if TEMPLATE_PP_MMXEXT
-        c.packedYScale= (uint16_t)(scale*256.0 + 0.5);
+        c.packedYScale = (uint16_t)av_rescale(scale.num, 256, scale.den);
         c.packedYOffset= (((black*c.packedYScale)>>8) - c.ppMode.minAllowedY) & 0xFFFF;
 #else
-        c.packedYScale= (uint16_t)(scale*1024.0 + 0.5);
+        c.packedYScale = (uint16_t)av_rescale(scale.num, 1024, scale.den);
         c.packedYOffset= (black - c.ppMode.minAllowedY) & 0xFFFF;
 #endif
 
@@ -3413,7 +3413,7 @@ static void RENAME(postProcess)(const uint8_t src[], int srcStride, uint8_t dst[
         c.packedYScale|= c.packedYScale<<32;
         c.packedYScale|= c.packedYScale<<16;
 
-        if(mode & LEVEL_FIX)        QPCorrecture= (int)(scale*256*256 + 0.5);
+        if(mode & LEVEL_FIX)        QPCorrecture= (int)av_rescale(scale.num, 256*256, scale.den);
         else                        QPCorrecture= 256*256;
     }else{
         c.packedYScale= 0x0100010001000100LL;

@@ -605,6 +605,54 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_PLANAR,
     },
+    [AV_PIX_FMT_YUV440P10LE] = {
+        .name = "yuv440p10le",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 1, 0, 9 },        /* Y */
+            { 1, 1, 1, 0, 9 },        /* U */
+            { 2, 1, 1, 0, 9 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR,
+    },
+    [AV_PIX_FMT_YUV440P10BE] = {
+        .name = "yuv440p10be",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 1, 0, 9 },        /* Y */
+            { 1, 1, 1, 0, 9 },        /* U */
+            { 2, 1, 1, 0, 9 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_PLANAR,
+    },
+    [AV_PIX_FMT_YUV440P12LE] = {
+        .name = "yuv440p12le",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 1, 0, 11 },        /* Y */
+            { 1, 1, 1, 0, 11 },        /* U */
+            { 2, 1, 1, 0, 11 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR,
+    },
+    [AV_PIX_FMT_YUV440P12BE] = {
+        .name = "yuv440p12be",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 1, 0, 11 },        /* Y */
+            { 1, 1, 1, 0, 11 },        /* U */
+            { 2, 1, 1, 0, 11 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_PLANAR,
+    },
     [AV_PIX_FMT_YUVA420P] = {
         .name = "yuva420p",
         .nb_components = 4,
@@ -1160,6 +1208,7 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_RGB,
     },
+#if FF_API_VAAPI
     [AV_PIX_FMT_VAAPI_MOCO] = {
         .name = "vaapi_moco",
         .log2_chroma_w = 1,
@@ -1178,6 +1227,14 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .log2_chroma_h = 1,
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
+#else
+    [AV_PIX_FMT_VAAPI] = {
+        .name = "vaapi",
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
+#endif
     [AV_PIX_FMT_YUV420P9LE] = {
         .name = "yuv420p9le",
         .nb_components = 3,
@@ -1538,6 +1595,12 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_PLANAR,
     },
+    [AV_PIX_FMT_D3D11VA_VLD] = {
+        .name = "d3d11va_vld",
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
     [AV_PIX_FMT_DXVA2_VLD] = {
         .name = "dxva2_vld",
         .log2_chroma_w = 1,
@@ -1577,6 +1640,10 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
             { 0, 3, 3, 0, 15 },        /* A */
         },
         .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_ALPHA,
+    },
+    [AV_PIX_FMT_VIDEOTOOLBOX] = {
+        .name = "videotoolbox_vld",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
     [AV_PIX_FMT_GBRP] = {
         .name = "gbrp",
@@ -1910,6 +1977,32 @@ const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
     [AV_PIX_FMT_MMAL] = {
         .name = "mmal",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
+    [AV_PIX_FMT_AYUV64LE] = {
+        .name = "ayuv64le",
+        .nb_components = 4,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 7, 3, 0, 15 },        /* Y */
+            { 0, 7, 5, 0, 15 },        /* U */
+            { 0, 7, 7, 0, 15 },        /* V */
+            { 0, 7, 1, 0, 15 },        /* A */
+        },
+        .flags = AV_PIX_FMT_FLAG_ALPHA,
+    },
+    [AV_PIX_FMT_AYUV64BE] = {
+        .name = "ayuv64be",
+        .nb_components = 4,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 7, 3, 0, 15 },        /* Y */
+            { 0, 7, 5, 0, 15 },        /* U */
+            { 0, 7, 7, 0, 15 },        /* V */
+            { 0, 7, 1, 0, 15 },        /* A */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_ALPHA,
     },
 };
 

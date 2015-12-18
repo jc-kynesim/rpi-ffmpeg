@@ -1493,6 +1493,11 @@ static int read_frame_data(ALSDecContext *ctx, unsigned int ra_frame)
 
     // TODO: read_diff_float_data
 
+    if (get_bits_left(gb) < 0) {
+        av_log(ctx->avctx, AV_LOG_ERROR, "Overread %d\n", -get_bits_left(gb));
+        return AVERROR_INVALIDDATA;
+    }
+
     return 0;
 }
 
@@ -1848,5 +1853,5 @@ AVCodec ff_als_decoder = {
     .close          = decode_end,
     .decode         = decode_frame,
     .flush          = flush,
-    .capabilities   = CODEC_CAP_SUBFRAMES | CODEC_CAP_DR1,
+    .capabilities   = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1,
 };

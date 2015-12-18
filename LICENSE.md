@@ -16,6 +16,7 @@ Specifically, the GPL parts of FFmpeg are:
 - optional x86 optimizations in the files
   - `libavcodec/x86/flac_dsp_gpl.asm`
   - `libavcodec/x86/idct_mmx.c`
+  - `libavfilter/x86/vf_removegrain.asm`
 - libutvideo encoding/decoding wrappers in
   `libavcodec/libutvideo*.cpp`
 - the X11 grabber in `libavdevice/x11grab.c`
@@ -27,9 +28,11 @@ Specifically, the GPL parts of FFmpeg are:
     - `vf_blackframe.c`
     - `vf_boxblur.c`
     - `vf_colormatrix.c`
+    - `vf_cover_rect.c`
     - `vf_cropdetect.c`
     - `vf_delogo.c`
     - `vf_eq.c`
+    - `vf_find_rect.c`
     - `vf_fspp.c`
     - `vf_geq.c`
     - `vf_histeq.c`

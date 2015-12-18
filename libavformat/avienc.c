@@ -29,6 +29,7 @@
 #include "mpegts.h"
 #include "libavformat/avlanguage.h"
 #include "libavutil/avstring.h"
+#include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/dict.h"
 #include "libavutil/avassert.h"
@@ -386,6 +387,8 @@ static int avi_write_header(AVFormatContext *s)
                 t = NULL;
                 if (langstr) {
                     char* str = av_asprintf("Subtitle - %s-xx;02", langstr);
+                    if (!str)
+                        return AVERROR(ENOMEM);
                     ff_riff_write_info_tag(s->pb, "strn", str);
                     av_free(str);
                 }
@@ -409,7 +412,7 @@ static int avi_write_header(AVFormatContext *s)
             avio_wl32(pb, 0); // video format   = unknown
             avio_wl32(pb, 0); // video standard = unknown
             // TODO: should be avg_frame_rate
-            avio_wl32(pb, lrintf(1.0 / av_q2d(st->time_base)));
+            avio_wl32(pb, (2LL*st->time_base.den + st->time_base.num - 1) / (2LL * st->time_base.num));
             avio_wl32(pb, enc->width);
             avio_wl32(pb, enc->height);
             avio_wl16(pb, den);
@@ -616,7 +619,7 @@ static int write_skip_frames(AVFormatContext *s, int stream_index, int64_t dts)
     AVIStream *avist    = s->streams[stream_index]->priv_data;
     AVCodecContext *enc = s->streams[stream_index]->codec;
 
-    av_dlog(s, "dts:%s packet_count:%d stream_index:%d\n", av_ts2str(dts), avist->packet_count, stream_index);
+    ff_dlog(s, "dts:%s packet_count:%d stream_index:%d\n", av_ts2str(dts), avist->packet_count, stream_index);
     while (enc->block_align == 0 && dts != AV_NOPTS_VALUE &&
            dts > avist->packet_count && enc->codec_id != AV_CODEC_ID_XSUB && avist->packet_count) {
         AVPacket empty_packet;
@@ -631,7 +634,7 @@ static int write_skip_frames(AVFormatContext *s, int stream_index, int64_t dts)
         empty_packet.data         = NULL;
         empty_packet.stream_index = stream_index;
         avi_write_packet(s, &empty_packet);
-        av_dlog(s, "dup dts:%s packet_count:%d\n", av_ts2str(dts), avist->packet_count);
+        ff_dlog(s, "dup dts:%s packet_count:%d\n", av_ts2str(dts), avist->packet_count);
     }
 
     return 0;

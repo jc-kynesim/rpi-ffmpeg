@@ -121,7 +121,7 @@ static int hq_decode_frame(HQContext *ctx, AVFrame *pic,
     uint32_t slice_off[21];
     int slice, start_off, next_off, i, ret;
 
-    if (prof_num >= NUM_HQ_PROFILES) {
+    if ((unsigned)prof_num >= NUM_HQ_PROFILES) {
         profile = &ff_hq_profile[0];
         avpriv_request_sample(ctx->avctx, "HQ Profile %d", prof_num);
     } else {
@@ -298,7 +298,8 @@ static int hq_hqa_decode_frame(AVCodecContext *avctx, void *data,
     AVFrame *pic = data;
     uint32_t info_tag;
     unsigned int data_size;
-    int tag, ret;
+    int ret;
+    unsigned tag;
 
     bytestream2_init(&ctx->gbc, avpkt->data, avpkt->size);
     if (bytestream2_get_bytes_left(&ctx->gbc) < 4 + 4) {
@@ -306,9 +307,11 @@ static int hq_hqa_decode_frame(AVCodecContext *avctx, void *data,
         return AVERROR_INVALIDDATA;
     }
 
-    info_tag = bytestream2_get_le32(&ctx->gbc);
+    info_tag = bytestream2_peek_le32(&ctx->gbc);
     if (info_tag == MKTAG('I', 'N', 'F', 'O')) {
-        int info_size = bytestream2_get_le32(&ctx->gbc);
+        int info_size;
+        bytestream2_skip(&ctx->gbc, 4);
+        info_size = bytestream2_get_le32(&ctx->gbc);
         if (bytestream2_get_bytes_left(&ctx->gbc) < info_size) {
             av_log(avctx, AV_LOG_ERROR, "Invalid INFO size (%d).\n", info_size);
             return AVERROR_INVALIDDATA;
@@ -378,7 +381,7 @@ AVCodec ff_hq_hqa_decoder = {
     .init           = hq_hqa_decode_init,
     .decode         = hq_hqa_decode_frame,
     .close          = hq_hqa_decode_close,
-    .capabilities   = CODEC_CAP_DR1,
+    .capabilities   = AV_CODEC_CAP_DR1,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE |
                       FF_CODEC_CAP_INIT_CLEANUP,
 };

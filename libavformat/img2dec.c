@@ -177,7 +177,7 @@ static int img_read_probe(AVProbeData *p)
 int ff_img_read_header(AVFormatContext *s1)
 {
     VideoDemuxData *s = s1->priv_data;
-    int first_index, last_index;
+    int first_index = 1, last_index = 1;
     AVStream *st;
     enum AVPixelFormat pix_fmt = AV_PIX_FMT_NONE;
 
@@ -282,7 +282,7 @@ int ff_img_read_header(AVFormatContext *s1)
                    "is not supported by this libavformat build\n");
             return AVERROR(ENOSYS);
 #endif
-        } else if (s->pattern_type != PT_GLOB_SEQUENCE) {
+        } else if (s->pattern_type != PT_GLOB_SEQUENCE && s->pattern_type != PT_NONE) {
             av_log(s1, AV_LOG_ERROR,
                    "Unknown value '%d' for pattern_type option\n", s->pattern_type);
             return AVERROR(EINVAL);
@@ -377,7 +377,9 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
         }
         if (s->img_number > s->img_last)
             return AVERROR_EOF;
-        if (s->use_glob) {
+        if (s->pattern_type == PT_NONE) {
+            av_strlcpy(filename_bytes, s->path, sizeof(filename_bytes));
+        } else if (s->use_glob) {
 #if HAVE_GLOB
             filename = s->globstate.gl_pathv[s->img_number];
 #endif
@@ -538,6 +540,7 @@ const AVOption ff_img_options[] = {
     { "glob_sequence","select glob/sequence pattern type",   0, AV_OPT_TYPE_CONST,  {.i64=PT_GLOB_SEQUENCE}, INT_MIN, INT_MAX, DEC, "pattern_type" },
     { "glob",         "select glob pattern type",            0, AV_OPT_TYPE_CONST,  {.i64=PT_GLOB         }, INT_MIN, INT_MAX, DEC, "pattern_type" },
     { "sequence",     "select sequence pattern type",        0, AV_OPT_TYPE_CONST,  {.i64=PT_SEQUENCE     }, INT_MIN, INT_MAX, DEC, "pattern_type" },
+    { "none",         "disable pattern matching",            0, AV_OPT_TYPE_CONST,  {.i64=PT_NONE         }, INT_MIN, INT_MAX, DEC, "pattern_type" },
 
     { "pixel_format", "set video pixel format",              OFFSET(pixel_format), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0,       DEC },
     { "start_number", "set first number in the sequence",    OFFSET(start_number), AV_OPT_TYPE_INT,    {.i64 = 0   }, INT_MIN, INT_MAX, DEC },
@@ -604,6 +607,17 @@ static int bmp_probe(AVProbeData *p)
         return AVPROBE_SCORE_EXTENSION + 1;
     }
     return AVPROBE_SCORE_EXTENSION / 4;
+}
+
+static int dds_probe(AVProbeData *p)
+{
+    const uint8_t *b = p->buf;
+
+    if (   AV_RB64(b) == 0x444453207c000000
+        && AV_RL32(b +  8)
+        && AV_RL32(b + 12))
+        return AVPROBE_SCORE_MAX - 1;
+    return 0;
 }
 
 static int dpx_probe(AVProbeData *p)
@@ -707,6 +721,22 @@ static int jpegls_probe(AVProbeData *p)
     return 0;
 }
 
+static int qdraw_probe(AVProbeData *p)
+{
+    const uint8_t *b = p->buf;
+
+    if (   p->buf_size >= 528
+        && (AV_RB64(b + 520) & 0xFFFFFFFFFFFF) == 0x001102ff0c00
+        && AV_RB16(b + 520)
+        && AV_RB16(b + 518))
+        return AVPROBE_SCORE_MAX * 3 / 4;
+    if (   (AV_RB64(b + 8) & 0xFFFFFFFFFFFF) == 0x001102ff0c00
+        && AV_RB16(b + 8)
+        && AV_RB16(b + 6))
+        return AVPROBE_SCORE_EXTENSION / 4;
+    return 0;
+}
+
 static int pictor_probe(AVProbeData *p)
 {
     const uint8_t *b = p->buf;
@@ -786,6 +816,7 @@ AVInputFormat ff_image_ ## imgname ## _pipe_demuxer = {\
 };
 
 IMAGEAUTO_DEMUXER(bmp,     AV_CODEC_ID_BMP)
+IMAGEAUTO_DEMUXER(dds,     AV_CODEC_ID_DDS)
 IMAGEAUTO_DEMUXER(dpx,     AV_CODEC_ID_DPX)
 IMAGEAUTO_DEMUXER(exr,     AV_CODEC_ID_EXR)
 IMAGEAUTO_DEMUXER(j2k,     AV_CODEC_ID_JPEG2000)
@@ -793,6 +824,7 @@ IMAGEAUTO_DEMUXER(jpeg,    AV_CODEC_ID_MJPEG)
 IMAGEAUTO_DEMUXER(jpegls,  AV_CODEC_ID_JPEGLS)
 IMAGEAUTO_DEMUXER(pictor,  AV_CODEC_ID_PICTOR)
 IMAGEAUTO_DEMUXER(png,     AV_CODEC_ID_PNG)
+IMAGEAUTO_DEMUXER(qdraw,   AV_CODEC_ID_QDRAW)
 IMAGEAUTO_DEMUXER(sgi,     AV_CODEC_ID_SGI)
 IMAGEAUTO_DEMUXER(sunrast, AV_CODEC_ID_SUNRAST)
 IMAGEAUTO_DEMUXER(tiff,    AV_CODEC_ID_TIFF)

@@ -550,7 +550,7 @@ redo:
             codec_id = AV_CODEC_ID_ADPCM_ADX;
             // Auto-detect AC-3
             request_probe = 50;
-        } else if (m->imkh_cctv && startcode == 0x1c0) {
+        } else if (m->imkh_cctv && startcode == 0x1c0 && len > 80) {
             codec_id = AV_CODEC_ID_PCM_ALAW;
             request_probe = 50;
         } else {
@@ -612,7 +612,7 @@ found:
     if (st->discard >= AVDISCARD_ALL)
         goto skip;
     if (startcode >= 0xa0 && startcode <= 0xaf) {
-      if (lpcm_header_len == 6 && st->codec->codec_id == AV_CODEC_ID_MLP) {
+      if (st->codec->codec_id == AV_CODEC_ID_MLP) {
             if (len < 6)
                 goto skip;
             avio_skip(s->pb, 6);

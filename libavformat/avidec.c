@@ -129,7 +129,7 @@ static inline int get_duration(AVIStream *ast, int len)
 {
     if (ast->sample_size)
         return len;
-    else if (ast->dshow_block_align > 1)
+    else if (ast->dshow_block_align)
         return (len + ast->dshow_block_align - 1) / ast->dshow_block_align;
     else
         return 1;
@@ -451,6 +451,7 @@ static int calculate_bitrate(AVFormatContext *s)
         int64_t len = 0;
         AVStream *st = s->streams[i];
         int64_t duration;
+        int64_t bitrate;
 
         for (j = 0; j < st->nb_index_entries; j++)
             len += st->index_entries[j].size;
@@ -458,7 +459,10 @@ static int calculate_bitrate(AVFormatContext *s)
         if (st->nb_index_entries < 2 || st->codec->bit_rate > 0)
             continue;
         duration = st->index_entries[j-1].timestamp - st->index_entries[0].timestamp;
-        st->codec->bit_rate = av_rescale(8*len, st->time_base.den, duration * st->time_base.num);
+        bitrate = av_rescale(8*len, st->time_base.den, duration * st->time_base.num);
+        if (bitrate <= INT_MAX && bitrate > 0) {
+            st->codec->bit_rate = bitrate;
+        }
     }
     return 1;
 }
@@ -689,6 +693,23 @@ static int avi_read_header(AVFormatContext *s)
             default:
                 av_log(s, AV_LOG_INFO, "unknown stream type %X\n", tag1);
             }
+
+            if (ast->sample_size < 0) {
+                if (s->error_recognition & AV_EF_EXPLODE) {
+                    av_log(s, AV_LOG_ERROR,
+                           "Invalid sample_size %d at stream %d\n",
+                           ast->sample_size,
+                           stream_index);
+                    goto fail;
+                }
+                av_log(s, AV_LOG_WARNING,
+                       "Invalid sample_size %d at stream %d "
+                       "setting it to 0\n",
+                       ast->sample_size,
+                       stream_index);
+                ast->sample_size = 0;
+            }
+
             if (ast->sample_size == 0) {
                 st->duration = st->nb_frames;
                 if (st->duration > 0 && avi->io_fsize > 0 && avi->riff_end > avi->io_fsize) {
@@ -802,7 +823,7 @@ static int avi_read_header(AVFormatContext *s)
                         st->codec->extradata_size += 9;
                         if ((ret = av_reallocp(&st->codec->extradata,
                                                st->codec->extradata_size +
-                                               FF_INPUT_BUFFER_PADDING_SIZE)) < 0) {
+                                               AV_INPUT_BUFFER_PADDING_SIZE)) < 0) {
                             st->codec->extradata_size = 0;
                             return ret;
                         } else
@@ -814,7 +835,7 @@ static int avi_read_header(AVFormatContext *s)
 //                    avio_skip(pb, size - 5 * 4);
                     break;
                 case AVMEDIA_TYPE_AUDIO:
-                    ret = ff_get_wav_header(pb, st->codec, size, 0);
+                    ret = ff_get_wav_header(s, pb, st->codec, size, 0);
                     if (ret < 0)
                         return ret;
                     ast->dshow_block_align = st->codec->block_align;
@@ -840,6 +861,9 @@ static int avi_read_header(AVFormatContext *s)
                     if (st->codec->codec_id == AV_CODEC_ID_AAC &&
                         st->codec->extradata_size)
                         st->need_parsing = AVSTREAM_PARSE_NONE;
+                    // The flac parser does not work with AVSTREAM_PARSE_TIMESTAMPS
+                    if (st->codec->codec_id == AV_CODEC_ID_FLAC)
+                        st->need_parsing = AVSTREAM_PARSE_NONE;
                     /* AVI files with Xan DPCM audio (wrongly) declare PCM
                      * audio in the header but have Axan as stream_code_tag. */
                     if (ast->handler == AV_RL32("Axan")) {
@@ -851,7 +875,9 @@ static int avi_read_header(AVFormatContext *s)
                         st->codec->codec_id    = AV_CODEC_ID_ADPCM_IMA_AMV;
                         ast->dshow_block_align = 0;
                     }
-                    if (st->codec->codec_id == AV_CODEC_ID_AAC && ast->dshow_block_align <= 4 && ast->dshow_block_align) {
+                    if ((st->codec->codec_id == AV_CODEC_ID_AAC  ||
+                         st->codec->codec_id == AV_CODEC_ID_FLAC ||
+                         st->codec->codec_id == AV_CODEC_ID_MP2 ) && ast->dshow_block_align <= 4 && ast->dshow_block_align) {
                         av_log(s, AV_LOG_DEBUG, "overriding invalid dshow_block_align of %d\n", ast->dshow_block_align);
                         ast->dshow_block_align = 0;
                     }
@@ -1659,9 +1685,13 @@ static int guess_ni_flag(AVFormatContext *s)
 
         if (n >= 2) {
             int64_t pos = st->index_entries[0].pos;
-            avio_seek(s->pb, pos + 4, SEEK_SET);
+            unsigned tag[2];
+            avio_seek(s->pb, pos, SEEK_SET);
+            tag[0] = avio_r8(s->pb);
+            tag[1] = avio_r8(s->pb);
+            avio_rl16(s->pb);
             size = avio_rl32(s->pb);
-            if (pos + size > st->index_entries[1].pos)
+            if (get_stream_idx(tag) == i && pos + size > st->index_entries[1].pos)
                 last_start = INT64_MAX;
         }
 
