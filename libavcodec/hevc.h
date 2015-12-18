@@ -37,7 +37,7 @@
 #include "videodsp.h"
 
 // define RPI to split the CABAC/prediction/transform into separate stages
-#define RPI
+//#define RPI
 
 #ifdef RPI
 

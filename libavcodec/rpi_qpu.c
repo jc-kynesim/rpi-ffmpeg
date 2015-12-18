@@ -16,6 +16,8 @@
 #include <stddef.h>
 #include "libavutil/avassert.h"
 
+#if 0
+
 #include <pthread.h>
 #include <time.h>
 
@@ -1214,4 +1216,5 @@ void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, i
 
 
 
+#endif
 #endif
