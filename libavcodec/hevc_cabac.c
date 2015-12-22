@@ -1246,6 +1246,44 @@ static inline void update_rice(uint8_t * const stat_coeff,
 #endif
 
 
+static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
+    const int n_end,
+    const uint8_t const * ctx_map,
+    uint8_t * const flag_idx)
+{
+    int n;
+    int i = 0;
+
+    PROFILE_START();
+    for (n = n_end; n > 0; n--) {
+        if (get_cabac(c, state0 + ctx_map[n]))
+        {
+            flag_idx[i++] = n;
+        }
+    }
+    PROFILE_ACC(residual_sig);
+
+    return i;
+}
+
+
+#define H4x4(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15) {\
+     x0,  x1,  x2,  x3,\
+     x4,  x5,  x6,  x7,\
+     x8,  x9, x10, x11,\
+    x12, x13, x14, x15}
+
+#define V4x4(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15) {\
+     x0,  x4,  x8, x12,\
+     x1,  x5,  x9, x13,\
+     x2,  x6, x10, x14,\
+     x3,  x7, x11, x15}
+
+#define D4x4(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15) {\
+     x0,  x4,  x1,  x8,\
+     x5,  x2, x12,  x9,\
+     x6,  x3, x13, x10,\
+     x7, x14, x11, x15}
 
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 int log2_trafo_size, enum ScanType scan_idx,
@@ -1565,18 +1603,33 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             prev_sig += (!!significant_coeff_group_flag[x_cg][y_cg + 1] << 1);
 
         if (significant_coeff_group_flag[x_cg][y_cg] && n_end >= 0) {
-            static const uint8_t ctx_idx_map[] = {
-                0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8, // log2_trafo_size == 2
-                1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, // prev_sig == 0
-                2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, // prev_sig == 1
-                2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, // prev_sig == 2
-                2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2  // default
+            static const uint8_t ctx_idx_map_default[16] = {
+                2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2
             };
-            const uint8_t *ctx_idx_map_p;
+            static const uint8_t ctx_idx_maps[3][4][16] = {
+                {
+                    D4x4(1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 0
+                    D4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 1
+                    D4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 2
+                    D4x4(0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8)  // log2_trafo_size == 2
+                },
+                {
+                    H4x4(1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 0
+                    H4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 1
+                    H4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 2
+                    H4x4(0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8)  // log2_trafo_size == 2
+                },
+                {
+                    V4x4(1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 0
+                    V4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 1
+                    V4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 2
+                    V4x4(0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8)  // log2_trafo_size == 2
+                }
+            };
+            const uint8_t *ctx_idx_map_p = ctx_idx_map_default;
             int scf_offset = 0;
             int n;
             if (s->ps.sps->transform_skip_context_enabled_flag && trans_skip_or_bypass) {
-                ctx_idx_map_p = (uint8_t*) &ctx_idx_map[4 * 16];
                 if (c_idx == 0) {
                     scf_offset = 40;
                 } else {
@@ -1585,10 +1638,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             } else {
                 if (c_idx != 0)
                     scf_offset = 27;
+
                 if (log2_trafo_size == 2) {
-                    ctx_idx_map_p = (uint8_t*) &ctx_idx_map[0];
+                    ctx_idx_map_p = ctx_idx_maps[scan_idx][3];
                 } else {
-                    ctx_idx_map_p = (uint8_t*) &ctx_idx_map[(prev_sig + 1) << 4];
+                    ctx_idx_map_p = ctx_idx_maps[scan_idx][prev_sig];
                     if (c_idx == 0) {
                         if ((x_cg > 0 || y_cg > 0))
                             scf_offset += 3;
@@ -1605,17 +1659,19 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     }
                 }
             }
-            PROFILE_START();
-            for (n = n_end; n > 0; n--) {
-                unsigned int x_c = scan_x_off[n];
-                unsigned int y_c = scan_y_off[n];
-                if (significant_coeff_flag_decode(s, x_c, y_c, scf_offset, ctx_idx_map_p)) {
-                    significant_coeff_flag_idx[nb_significant_coeff_flag] = n;
-                    nb_significant_coeff_flag++;
+
+            {
+                int cnt = get_sig_coeff_flag_idxs(&s->HEVClc->cc,
+                    s->HEVClc->cabac_state + elem_offset[SIGNIFICANT_COEFF_FLAG] + scf_offset,
+                    n_end, ctx_idx_map_p,
+                    significant_coeff_flag_idx + nb_significant_coeff_flag);
+
+                nb_significant_coeff_flag += cnt;
+                if (cnt != 0) {
                     implicit_non_zero_coeff = 0;
                 }
             }
-            PROFILE_ACC(residual_sig);
+
             if (implicit_non_zero_coeff == 0) {
                 if (s->ps.sps->transform_skip_context_enabled_flag && trans_skip_or_bypass) {
                     if (c_idx == 0) {
