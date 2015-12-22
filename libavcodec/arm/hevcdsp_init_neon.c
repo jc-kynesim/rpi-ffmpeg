@@ -58,6 +58,15 @@ PUT_PIXELS(ff_hevc_put_pixels_w32_neon_8);
 PUT_PIXELS(ff_hevc_put_pixels_w48_neon_8);
 PUT_PIXELS(ff_hevc_put_pixels_w64_neon_8);
 #undef PUT_PIXELS
+void ff_hevc_put_epel_h_neon_8(int16_t *dst, uint8_t *src,
+                                ptrdiff_t srcstride, int height,
+                                intptr_t mx, intptr_t my, int width);
+void ff_hevc_put_epel_v_neon_8(int16_t *dst, uint8_t *src,
+                                ptrdiff_t srcstride, int height,
+                                intptr_t mx, intptr_t my, int width);
+void ff_hevc_put_epel_hv_neon_8(int16_t *dst, uint8_t *src,
+                                ptrdiff_t srcstride, int height,
+                                intptr_t mx, intptr_t my, int width);
 
 static void (*put_hevc_qpel_neon[4][4])(int16_t *dst, ptrdiff_t dststride, uint8_t *src, ptrdiff_t srcstride,
                                    int height, int width);
@@ -201,7 +210,21 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
             c->put_hevc_qpel_bi[x][1][0]      = ff_hevc_put_qpel_bi_neon_wrapper;
             c->put_hevc_qpel_bi[x][0][1]      = ff_hevc_put_qpel_bi_neon_wrapper;
             c->put_hevc_qpel_bi[x][1][1]      = ff_hevc_put_qpel_bi_neon_wrapper;
+            c->put_hevc_epel[x][1][0]         = ff_hevc_put_epel_v_neon_8;
+            c->put_hevc_epel[x][0][1]         = ff_hevc_put_epel_h_neon_8;
+            c->put_hevc_epel[x][1][1]         = ff_hevc_put_epel_hv_neon_8;
         }
+        c->put_hevc_epel[0][0][0]  = ff_hevc_put_pixels_w2_neon_8;
+        c->put_hevc_epel[1][0][0]  = ff_hevc_put_pixels_w4_neon_8;
+        c->put_hevc_epel[2][0][0]  = ff_hevc_put_pixels_w6_neon_8;
+        c->put_hevc_epel[3][0][0]  = ff_hevc_put_pixels_w8_neon_8;
+        c->put_hevc_epel[4][0][0]  = ff_hevc_put_pixels_w12_neon_8;
+        c->put_hevc_epel[5][0][0]  = ff_hevc_put_pixels_w16_neon_8;
+        c->put_hevc_epel[6][0][0]  = ff_hevc_put_pixels_w24_neon_8;
+        c->put_hevc_epel[7][0][0]  = ff_hevc_put_pixels_w32_neon_8;
+        c->put_hevc_epel[8][0][0]  = ff_hevc_put_pixels_w48_neon_8;
+        c->put_hevc_epel[9][0][0]  = ff_hevc_put_pixels_w64_neon_8;
+
         c->put_hevc_qpel[0][0][0]  = ff_hevc_put_pixels_w2_neon_8;
         c->put_hevc_qpel[1][0][0]  = ff_hevc_put_pixels_w4_neon_8;
         c->put_hevc_qpel[2][0][0]  = ff_hevc_put_pixels_w6_neon_8;
