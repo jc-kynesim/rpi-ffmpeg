@@ -54,9 +54,7 @@ static const uint8_t * const ff_h264_lps_range = ff_h264_cabac_tables + H264_LPS
 static const uint8_t * const ff_h264_mlps_state = ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET;
 static const uint8_t * const ff_h264_last_coeff_flag_offset_8x8 = ff_h264_cabac_tables + H264_LAST_COEFF_FLAG_OFFSET_8x8_OFFSET;
 
-#if ALTCABAC_VER == 1
 #include "alt1cabac_fns.h"
-#endif
 
 
 #if !defined(get_cabac_bypass) || !defined(get_cabac_terminate)

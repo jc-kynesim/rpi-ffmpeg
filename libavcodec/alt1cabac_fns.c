@@ -58,7 +58,7 @@ const uint16_t alt1cabac_cabac_transIdx[256] __attribute__((aligned(256))) =
  *
  * @param buf_size size of buf in bits
  */
-int ff_init_alt1cabac_decoder(CABACContext *c, const uint8_t *buf, int buf_size){
+int ff_init_alt1cabac_decoder(Alt1CABACContext *c, const uint8_t *buf, int buf_size){
     c->bytestream_start= buf;
     c->bytestream_end= buf + buf_size;
 

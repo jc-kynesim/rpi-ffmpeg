@@ -1,8 +1,14 @@
 #ifndef AVCODEC_ALT1CABAC_FNS_H
 #define AVCODEC_ALT1CABAC_FNS_H
 
-#if ALTCABAC_VER != 1
-#error Unexpected CABAC VAR
+#if ALTCABAC_VER == 1
+#define get_cabac_inline get_alt1cabac_inline
+#define get_cabac_bypass get_alt1cabac_bypass
+#define get_cabac_bypeek22 get_alt1cabac_bypeek22
+#define get_cabac_byflush22 get_alt1cabac_byflush22
+#define get_cabac_bypass_sign get_alt1cabac_bypass_sign
+#define get_cabac_terminate get_alt1cabac_terminate
+#define skip_bytes alt1cabac_skip_bytes
 #endif
 
 // Bypeek method
@@ -36,8 +42,7 @@ static inline uint32_t LSR32M(const uint32_t x, const unsigned int y)
 }
 #endif
 
-#define get_cabac_inline get_alt1cabac_inline
-static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t * const state){
+static av_always_inline int get_alt1cabac_inline(Alt1CABACContext * const c, uint8_t * const state){
     unsigned int s = *state;
     unsigned int range = c->codIRange;
     unsigned int offset = c->codIOffset;
@@ -76,8 +81,7 @@ static av_always_inline int get_alt1cabac_inline(CABACContext * const c, uint8_t
 
 
 
-#define get_cabac_bypass get_alt1cabac_bypass
-static inline int get_alt1cabac_bypass(CABACContext *c){
+static inline int get_alt1cabac_bypass(Alt1CABACContext *c){
     c->codIOffset = (c->codIOffset << 1) |
         ((c->bytestream_start[c->b_offset >> 3] >> (~c->b_offset & 7)) & 1);
     ++c->b_offset;
@@ -109,8 +113,7 @@ static inline char * hibin2str(uint32_t x, char * const buf, const unsigned int 
 
 #if ALT1CABAC_BYPEEK == 1
 
-#define get_cabac_bypeek22 get_alt1cabac_bypeek22
-static inline uint32_t get_alt1cabac_bypeek22(CABACContext * c, uint32_t * pX)
+static inline uint32_t get_alt1cabac_bypeek22(Alt1CABACContext * c, uint32_t * pX)
 {
     const uint32_t nb = bmem_peek4(c->bytestream_start, c->b_offset) << (c->b_offset & 7);
     uint32_t x = (c->codIOffset << 23) | ((nb >> 9) & ~1U);
@@ -132,8 +135,7 @@ static inline uint32_t get_alt1cabac_bypeek22(CABACContext * c, uint32_t * pX)
     return x;
 }
 
-#define get_cabac_byflush22 get_alt1cabac_byflush22
-static inline void get_alt1cabac_byflush22(CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
+static inline void get_alt1cabac_byflush22(Alt1CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
 {
     assert(n >= 1);
     c->b_offset += n;
@@ -141,8 +143,7 @@ static inline void get_alt1cabac_byflush22(CABACContext * c, const unsigned int 
 }
 #elif ALT1CABAC_BYPEEK == 2
 
-#define get_cabac_bypeek22 get_alt1cabac_bypeek22
-static inline uint32_t get_alt1cabac_bypeek22(CABACContext * const c, uint32_t * const pX)
+static inline uint32_t get_alt1cabac_bypeek22(Alt1CABACContext * const c, uint32_t * const pX)
 {
     const uint32_t nb = bmem_peek4(c->bytestream_start, c->b_offset) << (c->b_offset & 7);
     uint32_t x2 = (c->codIOffset << 22) | (nb >> 10);
@@ -165,8 +166,7 @@ static inline uint32_t get_alt1cabac_bypeek22(CABACContext * const c, uint32_t *
     return x;
 }
 
-#define get_cabac_byflush22 get_alt1cabac_byflush22
-static inline void get_alt1cabac_byflush22(CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
+static inline void get_alt1cabac_byflush22(Alt1CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
 {
     c->b_offset += n;
     c->codIOffset = (c->codIOffset +  ((val & (0xffffffffU >> n)) >> 10) * c->codIRange) >> (22 - n);
@@ -176,13 +176,11 @@ static inline void get_alt1cabac_byflush22(CABACContext * c, const unsigned int 
 
 
 
-#define get_cabac_bypass_sign get_alt1cabac_bypass_sign
-static av_always_inline int get_alt1cabac_bypass_sign(CABACContext *c, int val){
-    return get_cabac_bypass(c) ? val : -val;
+static av_always_inline int get_alt1cabac_bypass_sign(Alt1CABACContext *c, int val){
+    return get_alt1cabac_bypass(c) ? val : -val;
 }
 
-#define get_cabac_terminate get_alt1cabac_terminate
-static int av_unused get_alt1cabac_terminate(CABACContext *c){
+static int av_unused get_alt1cabac_terminate(Alt1CABACContext *c){
     c->codIRange -= 2;
     if (c->codIOffset >= c->codIRange) {
         return (c->b_offset + 7) >> 3;
@@ -203,15 +201,38 @@ static int av_unused get_alt1cabac_terminate(CABACContext *c){
     return 0;
 }
 
-#define skip_bytes alt1cabac_skip_bytes
-static av_unused const uint8_t* alt1cabac_skip_bytes(CABACContext *c, int n) {
+static av_unused const uint8_t* alt1cabac_skip_bytes(Alt1CABACContext *c, int n) {
     const uint8_t *ptr = c->bytestream_start + ((c->b_offset + 7) >> 3);
 
     if ((int) (c->bytestream_end - ptr) < n)
         return NULL;
-    ff_init_cabac_decoder(c, ptr + n, c->bytestream_end - ptr - n);
+    ff_init_alt1cabac_decoder(c, ptr + n, c->bytestream_end - ptr - n);
 
     return ptr;
+}
+
+
+static inline void alt1cabac_from_alt0cabac(Alt1CABACContext * const c1, const Alt0CABACContext * const c0)
+{
+    const unsigned int bits = __builtin_ctz(c0->low);
+//    printf(">>> bits=%2d, range=%#03x, offset=%06x, bs=%p\n", bits, c0->range, c0->low, c0->bytestream);
+    c1->bytestream_start = c0->bytestream - 2;
+    c1->bytestream_end = c0->bytestream_end;
+    c1->b_offset = bits;
+    c1->codIRange = c0->range;
+    c1->codIOffset = c0->low >> (1 + CABAC_BITS);
+}
+
+static inline void alt1cabac_to_alt0cabac(const Alt1CABACContext * const c1, Alt0CABACContext * const c0)
+{
+    const unsigned int bits = c1->b_offset & 7;
+    const uint32_t nb = bmem_peek4(c1->bytestream_start, c1->b_offset) << bits;
+
+    c0->range = c1->codIRange;  // might not have changed if all we do is bypass
+    c0->low = ((((uint32_t)(c1->codIOffset << (CABAC_BITS + 1)) | (nb >> (31 - CABAC_BITS))) >> bits) | 1) << bits;
+    c0->bytestream = c1->bytestream_start + (c1->b_offset >> 3) + 2;
+
+//    printf("<<< bits=%2d, range=%#03x, offset=%06x, bs=%p\n", bits, c0->range, c0->low, c0->bytestream);
 }
 
 

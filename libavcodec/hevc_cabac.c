@@ -1044,12 +1044,64 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
     return last_coeff_abs_level_remaining;
 }
 
-static av_always_inline uint32_t coeff_sign_flag_decode(HEVCContext *s, uint8_t nb)
+
+static int coeff_abs_level_remaining_decode_alt1(Alt1CABACContext * const c, int rc_rice_param)
 {
-#ifdef get_cabac_bypeek22
+    int prefix = 0;
+    int suffix = 0;
+    int last_coeff_abs_level_remaining;
+
+//    PROFILE_START();
+
     uint32_t x, y;
-    y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
-    get_cabac_byflush22(&s->HEVClc->cc, nb, y, x);
+    y = get_alt1cabac_bypeek22(c, &x);
+    prefix = lmbd1(~y);
+
+    if (prefix < 3) {
+        suffix = LSR32M(y << (prefix + 1), rc_rice_param);
+        last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
+        get_alt1cabac_byflush22(c, prefix + 1 + rc_rice_param, y, x);
+    }
+    else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
+    {
+        unsigned int prefix_minus3 = prefix - 3;
+        uint32_t y2 = y << (prefix + 1);
+
+        suffix = LSR32M(y2, prefix_minus3 + rc_rice_param);
+        last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
+                                              << rc_rice_param) + suffix;
+
+
+        get_alt1cabac_byflush22(c, prefix + 1 + prefix - 3 + rc_rice_param, y, x);
+    }
+    else {
+        int prefix_minus3 = prefix - 3;
+
+        get_alt1cabac_byflush22(c, prefix + 1, y, x);
+        y = get_alt1cabac_bypeek22(c, &x);
+
+        suffix = LSR32M(y, prefix_minus3 + rc_rice_param);
+        last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
+                                              << rc_rice_param) + suffix;
+
+        get_alt1cabac_byflush22(c, prefix_minus3 + rc_rice_param, y, x);
+    }
+
+//    PROFILE_ACC(residual_abs);
+//    printf("----\n");
+
+    return last_coeff_abs_level_remaining;
+}
+
+
+
+static av_always_inline uint32_t coeff_sign_flag_decode_alt1(Alt1CABACContext * const c, uint8_t nb)
+{
+#if 1
+//#ifdef get_cabac_bypeek22
+    uint32_t x, y;
+    y = get_alt1cabac_bypeek22(c, &x);
+    get_alt1cabac_byflush22(c, nb, y, x);
     return y & ~(0xffffffffU >> nb);
 #else
     int i;
@@ -1240,7 +1292,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
-
 
 #ifdef RPI
     if (s->enable_rpi) {
@@ -1474,6 +1525,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         uint8_t significant_coeff_flag_idx[16];
         uint8_t nb_significant_coeff_flag = 0;
 
+        PROFILE_START();
+
         x_cg = scan_x_cg[i];
         y_cg = scan_y_cg[i];
 
@@ -1552,6 +1605,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     }
                 }
             }
+            PROFILE_START();
             for (n = n_end; n > 0; n--) {
                 unsigned int x_c = scan_x_off[n];
                 unsigned int y_c = scan_y_off[n];
@@ -1561,6 +1615,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     implicit_non_zero_coeff = 0;
                 }
             }
+            PROFILE_ACC(residual_sig);
             if (implicit_non_zero_coeff == 0) {
                 if (s->ps.sps->transform_skip_context_enabled_flag && trans_skip_or_bypass) {
                     if (c_idx == 0) {
@@ -1626,7 +1681,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 // ?????? cabac_bypass_alignment_enabled_flag
                 // ?????? extended_precision_processing_flag
 
-                coeff_sign_flag = get_cabac_bypass(&s->HEVClc->cc) << 31;
+                coeff_sign_flag = get_cabac_bypass(&s->HEVClc->cc);
 
                 if (coded_val)
                 {
@@ -1671,6 +1726,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 int eq2;
                 uint32_t coeff_sign_flags;
                 uint32_t coded_vals = 0;
+                Alt1CABACContext c1;
 
                 // initialize first elem of coeff_bas_level_greater1_flag
 
@@ -1694,10 +1750,12 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 else
                     sign_hidden = (significant_coeff_flag_idx[0] - significant_coeff_flag_idx[n_end - 1] > 3);
 
+                alt1cabac_from_alt0cabac(&c1, &s->HEVClc->cc);
+
                 // ?????? cabac_bypass_alignment_enabled_flag
                 // ?????? extended_precision_processing_flag
 
-                coeff_sign_flags = coeff_sign_flag_decode(s, nb_significant_coeff_flag - sign_hidden);
+                coeff_sign_flags = coeff_sign_flag_decode_alt1(&c1, nb_significant_coeff_flag - sign_hidden);
 
                 {
                     int sum_abs = n_end + eq2;
@@ -1718,7 +1776,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                             }
 
                             {
-                                const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
+                                const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_alt1(&c1, c_rice_param);
                                 const int trans_coeff_level = *level + last_coeff_abs_level_remaining;
 
                                 if (stat_coeff != NULL)
@@ -1738,6 +1796,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                         levels[n_end - 1] = -levels[n_end - 1];
                     }
                 }
+                alt1cabac_to_alt0cabac(&c1, &s->HEVClc->cc);
 
                 PROFILE_START();
 
@@ -1766,6 +1825,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
             PROFILE_ACC(residual_core);
         }
+        PROFILE_ACC(residual_base);
     }
     
     if (lc->cu.cu_transquant_bypass_flag) {
