@@ -132,6 +132,7 @@ NEON-OBJS-$(CONFIG_LLAUDDSP)           += arm/lossless_audiodsp_neon.o
 NEON-OBJS-$(CONFIG_DCA_DECODER)        += arm/synth_filter_neon.o
 NEON-OBJS-$(CONFIG_HEVC_DECODER)       += arm/hevcdsp_init_neon.o       \
                                           arm/hevcdsp_deblock_neon.o    \
+                                          arm/hevcdsp_epel_neon.o       \
                                           arm/hevcdsp_idct_neon.o       \
                                           arm/hevcdsp_qpel_neon.o
 NEON-OBJS-$(CONFIG_RV30_DECODER)       += arm/rv34dsp_neon.o
