@@ -4461,7 +4461,7 @@ int main(int argc, char **argv)
     }
     PROFILE_PRINTF(residual_abs);
     PROFILE_PRINTF(residual_greater1);
-//    PROFILE_PRINTF(residual_n_end_1);
+    PROFILE_PRINTF(residual_scale);
     PROFILE_PRINTF(residual_sig);
     PROFILE_PRINTF(residual_core);
     PROFILE_PRINTF(residual_base);

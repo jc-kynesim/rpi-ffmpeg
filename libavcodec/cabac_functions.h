@@ -86,9 +86,13 @@ static inline void renorm_cabac_decoder_once(CABACContext *c){
 static void refill2(CABACContext *c){
     int i;
     unsigned x;
-
+#if 0
     x= c->low ^ (c->low-1);
     i= 7 - ff_h264_norm_shift[x>>(CABAC_BITS-1)];
+#else
+    i = rmbd1(c->low) - 16;
+#endif
+
 
     x= -CABAC_MASK;
 

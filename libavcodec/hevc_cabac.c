@@ -941,12 +941,15 @@ static av_always_inline int significant_coeff_group_flag_decode(HEVCContext *s, 
 
     return GET_CABAC(elem_offset[SIGNIFICANT_COEFF_GROUP_FLAG] + inc);
 }
+
+#if 0
 static av_always_inline int significant_coeff_flag_decode(HEVCContext *s, int x_c, int y_c,
                                            int offset, const uint8_t *ctx_idx_map)
 {
     int inc = ctx_idx_map[(y_c << 2) + x_c] + offset;
     return GET_CABAC(elem_offset[SIGNIFICANT_COEFF_FLAG] + inc);
 }
+#endif
 
 static av_always_inline int significant_coeff_flag_decode_0(HEVCContext *s, int c_idx, int offset)
 {
@@ -1127,7 +1130,7 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
 
     for (i = 0; i != n; ++i) {
         const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
-        const unsigned int b = get_cabac(c, state0 + idx);
+        const unsigned int b = get_cabac_inline(c, state0 + idx);
         rv = (rv << 1) | b;
         levels[i] = 1 + b;
     }
@@ -1220,6 +1223,7 @@ static inline void update_rice(uint8_t * const stat_coeff,
     __asm__ (
 	"mov   %[t2], #-1                       \n\t"
 	"movs  %[t], %[coeff], LSR %[shift]     \n\t"
+	"it    ne                               \n\t"
 	"movne %[t2], #0                        \n\t"
 	"cmn   %[t], #3                         \n\t"
 	"adc   %[stat], %[stat], %[t2]          \n\t"
@@ -1246,6 +1250,7 @@ static inline void update_rice(uint8_t * const stat_coeff,
 #endif
 
 
+// n must be > 0 on entry
 static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
     unsigned int n,
     const uint8_t const * ctx_map,
@@ -1255,7 +1260,7 @@ static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state
 
     PROFILE_START();
     do {
-        if (get_cabac(c, state0 + ctx_map[n]))
+        if (get_cabac_inline(c, state0 + ctx_map[n]))
             *p++ = n;
     } while (--n != 0);
     PROFILE_ACC(residual_sig);
@@ -1286,11 +1291,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 int log2_trafo_size, enum ScanType scan_idx,
                                 int c_idx)
 {
-#define GET_COORD(offset, n)                                    \
-    do {                                                        \
-        x_c = (x_cg << 2) + scan_x_off[n];                      \
-        y_c = (y_cg << 2) + scan_y_off[n];                      \
-    } while (0)
     HEVCLocalContext * const lc = s->HEVClc;
     int trans_skip_or_bypass = lc->cu.cu_transquant_bypass_flag;
 
@@ -1628,7 +1628,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             const uint8_t *ctx_idx_map_p;
 
             int scf_offset = 0;
-            int n;
             if (s->ps.sps->transform_skip_context_enabled_flag && trans_skip_or_bypass) {
                 ctx_idx_map_p = ctx_idx_maps[0][3];
                 if (c_idx == 0) {
@@ -1878,7 +1877,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_m, shift);
                 }
 
-                PROFILE_ACC(residual_n_end_1);
+                PROFILE_ACC(residual_scale);
             }
             PROFILE_ACC(residual_core);
         }

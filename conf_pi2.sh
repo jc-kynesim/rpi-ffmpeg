@@ -20,3 +20,5 @@ RPI_KEEPS=""
  --extra-libs="-lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm"\
  --cross-prefix=$RPI_ROOT/opt/toolchains/gcc-linaro-5.1-2015.08-x86_64_arm-linux-gnueabihf/bin/arm-linux-gnueabihf-
 
+# -Wa,-ahls
+
