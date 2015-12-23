@@ -1270,13 +1270,12 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
      __asm__ (
 		 "1:                                                     \n\t"
 		 "ldrb       %[st]         , [%[ctx_map], %[n]]          \n\t"
-		 "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
 
-//         "ldrb       %[bit]        , [%[state]]                  \n\t"
          "sub        %[r_b]        , %[mlps_tables]   , %[lps_off]    \n\t"
+		 "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
          "and        %[tmp]        , %[range]    , #0xC0         \n\t"
          "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
-         "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]  \n\t"
+         "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]    \n\t"
          "sub        %[range]      , %[range]      , %[tmp]      \n\t"
 
          "cmp        %[low]        , %[range], lsl #17           \n\t"
@@ -1296,9 +1295,13 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
 
 		 "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
          "lsls       %[tmp]        , %[low]      , #16           \n\t"
+		 "subnes     %[n]          , %[n]        , #1            \n\t"
+		 "bne        1b                                          \n\t"
 
-         "bne        2f                                          \n\t"
-         "ldrh       %[tmp]        , [%[ptr]], #2                    \n\t"
+		 "tst        %[tmp]        , %[tmp]                      \n\t"
+		 "bne        2f                                          \n\t"
+
+         "ldrh       %[tmp]        , [%[ptr]]    , #2            \n\t"
          "rev        %[tmp]        , %[tmp]                      \n\t"
          "lsr        %[tmp]        , %[tmp]      , #15           \n\t"
          "movw       %[r_b]        , #0xFFFF                     \n\t"
@@ -1309,9 +1312,9 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
          "sub        %[r_b]        , %[r_b]      , #16           \n\t"
 
          "add        %[low]        , %[low]      , %[tmp], lsl %[r_b]        \n\t"
-         "2:                                                     \n\t"
 		 "subs       %[n]          , %[n]        , #1            \n\t"
 		 "bne        1b                                          \n\t"
+         "2:                                                     \n\t"
          :    [bit]"=&r"(bit),
               [low]"+&r"(c->low),
             [range]"+&r"(c->range),
