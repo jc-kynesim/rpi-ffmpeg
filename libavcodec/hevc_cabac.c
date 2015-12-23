@@ -1251,7 +1251,7 @@ static inline void update_rice(uint8_t * const stat_coeff,
 
 
 // n must be > 0 on entry
-static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
+static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
     unsigned int n,
     const uint8_t const * ctx_map,
     uint8_t * const flag_idx)
@@ -1259,10 +1259,77 @@ static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state
     uint8_t * p = flag_idx;
 
     PROFILE_START();
+
+#if 0
     do {
         if (get_cabac_inline(c, state0 + ctx_map[n]))
             *p++ = n;
     } while (--n != 0);
+#else
+    unsigned int reg_b, tmp, st, bit;
+     __asm__ (
+		 "1:                                                     \n\t"
+		 "ldrb       %[st]         , [%[ctx_map], %[n]]          \n\t"
+		 "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
+
+//         "ldrb       %[bit]        , [%[state]]                  \n\t"
+         "sub        %[r_b]        , %[mlps_tables]   , %[lps_off]    \n\t"
+         "and        %[tmp]        , %[range]    , #0xC0         \n\t"
+         "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
+         "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]  \n\t"
+         "sub        %[range]      , %[range]      , %[tmp]      \n\t"
+
+         "cmp        %[low]        , %[range], lsl #17           \n\t"
+         "subge      %[low]        , %[low]      , %[range], lsl #17        \n\t"
+         "mvnge      %[bit]        , %[bit]                      \n\t"
+         "movge      %[range]      , %[tmp]                      \n\t"
+
+         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]            \n\t"
+		 "tst        %[bit]        , #1                          \n\t"
+		 "strneb     %[n]          , [%[idx]]    , #1            \n\t"
+
+         "clz        %[tmp]        , %[range]                    \n\t"
+         "sub        %[tmp]        , #23                         \n\t"
+
+         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
+         "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
+
+		 "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
+         "lsls       %[tmp]        , %[low]      , #16           \n\t"
+
+         "bne        2f                                          \n\t"
+         "ldrh       %[tmp]        , [%[ptr]], #2                    \n\t"
+         "rev        %[tmp]        , %[tmp]                      \n\t"
+         "lsr        %[tmp]        , %[tmp]      , #15           \n\t"
+         "movw       %[r_b]        , #0xFFFF                     \n\t"
+         "sub        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
+
+         "rbit       %[r_b]        , %[low]                      \n\t"
+         "clz        %[r_b]        , %[r_b]                      \n\t"
+         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
+
+         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b]        \n\t"
+         "2:                                                     \n\t"
+		 "subs       %[n]          , %[n]        , #1            \n\t"
+		 "bne        1b                                          \n\t"
+         :    [bit]"=&r"(bit),
+              [low]"+&r"(c->low),
+            [range]"+&r"(c->range),
+              [r_b]"=&r"(reg_b),
+              [ptr]"+&r"(c->bytestream),
+              [idx]"+&r"(p),
+                [n]"+&r"(n),
+              [tmp]"=&r"(tmp),
+               [st]"=&r"(st)
+          :  [state0]"r"(state0),
+		    [ctx_map]"r"(ctx_map),
+        [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
+               [byte]"M"(offsetof(CABACContext, bytestream)),
+            [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
+         : "memory", "cc"
+    );
+#endif
+
     PROFILE_ACC(residual_sig);
 
     return p - flag_idx;
