@@ -15,7 +15,7 @@
 //  0   no bypeek
 //  1   requires a stash
 //  2   stashless but an extra multiply
-#define ALT1CABAC_BYPEEK 2
+#define ALT1CABAC_BYPEEK 1
 
 #if ARCH_ARM
 #   include "arm/cabac.h"
@@ -139,7 +139,12 @@ static inline void get_alt1cabac_byflush22(Alt1CABACContext * c, const unsigned 
 {
     assert(n >= 1);
     c->b_offset += n;
-    c->codIOffset = (x >> (23 - n)) - (val >> (32 - n)) * c->codIRange;
+
+//    c->codIOffset = (x >> (23 - n)) - (val >> (32 - n)) * c->codIRange;
+
+    c->codIOffset = ((x << n) - (((val >> (32 - n)) * c->codIRange) << 23)) >> 23;
+
+//    printf("%04x / %08x\n", c->codIOffset, c2);
 }
 #elif ALT1CABAC_BYPEEK == 2
 
