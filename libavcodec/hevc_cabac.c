@@ -453,16 +453,23 @@ static const uint8_t diag_scan8x8_inv[8][8] = {
 
 #if ALTCABAC_VER == 0
 
+typedef struct CABACBypeekStash
+{
+    int dummy;
+} CABACBypeekStash;
+
 #define get_cabac_bypeek22 get_alt0cabac_bypeek22
-static av_noinline uint32_t get_alt0cabac_bypeek22(Alt0CABACContext * const c, uint32_t * const pX)
+static inline uint32_t get_alt0cabac_bypeek22(Alt0CABACContext *const c, CABACBypeekStash * const s)
 {
     const unsigned int bits = __builtin_ctz(c->low);
     const uint32_t m = bmem_peek4(c->bytestream, 0);
-    uint32_t x = ((c->low << (22 - CABAC_BITS)) ^ ((m ^ 0x80000000U) >> (9 + CABAC_BITS - bits))) & ~1U;
+    uint32_t x = (c->low << (22 - CABAC_BITS)) ^ ((m ^ 0x80000000U) >> (9 + CABAC_BITS - bits));
 
-    *pX = x;
-
+    c->low = x;
     c->outstanding_count = bits;
+
+    x &= ~1U;
+
     if ((c->range & 0xff) != 0) {
         x = (uint32_t)(((uint64_t)x * (uint64_t)alt1cabac_inv_range[c->range & 0xff]) >> 32);
     }
@@ -479,15 +486,17 @@ static av_noinline uint32_t get_alt0cabac_bypeek22(Alt0CABACContext * const c, u
 }
 
 #define get_cabac_byflush22 get_alt0cabac_byflush22
-static inline void get_alt0cabac_byflush22(Alt0CABACContext * c, const unsigned int n, const uint32_t val, const uint32_t x)
+static inline void get_alt0cabac_byflush22(Alt0CABACContext * c, const unsigned int n, const uint32_t val,
+    const CABACBypeekStash * const s)
 {
     unsigned int used = n + c->outstanding_count;
     unsigned int bytes_used = (used / CABAC_BITS) * (CABAC_BITS / 8);
     unsigned int bits_used = used & (CABAC_BITS == 16 ? 15 : 7);
-    uint32_t offset = ((x << n) - (((val >> (32 - n)) * c->range) << 23)) >> (22 - CABAC_BITS);
+    uint32_t offset = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->range) << 23)) >> (22 - CABAC_BITS);
 
-    if (bytes_used != 0) {
-        c->bytestream += bytes_used;
+    c->bytestream += bytes_used;
+
+    if (n > 23 - CABAC_BITS + bits_used) {
         offset |= (((c->bytestream[-2] << 8) | (c->bytestream[-1])) << (bits_used + 1)) & 0x1ffff;
     }
 
@@ -1038,16 +1047,16 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 //    PROFILE_START();
 
 #ifdef get_cabac_bypeek22
-//#if 0
     {
-        uint32_t x, y;
-        y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
+        uint32_t y;
+        CABACBypeekStash stash;
+        y = get_cabac_bypeek22(&s->HEVClc->cc, &stash);
         prefix = lmbd1(~y);
 
         if (prefix < 3) {
             suffix = LSR32M(y << (prefix + 1), rc_rice_param);
             last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
-            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y, x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y, &stash);
         }
 //        else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
         else if (prefix + 1 + prefix - 3 + rc_rice_param <= 21)
@@ -1060,19 +1069,19 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
                                                   << rc_rice_param) + suffix;
 
 
-            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + prefix - 3 + rc_rice_param, y, x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + prefix - 3 + rc_rice_param, y, &stash);
         }
         else {
             int prefix_minus3 = prefix - 3;
 
-            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1, y, x);
-            y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1, y, &stash);
+            y = get_cabac_bypeek22(&s->HEVClc->cc, &stash);
 
             suffix = LSR32M(y, prefix_minus3 + rc_rice_param);
             last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                                   << rc_rice_param) + suffix;
 
-            get_cabac_byflush22(&s->HEVClc->cc, prefix_minus3 + rc_rice_param, y, x);
+            get_cabac_byflush22(&s->HEVClc->cc, prefix_minus3 + rc_rice_param, y, &stash);
         }
     }
 #else
@@ -1166,9 +1175,10 @@ static int coeff_abs_level_remaining_decode_alt1(Alt1CABACContext * const c, int
 static av_always_inline uint32_t coeff_sign_flag_decode(CABACContext * const c, uint8_t nb)
 {
 #ifdef get_cabac_bypeek22
-    uint32_t x, y;
-    y = get_cabac_bypeek22(c, &x);
-    get_cabac_byflush22(c, nb, y, x);
+    uint32_t y;
+    CABACBypeekStash stash;
+    y = get_cabac_bypeek22(c, &stash);
+    get_cabac_byflush22(c, nb, y, &stash);
     return y & ~(0xffffffffU >> nb);
 #else
     int i;
