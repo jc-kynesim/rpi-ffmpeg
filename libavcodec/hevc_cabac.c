@@ -453,54 +453,70 @@ static const uint8_t diag_scan8x8_inv[8][8] = {
 
 #if ALTCABAC_VER == 0
 
-typedef struct CABACBypeekStash
-{
-    int dummy;
-} CABACBypeekStash;
-
-#define get_cabac_bypeek22 get_alt0cabac_bypeek22
-static inline uint32_t get_alt0cabac_bypeek22(Alt0CABACContext *const c, CABACBypeekStash * const s)
+static inline void get_cabac_by22_start(CABACContext * const c)
 {
     const unsigned int bits = __builtin_ctz(c->low);
     const uint32_t m = bmem_peek4(c->bytestream, 0);
     uint32_t x = (c->low << (22 - CABAC_BITS)) ^ ((m ^ 0x80000000U) >> (9 + CABAC_BITS - bits));
+    const uint32_t inv = alt1cabac_inv_range[c->range & 0xff];
 
+    c->by22.bits = bits;
+    c->by22.range = c->range;
+    c->range = inv;
     c->low = x;
-    c->outstanding_count = bits;
+}
+
+static inline uint32_t get_cabac_by22_peek(CABACContext *const c)
+{
+    uint32_t x = c->low;
+    const uint32_t inv = c->range;
 
     x &= ~1U;
 
-    if ((c->range & 0xff) != 0) {
-        x = (uint32_t)(((uint64_t)x * (uint64_t)alt1cabac_inv_range[c->range & 0xff]) >> 32);
-    }
+    if (inv != 0)
+        x = (uint32_t)(((uint64_t)x * (uint64_t)inv) >> 32);
+
     x <<= 1;
 
 #if CABAC_TRACE_STATE
     {
         char buf[33];
-        printf("--- %s; bits=%d\n", hibin2str(x, buf, 22), bits);
+        printf("--- %s; bits=%d, low=%08x\n", hibin2str(x, buf, 22), c->by22.bits, c->low);
     }
 #endif
 
     return x;
 }
 
-#define get_cabac_byflush22 get_alt0cabac_byflush22
-static inline void get_alt0cabac_byflush22(Alt0CABACContext * c, const unsigned int n, const uint32_t val,
-    const CABACBypeekStash * const s)
+// n != 0
+static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, const uint32_t val)
 {
-    unsigned int used = n + c->outstanding_count;
+    uint32_t m, low;
+    c->by22.bits += n;
+    m = (bmem_peek4(c->bytestream - (CABAC_BITS / 8), c->by22.bits) << (c->by22.bits & 7)) >> 9;
+    low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->by22.range) << 23));
+
+#if CABAC_TRACE_STATE
+    printf("by22_flush: n=%d, low=%08x, m=%08x\n", n, low, m);
+#endif
+
+    c->low = low | m;
+}
+
+
+static inline void get_cabac_by22_finish(Alt0CABACContext * c)
+{
+    unsigned int used = c->by22.bits;
     unsigned int bytes_used = (used / CABAC_BITS) * (CABAC_BITS / 8);
     unsigned int bits_used = used & (CABAC_BITS == 16 ? 15 : 7);
-    uint32_t offset = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->range) << 23)) >> (22 - CABAC_BITS);
 
     c->bytestream += bytes_used;
+    c->low = ((c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
+    c->range = c->by22.range;
 
-    if (n > 23 - CABAC_BITS + bits_used) {
-        offset |= (((c->bytestream[-2] << 8) | (c->bytestream[-1])) << (bits_used + 1)) & 0x1ffff;
-    }
-
-    c->low = ((offset >> bits_used) | 1) << bits_used;
+#if CABAC_TRACE_STATE
+    printf("by22_finish: bytes=%d, low=%06x, range=%d\n", bytes_used, c->low, c->range);
+#endif
 
 //    printf("low: %06x / %06x / %06x; n=%d, bits=%d; by_used %d, bi_used %d\n", c->low, offset, ((offset >> bits_used) | 1) << bits_used,
 //        n, c->outstanding_count, bytes_used, bits_used);
@@ -1046,17 +1062,20 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 
 //    PROFILE_START();
 
-#ifdef get_cabac_bypeek22
+//#ifdef get_cabac_bypeek22
+#if 1
     {
         uint32_t y;
-        CABACBypeekStash stash;
-        y = get_cabac_bypeek22(&s->HEVClc->cc, &stash);
+
+        get_cabac_by22_start(&s->HEVClc->cc);
+
+        y = get_cabac_by22_peek(&s->HEVClc->cc);
         prefix = lmbd1(~y);
 
         if (prefix < 3) {
             suffix = LSR32M(y << (prefix + 1), rc_rice_param);
             last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
-            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y, &stash);
+            get_cabac_by22_flush(&s->HEVClc->cc, prefix + 1 + rc_rice_param, y);
         }
 //        else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
         else if (prefix + 1 + prefix - 3 + rc_rice_param <= 21)
@@ -1069,20 +1088,22 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
                                                   << rc_rice_param) + suffix;
 
 
-            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1 + prefix - 3 + rc_rice_param, y, &stash);
+            get_cabac_by22_flush(&s->HEVClc->cc, prefix + 1 + prefix - 3 + rc_rice_param, y);
         }
         else {
             int prefix_minus3 = prefix - 3;
 
-            get_cabac_byflush22(&s->HEVClc->cc, prefix + 1, y, &stash);
-            y = get_cabac_bypeek22(&s->HEVClc->cc, &stash);
+            get_cabac_by22_flush(&s->HEVClc->cc, prefix + 1, y);
+            y = get_cabac_by22_peek(&s->HEVClc->cc);
 
             suffix = LSR32M(y, prefix_minus3 + rc_rice_param);
             last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                                   << rc_rice_param) + suffix;
 
-            get_cabac_byflush22(&s->HEVClc->cc, prefix_minus3 + rc_rice_param, y, &stash);
+            get_cabac_by22_flush(&s->HEVClc->cc, prefix_minus3 + rc_rice_param, y);
         }
+
+        get_cabac_by22_finish(&s->HEVClc->cc);
     }
 #else
     {
@@ -1122,7 +1143,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
     return last_coeff_abs_level_remaining;
 }
 
-
+#if 0
 static int coeff_abs_level_remaining_decode_alt1(Alt1CABACContext * const c, int rc_rice_param)
 {
     int prefix = 0;
@@ -1170,15 +1191,17 @@ static int coeff_abs_level_remaining_decode_alt1(Alt1CABACContext * const c, int
 
     return last_coeff_abs_level_remaining;
 }
-
+#endif
 
 static av_always_inline uint32_t coeff_sign_flag_decode(CABACContext * const c, uint8_t nb)
 {
-#ifdef get_cabac_bypeek22
+//#ifdef get_cabac_bypeek22
+#if 1
     uint32_t y;
-    CABACBypeekStash stash;
-    y = get_cabac_bypeek22(c, &stash);
-    get_cabac_byflush22(c, nb, y, &stash);
+    get_cabac_by22_start(c);
+    y = get_cabac_by22_peek(c);
+    get_cabac_by22_flush(c, nb, y);
+    get_cabac_by22_finish(c);
     return y & ~(0xffffffffU >> nb);
 #else
     int i;
