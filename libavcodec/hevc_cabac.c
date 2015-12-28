@@ -33,6 +33,8 @@
 
 #define CABAC_MAX_BIN 31
 
+#define USE_BY22 1
+
 /**
  * number of bin by SyntaxElement.
  */
@@ -511,7 +513,7 @@ static inline void get_cabac_by22_finish(Alt0CABACContext * c)
     unsigned int bits_used = used & (CABAC_BITS == 16 ? 15 : 7);
 
     c->bytestream += bytes_used;
-    c->low = ((c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
+    c->low = (((uint32_t)c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
     c->range = c->by22.range;
 
 #if CABAC_TRACE_STATE
@@ -1054,6 +1056,66 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
     return GET_CABAC(elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] + inc);
 }
 
+
+static int coeff_abs_level_remaining_decode_by22(Alt0CABACContext * const c, int rc_rice_param)
+{
+    int prefix = 0;
+    int suffix = 0;
+    int last_coeff_abs_level_remaining;
+
+//    PROFILE_START();
+
+    {
+        uint32_t y;
+
+        get_cabac_by22_start(c);
+
+        y = get_cabac_by22_peek(c);
+        prefix = lmbd1(~y);
+
+        if (prefix < 3) {
+            suffix = LSR32M(y << (prefix + 1), rc_rice_param);
+            last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
+            get_cabac_by22_flush(c, prefix + 1 + rc_rice_param, y);
+        }
+//        else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
+        else if (prefix + 1 + prefix - 3 + rc_rice_param <= 21)
+        {
+            unsigned int prefix_minus3 = prefix - 3;
+            uint32_t y2 = y << (prefix + 1);
+
+            suffix = LSR32M(y2, prefix_minus3 + rc_rice_param);
+            last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
+                                                  << rc_rice_param) + suffix;
+
+
+            get_cabac_by22_flush(c, prefix + 1 + prefix - 3 + rc_rice_param, y);
+        }
+        else {
+            int prefix_minus3 = prefix - 3;
+
+            get_cabac_by22_flush(c, prefix + 1, y);
+            y = get_cabac_by22_peek(c);
+
+            suffix = LSR32M(y, prefix_minus3 + rc_rice_param);
+            last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
+                                                  << rc_rice_param) + suffix;
+
+            get_cabac_by22_flush(c, prefix_minus3 + rc_rice_param, y);
+        }
+
+        get_cabac_by22_finish(c);
+    }
+
+//    PROFILE_ACC(residual_abs);
+#if CABAC_TRACE_STATE
+    printf("**** \n");
+#endif
+
+    return last_coeff_abs_level_remaining;
+}
+
+
 static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 {
     int prefix = 0;
@@ -1063,7 +1125,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
 //    PROFILE_START();
 
 //#ifdef get_cabac_bypeek22
-#if 1
+#if USE_BY22
     {
         uint32_t y;
 
@@ -1109,8 +1171,10 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
     {
         int i;
 
-        uint32_t x, y;
-        y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
+//        uint32_t x, y;
+//        y = get_cabac_bypeek22(&s->HEVClc->cc, &x);
+        Alt0CABACContext context_stash = s->HEVClc->cc;
+
 
         while (prefix < CABAC_MAX_BIN && get_cabac_bypass(&s->HEVClc->cc))
             prefix++;
@@ -1119,7 +1183,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
             return 0;
         }
 
-        get_cabac_byflush22(&s->HEVClc->cc, prefix + 1, y, x);
+//        get_cabac_byflush22(&s->HEVClc->cc, prefix + 1, y, x);
 
         if (prefix < 3) {
             for (i = 0; i < rc_rice_param; i++)
@@ -1131,6 +1195,23 @@ static int coeff_abs_level_remaining_decode(HEVCContext *s, int rc_rice_param)
                 suffix = (suffix << 1) | get_cabac_bypass(&s->HEVClc->cc);
             last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                                   << rc_rice_param) + suffix;
+        }
+
+        {
+            int by_level = coeff_abs_level_remaining_decode_by22(&context_stash, rc_rice_param);
+            if (by_level != last_coeff_abs_level_remaining) {
+                printf("**** level %d != %d\n", by_level, last_coeff_abs_level_remaining);
+            }
+            if (context_stash.bytestream != s->HEVClc->cc.bytestream) {
+                printf("**** bytestream %p != %p\n", context_stash.bytestream,s->HEVClc->cc.bytestream);
+            }
+            if (context_stash.range != s->HEVClc->cc.range) {
+                printf("**** range %03x != %03x\n", context_stash.range,s->HEVClc->cc.range);
+            }
+            if (context_stash.low != s->HEVClc->cc.low) {
+                printf("**** low %03x != %06x\n", context_stash.low,s->HEVClc->cc.low);
+            }
+
         }
     }
 #endif
@@ -1196,7 +1277,7 @@ static int coeff_abs_level_remaining_decode_alt1(Alt1CABACContext * const c, int
 static av_always_inline uint32_t coeff_sign_flag_decode(CABACContext * const c, uint8_t nb)
 {
 //#ifdef get_cabac_bypeek22
-#if 1
+#if USE_BY22
     uint32_t y;
     get_cabac_by22_start(c);
     y = get_cabac_by22_peek(c);
@@ -1217,7 +1298,7 @@ static av_always_inline uint32_t coeff_sign_flag_decode(CABACContext * const c, 
 #if 0
 static av_always_inline uint32_t coeff_sign_flag_decode_alt1(Alt1CABACContext * const c, uint8_t nb)
 {
-#if 1
+#if 0
 //#ifdef get_cabac_bypeek22
     uint32_t x, y;
     y = get_alt1cabac_bypeek22(c, &x);
@@ -1377,7 +1458,7 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
 
     PROFILE_START();
 
-#if 0
+#if !ARCH_ARM
     do {
         if (get_cabac_inline(c, state0 + ctx_map[n]))
             *p++ = n;
@@ -2086,7 +2167,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             s->hevcdsp.transform_rdpcm(coeffs, log2_trafo_size, mode);
         }
     } else {
-        if (trans_skip_or_bypass) {
+        if (trans_skip_or_bypass) { // Must be trans_skip as we've already dealt with bypass
             int rot = s->ps.sps->transform_skip_rotation_enabled_flag &&
                       log2_trafo_size == 2 &&
                       lc->cu.pred_mode == MODE_INTRA;

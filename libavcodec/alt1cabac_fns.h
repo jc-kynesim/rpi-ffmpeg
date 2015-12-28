@@ -35,6 +35,11 @@ static inline unsigned int lmbd1(const uint32_t x)
     return x == 0 ? 32 : __builtin_clz(x);
 }
 
+static inline unsigned int rmbd1(const uint32_t x)
+{
+    return x == 0 ? 32 : __builtin_ctz(x);
+}
+
 // >> 32 is not safe on x86
 static inline uint32_t LSR32M(const uint32_t x, const unsigned int y)
 {
