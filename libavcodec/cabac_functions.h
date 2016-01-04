@@ -38,14 +38,13 @@
 
 #define CABAC_TRACE_STATE 0
 
-// No asm or support for alcabac in aarch64 or x86 yet
-#if ARCH_AARCH64 && ALTCABAC_VER == 0
+#if ARCH_AARCH64
 #   include "aarch64/cabac.h"
 #endif
 #if ARCH_ARM
 #   include "arm/cabac.h"
 #endif
-#if ARCH_X86 && ALTCABAC_VER == 0
+#if ARCH_X86
 #   include "x86/cabac.h"
 #endif
 
@@ -53,8 +52,6 @@ static const uint8_t * const ff_h264_norm_shift = ff_h264_cabac_tables + H264_NO
 static const uint8_t * const ff_h264_lps_range = ff_h264_cabac_tables + H264_LPS_RANGE_OFFSET;
 static const uint8_t * const ff_h264_mlps_state = ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET;
 static const uint8_t * const ff_h264_last_coeff_flag_offset_8x8 = ff_h264_cabac_tables + H264_LAST_COEFF_FLAG_OFFSET_8x8_OFFSET;
-
-#include "alt1cabac_fns.h"
 
 
 #if !defined(get_cabac_bypass) || !defined(get_cabac_terminate)
