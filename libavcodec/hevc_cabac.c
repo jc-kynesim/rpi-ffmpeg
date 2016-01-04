@@ -523,8 +523,6 @@ static const uint8_t diag_scan8x8_inv[8][8] = {
 
 
 
-#if ALTCABAC_VER == 0
-
 #if !USE_BY22
 // If no by22 then _by22 functions will revert to normal and so _peek/_flush
 // will no longer be called but the setup calls will still exist and we want
@@ -602,7 +600,6 @@ static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, 
     c->low = low | m;
 }
 
-#endif
 #endif
 
 

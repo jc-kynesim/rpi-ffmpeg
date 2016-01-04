@@ -78,7 +78,6 @@ static inline unsigned int rmbd1(const unsigned int x)
     return r;
 }
 
-#if ALTCABAC_VER == 0
 #define get_cabac_inline get_cabac_inline_arm
 static av_always_inline int get_cabac_inline_arm(CABACContext *c,
                                                  uint8_t *const state)
@@ -228,7 +227,6 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
 
     return bit & 1;
 }
-#endif
 #endif /* HAVE_ARMV6T2_INLINE */
 
 #endif /* AVCODEC_ARM_CABAC_H */

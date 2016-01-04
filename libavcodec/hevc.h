@@ -29,16 +29,6 @@
 #define RPI
 #endif
 
-#ifdef ALTCABAC_VER
-#error Unexpected redefinition of ALTCABAC_VER
-#endif
-
-#ifdef RPI
-#define ALTCABAC_VER 0
-#else
-#define ALTCABAC_VER 0
-#endif
-
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"
 
