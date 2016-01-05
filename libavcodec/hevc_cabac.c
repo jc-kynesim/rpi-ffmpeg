@@ -1497,7 +1497,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
     int last_significant_coeff_x, last_significant_coeff_y;
     int last_scan_pos;
-    int n_end;
     int num_coeff = 0;
     int prev_subset_coded = 0;
 
@@ -1529,6 +1528,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
+
+    PROFILE_START();
 
 #ifdef RPI
     if (s->enable_rpi) {
@@ -1753,26 +1754,31 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         int implicit_non_zero_coeff = 0;
         int prev_sig = 0;
         int offset = i << 4;
+        int n_end;
 
         uint8_t significant_coeff_flag_idx[16];
         uint8_t nb_significant_coeff_flag = 0;
 
-        PROFILE_START();
-
         x_cg = scan_x_cg[i];
         y_cg = scan_y_cg[i];
 
-        if ((i < num_last_subset) && (i > 0)) {
-            int ctx_cg = 0;
-            if (x_cg < (1 << (log2_trafo_size - 2)) - 1)
-                ctx_cg += significant_coeff_group_flag[x_cg + 1][y_cg];
-            if (y_cg < (1 << (log2_trafo_size - 2)) - 1)
-                ctx_cg += significant_coeff_group_flag[x_cg][y_cg + 1];
+        // Right + Down * 2 (Up/Down 0 if outside unit)
+        prev_sig = (((x_cg + 1) >> (log2_trafo_size - 2)) != 0 ? 0 :
+                    significant_coeff_group_flag[x_cg + 1][y_cg]) +
+            ((((y_cg + 1) >> (log2_trafo_size - 2)) != 0 ? 0 :
+                    significant_coeff_group_flag[x_cg][y_cg + 1]) << 1);
 
-            significant_coeff_group_flag[x_cg][y_cg] =
-                significant_coeff_group_flag_decode(s, c_idx, ctx_cg);
+        if ((i < num_last_subset) && (i > 0)) {
+            if (!significant_coeff_group_flag_decode(s, c_idx, prev_sig))
+                continue;
+
+//            significant_coeff_group_flag[x_cg][y_cg] = 1;
+//                significant_coeff_group_flag_decode(s, c_idx, prev_sig);
             implicit_non_zero_coeff = 1;
-        } else {
+
+        }
+#if 0
+         else {
 // Was:
 //          significant_coeff_group_flag[x_cg][y_cg] =
 //            ((x_cg == x_cg_last_sig && y_cg == y_cg_last_sig) ||
@@ -1780,7 +1786,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 // but this is implied by the condition that got us here
             significant_coeff_group_flag[x_cg][y_cg] = 1;
         }
+#endif
 
+        significant_coeff_group_flag[x_cg][y_cg] = 1;
         last_scan_pos = num_coeff - offset - 1;
 
         if (i == num_last_subset) {
@@ -1791,12 +1799,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             n_end = 15;
         }
 
-        if (x_cg < ((1 << log2_trafo_size) - 1) >> 2)
-            prev_sig = !!significant_coeff_group_flag[x_cg + 1][y_cg];
-        if (y_cg < ((1 << log2_trafo_size) - 1) >> 2)
-            prev_sig += (!!significant_coeff_group_flag[x_cg][y_cg + 1] << 1);
-
-        if (significant_coeff_group_flag[x_cg][y_cg] && n_end >= 0) {
+        if (n_end >= 0) {
             static const uint8_t ctx_idx_maps_ts2[3][16] = {
                 D4x4(0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8), // log2_trafo_size == 2
                 H4x4(0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8), // log2_trafo_size == 2
@@ -2090,8 +2093,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
             PROFILE_ACC(residual_core);
         }
-        PROFILE_ACC(residual_base);
     }
+
+    PROFILE_ACC(residual_base);
     
     if (lc->cu.cu_transquant_bypass_flag) {
         if (explicit_rdpcm_flag || (s->ps.sps->implicit_rdpcm_enabled_flag &&
