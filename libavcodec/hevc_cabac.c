@@ -1488,6 +1488,15 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
      x6,  x3, x13, x10,\
      x7, x14, x11, x15}
 
+
+#if 0
+static inline int next_subset(HEVCContext * const s, int i,
+    const uin8_t * const scan_x_cg, const uin8_t * const scan_y_cg)
+{
+}
+#endif
+
+
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 int log2_trafo_size, enum ScanType scan_idx,
                                 int c_idx)
@@ -1496,7 +1505,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int trans_skip_or_bypass = lc->cu.cu_transquant_bypass_flag;
 
     int last_significant_coeff_x, last_significant_coeff_y;
-    int last_scan_pos;
     int num_coeff = 0;
     int prev_subset_coded = 0;
 
@@ -1516,7 +1524,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int use_vpu = s->enable_rpi && !lc->cu.cu_transquant_bypass_flag /* && !transform_skip_flag*/ && !lc->tu.cross_pf && log2_trafo_size>=4;
 #endif
     int16_t *coeffs = (int16_t*)(c_idx ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
-    uint8_t significant_coeff_group_flag[8][8] = {{0}};
+    uint8_t significant_coeff_group_flag[9] = {0};
     int explicit_rdpcm_flag = 0;
     int explicit_rdpcm_dir_flag;
 
@@ -1715,21 +1723,28 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         int last_y_c = last_significant_coeff_y & 3;
 
         num_coeff = diag_scan4x4_inv[last_y_c][last_x_c];
-        if (trafo_size == 4) {
+
+        switch (log2_trafo_size) {
+        case 2:
             scan_x_cg = scan_1x1;
             scan_y_cg = scan_1x1;
-        } else if (trafo_size == 8) {
+            break;
+        case 3:
             num_coeff += diag_scan2x2_inv[y_cg_last_sig][x_cg_last_sig] << 4;
             scan_x_cg = diag_scan2x2_x;
             scan_y_cg = diag_scan2x2_y;
-        } else if (trafo_size == 16) {
+            break;
+        case 4:
             num_coeff += diag_scan4x4_inv[y_cg_last_sig][x_cg_last_sig] << 4;
             scan_x_cg = ff_hevc_diag_scan4x4_x;
             scan_y_cg = ff_hevc_diag_scan4x4_y;
-        } else { // trafo_size == 32
+            break;
+        case 5:
+        default:
             num_coeff += diag_scan8x8_inv[y_cg_last_sig][x_cg_last_sig] << 4;
             scan_x_cg = ff_hevc_diag_scan8x8_x;
             scan_y_cg = ff_hevc_diag_scan8x8_y;
+            break;
         }
         break;
     }
@@ -1752,8 +1767,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     for (i = num_last_subset; i >= 0; i--) {
         int x_cg, y_cg;
         int implicit_non_zero_coeff = 0;
-        int prev_sig = 0;
-        int offset = i << 4;
+        int prev_sig;
         int n_end;
 
         uint8_t significant_coeff_flag_idx[16];
@@ -1763,10 +1777,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         y_cg = scan_y_cg[i];
 
         // Right + Down * 2 (Up/Down 0 if outside unit)
-        prev_sig = (((x_cg + 1) >> (log2_trafo_size - 2)) != 0 ? 0 :
-                    significant_coeff_group_flag[x_cg + 1][y_cg]) +
-            ((((y_cg + 1) >> (log2_trafo_size - 2)) != 0 ? 0 :
-                    significant_coeff_group_flag[x_cg][y_cg + 1]) << 1);
+        prev_sig = ((significant_coeff_group_flag[y_cg] >> (x_cg + 1)) & 1) +
+            (((significant_coeff_group_flag[y_cg + 1] >> x_cg) & 1) << 1);
 
         if ((i < num_last_subset) && (i > 0)) {
             if (!significant_coeff_group_flag_decode(s, c_idx, prev_sig))
@@ -1788,10 +1800,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         }
 #endif
 
-        significant_coeff_group_flag[x_cg][y_cg] = 1;
-        last_scan_pos = num_coeff - offset - 1;
+        significant_coeff_group_flag[y_cg] |= (1 << x_cg);
 
         if (i == num_last_subset) {
+            // First time through
+            int last_scan_pos = num_coeff - (i << 4) - 1;
             n_end = last_scan_pos - 1;
             significant_coeff_flag_idx[0] = last_scan_pos;
             nb_significant_coeff_flag = 1;
