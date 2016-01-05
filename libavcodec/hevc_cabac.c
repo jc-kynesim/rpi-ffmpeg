@@ -34,8 +34,8 @@
 #define CABAC_MAX_BIN 31
 
 #define USE_BY22 1
-#define USE_N_END_1 1
-
+#define USE_N_END_1 0
+#define USE_DOT 0  // For removal!
 
 #if USE_BY22
 #define I(x) (uint32_t)((0x10000000000ULL / (uint64_t)(x)) + 1ULL)
@@ -519,6 +519,42 @@ static const uint8_t diag_scan8x8_inv[8][8] = {
     { 15, 22, 30, 38, 45, 51, 56, 60, },
     { 21, 29, 37, 44, 50, 55, 59, 62, },
     { 28, 36, 43, 49, 54, 58, 61, 63, },
+};
+
+
+#if USE_DOT
+typedef int32_t xy_off_t;
+#define XY(x,y) (((x) << 16) | (y))
+#else
+
+typedef struct
+{
+    uint8_t x;
+    uint8_t y;
+} xy_off_t;
+
+#define XY(x,y) {x,y}
+#endif
+
+static const xy_off_t off_diag_scan4x4_xy[16] = {
+    XY(0,0), XY(0,1), XY(1,0), XY(0,2),
+    XY(1,1), XY(2,0), XY(0,3), XY(1,2),
+    XY(2,1), XY(3,0), XY(1,3), XY(2,2),
+    XY(3,1), XY(2,3), XY(3,2), XY(3,3)
+};
+
+static const xy_off_t off_horiz_scan4x4_xy[16] = {
+    XY(0,0), XY(1,0), XY(2,0), XY(3,0),
+    XY(0,1), XY(1,1), XY(2,1), XY(3,1),
+    XY(0,2), XY(1,2), XY(2,2), XY(3,2),
+    XY(0,3), XY(1,3), XY(2,3), XY(3,3)
+};
+
+static const xy_off_t off_vert_scan4x4_xy[16] = {
+    XY(0,0), XY(0,1), XY(0,2), XY(0,3),
+    XY(1,0), XY(1,1), XY(1,2), XY(1,3),
+    XY(2,0), XY(2,1), XY(2,2), XY(2,3),
+    XY(3,0), XY(3,1), XY(3,2), XY(3,3),
 };
 
 
@@ -1466,6 +1502,52 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
 }
 
 
+static inline int dot2(const int32_t x, const int32_t y)
+{
+#if !ARCH_ARM
+    return (int16_t)x * (int16_t)y + (x >> 16) * (y >> 16);
+#else
+    int rv;
+    __asm__ (
+	"smuad %[rv], %[x], %[y]  \n\t"
+    : [rv]"=&r"(rv)
+    : [x]"r"(x),
+	  [y]"r"(y)
+    :
+    );
+    return rv;
+#endif
+}
+
+#if USE_DOT
+static inline void scale_trans_dot(int16_t * const coeffs, unsigned int i,
+        const int * levels, const uint8_t * const idxs,
+        const int xy_cg, const xy_off_t * const xy_off, const unsigned int traffo,
+        const uint32_t sign_flags, const uint8_t * const scale_matrix,
+        const int scale, const unsigned int shift)
+{
+    static const int k_coeffs[6] = {XY(1,1), XY(1,2), XY(1, 4), XY(1, 8), XY(1, 16), XY(1, 32)};
+    static const int k_poss[6] = {XY(1,1), XY(1,2), XY(1, 4), XY(1, 8), XY(1, 8), XY(1, 8)};
+    static const int k_shrs[6] = {0, 0, 0, 0, 1, 2};
+    static const int k_mask = XY(0xff, 0xff);
+
+    const int k_coeff = k_coeffs[traffo];
+    const int k_pos = k_poss[traffo];
+    const int k_shr = k_shrs[traffo];
+
+    do {
+        const unsigned int xy = xy_off[idxs[i]] + xy_cg;
+        const unsigned int t_offset = dot2(xy, k_coeff);
+        const unsigned int pos = dot2((xy >> k_shr) & k_mask, k_pos);
+        const int k = (int32_t)(sign_flags << i) >> 31;
+        const int trans_coeff_level = (levels[i] ^ k) - k;
+
+        coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_matrix[pos], shift);
+    } while (i-- != 0);
+}
+#endif
+
+
 #define H4x4(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15) {\
      x0,  x1,  x2,  x3,\
      x4,  x5,  x6,  x7,\
@@ -1500,7 +1582,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int num_last_subset;
     int x_cg_last_sig, y_cg_last_sig;
 
-    const uint8_t *scan_x_cg, *scan_y_cg, *scan_x_off, *scan_y_off;
+    const uint8_t *scan_x_cg, *scan_y_cg;
+    const xy_off_t * scan_xy_off;
 
     ptrdiff_t stride = s->frame->linesize[c_idx];
     int hshift = s->ps.sps->hshift[c_idx];
@@ -1708,8 +1791,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         int last_x_c = last_significant_coeff_x & 3;
         int last_y_c = last_significant_coeff_y & 3;
 
-        scan_x_off = ff_hevc_diag_scan4x4_x;
-        scan_y_off = ff_hevc_diag_scan4x4_y;
+        scan_xy_off = off_diag_scan4x4_xy;
         num_coeff = diag_scan4x4_inv[last_y_c][last_x_c];
         if (trafo_size == 4) {
             scan_x_cg = scan_1x1;
@@ -1732,15 +1814,13 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     case SCAN_HORIZ:
         scan_x_cg = horiz_scan2x2_x;
         scan_y_cg = horiz_scan2x2_y;
-        scan_x_off = horiz_scan4x4_x;
-        scan_y_off = horiz_scan4x4_y;
+        scan_xy_off = off_horiz_scan4x4_xy;
         num_coeff = horiz_scan8x8_inv[last_significant_coeff_y][last_significant_coeff_x];
         break;
     default: //SCAN_VERT
         scan_x_cg = horiz_scan2x2_y;
         scan_y_cg = horiz_scan2x2_x;
-        scan_x_off = horiz_scan4x4_y;
-        scan_y_off = horiz_scan4x4_x;
+        scan_xy_off = off_vert_scan4x4_xy;
         num_coeff = horiz_scan8x8_inv[last_significant_coeff_x][last_significant_coeff_y];
         break;
     }
@@ -1748,7 +1828,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     num_last_subset = (num_coeff - 1) >> 4;
 
     for (i = num_last_subset; i >= 0; i--) {
-        int m;
         int x_cg, y_cg;
         int implicit_non_zero_coeff = 0;
         int prev_sig = 0;
@@ -1957,8 +2036,13 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                 {
                     uint8_t scale_m = dc_scale;
-                    unsigned int x_c = (x_cg << 2) + scan_x_off[significant_coeff_flag_idx[0]];
-                    unsigned int y_c = (y_cg << 2) + scan_y_off[significant_coeff_flag_idx[0]];
+#if USE_DOT
+                    unsigned int x_c = (x_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]] >> 16;
+                    unsigned int y_c = (y_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]] & 0xffff;
+#else
+                    unsigned int x_c = (x_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]].x;
+                    unsigned int y_c = (y_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]].y;
+#endif
                     unsigned int t_offset = (y_c << log2_trafo_size) + x_c;
 
                     if (coeff_sign_flag)
@@ -2053,30 +2137,47 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 }
                 get_cabac_by22_finish(&s->HEVClc->cc);
 
-                PROFILE_START();
 
-                for (m = 0; m < n_end; m++) {
-                    uint8_t scale_m = dc_scale;
-                    unsigned int x_c = (x_cg << 2) + scan_x_off[significant_coeff_flag_idx[m]];
-                    unsigned int y_c = (y_cg << 2) + scan_y_off[significant_coeff_flag_idx[m]];
-                    unsigned int t_offset = (y_c << log2_trafo_size) + x_c;
-                    int trans_coeff_level = levels[m];
+                {
+                    int m = n_end - 1;
 
-                    if ((coeff_sign_flags & 0x80000000) != 0)
-                        trans_coeff_level = -trans_coeff_level;
-                    coeff_sign_flags <<= 1;
-
-                    if (t_offset != 0)
+                    if (x_cg == 0 && y_cg == 0 && significant_coeff_flag_idx[m] == 0)
                     {
-                        int n_shr = log2_trafo_size  - 3;
-                        unsigned int pos = ((y_c >> n_shr) << 3) + (x_c >> n_shr);
-                        scale_m = scale_matrix[n_shr >= 0 ? pos : t_offset];
+                        int trans_coeff_level = levels[m];
+                        if (((coeff_sign_flags << m) & 0x80000000) != 0)
+                            trans_coeff_level = -trans_coeff_level;
+                        coeffs[0] = trans_scale_sat(trans_coeff_level, scale, dc_scale, shift);
+                        --m;
                     }
 
-                    coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_m, shift);
+                    PROFILE_START();
+#if !USE_N_END_1
+                    // If N_END_! then m was at least 1 initially
+                    if (m >= 0)
+#endif
+                    {
+#if USE_DOT
+                        scale_trans_dot(coeffs, m, levels, significant_coeff_flag_idx, XY(x_cg, y_cg) << 2,
+                            scan_xy_off, log2_trafo_size, coeff_sign_flags, scale_matrix, scale, shift);
+#else
+                        do {
+                            const unsigned int x_c = (x_cg << 2) + scan_xy_off[significant_coeff_flag_idx[m]].x;
+                            const unsigned int y_c = (y_cg << 2) + scan_xy_off[significant_coeff_flag_idx[m]].y;
+                            const unsigned int t_offset = (y_c << log2_trafo_size) + x_c;
+                            const int k = (int32_t)(coeff_sign_flags << m) >> 31;
+                            const int trans_coeff_level = (levels[m] ^ k) - k;
+                            const int n_shr = log2_trafo_size  - 3;
+                            const unsigned int pos = ((y_c >> n_shr) << 3) + (x_c >> n_shr);
+                            const unsigned int scale_m = scale_matrix[n_shr >= 0 ? pos : t_offset];
+
+                            coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_m, shift);
+                        } while (--m >= 0);
+#endif
+                    }
+
+                    PROFILE_ACC(residual_scale);
                 }
 
-                PROFILE_ACC(residual_scale);
             }
             PROFILE_ACC(residual_core);
         }
