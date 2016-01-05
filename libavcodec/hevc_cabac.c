@@ -1313,17 +1313,12 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
 static inline int trans_scale_sat(const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
 {
     int rv;
+    int t = ((level * (int)(scale * scale_m)) >> shift) + 1;
+
     __asm__ (
-	"mul %[rv], %[scale], %[level]  \n\t"
-	"mul %[rv], %[rv], %[scale_m]   \n\t"
-	"asr %[rv], %[rv], %[shift]     \n\t"
-	"add %[rv], %[rv], #1           \n\t"
-	"ssat %[rv], #16, %[rv], ASR #1 \n\t"
+	"ssat %[rv], #16, %[t], ASR #1 \n\t"
     : [rv]"=&r"(rv)
-    : [level]"r"(level),
-	  [scale]"r"(scale),
-      [scale_m]"r"(scale_m),
-      [shift]"r"(shift)
+    : [t]"r"(t)
     :
     );
     return rv;
@@ -1473,52 +1468,6 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
 
     return p - flag_idx;
 }
-
-
-static inline int dot2(const int32_t x, const int32_t y)
-{
-#if !ARCH_ARM
-    return (int16_t)x * (int16_t)y + (x >> 16) * (y >> 16);
-#else
-    int rv;
-    __asm__ (
-	"smuad %[rv], %[x], %[y]  \n\t"
-    : [rv]"=&r"(rv)
-    : [x]"r"(x),
-	  [y]"r"(y)
-    :
-    );
-    return rv;
-#endif
-}
-
-#if USE_DOT
-static inline void scale_trans_dot(int16_t * const coeffs, unsigned int i,
-        const int * levels, const uint8_t * const idxs,
-        const int xy_cg, const xy_off_t * const xy_off, const unsigned int traffo,
-        const uint32_t sign_flags, const uint8_t * const scale_matrix,
-        const int scale, const unsigned int shift)
-{
-    static const int k_coeffs[6] = {XY(1,1), XY(1,2), XY(1, 4), XY(1, 8), XY(1, 16), XY(1, 32)};
-    static const int k_poss[6] = {XY(1,1), XY(1,2), XY(1, 4), XY(1, 8), XY(1, 8), XY(1, 8)};
-    static const int k_shrs[6] = {0, 0, 0, 0, 1, 2};
-    static const int k_mask = XY(0xff, 0xff);
-
-    const int k_coeff = k_coeffs[traffo];
-    const int k_pos = k_poss[traffo];
-    const int k_shr = k_shrs[traffo];
-
-    do {
-        const unsigned int xy = xy_off[idxs[i]] + xy_cg;
-        const unsigned int t_offset = dot2(xy, k_coeff);
-        const unsigned int pos = dot2((xy >> k_shr) & k_mask, k_pos);
-        const int k = (int32_t)(sign_flags << i) >> 31;
-        const int trans_coeff_level = (levels[i] ^ k) - k;
-
-        coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_matrix[pos], shift);
-    } while (i-- != 0);
-}
-#endif
 
 
 #define H4x4(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15) {\
