@@ -1489,12 +1489,29 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
      x7, x14, x11, x15}
 
 
-#if 0
-static inline int next_subset(HEVCContext * const s, int i,
-    const uin8_t * const scan_x_cg, const uin8_t * const scan_y_cg)
+static inline int next_subset(HEVCContext * const s, int i, const int c_idx,
+    uint8_t * const significant_coeff_group_flag,
+    const uint8_t * const scan_x_cg, const uint8_t * const scan_y_cg,
+    int * const pPrev_sig)
 {
+    while (--i >= 0) {
+        unsigned int x_cg = scan_x_cg[i];
+        unsigned int y_cg = scan_y_cg[i];
+
+        unsigned int prev_sig = ((significant_coeff_group_flag[y_cg] >> (x_cg + 1)) & 1) +
+            (((significant_coeff_group_flag[y_cg + 1] >> x_cg) & 1) << 1);
+
+        if (i == 0 ||
+            significant_coeff_group_flag_decode(s, c_idx, prev_sig))
+        {
+            significant_coeff_group_flag[y_cg] |= (1 << x_cg);
+            *pPrev_sig = prev_sig;
+            break;
+        }
+    }
+
+    return i;
 }
-#endif
 
 
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
@@ -1524,7 +1541,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int use_vpu = s->enable_rpi && !lc->cu.cu_transquant_bypass_flag /* && !transform_skip_flag*/ && !lc->tu.cross_pf && log2_trafo_size>=4;
 #endif
     int16_t *coeffs = (int16_t*)(c_idx ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
-    uint8_t significant_coeff_group_flag[9] = {0};
+    uint8_t significant_coeff_group_flag[9] = {0};  // Allow 1 final byte that is always zero
     int explicit_rdpcm_flag = 0;
     int explicit_rdpcm_dir_flag;
 
@@ -1536,6 +1553,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
+
+    int prev_sig = 0;
 
     PROFILE_START();
 
@@ -1762,12 +1781,14 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     num_coeff++;
     num_last_subset = (num_coeff - 1) >> 4;
 
+    significant_coeff_group_flag[y_cg_last_sig] = 1 << x_cg_last_sig; // 1st subset always significant
+
     scan_xy_off = off_xys[scan_idx][log2_trafo_size - 2];
 
-    for (i = num_last_subset; i >= 0; i--) {
+    i = num_last_subset;
+    do {
         int x_cg, y_cg;
         int implicit_non_zero_coeff = 0;
-        int prev_sig;
         int n_end;
 
         uint8_t significant_coeff_flag_idx[16];
@@ -1775,32 +1796,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
         x_cg = scan_x_cg[i];
         y_cg = scan_y_cg[i];
-
-        // Right + Down * 2 (Up/Down 0 if outside unit)
-        prev_sig = ((significant_coeff_group_flag[y_cg] >> (x_cg + 1)) & 1) +
-            (((significant_coeff_group_flag[y_cg + 1] >> x_cg) & 1) << 1);
-
-        if ((i < num_last_subset) && (i > 0)) {
-            if (!significant_coeff_group_flag_decode(s, c_idx, prev_sig))
-                continue;
-
-//            significant_coeff_group_flag[x_cg][y_cg] = 1;
-//                significant_coeff_group_flag_decode(s, c_idx, prev_sig);
-            implicit_non_zero_coeff = 1;
-
-        }
-#if 0
-         else {
-// Was:
-//          significant_coeff_group_flag[x_cg][y_cg] =
-//            ((x_cg == x_cg_last_sig && y_cg == y_cg_last_sig) ||
-//             (x_cg == 0 && y_cg == 0));
-// but this is implied by the condition that got us here
-            significant_coeff_group_flag[x_cg][y_cg] = 1;
-        }
-#endif
-
-        significant_coeff_group_flag[y_cg] |= (1 << x_cg);
 
         if (i == num_last_subset) {
             // First time through
@@ -1810,6 +1805,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             nb_significant_coeff_flag = 1;
         } else {
             n_end = 15;
+            implicit_non_zero_coeff = (i != 0);
         }
 
         if (n_end >= 0) {
@@ -2106,7 +2102,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
             PROFILE_ACC(residual_core);
         }
-    }
+    } while ((i = next_subset(s, i, c_idx, significant_coeff_group_flag, scan_x_cg, scan_y_cg, &prev_sig)) >= 0);
 
     PROFILE_ACC(residual_base);
     
