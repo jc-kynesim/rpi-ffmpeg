@@ -77,6 +77,11 @@ static inline uint32_t LSR32M(const uint32_t x, const unsigned int y)
 {
     return y == 0 ? 0 : x >> (32 - y);
 }
+#else
+
+// >> 32 is safe on arm
+#define LSR32M(x, y) ((x) >> (32 - (y)))
+
 #endif
 
 

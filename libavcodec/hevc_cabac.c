@@ -34,7 +34,7 @@
 #define CABAC_MAX_BIN 31
 
 #define USE_BY22 1
-#define USE_N_END_1 0
+#define USE_N_END_1 1
 #define USE_DOT 0  // For removal!
 
 #if USE_BY22
@@ -1954,6 +1954,14 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             const unsigned int ctx_set = ((i > 0 && c_idx == 0) ? 2 : 0) +
                 (i != num_last_subset && prev_subset_coded);
 
+            unsigned int xy_off_cg = (x_cg + (y_cg << log2_trafo_size)) << 2;
+            int16_t * const blk_coeffs = coeffs + xy_off_cg;
+            // This calculation is 'wrong' for log2_traffo_size == 2
+            // but that doesn't mattor as in this case x_cg & y_cg
+            // are always 0
+            const unsigned int xy_scale_cg = ((x_cg + (y_cg << 3)) << (5 - log2_trafo_size));
+            const uint8_t * const blk_scale = scale_matrix + xy_scale_cg;
+
             PROFILE_START();
 
 #if USE_N_END_1
@@ -2007,27 +2015,15 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 }
 
                 {
-                    uint8_t scale_m = dc_scale;
-#if USE_DOT
-                    unsigned int x_c = (x_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]] >> 16;
-                    unsigned int y_c = (y_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]] & 0xffff;
-#else
-                    unsigned int x_c = (x_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]].x;
-                    unsigned int y_c = (y_cg << 2) + scan_xy_off[significant_coeff_flag_idx[0]].y;
-#endif
-                    unsigned int t_offset = (y_c << log2_trafo_size) + x_c;
+                    const xy_off_t * const xy_off = scan_xy_off + significant_coeff_flag_idx[0];
+                    const int k = (int32_t)(coeff_sign_flag << 31) >> 31;
+                    const unsigned int scale_m = blk_scale[xy_off->scale];
 
-                    if (coeff_sign_flag)
-                        trans_coeff_level = -trans_coeff_level;
-
-                    if (t_offset != 0)
-                    {
-                        int n_shr = log2_trafo_size  - 3;
-                        unsigned int pos = ((y_c >> n_shr) << 3) + (x_c >> n_shr);
-                        scale_m = scale_matrix[n_shr >= 0 ? pos : t_offset];
-                    }
-
-                    coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_m, shift);
+                    blk_coeffs[xy_off->coeff] = trans_scale_sat(
+                        (trans_coeff_level ^ k) - k,  // Apply sign
+                        scale,
+                        xy_off->coeff == 0 && xy_off_cg == 0 ? dc_scale : scale_m,
+                        shift);
                 }
             }
             else
@@ -2113,46 +2109,30 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 {
                     int m = n_end - 1;
 
-                    if (x_cg == 0 && y_cg == 0 && significant_coeff_flag_idx[m] == 0)
+                    PROFILE_START();
+
+                    if (xy_off_cg == 0 && significant_coeff_flag_idx[m] == 0)
                     {
-                        int trans_coeff_level = levels[m];
-                        if (((coeff_sign_flags << m) & 0x80000000) != 0)
-                            trans_coeff_level = -trans_coeff_level;
-                        coeffs[0] = trans_scale_sat(trans_coeff_level, scale, dc_scale, shift);
+                        const int k = (int32_t)(coeff_sign_flags << m) >> 31;
+                        blk_coeffs[0] = trans_scale_sat((levels[m] ^ k) - k, scale, dc_scale, shift);
                         --m;
                     }
 
-                    PROFILE_START();
 #if !USE_N_END_1
                     // If N_END_! then m was at least 1 initially
                     if (m >= 0)
 #endif
                     {
-#if USE_DOT
-                        scale_trans_dot(coeffs, m, levels, significant_coeff_flag_idx, XY(x_cg, y_cg) << 2,
-                            scan_xy_off, log2_trafo_size, coeff_sign_flags, scale_matrix, scale, shift);
-#else
-//                        printf("--- scan_idx=%d, trafo=%d, cg=(%d,%d)\n", scan_idx, log2_trafo_size, x_cg, y_cg);
-                        unsigned int xy_off_cg = (x_cg + (y_cg << log2_trafo_size)) << 2;
-                        int16_t * const blk_coeffs = coeffs + xy_off_cg;
-                        // This calculation is 'wrong' for log2_traffo_size == 2
-                        // but that doesn't mattor as in this case x_cg & y_cg
-                        // are always 0
-                        const unsigned int xy_scale_cg = ((x_cg + (y_cg << 3)) << (5 - log2_trafo_size));
-                        const uint8_t * const blk_scale = scale_matrix + xy_scale_cg;
-
                         do {
-                            const unsigned int t_offset = scan_xy_off[significant_coeff_flag_idx[m]].coeff;
+                            const xy_off_t * const xy_off = scan_xy_off + significant_coeff_flag_idx[m];
                             const int k = (int32_t)(coeff_sign_flags << m) >> 31;
-                            const int trans_coeff_level = (levels[m] ^ k) - k;
-                            const unsigned int pos = scan_xy_off[significant_coeff_flag_idx[m]].scale;
-                            const unsigned int scale_m = blk_scale[pos];
 
-//                            printf("m=%d, idx=%d, toff=%d, soff=%d\n", m, significant_coeff_flag_idx[m], t_offset, pos);
-
-                            blk_coeffs[t_offset] = trans_scale_sat(trans_coeff_level, scale, scale_m, shift);
+                            blk_coeffs[xy_off->coeff] = trans_scale_sat(
+                                (levels[m] ^ k) - k,
+                                scale,
+                                blk_scale[xy_off->scale],
+                                shift);
                         } while (--m >= 0);
-#endif
                     }
 
                     PROFILE_ACC(residual_scale);
