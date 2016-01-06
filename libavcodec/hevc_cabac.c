@@ -1265,12 +1265,94 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
 
     PROFILE_START();
 
+    // Really this is i != n but the simple unconditional loop is cheaper
+    for (i = 0; i != 8; ++i)
+        levels[i] = 1;
+
+#if 0
     for (i = 0; i != n; ++i) {
         const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
         const unsigned int b = get_cabac(c, state0 + idx);
         rv = (rv << 1) | b;
-        levels[i] = 1;
     }
+#else
+{
+    unsigned int reg_b, st, tmp, bit;
+     __asm__ (
+		 "mov        %[i]          , #0                          \n\t"
+		 "mov        %[rv]         , #0                          \n\t"
+		 "1:                                                     \n\t"
+         "add        %[i]          , %[i]        , #1            \n\t"
+		 "cmp        %[rv]         , #0                          \n\t"
+		 "usateq     %[st]         , #2          , %[i]          \n\t"
+		 "movne      %[st]         , #0                          \n\t"
+
+		 "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
+         "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
+         "and        %[tmp]        , %[range]    , #0xC0         \n\t"
+         "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
+         "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]    \n\t"
+         "sub        %[range]      , %[range]    , %[tmp]        \n\t"
+
+         "cmp        %[low]        , %[range], lsl #17           \n\t"
+         "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
+         "mvnge      %[bit]        , %[bit]                      \n\t"
+         "movge      %[range]      , %[tmp]                      \n\t"
+
+         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
+		 "and        %[bit]        , %[bit]      , #1            \n\t"
+		 "orr        %[rv]         , %[bit]      , %[rv], lsl #1 \n\t"
+
+         "clz        %[tmp]        , %[range]                    \n\t"
+         "sub        %[tmp]        , #23                         \n\t"
+
+         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
+         "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
+
+		 "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
+// There is a small speed gain from combining both conditions, using a single
+// branch and then working out what that meant later
+         "lsls       %[tmp]        , %[low]      , #16           \n\t"
+		 "cmpne      %[n]          , %[i]                        \n\t"
+		 "bne        1b                                          \n\t"
+
+// If reload is not required then we must have run out of flags to decode
+		 "tst        %[tmp]        , %[tmp]                      \n\t"
+		 "bne        2f                                          \n\t"
+
+// Do reload
+         "ldrh       %[tmp]        , [%[bptr]]   , #2            \n\t"
+         "movw       %[r_b]        , #0xFFFF                     \n\t"
+         "rev        %[tmp]        , %[tmp]                      \n\t"
+         "rsb        %[tmp]        , %[r_b]      , %[tmp], lsr #15 \n\t"
+
+         "rbit       %[r_b]        , %[low]                      \n\t"
+         "clz        %[r_b]        , %[r_b]                      \n\t"
+         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
+
+         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
+
+		 "cmp        %[n]          , %[i]                        \n\t"
+		 "bne        1b                                          \n\t"
+         "2:                                                     \n\t"
+         :    [bit]"=&r"(bit),
+              [low]"+&r"(c->low),
+            [range]"+&r"(c->range),
+              [r_b]"=&r"(reg_b),
+             [bptr]"+&r"(c->bytestream),
+                [i]"=&r"(i),
+              [tmp]"=&r"(tmp),
+			   [st]"=&r"(st),
+               [rv]"=&r"(rv)
+          :  [state0]"r"(state0),
+		          [n]"r"(n),
+        [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
+               [byte]"M"(offsetof(CABACContext, bytestream)),
+            [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
+         : "memory", "cc"
+    );
+}
+#endif
 
     *pprev_subset_coded = 0;
     *psum = n;
@@ -1998,7 +2080,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             else
 #endif
             {
-                int sign_hidden = 0;
+                int sign_hidden;
                 int levels[16]; // Should be able to get away with int16_t but it fails some conf
                 uint32_t coeff_sign_flags;
                 uint32_t coded_vals = 0;
@@ -2008,9 +2090,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     &prev_subset_coded, &sum_abs,
                     s->HEVClc->cabac_state + idx0_gt1, s->HEVClc->cabac_state + idx_gt2);
 
-                if (may_hide_sign &&
-                    significant_coeff_flag_idx[0] - significant_coeff_flag_idx[nb_significant_coeff_flag - 1] > 3)
-                    sign_hidden = 1;
+                sign_hidden = may_hide_sign;
+                if (significant_coeff_flag_idx[0] - significant_coeff_flag_idx[nb_significant_coeff_flag - 1] <= 3)
+                    sign_hidden = 0;
 
                 get_cabac_by22_start(&s->HEVClc->cc);
 
@@ -2019,45 +2101,44 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                 coeff_sign_flags = coeff_sign_flag_decode_by22(&s->HEVClc->cc, nb_significant_coeff_flag - sign_hidden);
 
+                if (coded_vals != 0)
                 {
-                    if (coded_vals != 0)
-                    {
-                        const int rice_adaptation_enabled = s->ps.sps->persistent_rice_adaptation_enabled_flag;
-                        uint8_t * stat_coeff = !rice_adaptation_enabled ? NULL :
-                            lc->stat_coeff + trans_skip_or_bypass + 2 - ((c_idx_nz) << 1);
-                        int c_rice_param = !rice_adaptation_enabled ? 0 : *stat_coeff >> 2;
-                        int * level = levels - 1;
+                    const int rice_adaptation_enabled = s->ps.sps->persistent_rice_adaptation_enabled_flag;
+                    uint8_t * stat_coeff = !rice_adaptation_enabled ? NULL :
+                        lc->stat_coeff + trans_skip_or_bypass + 2 - ((c_idx_nz) << 1);
+                    int c_rice_param = !rice_adaptation_enabled ? 0 : *stat_coeff >> 2;
+                    int * level = levels - 1;
 
-                        do {
-                            {
-                                unsigned int z = __builtin_clz(coded_vals) + 1;
-                                level += z;
-                                coded_vals <<= z;
-                            }
+                    do {
+                        {
+                            unsigned int z = __builtin_clz(coded_vals) + 1;
+                            level += z;
+                            coded_vals <<= z;
+                        }
 
-                            {
-                                const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_by22(&s->HEVClc->cc, c_rice_param);
-                                const int trans_coeff_level = *level + last_coeff_abs_level_remaining + 1;
+                        {
+                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_by22(&s->HEVClc->cc, c_rice_param);
+                            const int trans_coeff_level = *level + last_coeff_abs_level_remaining + 1;
 
-                                sum_abs += last_coeff_abs_level_remaining + 1;
-                                *level = trans_coeff_level;
+                            sum_abs += last_coeff_abs_level_remaining + 1;
+                            *level = trans_coeff_level;
 
-                                if (stat_coeff != NULL)
-                                    update_rice(stat_coeff, last_coeff_abs_level_remaining, c_rice_param);
-                                stat_coeff = NULL;
+                            if (stat_coeff != NULL)
+                                update_rice(stat_coeff, last_coeff_abs_level_remaining, c_rice_param);
+                            stat_coeff = NULL;
 
-                                if (trans_coeff_level > (3 << c_rice_param) &&
-                                    (c_rice_param < 4 || rice_adaptation_enabled))
-                                    ++c_rice_param;
-                            }
-                        } while (coded_vals != 0);
-                    }
-
-                    // sign_hidden = 0 or 1 so we can combine the tests
-                    if ((sign_hidden & sum_abs) != 0) {
-                        levels[nb_significant_coeff_flag - 1] = -levels[nb_significant_coeff_flag - 1];
-                    }
+                            if (trans_coeff_level > (3 << c_rice_param) &&
+                                (c_rice_param < 4 || rice_adaptation_enabled))
+                                ++c_rice_param;
+                        }
+                    } while (coded_vals != 0);
                 }
+
+                // sign_hidden = 0 or 1 so we can combine the tests
+                if ((sign_hidden & sum_abs) != 0) {
+                    levels[nb_significant_coeff_flag - 1] = -levels[nb_significant_coeff_flag - 1];
+                }
+
                 get_cabac_by22_finish(&s->HEVClc->cc);
 
 
