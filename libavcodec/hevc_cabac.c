@@ -1570,6 +1570,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int prev_sig = 0;
     const int c_idx_nz = (c_idx != 0);
 
+    int may_hide_sign;
+
     PROFILE_START();
 
 #ifdef RPI
@@ -1619,11 +1621,18 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         };
         int qp_y = lc->qp_y;
 
+        may_hide_sign = s->ps.pps->sign_data_hiding_flag;
+
         if (s->ps.pps->transform_skip_enabled_flag &&
             log2_trafo_size <= s->ps.pps->log2_max_transform_skip_block_size) {
             int transform_skip_flag = hevc_transform_skip_flag_decode(s, c_idx_nz);
             if (transform_skip_flag) {
                 trans_skip_or_bypass = 1;
+                if (lc->cu.pred_mode ==  MODE_INTRA  &&
+                    s->ps.sps->implicit_rdpcm_enabled_flag &&
+                    (pred_mode_intra == 10 || pred_mode_intra  ==  26)) {
+                    may_hide_sign = 0;
+                }
             }
         }
 
@@ -1717,12 +1726,15 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         shift        = 0;
         scale        = 2;  // We will shift right to kill this
         dc_scale     = 1;
+
+        may_hide_sign = 0;
     }
 
     if (lc->cu.pred_mode == MODE_INTER && s->ps.sps->explicit_rdpcm_enabled_flag &&
         trans_skip_or_bypass) {
         explicit_rdpcm_flag = explicit_rdpcm_flag_decode(s, c_idx_nz);
         if (explicit_rdpcm_flag) {
+            may_hide_sign = 0;
             explicit_rdpcm_dir_flag = explicit_rdpcm_dir_flag_decode(s, c_idx_nz);
         }
     }
@@ -1911,18 +1923,23 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
 
         if (n_end) {
-            const unsigned int ctx_set = ((i != 0 && !c_idx_nz) ? 2 : 0) +
-                (i != num_last_subset && prev_subset_coded);
+            const unsigned int gt1_idx_delta = (c_idx_nz << 2) |
+                ((i != 0 && !c_idx_nz) ? 2 : 0) |
+                prev_subset_coded;
+            const unsigned int idx0_gt1 = elem_offset[COEFF_ABS_LEVEL_GREATER1_FLAG] +
+                (gt1_idx_delta << 2);
+            const unsigned int idx_gt2 = elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] +
+                gt1_idx_delta;
 
             const unsigned int x_cg = scan_x_cg[i];
             const unsigned int y_cg = scan_y_cg[i];
-            const unsigned int xy_off_cg = (x_cg + (y_cg << log2_trafo_size)) << 2;
-            int16_t * const blk_coeffs = coeffs + xy_off_cg;
+            int16_t * const blk_coeffs = coeffs +
+                ((x_cg + (y_cg << log2_trafo_size)) << 2);
             // This calculation is 'wrong' for log2_traffo_size == 2
             // but that doesn't mattor as in this case x_cg & y_cg
             // are always 0 so result is correct (0) anyway
-            const unsigned int xy_scale_cg = ((x_cg + (y_cg << 3)) << (5 - log2_trafo_size));
-            const uint8_t * const blk_scale = scale_matrix + xy_scale_cg;
+            const uint8_t * const blk_scale = scale_matrix +
+                (((x_cg + (y_cg << 3)) << (5 - log2_trafo_size)));
 
             PROFILE_START();
 
@@ -1937,20 +1954,12 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 int coded_val = 0;
 
                 // initialize first elem of coeff_bas_level_greater1_flag
+                prev_subset_coded = 0;
 
-                {
-                    const unsigned int idx_delta = ctx_set + (c_idx_nz << 2);
-                    const unsigned int idx0 = elem_offset[COEFF_ABS_LEVEL_GREATER1_FLAG] +
-                        (idx_delta << 2);
-                    const unsigned int idx_gt2 = elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] +
-                        idx_delta;
-
-                    prev_subset_coded = 0;
-                    if (get_cabac(&s->HEVClc->cc, s->HEVClc->cabac_state + idx0 + 1)) {
-                        trans_coeff_level = 2;
-                        prev_subset_coded = 1;
-                        coded_val = get_cabac(&s->HEVClc->cc, s->HEVClc->cabac_state + idx_gt2);
-                    }
+                if (get_cabac(&s->HEVClc->cc, s->HEVClc->cabac_state + idx0_gt1 + 1)) {
+                    trans_coeff_level = 2;
+                    prev_subset_coded = 1;
+                    coded_val = get_cabac(&s->HEVClc->cc, s->HEVClc->cabac_state + idx_gt2);
                 }
 
                 // ?????? cabac_bypass_alignment_enabled_flag
@@ -1984,47 +1993,33 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     blk_coeffs[xy_off->coeff] = trans_scale_sat(
                         (trans_coeff_level ^ k) - k,  // Apply sign
                         scale,
-                        xy_off->coeff == 0 && xy_off_cg == 0 ? dc_scale : scale_m,
+                        i == 0 && xy_off->coeff == 0 ? dc_scale : scale_m,
                         shift);
                 }
             }
             else
 #endif
             {
-                int sign_hidden;
+                int sign_hidden = 0;
                 int levels[16]; // Should be able to get away with int16_t but it fails some conf
                 int eq2;
                 uint32_t coeff_sign_flags;
                 uint32_t coded_vals = 0;
 
-                // initialize first elem of coeff_bas_level_greater1_flag
+                coded_vals = get_greaterx_bits(&s->HEVClc->cc, n_end, levels,
+                    &prev_subset_coded, &eq2,
+                    s->HEVClc->cabac_state + idx0_gt1, s->HEVClc->cabac_state + idx_gt2);
 
-                {
-                    const unsigned int idx_delta = ctx_set + (c_idx_nz << 2);
-                    const unsigned int idx0 = elem_offset[COEFF_ABS_LEVEL_GREATER1_FLAG] +
-                        (idx_delta << 2);
-                    const unsigned int idx_gt2 = elem_offset[COEFF_ABS_LEVEL_GREATER2_FLAG] +
-                        idx_delta;
-                    coded_vals = get_greaterx_bits(&s->HEVClc->cc, n_end, levels,
-                        &prev_subset_coded, &eq2,
-                        s->HEVClc->cabac_state + idx0, s->HEVClc->cabac_state + idx_gt2);
-                }
-
-                if (!s->ps.pps->sign_data_hiding_flag || lc->cu.cu_transquant_bypass_flag ||
-                    (lc->cu.pred_mode ==  MODE_INTRA  &&
-                     s->ps.sps->implicit_rdpcm_enabled_flag  && trans_skip_or_bypass &&
-                     (pred_mode_intra == 10 || pred_mode_intra  ==  26 )) ||
-                     explicit_rdpcm_flag)
-                    sign_hidden = 0;
-                else
-                    sign_hidden = (significant_coeff_flag_idx[0] - significant_coeff_flag_idx[n_end - 1] > 3);
+                if (may_hide_sign &&
+                    significant_coeff_flag_idx[0] - significant_coeff_flag_idx[n_end - 1] > 3)
+                    sign_hidden = 1;
 
                 get_cabac_by22_start(&s->HEVClc->cc);
 
                 // ?????? cabac_bypass_alignment_enabled_flag
                 // ?????? extended_precision_processing_flag
 
-                coeff_sign_flags = coeff_sign_flag_decode_by22(&s->HEVClc->cc, nb_significant_coeff_flag - sign_hidden);
+                coeff_sign_flags = coeff_sign_flag_decode_by22(&s->HEVClc->cc, n_end - sign_hidden);
 
                 {
                     int sum_abs = n_end + eq2;
@@ -2033,7 +2028,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     {
                         const int rice_adaptation_enabled = s->ps.sps->persistent_rice_adaptation_enabled_flag;
                         uint8_t * stat_coeff = !rice_adaptation_enabled ? NULL :
-                            lc->stat_coeff + (!c_idx_nz ? 2 : 0) + trans_skip_or_bypass;
+                            lc->stat_coeff + trans_skip_or_bypass + 2 - ((c_idx_nz) << 1);
                         int c_rice_param = !rice_adaptation_enabled ? 0 : *stat_coeff >> 2;
                         int * level = levels - 1;
 
@@ -2073,7 +2068,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                     PROFILE_START();
 
-                    if (xy_off_cg == 0 && significant_coeff_flag_idx[m] == 0)
+                    if (i == 0 && significant_coeff_flag_idx[m] == 0)
                     {
                         const int k = (int32_t)(coeff_sign_flags << m) >> 31;
                         blk_coeffs[0] = trans_scale_sat((levels[m] ^ k) - k, scale, dc_scale, shift);
