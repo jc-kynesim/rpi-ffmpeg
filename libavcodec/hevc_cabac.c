@@ -1252,14 +1252,16 @@ static av_always_inline uint32_t coeff_sign_flag_decode(CABACContext * const c, 
 }
 #endif
 
-
+// N.B. levels returned are the values assuming coeff_abs_level_remaining
+// is uncoded, so 1 must be added if it is coded.  sum_abs also reflects
+// this version of events.
 static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_end, int * const levels,
-    int * const pprev_subset_coded, int * const peq2,
+    int * const pprev_subset_coded, int * const psum,
     uint8_t * const state0, uint8_t * const state_gt2)
 {
     unsigned int rv = 0;
     unsigned int i;
-    const unsigned int n = n_end > 8 ? 8 : n_end;
+    const unsigned int n = FFMIN(n_end, 8);
 
     PROFILE_START();
 
@@ -1267,24 +1269,23 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
         const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
         const unsigned int b = get_cabac(c, state0 + idx);
         rv = (rv << 1) | b;
-        levels[i] = 1 + b;
+        levels[i] = 1;
     }
 
     *pprev_subset_coded = 0;
-    *peq2 = 0;
+    *psum = n;
 
     rv <<= (32 - n);
     if (rv != 0)
     {
         *pprev_subset_coded = 1;
+        *psum = n + 1;
         i = __builtin_clz(rv);
-        levels[i] = 3;
+        levels[i] = 2;
         if (get_cabac(c, state_gt2) == 0)
         {
             // Unset first coded bit
             rv &= ~(0x80000000U >> i);
-            levels[i] = 2;
-            *peq2 = 1;
         }
     }
 
@@ -1292,7 +1293,7 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
         const unsigned int g8 = n_end - 8;
         rv |= ((1 << g8) - 1) << (24 - g8);
         for (i = 0; i != g8; ++i) {
-            levels[i + 8] = 1;
+            levels[i + 8] = 0;
         }
     }
 
@@ -1605,7 +1606,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
     // Derive QP for dequant
     if (!lc->cu.cu_transquant_bypass_flag) {
-        static const int qp_c[] = { 29, 30, 31, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37 };
+        static const uint8_t qp_c[] = { 29, 30, 31, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37 };
         static const uint8_t rem6[51 + 4 * 6 + 1] = {
             0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2,
             3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5,
@@ -1630,7 +1631,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 trans_skip_or_bypass = 1;
                 if (lc->cu.pred_mode ==  MODE_INTRA  &&
                     s->ps.sps->implicit_rdpcm_enabled_flag &&
-                    (pred_mode_intra == 10 || pred_mode_intra  ==  26)) {
+                    (pred_mode_intra == 10 || pred_mode_intra == 26)) {
                     may_hide_sign = 0;
                 }
             }
@@ -1817,7 +1818,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         int n_end;
 
         uint8_t significant_coeff_flag_idx[16];
-        uint8_t nb_significant_coeff_flag = 0;
+        unsigned int nb_significant_coeff_flag = 0;
 
         if (i == num_last_subset) {
             // First time through
@@ -1919,10 +1920,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
         }
 
-        n_end = nb_significant_coeff_flag;
-
-
-        if (n_end) {
+        if (nb_significant_coeff_flag != 0) {
             const unsigned int gt1_idx_delta = (c_idx_nz << 2) |
                 ((i != 0 && !c_idx_nz) ? 2 : 0) |
                 prev_subset_coded;
@@ -1944,7 +1942,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             PROFILE_START();
 
 #if USE_N_END_1
-            if (n_end == 1) {
+            if (nb_significant_coeff_flag == 1) {
                 // There is a small gain to be had from special casing the single
                 // transform coefficient case.  The reduction in complexity
                 // makes up for the code duplicatioon.
@@ -2002,16 +2000,16 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             {
                 int sign_hidden = 0;
                 int levels[16]; // Should be able to get away with int16_t but it fails some conf
-                int eq2;
                 uint32_t coeff_sign_flags;
                 uint32_t coded_vals = 0;
+                unsigned int sum_abs;
 
-                coded_vals = get_greaterx_bits(&s->HEVClc->cc, n_end, levels,
-                    &prev_subset_coded, &eq2,
+                coded_vals = get_greaterx_bits(&s->HEVClc->cc, nb_significant_coeff_flag, levels,
+                    &prev_subset_coded, &sum_abs,
                     s->HEVClc->cabac_state + idx0_gt1, s->HEVClc->cabac_state + idx_gt2);
 
                 if (may_hide_sign &&
-                    significant_coeff_flag_idx[0] - significant_coeff_flag_idx[n_end - 1] > 3)
+                    significant_coeff_flag_idx[0] - significant_coeff_flag_idx[nb_significant_coeff_flag - 1] > 3)
                     sign_hidden = 1;
 
                 get_cabac_by22_start(&s->HEVClc->cc);
@@ -2019,11 +2017,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 // ?????? cabac_bypass_alignment_enabled_flag
                 // ?????? extended_precision_processing_flag
 
-                coeff_sign_flags = coeff_sign_flag_decode_by22(&s->HEVClc->cc, n_end - sign_hidden);
+                coeff_sign_flags = coeff_sign_flag_decode_by22(&s->HEVClc->cc, nb_significant_coeff_flag - sign_hidden);
 
                 {
-                    int sum_abs = n_end + eq2;
-
                     if (coded_vals != 0)
                     {
                         const int rice_adaptation_enabled = s->ps.sps->persistent_rice_adaptation_enabled_flag;
@@ -2041,30 +2037,31 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                             {
                                 const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_by22(&s->HEVClc->cc, c_rice_param);
-                                const int trans_coeff_level = *level + last_coeff_abs_level_remaining;
+                                const int trans_coeff_level = *level + last_coeff_abs_level_remaining + 1;
+
+                                sum_abs += last_coeff_abs_level_remaining + 1;
+                                *level = trans_coeff_level;
 
                                 if (stat_coeff != NULL)
                                     update_rice(stat_coeff, last_coeff_abs_level_remaining, c_rice_param);
                                 stat_coeff = NULL;
 
-                                if (trans_coeff_level > (3 << c_rice_param))
-                                    c_rice_param = rice_adaptation_enabled ? c_rice_param + 1 : FFMIN(c_rice_param + 1, 4);
-
-                                *level = trans_coeff_level;
-                                sum_abs += trans_coeff_level - 1;
+                                if (trans_coeff_level > (3 << c_rice_param) &&
+                                    (c_rice_param < 4 || rice_adaptation_enabled))
+                                    ++c_rice_param;
                             }
                         } while (coded_vals != 0);
                     }
 
                     if (sign_hidden && (sum_abs & 1) != 0) {
-                        levels[n_end - 1] = -levels[n_end - 1];
+                        levels[nb_significant_coeff_flag - 1] = -levels[nb_significant_coeff_flag - 1];
                     }
                 }
                 get_cabac_by22_finish(&s->HEVClc->cc);
 
 
                 {
-                    int m = n_end - 1;
+                    int m = nb_significant_coeff_flag - 1;
 
                     PROFILE_START();
 
