@@ -4459,6 +4459,8 @@ int main(int argc, char **argv)
     if (do_benchmark) {
         av_log(NULL, AV_LOG_INFO, "bench: utime=%0.3fs\n", ti / 1000000.0);
     }
+    PROFILE_PRINTF(residual_group);
+    PROFILE_PRINTF(residual_xy_final);
     PROFILE_PRINTF(residual_abs);
     PROFILE_PRINTF(residual_greater1);
     PROFILE_PRINTF(residual_scale);

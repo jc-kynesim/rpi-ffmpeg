@@ -22,6 +22,14 @@
 X unsigned int rpi_residual_sig_coeffs Z;
 X unsigned int rpi_residual_sig_bits Z;
 
+X uint64_t rpi_residual_group_cycles Z;
+X unsigned int rpi_residual_group_cnt Z;
+#define RPI_residual_group_MAX_DURATION 5000
+
+X uint64_t rpi_residual_xy_final_cycles Z;
+X unsigned int rpi_residual_xy_final_cnt Z;
+#define RPI_residual_xy_final_MAX_DURATION 5000
+
 X uint64_t rpi_residual_abs_cycles Z;
 X unsigned int rpi_residual_abs_cnt Z;
 #define RPI_residual_abs_MAX_DURATION 5000
