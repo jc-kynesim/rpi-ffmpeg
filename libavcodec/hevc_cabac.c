@@ -2053,7 +2053,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                         } while (coded_vals != 0);
                     }
 
-                    if (sign_hidden && (sum_abs & 1) != 0) {
+                    // sign_hidden = 0 or 1 so we can combine the tests
+                    if ((sign_hidden & sum_abs) != 0) {
                         levels[nb_significant_coeff_flag - 1] = -levels[nb_significant_coeff_flag - 1];
                     }
                 }
