@@ -1482,13 +1482,15 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
     unsigned int reg_b, tmp, st, bit;
      __asm__ (
 		 "1:                                                     \n\t"
+// Get bin from map
 		 "ldrb       %[st]         , [%[ctx_map], %[n]]          \n\t"
 
+// Load state & ranges
          "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
 		 "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
          "and        %[tmp]        , %[range]    , #0xC0         \n\t"
-         "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
-         "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]    \n\t"
+         "add        %[r_b]        , %[r_b]      , %[tmp], lsl #1 \n\t"
+         "ldrb       %[tmp]        , [%[r_b], %[bit]]            \n\t"
          "sub        %[range]      , %[range]    , %[tmp]        \n\t"
 
          "cmp        %[low]        , %[range], lsl #17           \n\t"
@@ -1500,21 +1502,21 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
 		 "tst        %[bit]        , #1                          \n\t"
 		 "strneb     %[n]          , [%[idx]]    , #1            \n\t"
 
+// Renorm
          "clz        %[tmp]        , %[range]                    \n\t"
          "sub        %[tmp]        , #23                         \n\t"
-
          "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
          "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
 
 		 "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
 // There is a small speed gain from combining both conditions, using a single
 // branch and then working out what that meant later
-         "lsls       %[tmp]        , %[low]      , #16           \n\t"
-		 "subnes     %[n]          , %[n]        , #1            \n\t"
+		 "subs       %[n]          , %[n]        , #1            \n\t"
+         "lslnes     %[tmp]        , %[low]      , #16           \n\t"
 		 "bne        1b                                          \n\t"
 
-// If reload is not required then we must have run out of flags to decode
-		 "tst        %[tmp]        , %[tmp]                      \n\t"
+// If we have bits left then n must be 0 so give up now
+		 "lsls       %[tmp]        , %[low]      , #16           \n\t"
 		 "bne        2f                                          \n\t"
 
 // Do reload
@@ -1529,8 +1531,8 @@ static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t *
 
          "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
 
-// while (--n != 0); Given that we are here the previous sub didn't happen
-		 "subs       %[n]          , %[n]        , #1            \n\t"
+// Check to see if we still have more to do
+		 "cmp        %[n]          , #0                          \n\t"
 		 "bne        1b                                          \n\t"
          "2:                                                     \n\t"
          :    [bit]"=&r"(bit),
