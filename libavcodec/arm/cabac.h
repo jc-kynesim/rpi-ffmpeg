@@ -78,6 +78,20 @@ static inline unsigned int rmbd1(const unsigned int x)
     return r;
 }
 
+
+#if UNCHECKED_BITSTREAM_READER
+#define LOAD_16BITS_BEHI\
+        "ldrh       %[tmp]        , [%[ptr]]    , #2            \n\t"\
+        "rev        %[tmp]        , %[tmp]                      \n\t"
+#else
+#define LOAD_16BITS_BEHI\
+        "ldr        %[tmp]        , [%[c], %[end]]              \n\t"\
+		"cmp        %[tmp]        , %[ptr]                      \n\t"\
+        "ldrcsh     %[tmp]        , [%[ptr]]    , #2            \n\t"\
+        "rev        %[tmp]        , %[tmp]                      \n\t"
+#endif
+
+
 #define get_cabac_inline get_cabac_inline_arm
 static av_always_inline int get_cabac_inline_arm(CABACContext *c,
                                                  uint8_t *const state)
@@ -153,27 +167,28 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         : "memory", "cc"
         );
 #else
+   // *** Not thumb compatible yet
    unsigned int reg_b, tmp;
     __asm__ (
         "ldrb       %[bit]        , [%[state]]                  \n\t"
-        "sub        %[r_b]        , %[mlps_tables]   , %[lps_off]    \n\t"
+        "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
         "and        %[tmp]        , %[range]    , #0xC0         \n\t"
         "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
-        "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]  \n\t"
+        "ldrb       %[tmp]        , [%[r_b]     , %[tmp], lsl #1] \n\t"
 // %bit = *state
 // %range = range
 // %tmp = RangeLPS
-        "sub        %[range]      , %[range]      , %[tmp]      \n\t"
+        "sub        %[range]      , %[range]    , %[tmp]        \n\t"
 
-        "cmp        %[low]        , %[range], lsl #17           \n\t"
-        "subge      %[low]        , %[low]      , %[range], lsl #17        \n\t"
+        "cmp        %[low]        , %[range]    , lsl #17       \n\t"
+        "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
         "mvnge      %[bit]        , %[bit]                      \n\t"
         "movge      %[range]      , %[tmp]                      \n\t"
 
 		"clz        %[tmp]        , %[range]                    \n\t"
 		"sub        %[tmp]        , #23                         \n\t"
 
-        "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]            \n\t"
+        "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
         "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
 
@@ -181,21 +196,7 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "lsls       %[tmp]        , %[low]      , #16           \n\t"
 
         "bne        2f                                          \n\t"
-//        "ldr        %[r_b]        , [%[c], %[byte]]             \n\t"
-//#if UNCHECKED_BITSTREAM_READER
-#if 1
-        "ldrh       %[tmp]        , [%[ptr]], #2                    \n\t"
-//        "ldrh       %[tmp]        , [%[r_b], #2]!                    \n\t"
-//        "str        %[r_b]        , [%[c], %[byte]]             \n\t"
-#else
-        "ldr        %[r_b]        , [%[c], %[end]]              \n\t"
-        "ldrh       %[tmp]        , [%[r_c]]                    \n\t"
-        "cmp        %[r_c]        , %[r_b]                      \n\t"
-        "itt        lt                                          \n\t"
-        "addlt      %[r_c]        , %[r_c]      , #2            \n\t"
-        "strlt      %[r_c]        , [%[c], %[byte]]             \n\t"
-#endif
-        "rev        %[tmp]        , %[tmp]                      \n\t"
+        LOAD_16BITS_BEHI
         "lsr        %[tmp]        , %[tmp]      , #15           \n\t"
         "movw       %[r_b]        , #0xFFFF                     \n\t"
         "sub        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
@@ -204,20 +205,19 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "clz        %[r_b]        , %[r_b]                      \n\t"
         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
 
-        "add        %[low]        , %[low]      , %[tmp], lsl %[r_b]        \n\t"
+        "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
         "2:                                                     \n\t"
         :    [bit]"=&r"(bit),
              [low]"+&r"(c->low),
            [range]"+&r"(c->range),
              [r_b]"=&r"(reg_b),
-//             [r_c]"=&r"(reg_c),
              [ptr]"+&r"(c->bytestream),
              [tmp]"=&r"(tmp)
-//        :        [c]"r"(c),
           :  [state]"r"(state),
             [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
               [byte]"M"(offsetof(CABACContext, bytestream)),
 #if !UNCHECKED_BITSTREAM_READER
+                 [c]"r"(c),
                [end]"M"(offsetof(CABACContext, bytestream_end)),
 #endif
            [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
@@ -227,6 +227,74 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
 
     return bit & 1;
 }
+
+#define get_cabac_bypass get_cabac_bypass_arm
+static inline int get_cabac_bypass_arm(CABACContext * const c)
+{
+    int rv = 0;
+    unsigned int tmp;
+    __asm (
+		"lsl        %[low]        , #1                          \n\t"
+        "cmp        %[low]        , %[range]    , lsl #17       \n\t"
+		"adc        %[rv]         , %[rv]       , #0            \n\t"
+        "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
+		"lsls       %[tmp]        , %[low]      , #16           \n\t"
+		"bne        1f                                          \n\t"
+        LOAD_16BITS_BEHI
+		"add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
+        "movw       %[tmp]        , #0xFFFF                     \n\t"
+		"sub        %[low]        , %[low]      , %[tmp]        \n\t"
+		"1:                                                     \n\t"
+        : // Outputs
+		      [rv]"+&r"(rv),
+             [low]"+&r"(c->low),
+		     [tmp]"=&r"(tmp),
+             [ptr]"+&r"(c->bytestream)
+        : // Inputs
+#if !UNCHECKED_BITSTREAM_READER
+                 [c]"r"(c),
+               [end]"M"(offsetof(CABACContext, bytestream_end)),
+#endif
+             [range]"r"(c->range)
+        : "cc"
+    );
+    return rv;
+}
+
+
+#define get_cabac_bypass_sign get_cabac_bypass_sign_arm
+static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
+{
+    unsigned int tmp;
+    __asm (
+		"lsl        %[low]        , #1                          \n\t"
+        "cmp        %[low]        , %[range]    , lsl #17       \n\t"
+		"rsbcc      %[rv]         , %[rv]       , #0            \n\t"
+        "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
+		"lsls       %[tmp]        , %[low]      , #16           \n\t"
+		"bne        1f                                          \n\t"
+        LOAD_16BITS_BEHI
+		"add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
+        "movw       %[tmp]        , #0xFFFF                     \n\t"
+		"sub        %[low]        , %[low]      , %[tmp]        \n\t"
+		"1:                                                     \n\t"
+        : // Outputs
+		      [rv]"+&r"(rv),
+             [low]"+&r"(c->low),
+		     [tmp]"=&r"(tmp),
+             [ptr]"+&r"(c->bytestream)
+        : // Inputs
+#if !UNCHECKED_BITSTREAM_READER
+                 [c]"r"(c),
+               [end]"M"(offsetof(CABACContext, bytestream_end)),
+#endif
+             [range]"r"(c->range)
+        : "cc"
+    );
+    return rv;
+}
+
+
 #endif /* HAVE_ARMV6T2_INLINE */
 
 #endif /* AVCODEC_ARM_CABAC_H */

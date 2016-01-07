@@ -180,8 +180,10 @@ static int av_unused get_cabac(CABACContext *c, uint8_t * const state){
 }
 
 #ifndef get_cabac_bypass
-static int av_unused get_cabac_bypass(CABACContext *c){
+static inline int av_unused get_cabac_bypass(CABACContext *c){
     int range;
+    int rv;
+
     c->low += c->low;
 
     if(!(c->low & CABAC_MASK))
@@ -193,18 +195,19 @@ static int av_unused get_cabac_bypass(CABACContext *c){
 #if CABAC_TRACE_STATE
         printf("bypass 0: o=%u, r=%u\n", c->low >> (CABAC_BITS + 1), c->range);
 #endif
-        return 0;
+        rv = 0;
     }else{
         c->low -= range;
 #if CABAC_TRACE_STATE
         printf("bypass 1: o=%u, r=%u\n", c->low >> (CABAC_BITS + 1), c->range);
 #endif
-        return 1;
+        rv = 1;
     }
+
+    return rv;
 }
 #endif
 
-#if 0
 #ifndef get_cabac_bypass_sign
 static av_always_inline int get_cabac_bypass_sign(CABACContext *c, int val){
     int range, mask;
@@ -221,9 +224,9 @@ static av_always_inline int get_cabac_bypass_sign(CABACContext *c, int val){
     return (val^mask)-mask;
 }
 #endif
-#endif
 
-#ifndef get_cabac_bypass_sign
+#if 0
+//#ifndef get_cabac_bypass_sign
 static av_always_inline int get_cabac_bypass_sign(CABACContext *c, int val){
     return get_cabac_bypass(c) ? val : -val;
 }
