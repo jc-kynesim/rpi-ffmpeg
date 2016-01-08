@@ -620,13 +620,12 @@ static inline uint32_t get_cabac_by22_peek(const CABACContext *const c)
 
 
 // ***** Slower than the C  :-(
-//#define get_cabac_by22_flush get_cabac_by22_flush_arm
+#define get_cabac_by22_flush get_cabac_by22_flush_arm
 static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigned int n, const uint32_t val)
 {
     uint32_t m, tmp;
     __asm__ (
 	"add    %[bits], %[bits], %[n]   \n\t"
-
 	"ldr    %[m], [%[ptr], %[bits], lsr #3]  \n\t"
 
     "rsb    %[tmp], %[n], #32        \n\t"
@@ -1215,78 +1214,121 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
 #define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode(c, r)
 #endif
 
-#if 0
+#if 1
+//#define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode_by22_arm(c, r)
 static int coeff_abs_level_remaining_decode_by22_arm(CABACContext * const c, const unsigned int c_rice_param)
 {
-    PROFILE_START();
+    uint32_t n, val, tmp, level;
 
-    uint32_t m, n, val, tmp, level;
+//    PROFILE_START();
+
     __asm__ (
 			// Peek
 			"bic    %[val],  %[low],   #1  \n\t"
-			"cmp    %[val], #0          \n\t"
+			"cmp    %[inv], #0          \n\t"
 			"umullne  %[tmp], %[val], %[inv], %[val] \n\t"
 			"lsl    %[val], %[val], #1  \n\t"
 
-            // Count bits
+            // Count bits (n = prefix)
             "mvn    %[n], %[val] \n\t"
-			"clz    %[m], %[n]   \n\t"
-			"add    %[n], %[m], #1 \n\t"
-
+			"clz    %[n], %[n]   \n\t"
 
 			"lsl    %[level], %[val], %[n] \n\t"
-            "subs   %[tmp], %[m], #3 \n\t"
+            "subs   %[tmp], %[n], #3 \n\t"
 			"bhs    2f \n\t"
 
             // prefix < 3
-			"rsb    %[tmp], %[rice], #32 \n\t"
+			"rsb    %[tmp], %[rice], #31 \n\t"
 			"lsr    %[level], %[level], %[tmp] \n\t"
-			"orr    %[level], %[level], %[m], lsl %[rice] \n\t"
+			"orr    %[level], %[level], %[n], lsl %[rice] \n\t"
 			"add    %[n], %[n], %[rice] \n\t"
             "b      1f \n\t"
 
             // prefix >= 3
 			"2:  \n\t"
-			"add    %[n], %[rice], %[m], lsl #1 \n\t"
-
-			"add    %[m], %[tmp], %[rice] \n\t"
-			"rsb    %[tmp], %[m], #32 \n\t"
-			"lsr    %[level], %[level], %[tmp] \n\t"
-
-			"mov    %[tmp], #1 \n\t"
-			"add    %[level], %[level], %[tmp], lsl %[m]"
-
-
-			"cmp    %[n], #24 \n\t"
+            // < tmp = prefix - 3
+            // > tmp = prefix + rice - 3
+			"add    %[tmp], %[tmp], %[rice] \n\t"
+            // > n = prefix * 2 + rice - 3
+			"add    %[n], %[tmp], %[n] \n\t"
+			"cmp    %[n], #21 \n\t"
 			"bhi    3f \n\t"
 
+			"orr    %[level], %[level], #0x80000000 \n\t"
+			"rsb    %[tmp], %[tmp], #31 \n\t"
+			"lsr    %[level], %[level], %[tmp] \n\t"
 
+			"mov    %[tmp], #2 \n\t"
+			"add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
+            "b      1f \n\t"
 
             // > 22 bits used in total - need reload
 			"3:  \n\t"
 
-			"1:  \n\t"
-			// Flush
-			"add    %[bits], %[bits], %[n]   \n\t"
+            // Stash prefix + rice - 3 in level (only spare reg)
+			"mov    %[level], %[tmp] \n\t"
+            // Restore n to flush value (prefix)
+			"sub    %[n], %[n], %[tmp] \n\t"
 
-			"ldr    %[m], [%[ptr], %[bits], lsr #3]  \n\t"
+            // Flush + reload
 
-			"rsb    %[tmp], %[n], #32        \n\t"
-			"lsr    %[tmp], %[val], %[tmp]   \n\t"
-			"mul    %[tmp], %[range], %[tmp] \n\t"
+//			"rsb    %[tmp], %[n], #32        \n\t"
+//			"lsr    %[tmp], %[val], %[tmp]   \n\t"
+//			"mul    %[tmp], %[range], %[tmp] \n\t"
 
-			"rev    %[m], %[m]               \n\t"
-
+		    // As it happens we know that all the bits we are flushing are 1
+            // so we can cheat slightly
+		    "rsb    %[tmp], %[range], %[range], lsl %[n] \n\t"
 			"lsl    %[tmp], %[tmp], #23      \n\t"
 			"rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
 
+			"add    %[bits], %[bits], %[n]   \n\t"
+			"ldr    %[n], [%[ptr], %[bits], lsr #3]  \n\t"
+			"rev    %[n], %[n]               \n\t"
 			"and    %[tmp], %[bits], #7         \n\t"
-			"lsl    %[m], %[m], %[tmp]          \n\t"
+			"lsl    %[n], %[n], %[tmp]          \n\t"
 
-			"orr    %[low], %[low], %[m], lsr #9      \n\t"
+			"orr    %[low], %[low], %[n], lsr #9      \n\t"
+
+            // (reload)
+
+			"bic    %[val],  %[low],   #1  \n\t"
+			"cmp    %[inv], #0          \n\t"
+			"umullne  %[tmp], %[val], %[inv], %[val] \n\t"
+			"lsl    %[val], %[val], #1  \n\t"
+
+            // Build value
+
+			"mov    %[n], %[level] \n\t"
+
+            "orr     %[tmp], %[val], #0x80000000 \n\t"
+            "rsb     %[level], %[level], #31 \n\t"
+            "lsr     %[level], %[tmp], %[level] \n\t"
+
+			"mov    %[tmp], #2 \n\t"
+			"add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
+
+			"1:  \n\t"
+			// Flush
+			"add    %[n], %[n], #1 \n\t"
+
+			"rsb    %[tmp], %[n], #32        \n\t"
+			"lsr    %[tmp], %[val], %[tmp]   \n\t"
+
+			"add    %[bits], %[bits], %[n]   \n\t"
+			"ldr    %[val], [%[ptr], %[bits], lsr #3]  \n\t"
+
+			"mul    %[tmp], %[range], %[tmp] \n\t"
+			"lsl    %[tmp], %[tmp], #23      \n\t"
+			"rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
+
+			"rev    %[val], %[val]               \n\t"
+			"and    %[tmp], %[bits], #7         \n\t"
+			"lsl    %[val], %[val], %[tmp]          \n\t"
+
+			"orr    %[low], %[low], %[val], lsr #9      \n\t"
 		:  // Outputs
 	     [level]"=&r"(level),
-   	         [m]"=&r"(m),
 		     [n]"=&r"(n),
            [val]"=&r"(val),
            [tmp]"=&r"(tmp),
@@ -1298,10 +1340,10 @@ static int coeff_abs_level_remaining_decode_by22_arm(CABACContext * const c, con
            [range]"r"(c->by22.range),
 		     [ptr]"r"(c->bytestream)
 		:  // Clobbers
+				"cc"
     );
 
-
-    PROFILE_ACC(residual_abs);
+//    PROFILE_ACC(residual_abs);
 
     return level;
 }
@@ -1315,9 +1357,11 @@ static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const u
     unsigned int prefix;
     unsigned int last_coeff_abs_level_remaining;
 
-    PROFILE_START();
+//    PROFILE_START();
 
 #if 1
+//    CABACContext c2 = *c;
+
     y = get_cabac_by22_peek(c);
     prefix = lmbd1(~y);
 
@@ -1350,6 +1394,15 @@ static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const u
 
         get_cabac_by22_flush(c, prefix_minus3 + rc_rice_param + 1, y);
     }
+#if 0
+    {
+        int lvl = coeff_abs_level_remaining_decode_by22_arm(&c2, rc_rice_param);
+        if (lvl != last_coeff_abs_level_remaining || c->low != c2.low) {
+            printf("lvl=%06x/%06x, low=%07x/%07x, bits=%d/%d, rice=%d\n", last_coeff_abs_level_remaining, lvl,
+                c->low, c2.low, c->by22.bits, c2.by22.bits, rc_rice_param);
+        }
+    }
+#endif
 #else
     y = get_cabac_by22_peek(c);
     prefix = lmbd1(~y);
@@ -1386,7 +1439,7 @@ static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const u
 #endif
 
 
-    PROFILE_ACC(residual_abs);
+//    PROFILE_ACC(residual_abs);
 
     return last_coeff_abs_level_remaining;
 }
@@ -1467,7 +1520,7 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
     for (i = 0; i != 8; ++i)
         levels[i] = 1;
 
-#if 0
+#if !ARCH_ARM
     for (i = 0; i != n; ++i) {
         const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
         const unsigned int b = get_cabac(c, state0 + idx);
