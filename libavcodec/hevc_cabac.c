@@ -28,6 +28,9 @@
 #include "hevc.h"
 #include "cabac_functions.h"
 
+#define USE_BY22 1
+#define USE_N_END_1 1
+
 #if ARCH_ARM
 #include "arm/hevc_cabac.h"
 #endif
@@ -36,9 +39,6 @@
 #include "rpi_prof.h"
 
 #define CABAC_MAX_BIN 31
-
-#define USE_BY22 1
-#define USE_N_END_1 1
 
 #if USE_BY22
 #define I(x) (uint32_t)((0x10000000000ULL / (uint64_t)(x)) + 1ULL)
@@ -1098,15 +1098,6 @@ static av_always_inline int significant_coeff_group_flag_decode(HEVCContext *s, 
     return GET_CABAC(elem_offset[SIGNIFICANT_COEFF_GROUP_FLAG] + inc);
 }
 
-#if 0
-static av_always_inline int significant_coeff_flag_decode(HEVCContext *s, int x_c, int y_c,
-                                           int offset, const uint8_t *ctx_idx_map)
-{
-    int inc = ctx_idx_map[(y_c << 2) + x_c] + offset;
-    return GET_CABAC(elem_offset[SIGNIFICANT_COEFF_FLAG] + inc);
-}
-#endif
-
 static av_always_inline int significant_coeff_flag_decode_0(HEVCContext *s, int offset)
 {
     return GET_CABAC(elem_offset[SIGNIFICANT_COEFF_FLAG] + offset);
@@ -1135,8 +1126,8 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
 #endif
 
 
-#ifndef coeff_abs_level_remaining_decode_by22
-static int coeff_abs_level_remaining_decode_by22(HEVCContext * const s, const unsigned int rice_param)
+#ifndef coeff_abs_level_remaining_decode_bypass
+static int coeff_abs_level_remaining_decode_bypass(HEVCContext * const s, const unsigned int rice_param)
 {
     CABACContext * const c = &s->HEVClc->cc;
     uint32_t y;
@@ -1189,7 +1180,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext * const s, int rc_rice_p
     int last_coeff_abs_level_remaining;
     int i;
 
-    PROFILE_START();
+//    PROFILE_START();
 
     while (prefix < CABAC_MAX_BIN && get_cabac_bypass(c))
         prefix++;
@@ -1210,7 +1201,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext * const s, int rc_rice_p
                                               << rc_rice_param) + suffix;
     }
 
-    PROFILE_ACC(residual_abs);
+//    PROFILE_ACC(residual_abs);
 
     return last_coeff_abs_level_remaining;
 }
@@ -1928,7 +1919,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                         }
 
                         {
-                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_by22(s, c_rice_param);
+                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_bypass(s, c_rice_param);
                             const int trans_coeff_level = *level + last_coeff_abs_level_remaining + 1;
 
                             sum_abs += last_coeff_abs_level_remaining + 1;

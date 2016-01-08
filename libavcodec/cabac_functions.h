@@ -59,7 +59,7 @@ static const uint8_t * const ff_h264_last_coeff_flag_offset_8x8 = ff_h264_cabac_
 static inline uint32_t bmem_peek4(const void * buf, const unsigned int offset)
 {
     const uint8_t * const p = (const uint8_t *)buf + (offset >> 3);
-    return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+    return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) << (offset & 7);
 }
 
 static inline unsigned int lmbd1(const uint32_t x)
