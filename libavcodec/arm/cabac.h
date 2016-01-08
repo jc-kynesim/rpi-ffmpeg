@@ -26,58 +26,6 @@
 #include "libavutil/internal.h"
 #include "libavcodec/cabac.h"
 
-static inline uint32_t bmem_peek4(const void * p, const unsigned int bits)
-{
-    unsigned int n;
-#if 1
-    __asm__ (
-	    "ldr 		%[n], [%[p], %[b], ASR #3]   \n\t"
-		"rev        %[n], %[n]                     \n\t"
-		: [n]"=&r"(n)
-        : [p]"r"(p),
-		  [b]"r"(bits)
-        :
-        );
-#else
-    __asm__ (
-	    "lsr        %[n], %[b], #3               \n\t"
-	    "ldr 		%[n], [%[p], %[n]]           \n\t"
-		"rev        %[n], %[n]                   \n\t"
-		: [n]"=&r"(n)
-        : [p]"r"(p),
-		  [b]"r"(bits)
-        :
-        );
-#endif
-    return n;
-}
-
-
-static inline unsigned int lmbd1(const unsigned int x)
-{
-    unsigned int r;
-    __asm__ (
-        "clz       %[r], %[x]"
-        : [r]"=r&"(r)
-        : [x]"r"(x)
-        :
-    );
-    return r;
-}
-
-static inline unsigned int rmbd1(const unsigned int x)
-{
-    unsigned int r;
-    __asm__ (
-	    "rbit      %[r], %[x]   \n\t"
-        "clz       %[r], %[r]"
-        : [r]"=r&"(r)
-        : [x]"r"(x)
-        :
-    );
-    return r;
-}
-
 
 #if UNCHECKED_BITSTREAM_READER
 #define LOAD_16BITS_BEHI\
@@ -293,7 +241,6 @@ static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
     );
     return rv;
 }
-
 
 #endif /* HAVE_ARMV6T2_INLINE */
 

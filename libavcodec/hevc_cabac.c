@@ -28,6 +28,10 @@
 #include "hevc.h"
 #include "cabac_functions.h"
 
+#if ARCH_ARM
+#include "arm/hevc_cabac.h"
+#endif
+
 #define RPI_PROC_ALLOC
 #include "rpi_prof.h"
 
@@ -535,8 +539,8 @@ static const xy_off_t off_xys[3][4][16] =
 // If no by22 then _by22 functions will revert to normal and so _peek/_flush
 // will no longer be called but the setup calls will still exist and we want
 // to null them out
-#define get_cabac_by22_start(c)
-#define get_cabac_by22_finish(c)
+#define bypass_start(s)
+#define bypass_finish(s)
 #else
 
 static inline void get_cabac_by22_start(CABACContext * const c)
@@ -552,6 +556,7 @@ static inline void get_cabac_by22_start(CABACContext * const c)
     c->range = inv;
     c->low = x;
 }
+#define bypass_start(s) get_cabac_by22_start(&s->HEVClc->cc)
 
 static inline void get_cabac_by22_finish(CABACContext * const c)
 {
@@ -562,123 +567,38 @@ static inline void get_cabac_by22_finish(CABACContext * const c)
     c->bytestream += bytes_used + (CABAC_BITS / 8);
     c->low = (((uint32_t)c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
     c->range = c->by22.range;
-
-#if CABAC_TRACE_STATE
-    printf("by22_finish: bytes=%d, low=%06x, range=%d\n", bytes_used, c->low, c->range);
-#endif
-
-//    printf("low: %06x / %06x / %06x; n=%d, bits=%d; by_used %d, bi_used %d\n", c->low, offset, ((offset >> bits_used) | 1) << bits_used,
-//        n, c->outstanding_count, bytes_used, bits_used);
-
 }
-
-// Faster residual_abs but slightly slower overall!!
-//#define get_cabac_by22_peek get_cabac_by22_peek_arm
-static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
-{
-    uint32_t rv, tmp;
-    __asm__ (
-        "bic    %[rv],  %[low],   #1  \n\t"
-		"cmp    %[inv], #0          \n\t"
-		"umullne  %[tmp], %[rv], %[inv], %[rv] \n\t"
-		:  // Outputs
-		     [rv]"=&r"(rv),
-             [tmp]"=r"(tmp)
-	    :  // Inputs
-		     [low]"r"(c->low),
-             [inv]"r"(c->range)
-		:  // Clobbers
-				"cc"
-    );
-    return rv << 1;
-}
-
+#define bypass_finish(s) get_cabac_by22_finish(&s->HEVClc->cc)
 
 #ifndef get_cabac_by22_peek
-static inline uint32_t get_cabac_by22_peek(const CABACContext *const c)
+static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
 {
-    uint32_t x = c->low;
+    uint32_t x = c->low & ~1U;
     const uint32_t inv = c->range;
-
-    x &= ~1U;
 
     if (inv != 0)
         x = (uint32_t)(((uint64_t)x * (uint64_t)inv) >> 32);
 
-    x <<= 1;
-
-#if CABAC_TRACE_STATE
-    {
-        char buf[33];
-        printf("--- %s; bits=%d, low=%08x\n", hibin2str(x, buf, 22), c->by22.bits, c->low);
-    }
-#endif
-
-    return x;
+    return x << 1;
 }
 #endif
-
-
-// ***** Slower than the C  :-(
-#define get_cabac_by22_flush get_cabac_by22_flush_arm
-static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigned int n, const uint32_t val)
-{
-    uint32_t m, tmp;
-    __asm__ (
-	"add    %[bits], %[bits], %[n]   \n\t"
-	"ldr    %[m], [%[ptr], %[bits], lsr #3]  \n\t"
-
-    "rsb    %[tmp], %[n], #32        \n\t"
-	"lsr    %[tmp], %[val], %[tmp]   \n\t"
-	"mul    %[tmp], %[range], %[tmp] \n\t"
-
-	"rev    %[m], %[m]               \n\t"
-
-	"lsl    %[tmp], %[tmp], #23      \n\t"
-    "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-	"and    %[tmp], %[bits], #7         \n\t"
-	"lsl    %[m], %[m], %[tmp]          \n\t"
-
-	"orr    %[low], %[low], %[m], lsr #9      \n\t"
-		:  // Outputs
-   	         [m]"=&r"(m),
-           [tmp]"=&r"(tmp),
-          [bits]"+&r"(c->by22.bits),
-	       [low]"+&r"(c->low)
-	    :  // Inputs
-		       [n]"r"(n),
-             [val]"r"(val),
-             [inv]"r"(c->range),
-           [range]"r"(c->by22.range),
-		     [ptr]"r"(c->bytestream)
-		:  // Clobbers
-    );
-}
-
 
 
 #ifndef get_cabac_by22_flush
-// n != 0
+// We must always have used at least one bit so n != 0
 static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, const uint32_t val)
 {
-    uint32_t m, low;
+    // Subtract the bits used & reshift up to the top of the word
+    const uint32_t low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->by22.range) << 23));
+
+    // and refill lower bits
+    // We will probably OR over some existing bits but that doesn't matter
     c->by22.bits += n;
-    m = (bmem_peek4(c->bytestream, c->by22.bits) << (c->by22.bits & 7)) >> 9;
-    low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->by22.range) << 23));
-
-#if CABAC_TRACE_STATE
-    printf("by22_flush: n=%d, low=%08x, m=%08x\n", n, low, m);
-#endif
-
-    c->low = low | m;
+    c->low = low | (bmem_peek4(c->bytestream, c->by22.bits) >> 9);
 }
 #endif
 
 #endif  // USE_BY22
-
-
-
 
 
 void ff_hevc_save_states(HEVCContext *s, int ctb_addr_ts)
@@ -1211,233 +1131,49 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
 
 
 #if !USE_BY22
-#define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode(c, r)
-#endif
-
-#if 1
-//#define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode_by22_arm(c, r)
-static int coeff_abs_level_remaining_decode_by22_arm(CABACContext * const c, const unsigned int c_rice_param)
-{
-    uint32_t n, val, tmp, level;
-
-//    PROFILE_START();
-
-    __asm__ (
-			// Peek
-			"bic    %[val],  %[low],   #1  \n\t"
-			"cmp    %[inv], #0          \n\t"
-			"umullne  %[tmp], %[val], %[inv], %[val] \n\t"
-			"lsl    %[val], %[val], #1  \n\t"
-
-            // Count bits (n = prefix)
-            "mvn    %[n], %[val] \n\t"
-			"clz    %[n], %[n]   \n\t"
-
-			"lsl    %[level], %[val], %[n] \n\t"
-            "subs   %[tmp], %[n], #3 \n\t"
-			"bhs    2f \n\t"
-
-            // prefix < 3
-			"rsb    %[tmp], %[rice], #31 \n\t"
-			"lsr    %[level], %[level], %[tmp] \n\t"
-			"orr    %[level], %[level], %[n], lsl %[rice] \n\t"
-			"add    %[n], %[n], %[rice] \n\t"
-            "b      1f \n\t"
-
-            // prefix >= 3
-			"2:  \n\t"
-            // < tmp = prefix - 3
-            // > tmp = prefix + rice - 3
-			"add    %[tmp], %[tmp], %[rice] \n\t"
-            // > n = prefix * 2 + rice - 3
-			"add    %[n], %[tmp], %[n] \n\t"
-			"cmp    %[n], #21 \n\t"
-			"bhi    3f \n\t"
-
-			"orr    %[level], %[level], #0x80000000 \n\t"
-			"rsb    %[tmp], %[tmp], #31 \n\t"
-			"lsr    %[level], %[level], %[tmp] \n\t"
-
-			"mov    %[tmp], #2 \n\t"
-			"add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
-            "b      1f \n\t"
-
-            // > 22 bits used in total - need reload
-			"3:  \n\t"
-
-            // Stash prefix + rice - 3 in level (only spare reg)
-			"mov    %[level], %[tmp] \n\t"
-            // Restore n to flush value (prefix)
-			"sub    %[n], %[n], %[tmp] \n\t"
-
-            // Flush + reload
-
-//			"rsb    %[tmp], %[n], #32        \n\t"
-//			"lsr    %[tmp], %[val], %[tmp]   \n\t"
-//			"mul    %[tmp], %[range], %[tmp] \n\t"
-
-		    // As it happens we know that all the bits we are flushing are 1
-            // so we can cheat slightly
-		    "rsb    %[tmp], %[range], %[range], lsl %[n] \n\t"
-			"lsl    %[tmp], %[tmp], #23      \n\t"
-			"rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-			"add    %[bits], %[bits], %[n]   \n\t"
-			"ldr    %[n], [%[ptr], %[bits], lsr #3]  \n\t"
-			"rev    %[n], %[n]               \n\t"
-			"and    %[tmp], %[bits], #7         \n\t"
-			"lsl    %[n], %[n], %[tmp]          \n\t"
-
-			"orr    %[low], %[low], %[n], lsr #9      \n\t"
-
-            // (reload)
-
-			"bic    %[val],  %[low],   #1  \n\t"
-			"cmp    %[inv], #0          \n\t"
-			"umullne  %[tmp], %[val], %[inv], %[val] \n\t"
-			"lsl    %[val], %[val], #1  \n\t"
-
-            // Build value
-
-			"mov    %[n], %[level] \n\t"
-
-            "orr     %[tmp], %[val], #0x80000000 \n\t"
-            "rsb     %[level], %[level], #31 \n\t"
-            "lsr     %[level], %[tmp], %[level] \n\t"
-
-			"mov    %[tmp], #2 \n\t"
-			"add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
-
-			"1:  \n\t"
-			// Flush
-			"add    %[n], %[n], #1 \n\t"
-
-			"rsb    %[tmp], %[n], #32        \n\t"
-			"lsr    %[tmp], %[val], %[tmp]   \n\t"
-
-			"add    %[bits], %[bits], %[n]   \n\t"
-			"ldr    %[val], [%[ptr], %[bits], lsr #3]  \n\t"
-
-			"mul    %[tmp], %[range], %[tmp] \n\t"
-			"lsl    %[tmp], %[tmp], #23      \n\t"
-			"rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-			"rev    %[val], %[val]               \n\t"
-			"and    %[tmp], %[bits], #7         \n\t"
-			"lsl    %[val], %[val], %[tmp]          \n\t"
-
-			"orr    %[low], %[low], %[val], lsr #9      \n\t"
-		:  // Outputs
-	     [level]"=&r"(level),
-		     [n]"=&r"(n),
-           [val]"=&r"(val),
-           [tmp]"=&r"(tmp),
-          [bits]"+&r"(c->by22.bits),
-	       [low]"+&r"(c->low)
-	    :  // Inputs
-		    [rice]"r"(c_rice_param),
-             [inv]"r"(c->range),
-           [range]"r"(c->by22.range),
-		     [ptr]"r"(c->bytestream)
-		:  // Clobbers
-				"cc"
-    );
-
-//    PROFILE_ACC(residual_abs);
-
-    return level;
-}
+#define coeff_abs_level_remaining_decode_bypass(s,r) coeff_abs_level_remaining_decode(s, r)
 #endif
 
 
 #ifndef coeff_abs_level_remaining_decode_by22
-static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const unsigned int rc_rice_param)
+static int coeff_abs_level_remaining_decode_by22(HEVCContext * const s, const unsigned int rice_param)
 {
+    CABACContext * const c = &s->HEVClc->cc;
     uint32_t y;
     unsigned int prefix;
     unsigned int last_coeff_abs_level_remaining;
+    unsigned int n;
 
 //    PROFILE_START();
 
-#if 1
-//    CABACContext c2 = *c;
-
     y = get_cabac_by22_peek(c);
     prefix = lmbd1(~y);
-
     // y << prefix will always have top bit 0
+
     if (prefix < 3) {
-        const unsigned int suffix = LSR32M(y << prefix, rc_rice_param + 1);
-        last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
-        get_cabac_by22_flush(c, prefix + 1 + rc_rice_param, y);
+        const unsigned int suffix = (y << prefix) >> (31 - rice_param);
+        last_coeff_abs_level_remaining = (prefix << rice_param) + suffix;
+        n = prefix + 1 + rice_param;
     }
-    else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
+    else if (prefix * 2 + rice_param <= 22 + 2)
     {
-        const unsigned int prefix_minus3 = prefix - 3;
-        const uint32_t y2 = (y << prefix) | 0x80000000;
-        const unsigned int suffix = LSR32M(y2, prefix_minus3 + rc_rice_param + 1);
+        const uint32_t suffix = ((y << prefix) | 0x80000000) >> (34 - (prefix + rice_param));
 
-        last_coeff_abs_level_remaining = ((3 - 1) << rc_rice_param) + suffix;
-
-        get_cabac_by22_flush(c, prefix + 1 + prefix - 3 + rc_rice_param, y);
+        last_coeff_abs_level_remaining = (2 << rice_param) + suffix;
+        n = prefix * 2 + rice_param - 2;
     }
     else {
-        const unsigned int prefix_minus3 = prefix - 3;
         unsigned int suffix;
 
         get_cabac_by22_flush(c, prefix, y);
-        y = get_cabac_by22_peek(c) | 0x80000000;
-
-        suffix = LSR32M(y, prefix_minus3 + rc_rice_param + 1);
-        last_coeff_abs_level_remaining = ((3 - 1)
-                                              << rc_rice_param) + suffix;
-
-        get_cabac_by22_flush(c, prefix_minus3 + rc_rice_param + 1, y);
-    }
-#if 0
-    {
-        int lvl = coeff_abs_level_remaining_decode_by22_arm(&c2, rc_rice_param);
-        if (lvl != last_coeff_abs_level_remaining || c->low != c2.low) {
-            printf("lvl=%06x/%06x, low=%07x/%07x, bits=%d/%d, rice=%d\n", last_coeff_abs_level_remaining, lvl,
-                c->low, c2.low, c->by22.bits, c2.by22.bits, rc_rice_param);
-        }
-    }
-#endif
-#else
-    y = get_cabac_by22_peek(c);
-    prefix = lmbd1(~y);
-
-    if (prefix < 3) {
-        const unsigned int suffix = LSR32M(y << (prefix + 1), rc_rice_param);
-        last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
-        get_cabac_by22_flush(c, prefix + 1 + rc_rice_param, y);
-    }
-    else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
-    {
-        const unsigned int prefix_minus3 = prefix - 3;
-        const uint32_t y2 = y << (prefix + 1);
-        const unsigned int suffix = LSR32M(y2, prefix_minus3 + rc_rice_param);
-
-        last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
-                                              << rc_rice_param) + suffix;
-
-        get_cabac_by22_flush(c, prefix + 1 + prefix - 3 + rc_rice_param, y);
-    }
-    else {
-        const unsigned int prefix_minus3 = prefix - 3;
-        unsigned int suffix;
-
-        get_cabac_by22_flush(c, prefix + 1, y);
         y = get_cabac_by22_peek(c);
 
-        suffix = LSR32M(y, prefix_minus3 + rc_rice_param);
-        last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
-                                              << rc_rice_param) + suffix;
-
-        get_cabac_by22_flush(c, prefix_minus3 + rc_rice_param, y);
+        suffix = (y | 0x80000000) >> (34 - (prefix + rice_param));
+        last_coeff_abs_level_remaining = (2 << rice_param) + suffix;
+        n = prefix + rice_param - 2;
     }
-#endif
 
+    get_cabac_by22_flush(c, n, y);
 
 //    PROFILE_ACC(residual_abs);
 
@@ -1445,8 +1181,9 @@ static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const u
 }
 #endif
 
-static int coeff_abs_level_remaining_decode(CABACContext * const c, int rc_rice_param)
+static int coeff_abs_level_remaining_decode(HEVCContext * const s, int rc_rice_param)
 {
+    CABACContext * const c = &s->HEVClc->cc;
     int prefix = 0;
     int suffix = 0;
     int last_coeff_abs_level_remaining;
@@ -1457,7 +1194,7 @@ static int coeff_abs_level_remaining_decode(CABACContext * const c, int rc_rice_
     while (prefix < CABAC_MAX_BIN && get_cabac_bypass(c))
         prefix++;
     if (prefix == CABAC_MAX_BIN) {
-//        av_log(s->avctx, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", prefix);
+        av_log(s->avctx, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", prefix);
         return 0;
     }
 
@@ -1479,20 +1216,10 @@ static int coeff_abs_level_remaining_decode(CABACContext * const c, int rc_rice_
 }
 
 #if !USE_BY22
-#define coeff_sign_flag_decode_by22(c, nb) coeff_sign_flag_decode(c, nb)
-#else
-static av_always_inline uint32_t coeff_sign_flag_decode_by22(CABACContext * const c, const unsigned int nb)
+#define coeff_sign_flag_decode_bypass coeff_sign_flag_decode
+static inline uint32_t coeff_sign_flag_decode(HEVCContext * const s, const unsigned int nb)
 {
-    uint32_t y;
-    y = get_cabac_by22_peek(c);
-    get_cabac_by22_flush(c, nb, y);
-    return y & ~(0xffffffffU >> nb);
-}
-#endif
-
-#if !USE_BY22 || USE_N_END_1
-static av_always_inline uint32_t coeff_sign_flag_decode(CABACContext * const c, const unsigned int nb)
-{
+    CABACContext * const c = &s->HEVClc->cc;
     unsigned int i;
     uint32_t ret = 0;
 
@@ -1503,13 +1230,43 @@ static av_always_inline uint32_t coeff_sign_flag_decode(CABACContext * const c, 
 }
 #endif
 
+#ifndef coeff_sign_flag_decode_bypass
+static inline uint32_t coeff_sign_flag_decode_bypass(HEVCContext * const s, const unsigned int nb)
+{
+    CABACContext * const c = &s->HEVClc->cc;
+    uint32_t y;
+    y = get_cabac_by22_peek(c);
+    get_cabac_by22_flush(c, nb, y);
+    return y & ~(0xffffffffU >> nb);
+}
+#endif
+
+
+#ifndef get_cabac_greater1_bits
+static inline unsigned int get_cabac_greater1_bits(CABACContext * const c, const unsigned int n,
+    uint8_t * const state0)
+{
+    unsigned int i, rv;
+    for (i = 0; i != n; ++i) {
+        const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
+        const unsigned int b = get_cabac(c, state0 + idx);
+        rv = (rv << 1) | b;
+    }
+    return rv;
+}
+#endif
+
+
 // N.B. levels returned are the values assuming coeff_abs_level_remaining
 // is uncoded, so 1 must be added if it is coded.  sum_abs also reflects
 // this version of events.
-static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_end, int * const levels,
+static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned int n_end, int * const levels,
     int * const pprev_subset_coded, int * const psum,
-    uint8_t * const state0, uint8_t * const state_gt2)
+    const unsigned int idx0_gt1, const unsigned int idx_gt2)
 {
+    CABACContext * const c = &s->HEVClc->cc;
+    uint8_t * const state0 = s->HEVClc->cabac_state + idx0_gt1;
+    uint8_t * const state_gt2 = s->HEVClc->cabac_state + idx_gt2;
     unsigned int rv = 0;
     unsigned int i;
     const unsigned int n = FFMIN(n_end, 8);
@@ -1517,93 +1274,11 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
     PROFILE_START();
 
     // Really this is i != n but the simple unconditional loop is cheaper
+    // and faster
     for (i = 0; i != 8; ++i)
         levels[i] = 1;
 
-#if !ARCH_ARM
-    for (i = 0; i != n; ++i) {
-        const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
-        const unsigned int b = get_cabac(c, state0 + idx);
-        rv = (rv << 1) | b;
-    }
-#else
-{
-    unsigned int reg_b, st, tmp, bit;
-     __asm__ (
-		 "mov        %[i]          , #0                          \n\t"
-		 "mov        %[rv]         , #0                          \n\t"
-		 "1:                                                     \n\t"
-         "add        %[i]          , %[i]        , #1            \n\t"
-		 "cmp        %[rv]         , #0                          \n\t"
-		 "usateq     %[st]         , #2          , %[i]          \n\t"
-		 "movne      %[st]         , #0                          \n\t"
-
-		 "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
-         "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
-         "and        %[tmp]        , %[range]    , #0xC0         \n\t"
-         "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
-         "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]    \n\t"
-         "sub        %[range]      , %[range]    , %[tmp]        \n\t"
-
-         "cmp        %[low]        , %[range], lsl #17           \n\t"
-         "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-         "mvnge      %[bit]        , %[bit]                      \n\t"
-         "movge      %[range]      , %[tmp]                      \n\t"
-
-         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
-		 "and        %[bit]        , %[bit]      , #1            \n\t"
-		 "orr        %[rv]         , %[bit]      , %[rv], lsl #1 \n\t"
-
-         "clz        %[tmp]        , %[range]                    \n\t"
-         "sub        %[tmp]        , #23                         \n\t"
-
-         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
-         "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
-
-		 "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
-// There is a small speed gain from combining both conditions, using a single
-// branch and then working out what that meant later
-         "lsls       %[tmp]        , %[low]      , #16           \n\t"
-		 "cmpne      %[n]          , %[i]                        \n\t"
-		 "bne        1b                                          \n\t"
-
-// If reload is not required then we must have run out of flags to decode
-		 "tst        %[tmp]        , %[tmp]                      \n\t"
-		 "bne        2f                                          \n\t"
-
-// Do reload
-         "ldrh       %[tmp]        , [%[bptr]]   , #2            \n\t"
-         "movw       %[r_b]        , #0xFFFF                     \n\t"
-         "rev        %[tmp]        , %[tmp]                      \n\t"
-         "rsb        %[tmp]        , %[r_b]      , %[tmp], lsr #15 \n\t"
-
-         "rbit       %[r_b]        , %[low]                      \n\t"
-         "clz        %[r_b]        , %[r_b]                      \n\t"
-         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
-
-         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
-
-		 "cmp        %[n]          , %[i]                        \n\t"
-		 "bne        1b                                          \n\t"
-         "2:                                                     \n\t"
-         :    [bit]"=&r"(bit),
-              [low]"+&r"(c->low),
-            [range]"+&r"(c->range),
-              [r_b]"=&r"(reg_b),
-             [bptr]"+&r"(c->bytestream),
-                [i]"=&r"(i),
-              [tmp]"=&r"(tmp),
-			   [st]"=&r"(st),
-               [rv]"=&r"(rv)
-          :  [state0]"r"(state0),
-		          [n]"r"(n),
-        [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
-               [byte]"M"(offsetof(CABACContext, bytestream)),
-            [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
-         : "memory", "cc"
-    );
-}
-#endif
+    rv = get_cabac_greater1_bits(c, n, state0);
 
     *pprev_subset_coded = 0;
     *psum = n;
@@ -1647,57 +1322,15 @@ static uint32_t get_greaterx_bits(CABACContext * const c, const unsigned int n_e
 // This can still theoretically lead to overflow but the coding would have to be very odd (& inefficient)
 // to achieve it
 
-#if ARCH_ARM
+#ifndef trans_scale_sat
 static inline int trans_scale_sat(const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
 {
-    int rv;
-    int t = ((level * (int)(scale * scale_m)) >> shift) + 1;
-
-    __asm__ (
-	"ssat %[rv], #16, %[t], ASR #1 \n\t"
-    : [rv]"=r"(rv)
-    : [t]"r"(t)
-    :
-    );
-    return rv;
-}
-#else
-static inline int trans_scale_sat(const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
-{
-    int trans_coeff_level = (((level * (int)(scale * scale_m)) >> shift) + 1) >> 1;
-
-    if (trans_coeff_level < -32768) {
-        trans_coeff_level = -32768;
-    }
-    else if (trans_coeff_level > 32767) {
-        trans_coeff_level = 32767;
-    }
-
-    return trans_coeff_level;
+    return av_clip_int16((((level * (int)(scale * scale_m)) >> shift) + 1) >> 1);
 }
 #endif
 
 
-#if ARCH_ARM
-static inline void update_rice(uint8_t * const stat_coeff,
-    const unsigned int last_coeff_abs_level_remaining,
-    const unsigned int c_rice_param)
-{
-    int t;
-    __asm__ (
-	"movs  %[t], %[coeff], LSR %[shift]     \n\t"
-	"subeq %[stat], %[stat], #1             \n\t"
-	"cmp   %[t], #2                         \n\t"
-	"adc   %[stat], %[stat], #0            \n\t"
-	"usat  %[stat], #8, %[stat]            \n\t"
-	: [stat]"+&r"(*stat_coeff),
-	      [t]"=r"(t)
-	:  [coeff]"r"(last_coeff_abs_level_remaining),
-	   [shift]"r"(c_rice_param)
-    : "cc"
-	);
-}
-#else
+#ifndef update_rice
 static inline void update_rice(uint8_t * const stat_coeff,
     const unsigned int last_coeff_abs_level_remaining,
     const unsigned int c_rice_param)
@@ -1712,100 +1345,36 @@ static inline void update_rice(uint8_t * const stat_coeff,
 
 
 // n must be > 0 on entry
-static int av_noinline get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
+#ifndef get_cabac_sig_coeff_flag_idxs
+static inline uint8_t * get_cabac_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
+    unsigned int n,
+    const uint8_t const * ctx_map,
+    uint8_t * p)
+{
+    do {
+        if (get_cabac(c, state0 + ctx_map[n]))
+            *p++ = n;
+    } while (--n != 0);
+    return p;
+}
+#endif
+
+
+static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
     unsigned int n,
     const uint8_t const * ctx_map,
     uint8_t * const flag_idx)
 {
-    uint8_t * p = flag_idx;
+    int rv;
 
     PROFILE_START();
 
-#if !ARCH_ARM
-    do {
-        if (get_cabac_inline(c, state0 + ctx_map[n]))
-            *p++ = n;
-    } while (--n != 0);
-#else
-    unsigned int reg_b, tmp, st, bit;
-     __asm__ (
-		 "1:                                                     \n\t"
-// Get bin from map
-		 "ldrb       %[st]         , [%[ctx_map], %[n]]          \n\t"
-
-// Load state & ranges
-         "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
-		 "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
-         "and        %[tmp]        , %[range]    , #0xC0         \n\t"
-         "add        %[r_b]        , %[r_b]      , %[tmp], lsl #1 \n\t"
-         "ldrb       %[tmp]        , [%[r_b], %[bit]]            \n\t"
-         "sub        %[range]      , %[range]    , %[tmp]        \n\t"
-
-         "cmp        %[low]        , %[range], lsl #17           \n\t"
-         "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-         "mvnge      %[bit]        , %[bit]                      \n\t"
-         "movge      %[range]      , %[tmp]                      \n\t"
-
-         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
-		 "tst        %[bit]        , #1                          \n\t"
-		 "strneb     %[n]          , [%[idx]]    , #1            \n\t"
-
-// Renorm
-         "clz        %[tmp]        , %[range]                    \n\t"
-         "sub        %[tmp]        , #23                         \n\t"
-         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
-         "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
-
-		 "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
-// There is a small speed gain from combining both conditions, using a single
-// branch and then working out what that meant later
-		 "subs       %[n]          , %[n]        , #1            \n\t"
-         "lslnes     %[tmp]        , %[low]      , #16           \n\t"
-		 "bne        1b                                          \n\t"
-
-// If we have bits left then n must be 0 so give up now
-		 "lsls       %[tmp]        , %[low]      , #16           \n\t"
-		 "bne        2f                                          \n\t"
-
-// Do reload
-         "ldrh       %[tmp]        , [%[bptr]]   , #2            \n\t"
-         "movw       %[r_b]        , #0xFFFF                     \n\t"
-         "rev        %[tmp]        , %[tmp]                      \n\t"
-         "rsb        %[tmp]        , %[r_b]      , %[tmp], lsr #15 \n\t"
-
-         "rbit       %[r_b]        , %[low]                      \n\t"
-         "clz        %[r_b]        , %[r_b]                      \n\t"
-         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
-
-         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
-
-// Check to see if we still have more to do
-		 "cmp        %[n]          , #0                          \n\t"
-		 "bne        1b                                          \n\t"
-         "2:                                                     \n\t"
-         :    [bit]"=&r"(bit),
-              [low]"+&r"(c->low),
-            [range]"+&r"(c->range),
-              [r_b]"=&r"(reg_b),
-             [bptr]"+&r"(c->bytestream),
-              [idx]"+&r"(p),
-                [n]"+&r"(n),
-              [tmp]"=&r"(tmp),
-               [st]"=&r"(st)
-          :  [state0]"r"(state0),
-		    [ctx_map]"r"(ctx_map),
-        [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
-               [byte]"M"(offsetof(CABACContext, bytestream)),
-            [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
-         : "memory", "cc"
-    );
-#endif
+    rv = get_cabac_sig_coeff_flag_idxs(c, state0, n, ctx_map, flag_idx) - flag_idx;
 
     PROFILE_ACC(residual_sig);
 
-    return p - flag_idx;
+    return rv;
 }
-
 
 #define H4x4(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15) {\
      x0,  x1,  x2,  x3,\
@@ -1999,23 +1568,16 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             qp += s->ps.sps->qp_bd_offset;
         }
 
-//        shift    = s->ps.sps->bit_depth + log2_trafo_size - 5;
-        shift    = s->ps.sps->bit_depth + log2_trafo_size - 6;
-#if 0
-        scale = level_scale[rem6[qp]] << div6[qp];
-#else
+        // Shift is set to one less than will actually occur as the scale
+        // and saturate step adds 1 and then shifts right again
+        shift = s->ps.sps->bit_depth + log2_trafo_size - 6;
         scale = level_scale[rem6[qp]];
         if (div6[qp] >= shift) {
             scale <<= (div6[qp] - shift);
             shift = 0;
-//            rounding = 0;
-        }
-        else
-        {
+        } else {
             shift -= div6[qp];
-//            rounding = (1 << (shift - 1));
         }
-#endif
 
         if (s->ps.sps->scaling_list_enable_flag && !(trans_skip_or_bypass && log2_trafo_size > 2)) {
             const ScalingList *sl = s->ps.pps->scaling_list_data_present_flag ?
@@ -2301,14 +1863,14 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 if (coded_val)
                 {
                     if (!s->ps.sps->persistent_rice_adaptation_enabled_flag) {
-                        trans_coeff_level = 3 + coeff_abs_level_remaining_decode(&s->HEVClc->cc, 0);
+                        trans_coeff_level = 3 + coeff_abs_level_remaining_decode(s, 0);
                     }
                     else
                     {
                         uint8_t * const stat_coeff =
                             lc->stat_coeff + (!c_idx_nz ? 2 : 0) + trans_skip_or_bypass;
                         const unsigned int c_rice_param = *stat_coeff >> 2;
-                        const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(&s->HEVClc->cc, c_rice_param);
+                        const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
 
                         trans_coeff_level = 3 + last_coeff_abs_level_remaining;
                         update_rice(stat_coeff, last_coeff_abs_level_remaining, c_rice_param);
@@ -2336,20 +1898,19 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 uint32_t coded_vals = 0;
                 unsigned int sum_abs;
 
-                coded_vals = get_greaterx_bits(&s->HEVClc->cc, nb_significant_coeff_flag, levels,
-                    &prev_subset_coded, &sum_abs,
-                    s->HEVClc->cabac_state + idx0_gt1, s->HEVClc->cabac_state + idx_gt2);
+                coded_vals = get_greaterx_bits(s, nb_significant_coeff_flag, levels,
+                    &prev_subset_coded, &sum_abs, idx0_gt1, idx_gt2);
 
                 sign_hidden = may_hide_sign;
                 if (significant_coeff_flag_idx[0] - significant_coeff_flag_idx[nb_significant_coeff_flag - 1] <= 3)
                     sign_hidden = 0;
 
-                get_cabac_by22_start(&s->HEVClc->cc);
+                bypass_start(s);
 
                 // ?????? cabac_bypass_alignment_enabled_flag
                 // ?????? extended_precision_processing_flag
 
-                coeff_sign_flags = coeff_sign_flag_decode_by22(&s->HEVClc->cc, nb_significant_coeff_flag - sign_hidden);
+                coeff_sign_flags = coeff_sign_flag_decode_bypass(s, nb_significant_coeff_flag - sign_hidden);
 
                 if (coded_vals != 0)
                 {
@@ -2367,7 +1928,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                         }
 
                         {
-                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_by22(&s->HEVClc->cc, c_rice_param);
+                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_by22(s, c_rice_param);
                             const int trans_coeff_level = *level + last_coeff_abs_level_remaining + 1;
 
                             sum_abs += last_coeff_abs_level_remaining + 1;
@@ -2389,7 +1950,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     levels[nb_significant_coeff_flag - 1] = -levels[nb_significant_coeff_flag - 1];
                 }
 
-                get_cabac_by22_finish(&s->HEVClc->cc);
+                bypass_finish(s);
 
 
                 {
