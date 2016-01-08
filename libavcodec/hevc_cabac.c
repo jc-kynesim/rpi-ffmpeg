@@ -35,7 +35,6 @@
 
 #define USE_BY22 1
 #define USE_N_END_1 1
-#define USE_DOT 0  // For removal!
 
 #if USE_BY22
 #define I(x) (uint32_t)((0x10000000000ULL / (uint64_t)(x)) + 1ULL)
@@ -547,6 +546,7 @@ static inline void get_cabac_by22_start(CABACContext * const c)
     uint32_t x = (c->low << (22 - CABAC_BITS)) ^ ((m ^ 0x80000000U) >> (9 + CABAC_BITS - bits));
     const uint32_t inv = alt1cabac_inv_range[c->range & 0xff];
 
+    c->bytestream -= (CABAC_BITS / 8);
     c->by22.bits = bits;
     c->by22.range = c->range;
     c->range = inv;
@@ -559,7 +559,7 @@ static inline void get_cabac_by22_finish(CABACContext * const c)
     unsigned int bytes_used = (used / CABAC_BITS) * (CABAC_BITS / 8);
     unsigned int bits_used = used & (CABAC_BITS == 16 ? 15 : 7);
 
-    c->bytestream += bytes_used;
+    c->bytestream += bytes_used + (CABAC_BITS / 8);
     c->low = (((uint32_t)c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
     c->range = c->by22.range;
 
@@ -572,7 +572,30 @@ static inline void get_cabac_by22_finish(CABACContext * const c)
 
 }
 
-static inline uint32_t get_cabac_by22_peek(CABACContext *const c)
+// Faster residual_abs but slightly slower overall!!
+//#define get_cabac_by22_peek get_cabac_by22_peek_arm
+static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
+{
+    uint32_t rv, tmp;
+    __asm__ (
+        "bic    %[rv],  %[low],   #1  \n\t"
+		"cmp    %[inv], #0          \n\t"
+		"umullne  %[tmp], %[rv], %[inv], %[rv] \n\t"
+		:  // Outputs
+		     [rv]"=&r"(rv),
+             [tmp]"=r"(tmp)
+	    :  // Inputs
+		     [low]"r"(c->low),
+             [inv]"r"(c->range)
+		:  // Clobbers
+				"cc"
+    );
+    return rv << 1;
+}
+
+
+#ifndef get_cabac_by22_peek
+static inline uint32_t get_cabac_by22_peek(const CABACContext *const c)
 {
     uint32_t x = c->low;
     const uint32_t inv = c->range;
@@ -593,13 +616,56 @@ static inline uint32_t get_cabac_by22_peek(CABACContext *const c)
 
     return x;
 }
+#endif
 
+
+// ***** Slower than the C  :-(
+//#define get_cabac_by22_flush get_cabac_by22_flush_arm
+static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigned int n, const uint32_t val)
+{
+    uint32_t m, tmp;
+    __asm__ (
+	"add    %[bits], %[bits], %[n]   \n\t"
+
+	"ldr    %[m], [%[ptr], %[bits], lsr #3]  \n\t"
+
+    "rsb    %[tmp], %[n], #32        \n\t"
+	"lsr    %[tmp], %[val], %[tmp]   \n\t"
+	"mul    %[tmp], %[range], %[tmp] \n\t"
+
+	"rev    %[m], %[m]               \n\t"
+
+	"lsl    %[tmp], %[tmp], #23      \n\t"
+    "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
+
+	"and    %[tmp], %[bits], #7         \n\t"
+	"lsl    %[m], %[m], %[tmp]          \n\t"
+
+	"orr    %[low], %[low], %[m], lsr #9      \n\t"
+		:  // Outputs
+   	         [m]"=&r"(m),
+           [tmp]"=&r"(tmp),
+          [bits]"+&r"(c->by22.bits),
+	       [low]"+&r"(c->low)
+	    :  // Inputs
+		       [n]"r"(n),
+             [val]"r"(val),
+             [inv]"r"(c->range),
+           [range]"r"(c->by22.range),
+		     [ptr]"r"(c->bytestream)
+		:  // Clobbers
+    );
+}
+
+
+
+#ifndef get_cabac_by22_flush
 // n != 0
 static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, const uint32_t val)
 {
     uint32_t m, low;
     c->by22.bits += n;
-    m = (bmem_peek4(c->bytestream - (CABAC_BITS / 8), c->by22.bits) << (c->by22.bits & 7)) >> 9;
+    m = (bmem_peek4(c->bytestream, c->by22.bits) << (c->by22.bits & 7)) >> 9;
     low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->by22.range) << 23));
 
 #if CABAC_TRACE_STATE
@@ -608,8 +674,9 @@ static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, 
 
     c->low = low | m;
 }
-
 #endif
+
+#endif  // USE_BY22
 
 
 
@@ -1146,7 +1213,102 @@ static av_always_inline int coeff_abs_level_greater2_flag_decode(HEVCContext *s,
 
 #if !USE_BY22
 #define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode(c, r)
-#else
+#endif
+
+#if 0
+static int coeff_abs_level_remaining_decode_by22_arm(CABACContext * const c, const unsigned int c_rice_param)
+{
+    PROFILE_START();
+
+    uint32_t m, n, val, tmp, level;
+    __asm__ (
+			// Peek
+			"bic    %[val],  %[low],   #1  \n\t"
+			"cmp    %[val], #0          \n\t"
+			"umullne  %[tmp], %[val], %[inv], %[val] \n\t"
+			"lsl    %[val], %[val], #1  \n\t"
+
+            // Count bits
+            "mvn    %[n], %[val] \n\t"
+			"clz    %[m], %[n]   \n\t"
+			"add    %[n], %[m], #1 \n\t"
+
+
+			"lsl    %[level], %[val], %[n] \n\t"
+            "subs   %[tmp], %[m], #3 \n\t"
+			"bhs    2f \n\t"
+
+            // prefix < 3
+			"rsb    %[tmp], %[rice], #32 \n\t"
+			"lsr    %[level], %[level], %[tmp] \n\t"
+			"orr    %[level], %[level], %[m], lsl %[rice] \n\t"
+			"add    %[n], %[n], %[rice] \n\t"
+            "b      1f \n\t"
+
+            // prefix >= 3
+			"2:  \n\t"
+			"add    %[n], %[rice], %[m], lsl #1 \n\t"
+
+			"add    %[m], %[tmp], %[rice] \n\t"
+			"rsb    %[tmp], %[m], #32 \n\t"
+			"lsr    %[level], %[level], %[tmp] \n\t"
+
+			"mov    %[tmp], #1 \n\t"
+			"add    %[level], %[level], %[tmp], lsl %[m]"
+
+
+			"cmp    %[n], #24 \n\t"
+			"bhi    3f \n\t"
+
+
+
+            // > 22 bits used in total - need reload
+			"3:  \n\t"
+
+			"1:  \n\t"
+			// Flush
+			"add    %[bits], %[bits], %[n]   \n\t"
+
+			"ldr    %[m], [%[ptr], %[bits], lsr #3]  \n\t"
+
+			"rsb    %[tmp], %[n], #32        \n\t"
+			"lsr    %[tmp], %[val], %[tmp]   \n\t"
+			"mul    %[tmp], %[range], %[tmp] \n\t"
+
+			"rev    %[m], %[m]               \n\t"
+
+			"lsl    %[tmp], %[tmp], #23      \n\t"
+			"rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
+
+			"and    %[tmp], %[bits], #7         \n\t"
+			"lsl    %[m], %[m], %[tmp]          \n\t"
+
+			"orr    %[low], %[low], %[m], lsr #9      \n\t"
+		:  // Outputs
+	     [level]"=&r"(level),
+   	         [m]"=&r"(m),
+		     [n]"=&r"(n),
+           [val]"=&r"(val),
+           [tmp]"=&r"(tmp),
+          [bits]"+&r"(c->by22.bits),
+	       [low]"+&r"(c->low)
+	    :  // Inputs
+		    [rice]"r"(c_rice_param),
+             [inv]"r"(c->range),
+           [range]"r"(c->by22.range),
+		     [ptr]"r"(c->bytestream)
+		:  // Clobbers
+    );
+
+
+    PROFILE_ACC(residual_abs);
+
+    return level;
+}
+#endif
+
+
+#ifndef coeff_abs_level_remaining_decode_by22
 static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const unsigned int rc_rice_param)
 {
     uint32_t y;
@@ -1155,6 +1317,40 @@ static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const u
 
     PROFILE_START();
 
+#if 1
+    y = get_cabac_by22_peek(c);
+    prefix = lmbd1(~y);
+
+    // y << prefix will always have top bit 0
+    if (prefix < 3) {
+        const unsigned int suffix = LSR32M(y << prefix, rc_rice_param + 1);
+        last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
+        get_cabac_by22_flush(c, prefix + 1 + rc_rice_param, y);
+    }
+    else if (prefix + 1 + prefix - 3 + rc_rice_param <= 22)
+    {
+        const unsigned int prefix_minus3 = prefix - 3;
+        const uint32_t y2 = (y << prefix) | 0x80000000;
+        const unsigned int suffix = LSR32M(y2, prefix_minus3 + rc_rice_param + 1);
+
+        last_coeff_abs_level_remaining = ((3 - 1) << rc_rice_param) + suffix;
+
+        get_cabac_by22_flush(c, prefix + 1 + prefix - 3 + rc_rice_param, y);
+    }
+    else {
+        const unsigned int prefix_minus3 = prefix - 3;
+        unsigned int suffix;
+
+        get_cabac_by22_flush(c, prefix, y);
+        y = get_cabac_by22_peek(c) | 0x80000000;
+
+        suffix = LSR32M(y, prefix_minus3 + rc_rice_param + 1);
+        last_coeff_abs_level_remaining = ((3 - 1)
+                                              << rc_rice_param) + suffix;
+
+        get_cabac_by22_flush(c, prefix_minus3 + rc_rice_param + 1, y);
+    }
+#else
     y = get_cabac_by22_peek(c);
     prefix = lmbd1(~y);
 
@@ -1187,6 +1383,8 @@ static int coeff_abs_level_remaining_decode_by22(CABACContext * const c, const u
 
         get_cabac_by22_flush(c, prefix_minus3 + rc_rice_param, y);
     }
+#endif
+
 
     PROFILE_ACC(residual_abs);
 
@@ -1404,7 +1602,7 @@ static inline int trans_scale_sat(const int level, const unsigned int scale, con
 
     __asm__ (
 	"ssat %[rv], #16, %[t], ASR #1 \n\t"
-    : [rv]"=&r"(rv)
+    : [rv]"=r"(rv)
     : [t]"r"(t)
     :
     );
@@ -1432,20 +1630,17 @@ static inline void update_rice(uint8_t * const stat_coeff,
     const unsigned int last_coeff_abs_level_remaining,
     const unsigned int c_rice_param)
 {
-    int t, t2;
+    int t;
     __asm__ (
-	"mov   %[t2], #-1                       \n\t"
 	"movs  %[t], %[coeff], LSR %[shift]     \n\t"
-	"it    ne                               \n\t"
-	"movne %[t2], #0                        \n\t"
-	"cmn   %[t], #3                         \n\t"
-	"adc   %[stat], %[stat], %[t2]          \n\t"
+	"subeq %[stat], %[stat], #1             \n\t"
+	"cmp   %[t], #2                         \n\t"
+	"adc   %[stat], %[stat], #0            \n\t"
 	"usat  %[stat], #8, %[stat]            \n\t"
 	: [stat]"+&r"(*stat_coeff),
-	  [t]"=&r"(t),
-	  [t2]"=&r"(t2)
-	: [coeff]"r"(last_coeff_abs_level_remaining),
-	  [shift]"r"(c_rice_param)
+	      [t]"=r"(t)
+	:  [coeff]"r"(last_coeff_abs_level_remaining),
+	   [shift]"r"(c_rice_param)
     : "cc"
 	);
 }
