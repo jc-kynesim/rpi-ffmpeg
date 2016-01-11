@@ -23,6 +23,9 @@
 #ifndef AVCODEC_HEVC_H
 #define AVCODEC_HEVC_H
 
+// define RPI to split the CABAC/prediction/transform into separate stages
+#include "config.h"
+
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"
 
@@ -37,8 +40,6 @@
 #include "videodsp.h"
 
 // define RPI to split the CABAC/prediction/transform into separate stages
-#define RPI
-
 #ifdef RPI
 
   #include "rpi_qpu.h"
