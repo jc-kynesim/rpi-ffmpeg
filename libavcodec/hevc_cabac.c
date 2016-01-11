@@ -27,6 +27,9 @@
 #include "cabac_functions.h"
 #include "hevc.h"
 
+#define RPI_PROC_ALLOC 1
+#include "rpi_prof.h"
+
 #define CABAC_MAX_BIN 31
 
 /**
@@ -1047,6 +1050,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t dc_scale;
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
+
+    PROFILE_START();
+
 #ifdef RPI
     if (s->enable_rpi) {
         int n = trafo_size * trafo_size;
@@ -1366,6 +1372,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int sign_hidden;
             int sb_type;
 
+            PROFILE_START();
 
             // initialize first elem of coeff_bas_level_greater1_flag
             int ctx_set = (i > 0 && c_idx == 0) ? 2 : 0;
@@ -1485,8 +1492,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 }
                 coeffs[y_c * trafo_size + x_c] = trans_coeff_level;
             }
+
+            PROFILE_ACC(residual_core);
         }
     }
+    PROFILE_ACC(residual_base);
     
     if (lc->cu.cu_transquant_bypass_flag) {
         if (explicit_rdpcm_flag || (s->ps.sps->implicit_rdpcm_enabled_flag &&

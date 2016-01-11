@@ -83,6 +83,8 @@
 #endif
 #endif
 
+#include "rpi_prof.h"
+
 #if HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
 #include <sys/types.h>
@@ -4451,6 +4453,7 @@ int main(int argc, char **argv)
     show_banner(argc, argv, options);
 
     term_init();
+    PROFILE_INIT();
 
     /* parse options and open all input/output files */
     ret = ffmpeg_parse_options(argc, argv);
@@ -4477,6 +4480,10 @@ int main(int argc, char **argv)
     current_time = ti = getutime();
     if (transcode() < 0)
         exit_program(1);
+
+    PROFILE_PRINTF(residual_core);
+    PROFILE_PRINTF(residual_base);
+
     ti = getutime() - ti;
     if (do_benchmark) {
         av_log(NULL, AV_LOG_INFO, "bench: utime=%0.3fs\n", ti / 1000000.0);
