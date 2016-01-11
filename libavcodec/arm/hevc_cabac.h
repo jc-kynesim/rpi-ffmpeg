@@ -22,7 +22,8 @@
 #include "config.h"
 #if HAVE_ARMV6T2_INLINE
 
-static inline uint32_t bmem_peek4(const void * p, const unsigned int bits)
+#define hevc_mem_bits32 hevc_mem_bits32_arm
+static inline uint32_t hevc_mem_bits32_arm(const void * p, const unsigned int bits)
 {
     unsigned int n;
     __asm__ (
@@ -34,31 +35,6 @@ static inline uint32_t bmem_peek4(const void * p, const unsigned int bits)
     return n << (bits & 7);
 }
 
-
-static inline unsigned int lmbd1(const unsigned int x)
-{
-    unsigned int r;
-    __asm__ (
-        "clz       %[r], %[x]"
-        : [r]"=r"(r)
-        : [x]"r"(x)
-        :
-    );
-    return r;
-}
-
-static inline unsigned int rmbd1(const unsigned int x)
-{
-    unsigned int r;
-    __asm__ (
-	    "rbit      %[r], %[x]   \n\t"
-        "clz       %[r], %[r]"
-        : [r]"=r"(r)
-        : [x]"r"(x)
-        :
-    );
-    return r;
-}
 
 // ---------------------------------------------------------------------------
 //

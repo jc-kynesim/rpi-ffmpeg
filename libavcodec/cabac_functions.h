@@ -54,37 +54,6 @@ static const uint8_t * const ff_h264_mlps_state = ff_h264_cabac_tables + H264_ML
 static const uint8_t * const ff_h264_last_coeff_flag_offset_8x8 = ff_h264_cabac_tables + H264_LAST_COEFF_FLAG_OFFSET_8x8_OFFSET;
 
 
-#if !ARCH_ARM
-// Helper fns
-static inline uint32_t bmem_peek4(const void * buf, const unsigned int offset)
-{
-    const uint8_t * const p = (const uint8_t *)buf + (offset >> 3);
-    return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) << (offset & 7);
-}
-
-static inline unsigned int lmbd1(const uint32_t x)
-{
-    return x == 0 ? 32 : __builtin_clz(x);
-}
-
-static inline unsigned int rmbd1(const uint32_t x)
-{
-    return x == 0 ? 32 : __builtin_ctz(x);
-}
-
-// >> 32 is not safe on x86
-static inline uint32_t LSR32M(const uint32_t x, const unsigned int y)
-{
-    return y == 0 ? 0 : x >> (32 - y);
-}
-#else
-
-// >> 32 is safe on arm
-#define LSR32M(x, y) ((x) >> (32 - (y)))
-
-#endif
-
-
 #if !defined(get_cabac_bypass) || !defined(get_cabac_terminate)
 static void refill(CABACContext *c){
 #if CABAC_BITS == 16
@@ -114,13 +83,12 @@ static inline void renorm_cabac_decoder_once(CABACContext *c){
 static void refill2(CABACContext *c){
     int i;
     unsigned x;
-#if 0
+#if !HAVE_FAST_CLZ
     x= c->low ^ (c->low-1);
     i= 7 - ff_h264_norm_shift[x>>(CABAC_BITS-1)];
 #else
-    i = rmbd1(c->low) - 16;
+    i = ff_ctz(c->low) - CABAC_BITS;
 #endif
-
 
     x= -CABAC_MASK;
 

@@ -28,7 +28,19 @@
 #include "hevc.h"
 #include "cabac_functions.h"
 
-#define USE_BY22 1
+// BY22 is probably faster than simple bypass if the processor has
+// either a fast 32-bit divide or a fast 32x32->64[63:32] instruction
+// x86 has fast int divide
+// Arm doesn't have divide or general fast 64 bit, but does have the multiply
+#define USE_BY22 (HAVE_FAST_64BIT || ARCH_ARM || ARCH_x86)
+// Use native divide if we have a fast one - otherwise use mpy 1/x
+// x86 has a fast integer divide - arm doesn't - unsure about other
+// architectures
+#define USE_BY22_DIV  ARCH_X86
+
+// Special case blocks with a single significant ceoff
+// Decreases the complexity of the code for a common case but increases the
+// code size.
 #define USE_N_END_1 1
 
 #if ARCH_ARM
@@ -40,7 +52,8 @@
 
 #define CABAC_MAX_BIN 31
 
-#if USE_BY22
+
+#if USE_BY22 && !USE_BY22_DIV
 #define I(x) (uint32_t)((0x10000000000ULL / (uint64_t)(x)) + 1ULL)
 
 const uint32_t alt1cabac_inv_range[256] __attribute__((aligned(256))) = {
@@ -534,6 +547,48 @@ static const xy_off_t off_xys[3][4][16] =
 };
 
 
+// Helper fns
+#ifndef hevc_mem_bits32
+static av_always_inline uint32_t hevc_mem_bits32(const void * buf, const unsigned int offset)
+{
+    return AV_RB32((const uint8_t *)buf + (offset >> 3)) << (offset & 7);
+}
+#endif
+
+#if AV_GCC_VERSION_AT_LEAST(3,4) && !defined(hevc_clz32)
+#define hevc_clz32 hevc_clz32_builtin
+static av_always_inline unsigned int hevc_clz32_builtin(const uint32_t x)
+{
+    // __builtin_clz says it works on ints - so adjust if int is >32 bits long
+    return __builtin_clz(x) - (sizeof(int) * 8 - 32);
+}
+#endif
+
+// It is unlikely that we will ever need this but include for completeness
+#ifndef hevc_clz32
+static inline unsigned int hevc_clz32(unsigned int x)
+{
+    unsigned int n = 1;
+    if ((x & 0xffff0000) == 0) {
+        n += 16;
+        x <<= 16;
+    }
+    if ((x & 0xff000000) == 0) {
+        n += 8;
+        x <<= 8;
+    }
+    if ((x & 0xf0000000) == 0) {
+        n += 4;
+        x <<= 4;
+    }
+    if ((x & 0xc0000000) == 0) {
+        n += 2;
+        x <<= 2;
+    }
+    return n - ((x >> 31) & 1);
+}
+#endif
+
 
 #if !USE_BY22
 // If no by22 then _by22 functions will revert to normal and so _peek/_flush
@@ -543,17 +598,33 @@ static const xy_off_t off_xys[3][4][16] =
 #define bypass_finish(s)
 #else
 
+#if !USE_BY22_DIV
+// * 1/x @ 32 bits gets us 22 bits of accuracy
+#define CABAC_BY22_PEEK_BITS  22
+#else
+// A real 32-bit divide gets us another bit
+// If we have a 64 bit int & a unit time divider then we should get a lot
+// of bits (55)  but that is untested and it is unclear if it would give
+// us a large advantage
+#define CABAC_BY22_PEEK_BITS  23
+#endif
+
+
 static inline void get_cabac_by22_start(CABACContext * const c)
 {
     const unsigned int bits = __builtin_ctz(c->low);
-    const uint32_t m = bmem_peek4(c->bytestream, 0);
+    const uint32_t m = hevc_mem_bits32(c->bytestream, 0);
     uint32_t x = (c->low << (22 - CABAC_BITS)) ^ ((m ^ 0x80000000U) >> (9 + CABAC_BITS - bits));
+#if !USE_BY22_DIV
     const uint32_t inv = alt1cabac_inv_range[c->range & 0xff];
+#endif
 
     c->bytestream -= (CABAC_BITS / 8);
     c->by22.bits = bits;
+#if !USE_BY22_DIV
     c->by22.range = c->range;
     c->range = inv;
+#endif
     c->low = x;
 }
 #define bypass_start(s) get_cabac_by22_start(&s->HEVClc->cc)
@@ -566,13 +637,18 @@ static inline void get_cabac_by22_finish(CABACContext * const c)
 
     c->bytestream += bytes_used + (CABAC_BITS / 8);
     c->low = (((uint32_t)c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
+#if !USE_BY22_DIV
     c->range = c->by22.range;
+#endif
 }
 #define bypass_finish(s) get_cabac_by22_finish(&s->HEVClc->cc)
 
 #ifndef get_cabac_by22_peek
 static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
 {
+#if USE_BY22_DIV
+    return ((unsigned int)c->low / (unsigned int)c->range) << 9;
+#else
     uint32_t x = c->low & ~1U;
     const uint32_t inv = c->range;
 
@@ -580,6 +656,7 @@ static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
         x = (uint32_t)(((uint64_t)x * (uint64_t)inv) >> 32);
 
     return x << 1;
+#endif
 }
 #endif
 
@@ -589,12 +666,16 @@ static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
 static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, const uint32_t val)
 {
     // Subtract the bits used & reshift up to the top of the word
+#if USE_BY22_DIV
+    const uint32_t low = (((unsigned int)c->low << n) - (((val >> (32 - n)) * (unsigned int)c->range) << 23));
+#else
     const uint32_t low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->by22.range) << 23));
+#endif
 
     // and refill lower bits
     // We will probably OR over some existing bits but that doesn't matter
     c->by22.bits += n;
-    c->low = low | (bmem_peek4(c->bytestream, c->by22.bits) >> 9);
+    c->low = low | (hevc_mem_bits32(c->bytestream, c->by22.bits) >> 9);
 }
 #endif
 
@@ -1138,7 +1219,7 @@ static int coeff_abs_level_remaining_decode_bypass(HEVCContext * const s, const 
 //    PROFILE_START();
 
     y = get_cabac_by22_peek(c);
-    prefix = lmbd1(~y);
+    prefix = hevc_clz32(~y);
     // y << prefix will always have top bit 0
 
     if (prefix < 3) {
@@ -1146,7 +1227,7 @@ static int coeff_abs_level_remaining_decode_bypass(HEVCContext * const s, const 
         last_coeff_abs_level_remaining = (prefix << rice_param) + suffix;
         n = prefix + 1 + rice_param;
     }
-    else if (prefix * 2 + rice_param <= 22 + 2)
+    else if (prefix * 2 + rice_param <= CABAC_BY22_PEEK_BITS + 2)
     {
         const uint32_t suffix = ((y << prefix) | 0x80000000) >> (34 - (prefix + rice_param));
 
@@ -1279,7 +1360,7 @@ static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned i
     {
         *pprev_subset_coded = 1;
         *psum = n + 1;
-        i = __builtin_clz(rv);
+        i = hevc_clz32(rv);
         levels[i] = 2;
         if (get_cabac(c, state_gt2) == 0)
         {
@@ -1913,7 +1994,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                     do {
                         {
-                            unsigned int z = __builtin_clz(coded_vals) + 1;
+                            unsigned int z = hevc_clz32(coded_vals) + 1;
                             level += z;
                             coded_vals <<= z;
                         }
