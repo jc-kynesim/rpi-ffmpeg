@@ -44,7 +44,7 @@ static const uint8_t aac_extradata[] = {
 };
 
 
-const char *format = "mp4";
+static const char *format = "mp4";
 AVFormatContext *ctx;
 uint8_t iobuf[32768];
 AVDictionary *opts;
@@ -137,6 +137,7 @@ static void check_func(int value, int line, const char *msg, ...)
         vprintf(msg, ap);
         printf("\n");
         check_faults++;
+        va_end(ap);
     }
 }
 #define check(value, ...) check_func(value, __LINE__, __VA_ARGS__)

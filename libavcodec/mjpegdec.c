@@ -632,7 +632,8 @@ unk_pixfmt:
         av_log(s->avctx, AV_LOG_DEBUG, "decode_sof0: error, len(%d) mismatch\n", len);
     }
 
-    if (s->rgb && !s->lossless && !s->ls) {
+    if ((s->rgb && !s->lossless && !s->ls) ||
+        (!s->rgb && s->ls && s->nb_components > 1)) {
         av_log(s->avctx, AV_LOG_ERROR, "Unsupported coding and pixel format combination\n");
         return AVERROR_PATCHWELCOME;
     }
@@ -998,7 +999,7 @@ static int ljpeg_decode_rgb_scan(MJpegDecodeContext *s, int nb_components, int p
                     return -1;
 
                 left[i] = buffer[mb_x][i] =
-                    mask & (pred + (dc << point_transform));
+                    mask & (pred + (dc * (1 << point_transform)));
             }
 
             if (s->restart_interval && !--s->restart_count) {
@@ -1246,7 +1247,7 @@ static int mjpeg_decode_scan(MJpegDecodeContext *s, int nb_components, int Ah,
                              int mb_bitmask_size,
                              const AVFrame *reference)
 {
-    int i, mb_x, mb_y;
+    int i, mb_x, mb_y, chroma_h_shift, chroma_v_shift, chroma_width, chroma_height;
     uint8_t *data[MAX_COMPONENTS];
     const uint8_t *reference_data[MAX_COMPONENTS];
     int linesize[MAX_COMPONENTS];
@@ -1262,6 +1263,11 @@ static int mjpeg_decode_scan(MJpegDecodeContext *s, int nb_components, int Ah,
     }
 
     s->restart_count = 0;
+
+    av_pix_fmt_get_chroma_sub_sample(s->avctx->pix_fmt, &chroma_h_shift,
+                                     &chroma_v_shift);
+    chroma_width  = FF_CEIL_RSHIFT(s->width,  chroma_h_shift);
+    chroma_height = FF_CEIL_RSHIFT(s->height, chroma_v_shift);
 
     for (i = 0; i < nb_components; i++) {
         int c   = s->comp_index[i];
@@ -1299,8 +1305,8 @@ static int mjpeg_decode_scan(MJpegDecodeContext *s, int nb_components, int Ah,
 
                     if (s->interlaced && s->bottom_field)
                         block_offset += linesize[c] >> 1;
-                    if (   8*(h * mb_x + x) < s->width
-                        && 8*(v * mb_y + y) < s->height) {
+                    if (   8*(h * mb_x + x) < ((c == 1) || (c == 2) ? chroma_width  : s->width)
+                        && 8*(v * mb_y + y) < ((c == 1) || (c == 2) ? chroma_height : s->height)) {
                         ptr = data[c] + block_offset;
                     } else
                         ptr = NULL;
@@ -2435,7 +2441,7 @@ static void decode_flush(AVCodecContext *avctx)
 #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
 static const AVOption options[] = {
     { "extern_huff", "Use external huffman table.",
-      OFFSET(extern_huff), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VD },
+      OFFSET(extern_huff), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
     { NULL },
 };
 

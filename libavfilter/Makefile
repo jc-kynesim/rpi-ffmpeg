@@ -17,6 +17,7 @@ OBJS = allfilters.o                                                     \
        drawutils.o                                                      \
        fifo.o                                                           \
        formats.o                                                        \
+       framepool.o                                                      \
        graphdump.o                                                      \
        graphparser.o                                                    \
        opencl_allkernels.o                                              \
@@ -27,6 +28,8 @@ OBJS-$(CONFIG_ACOMPRESSOR_FILTER)            += af_sidechaincompress.o
 OBJS-$(CONFIG_ACROSSFADE_FILTER)             += af_afade.o
 OBJS-$(CONFIG_ADELAY_FILTER)                 += af_adelay.o
 OBJS-$(CONFIG_AECHO_FILTER)                  += af_aecho.o
+OBJS-$(CONFIG_AEMPHASIS_FILTER)              += af_aemphasis.o
+OBJS-$(CONFIG_ANEQUALIZER_FILTER)            += af_anequalizer.o
 OBJS-$(CONFIG_AEVAL_FILTER)                  += aeval.o
 OBJS-$(CONFIG_AFADE_FILTER)                  += af_afade.o
 OBJS-$(CONFIG_AFORMAT_FILTER)                += af_aformat.o
@@ -83,8 +86,10 @@ OBJS-$(CONFIG_REPLAYGAIN_FILTER)             += af_replaygain.o
 OBJS-$(CONFIG_RESAMPLE_FILTER)               += af_resample.o
 OBJS-$(CONFIG_RUBBERBAND_FILTER)             += af_rubberband.o
 OBJS-$(CONFIG_SIDECHAINCOMPRESS_FILTER)      += af_sidechaincompress.o
+OBJS-$(CONFIG_SIDECHAINGATE_FILTER)          += af_agate.o
 OBJS-$(CONFIG_SILENCEDETECT_FILTER)          += af_silencedetect.o
 OBJS-$(CONFIG_SILENCEREMOVE_FILTER)          += af_silenceremove.o
+OBJS-$(CONFIG_SOFALIZER_FILTER)              += af_sofalizer.o
 OBJS-$(CONFIG_STEREOTOOLS_FILTER)            += af_stereotools.o
 OBJS-$(CONFIG_STEREOWIDEN_FILTER)            += af_stereowiden.o
 OBJS-$(CONFIG_TREBLE_FILTER)                 += af_biquads.o
@@ -279,8 +284,9 @@ OBJS-$(CONFIG_APHASEMETER_FILTER)            += avf_aphasemeter.o
 OBJS-$(CONFIG_AVECTORSCOPE_FILTER)           += avf_avectorscope.o
 OBJS-$(CONFIG_CONCAT_FILTER)                 += avf_concat.o
 OBJS-$(CONFIG_SHOWCQT_FILTER)                += avf_showcqt.o lswsutils.o lavfutils.o
-OBJS-$(CONFIG_SHOWFREQS_FILTER)              += avf_showfreqs.o
-OBJS-$(CONFIG_SHOWSPECTRUM_FILTER)           += avf_showspectrum.o
+OBJS-$(CONFIG_SHOWFREQS_FILTER)              += avf_showfreqs.o window_func.o
+OBJS-$(CONFIG_SHOWSPECTRUM_FILTER)           += avf_showspectrum.o window_func.o
+OBJS-$(CONFIG_SHOWSPECTRUMPIC_FILTER)        += avf_showspectrum.o window_func.o
 OBJS-$(CONFIG_SHOWVOLUME_FILTER)             += avf_showvolume.o
 OBJS-$(CONFIG_SHOWWAVES_FILTER)              += avf_showwaves.o
 OBJS-$(CONFIG_SHOWWAVESPIC_FILTER)           += avf_showwaves.o

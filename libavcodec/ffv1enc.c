@@ -155,6 +155,10 @@ static void find_best_state(uint8_t best_state[256][256],
             double occ[256] = { 0 };
             double len      = 0;
             occ[j] = 1.0;
+
+            if (!one_state[j])
+                continue;
+
             for (k = 0; k < 256; k++) {
                 double newocc[256] = { 0 };
                 for (m = 1; m < 256; m++)
@@ -366,7 +370,7 @@ static av_always_inline int encode_line(FFV1Context *s, int w,
 }
 
 static int encode_plane(FFV1Context *s, uint8_t *src, int w, int h,
-                         int stride, int plane_index)
+                         int stride, int plane_index, int pixel_stride)
 {
     int x, y, i, ret;
     const int ring_size = s->avctx->context_model ? 3 : 2;
@@ -384,7 +388,7 @@ static int encode_plane(FFV1Context *s, uint8_t *src, int w, int h,
 // { START_TIMER
         if (s->bits_per_raw_sample <= 8) {
             for (x = 0; x < w; x++)
-                sample[0][x] = src[x + stride * y];
+                sample[0][x] = src[x * pixel_stride + stride * y];
             if((ret = encode_line(s, w, sample, plane_index, 8)) < 0)
                 return ret;
         } else {
@@ -700,7 +704,17 @@ static av_cold int encode_init(AVCodecContext *avctx)
         return AVERROR_INVALIDDATA;
     }
 
-    s->ac = avctx->coder_type > 0 ? AC_RANGE_CUSTOM_TAB : AC_GOLOMB_RICE;
+#if FF_API_CODER_TYPE
+FF_DISABLE_DEPRECATION_WARNINGS
+    if (avctx->coder_type != -1)
+        s->ac = avctx->coder_type > 0 ? AC_RANGE_CUSTOM_TAB : AC_GOLOMB_RICE;
+    else
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+    if (s->ac == 1) // Compatbility with common command line usage
+        s->ac = AC_RANGE_CUSTOM_TAB;
+    else if (s->ac == AC_RANGE_DEFAULT_TAB_FORCE)
+        s->ac = AC_RANGE_DEFAULT_TAB;
 
     s->plane_count = 3;
     switch(avctx->pix_fmt) {
@@ -744,6 +758,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
         }
         s->version = FFMAX(s->version, 1);
     case AV_PIX_FMT_GRAY8:
+    case AV_PIX_FMT_YA8:
     case AV_PIX_FMT_YUV444P:
     case AV_PIX_FMT_YUV440P:
     case AV_PIX_FMT_YUV422P:
@@ -755,7 +770,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
     case AV_PIX_FMT_YUVA420P:
         s->chroma_planes = desc->nb_components < 3 ? 0 : 1;
         s->colorspace = 0;
-        s->transparency = desc->nb_components == 4;
+        s->transparency = desc->nb_components == 4 || desc->nb_components == 2;
         if (!avctx->bits_per_raw_sample && !s->bits_per_raw_sample)
             s->bits_per_raw_sample = 8;
         else if (!s->bits_per_raw_sample)
@@ -811,9 +826,15 @@ static av_cold int encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
-    if (s->ac == AC_RANGE_CUSTOM_TAB)
+    if (s->ac == AC_RANGE_CUSTOM_TAB) {
         for (i = 1; i < 256; i++)
             s->state_transition[i] = ver2_state[i];
+    } else {
+        RangeCoder c;
+        ff_build_rac_states(&c, 0.05 * (1LL << 32), 256 - 8);
+        for (i = 1; i < 256; i++)
+            s->state_transition[i] = c.one_state[i];
+    }
 
     for (i = 0; i < 256; i++) {
         s->quant_table_count = 2;
@@ -924,7 +945,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
             if (p[0] == 0)
                 break;
         }
-        sort_stt(s, s->state_transition);
+        if (s->ac == AC_RANGE_CUSTOM_TAB)
+            sort_stt(s, s->state_transition);
 
         find_best_state(best_state, s->state_transition);
 
@@ -1153,20 +1175,23 @@ retry:
                       fs->c.bytestream_end - fs->c.bytestream_start - fs->ac_byte_count);
     }
 
-    if (f->colorspace == 0) {
+    if (f->colorspace == 0 && c->pix_fmt != AV_PIX_FMT_YA8) {
         const int chroma_width  = FF_CEIL_RSHIFT(width,  f->chroma_h_shift);
         const int chroma_height = FF_CEIL_RSHIFT(height, f->chroma_v_shift);
         const int cx            = x >> f->chroma_h_shift;
         const int cy            = y >> f->chroma_v_shift;
 
-        ret = encode_plane(fs, p->data[0] + ps*x + y*p->linesize[0], width, height, p->linesize[0], 0);
+        ret = encode_plane(fs, p->data[0] + ps*x + y*p->linesize[0], width, height, p->linesize[0], 0, 1);
 
         if (f->chroma_planes) {
-            ret |= encode_plane(fs, p->data[1] + ps*cx+cy*p->linesize[1], chroma_width, chroma_height, p->linesize[1], 1);
-            ret |= encode_plane(fs, p->data[2] + ps*cx+cy*p->linesize[2], chroma_width, chroma_height, p->linesize[2], 1);
+            ret |= encode_plane(fs, p->data[1] + ps*cx+cy*p->linesize[1], chroma_width, chroma_height, p->linesize[1], 1, 1);
+            ret |= encode_plane(fs, p->data[2] + ps*cx+cy*p->linesize[2], chroma_width, chroma_height, p->linesize[2], 1, 1);
         }
         if (fs->transparency)
-            ret |= encode_plane(fs, p->data[3] + ps*x + y*p->linesize[3], width, height, p->linesize[3], 2);
+            ret |= encode_plane(fs, p->data[3] + ps*x + y*p->linesize[3], width, height, p->linesize[3], 2, 1);
+    } else if (c->pix_fmt == AV_PIX_FMT_YA8) {
+        ret  = encode_plane(fs, p->data[0] +     ps*x + y*p->linesize[0], width, height, p->linesize[0], 0, 2);
+        ret |= encode_plane(fs, p->data[0] + 1 + ps*x + y*p->linesize[0], width, height, p->linesize[0], 1, 2);
     } else {
         ret = encode_rgb_frame(fs, planes, width, height, p->linesize);
     }
@@ -1345,7 +1370,18 @@ static av_cold int encode_close(AVCodecContext *avctx)
 #define OFFSET(x) offsetof(FFV1Context, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
-    { "slicecrc", "Protect slices with CRCs", OFFSET(ec), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 1, VE },
+    { "slicecrc", "Protect slices with CRCs", OFFSET(ec), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, VE },
+    { "coder", "Coder type", OFFSET(ac), AV_OPT_TYPE_INT,
+            { .i64 = 0 }, -2, 2, VE, "coder" },
+        { "rice", "Golomb rice", 0, AV_OPT_TYPE_CONST,
+            { .i64 = AC_GOLOMB_RICE }, INT_MIN, INT_MAX, VE, "coder" },
+        { "range_def", "Range with default table", 0, AV_OPT_TYPE_CONST,
+            { .i64 = AC_RANGE_DEFAULT_TAB_FORCE }, INT_MIN, INT_MAX, VE, "coder" },
+        { "range_tab", "Range with custom table", 0, AV_OPT_TYPE_CONST,
+            { .i64 = AC_RANGE_CUSTOM_TAB }, INT_MIN, INT_MAX, VE, "coder" },
+        { "ac", "Range with custom table (the ac option exists for compatibility and is deprecated)", 0, AV_OPT_TYPE_CONST,
+            { .i64 = 1 }, INT_MIN, INT_MAX, VE, "coder" },
+
     { NULL }
 };
 
@@ -1356,10 +1392,12 @@ static const AVClass ffv1_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
+#if FF_API_CODER_TYPE
 static const AVCodecDefault ffv1_defaults[] = {
     { "coder", "-1" },
     { NULL },
 };
+#endif
 
 AVCodec ff_ffv1_encoder = {
     .name           = "ffv1",
@@ -1382,9 +1420,12 @@ AVCodec ff_ffv1_encoder = {
         AV_PIX_FMT_YUVA444P9, AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA420P9,
         AV_PIX_FMT_GRAY16,    AV_PIX_FMT_GRAY8,     AV_PIX_FMT_GBRP9,     AV_PIX_FMT_GBRP10,
         AV_PIX_FMT_GBRP12,    AV_PIX_FMT_GBRP14,
+        AV_PIX_FMT_YA8,
         AV_PIX_FMT_NONE
 
     },
+#if FF_API_CODER_TYPE
     .defaults       = ffv1_defaults,
+#endif
     .priv_class     = &ffv1_class,
 };

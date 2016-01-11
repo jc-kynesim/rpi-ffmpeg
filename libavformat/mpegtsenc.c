@@ -99,6 +99,7 @@ typedef struct MpegTSWrite {
 #define MPEGTS_FLAG_REEMIT_PAT_PMT  0x01
 #define MPEGTS_FLAG_AAC_LATM        0x02
 #define MPEGTS_FLAG_PAT_PMT_AT_FRAMES           0x04
+#define MPEGTS_FLAG_SYSTEM_B        0x08
     int flags;
     int copyts;
     int tables_version;
@@ -273,6 +274,12 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
         MpegTSWriteStream *ts_st = st->priv_data;
         AVDictionaryEntry *lang = av_dict_get(st->metadata, "language", NULL, 0);
 
+        if (s->nb_programs) {
+            AVProgram *program = av_find_program_from_stream(s, NULL, i);
+            if (program->id != service->sid)
+                continue;
+        }
+
         if (q - data > SECTION_LENGTH - 32) {
             err = 1;
             break;
@@ -313,7 +320,14 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
             stream_type = STREAM_TYPE_AUDIO_AAC_LATM;
             break;
         case AV_CODEC_ID_AC3:
-            stream_type = STREAM_TYPE_AUDIO_AC3;
+            stream_type = (ts->flags & MPEGTS_FLAG_SYSTEM_B)
+                          ? STREAM_TYPE_PRIVATE_DATA
+                          : STREAM_TYPE_AUDIO_AC3;
+            break;
+        case AV_CODEC_ID_EAC3:
+            stream_type = (ts->flags & MPEGTS_FLAG_SYSTEM_B)
+                          ? STREAM_TYPE_PRIVATE_DATA
+                          : STREAM_TYPE_AUDIO_EAC3;
             break;
         case AV_CODEC_ID_DTS:
             stream_type = STREAM_TYPE_AUDIO_DTS;
@@ -337,7 +351,12 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
         /* write optional descriptors here */
         switch (st->codec->codec_type) {
         case AVMEDIA_TYPE_AUDIO:
-            if (st->codec->codec_id==AV_CODEC_ID_EAC3) {
+            if (st->codec->codec_id==AV_CODEC_ID_AC3 && (ts->flags & MPEGTS_FLAG_SYSTEM_B)) {
+                *q++=0x6a; // AC3 descriptor see A038 DVB SI
+                *q++=1; // 1 byte, all flags sets to 0
+                *q++=0; // omit all fields...
+            }
+            if (st->codec->codec_id==AV_CODEC_ID_EAC3 && (ts->flags & MPEGTS_FLAG_SYSTEM_B)) {
                 *q++=0x7a; // EAC3 descriptor see A038 DVB SI
                 *q++=1; // 1 byte, all flags sets to 0
                 *q++=0; // omit all fields...
@@ -401,11 +420,11 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
 
                         if (st->codec->extradata[19] == st->codec->channels - coupled_stream_counts[st->codec->channels] &&
                             st->codec->extradata[20] == coupled_stream_counts[st->codec->channels] &&
-                            memcmp(&st->codec->extradata[21], channel_map_a[st->codec->channels], st->codec->channels) == 0) {
+                            memcmp(&st->codec->extradata[21], channel_map_a[st->codec->channels-1], st->codec->channels) == 0) {
                             *q++ = st->codec->channels;
                         } else if (st->codec->channels >= 2 && st->codec->extradata[19] == st->codec->channels &&
                                    st->codec->extradata[20] == 0 &&
-                                   memcmp(&st->codec->extradata[21], channel_map_b[st->codec->channels], st->codec->channels) == 0) {
+                                   memcmp(&st->codec->extradata[21], channel_map_b[st->codec->channels-1], st->codec->channels) == 0) {
                             *q++ = st->codec->channels | 0x80;
                         } else {
                             /* Unsupported, could write an extended descriptor here */
@@ -698,7 +717,7 @@ static void section_write_packet(MpegTSSection *s, const uint8_t *packet)
     avio_write(ctx->pb, packet, TS_PACKET_SIZE);
 }
 
-static int mpegts_write_header(AVFormatContext *s)
+static int mpegts_init(AVFormatContext *s)
 {
     MpegTSWrite *ts = s->priv_data;
     MpegTSWriteStream *ts_st;
@@ -719,22 +738,43 @@ static int mpegts_write_header(AVFormatContext *s)
 
     ts->tsid = ts->transport_stream_id;
     ts->onid = ts->original_network_id;
-    /* allocate a single DVB service */
-    title = av_dict_get(s->metadata, "service_name", NULL, 0);
-    if (!title)
-        title = av_dict_get(s->metadata, "title", NULL, 0);
-    service_name  = title ? title->value : DEFAULT_SERVICE_NAME;
-    provider      = av_dict_get(s->metadata, "service_provider", NULL, 0);
-    provider_name = provider ? provider->value : DEFAULT_PROVIDER_NAME;
-    service       = mpegts_add_service(ts, ts->service_id,
-                                       provider_name, service_name);
+    if (!s->nb_programs) {
+        /* allocate a single DVB service */
+        title = av_dict_get(s->metadata, "service_name", NULL, 0);
+        if (!title)
+            title = av_dict_get(s->metadata, "title", NULL, 0);
+        service_name  = title ? title->value : DEFAULT_SERVICE_NAME;
+        provider      = av_dict_get(s->metadata, "service_provider", NULL, 0);
+        provider_name = provider ? provider->value : DEFAULT_PROVIDER_NAME;
+        service       = mpegts_add_service(ts, ts->service_id,
+                                           provider_name, service_name);
 
-    if (!service)
-        return AVERROR(ENOMEM);
+        if (!service)
+            return AVERROR(ENOMEM);
 
-    service->pmt.write_packet = section_write_packet;
-    service->pmt.opaque       = s;
-    service->pmt.cc           = 15;
+        service->pmt.write_packet = section_write_packet;
+        service->pmt.opaque       = s;
+        service->pmt.cc           = 15;
+    } else {
+        for (i = 0; i < s->nb_programs; i++) {
+            AVProgram *program = s->programs[i];
+            title = av_dict_get(program->metadata, "service_name", NULL, 0);
+            if (!title)
+                title = av_dict_get(program->metadata, "title", NULL, 0);
+            service_name  = title ? title->value : DEFAULT_SERVICE_NAME;
+            provider      = av_dict_get(program->metadata, "service_provider", NULL, 0);
+            provider_name = provider ? provider->value : DEFAULT_PROVIDER_NAME;
+            service       = mpegts_add_service(ts, program->id,
+                                               provider_name, service_name);
+
+            if (!service)
+                return AVERROR(ENOMEM);
+
+            service->pmt.write_packet = section_write_packet;
+            service->pmt.opaque       = s;
+            service->pmt.cc           = 15;
+        }
+    }
 
     ts->pat.pid          = PAT_PID;
     /* Initialize at 15 so that it wraps and is equal to 0 for the
@@ -852,11 +892,11 @@ static int mpegts_write_header(AVFormatContext *s)
         ts_st = pcr_st->priv_data;
 
     if (ts->mux_rate > 1) {
-        service->pcr_packet_period = (ts->mux_rate * ts->pcr_period) /
+        service->pcr_packet_period = (int64_t)ts->mux_rate * ts->pcr_period /
                                      (TS_PACKET_SIZE * 8 * 1000);
-        ts->sdt_packet_period      = (ts->mux_rate * SDT_RETRANS_TIME) /
+        ts->sdt_packet_period      = (int64_t)ts->mux_rate * SDT_RETRANS_TIME /
                                      (TS_PACKET_SIZE * 8 * 1000);
-        ts->pat_packet_period      = (ts->mux_rate * PAT_RETRANS_TIME) /
+        ts->pat_packet_period      = (int64_t)ts->mux_rate * PAT_RETRANS_TIME /
                                      (TS_PACKET_SIZE * 8 * 1000);
 
         if (ts->copyts < 1)
@@ -920,26 +960,6 @@ static int mpegts_write_header(AVFormatContext *s)
 
 fail:
     av_freep(&pids);
-    for (i = 0; i < s->nb_streams; i++) {
-        st    = s->streams[i];
-        ts_st = st->priv_data;
-        if (ts_st) {
-            av_freep(&ts_st->payload);
-            if (ts_st->amux) {
-                avformat_free_context(ts_st->amux);
-                ts_st->amux = NULL;
-            }
-        }
-        av_freep(&st->priv_data);
-    }
-
-    for (i = 0; i < ts->nb_services; i++) {
-        service = ts->services[i];
-        av_freep(&service->provider_name);
-        av_freep(&service->name);
-        av_freep(&service);
-    }
-    av_freep(&ts->services);
     return ret;
 }
 
@@ -1674,20 +1694,27 @@ static int mpegts_write_packet(AVFormatContext *s, AVPacket *pkt)
 
 static int mpegts_write_end(AVFormatContext *s)
 {
+    if (s->pb)
+        mpegts_write_flush(s);
+
+    return 0;
+}
+
+static void mpegts_deinit(AVFormatContext *s)
+{
     MpegTSWrite *ts = s->priv_data;
     MpegTSService *service;
     int i;
 
-    if (s->pb)
-        mpegts_write_flush(s);
-
     for (i = 0; i < s->nb_streams; i++) {
         AVStream *st = s->streams[i];
         MpegTSWriteStream *ts_st = st->priv_data;
-        av_freep(&ts_st->payload);
-        if (ts_st->amux) {
-            avformat_free_context(ts_st->amux);
-            ts_st->amux = NULL;
+        if (ts_st) {
+            av_freep(&ts_st->payload);
+            if (ts_st->amux) {
+                avformat_free_context(ts_st->amux);
+                ts_st->amux = NULL;
+            }
         }
     }
 
@@ -1698,8 +1725,24 @@ static int mpegts_write_end(AVFormatContext *s)
         av_freep(&service);
     }
     av_freep(&ts->services);
+}
 
-    return 0;
+static int mpegts_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+{
+    int ret = 1;
+    AVStream *st = s->streams[pkt->stream_index];
+
+    if (st->codec->codec_id == AV_CODEC_ID_H264) {
+        if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
+                              AV_RB24(pkt->data) != 0x000001)
+            ret = ff_stream_add_bitstream_filter(st, "h264_mp4toannexb", NULL);
+    } else if (st->codec->codec_id == AV_CODEC_ID_HEVC) {
+        if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
+                              AV_RB24(pkt->data) != 0x000001)
+            ret = ff_stream_add_bitstream_filter(st, "hevc_mp4toannexb", NULL);
+    }
+
+    return ret;
 }
 
 static const AVOption options[] = {
@@ -1743,7 +1786,7 @@ static const AVOption options[] = {
       offsetof(MpegTSWrite, start_pid), AV_OPT_TYPE_INT,
       { .i64 = 0x0100 }, 0x0020, 0x0f00, AV_OPT_FLAG_ENCODING_PARAM },
     { "mpegts_m2ts_mode", "Enable m2ts mode.",
-      offsetof(MpegTSWrite, m2ts_mode), AV_OPT_TYPE_INT,
+      offsetof(MpegTSWrite, m2ts_mode), AV_OPT_TYPE_BOOL,
       { .i64 = -1 }, -1, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { "muxrate", NULL,
       offsetof(MpegTSWrite, mux_rate), AV_OPT_TYPE_INT,
@@ -1763,18 +1806,21 @@ static const AVOption options[] = {
     { "pat_pmt_at_frames", "Reemit PAT and PMT at each video frame",
       0, AV_OPT_TYPE_CONST, { .i64 = MPEGTS_FLAG_PAT_PMT_AT_FRAMES}, 0, INT_MAX,
       AV_OPT_FLAG_ENCODING_PARAM, "mpegts_flags" },
+    { "system_b", "Conform to System B (DVB) instead of System A (ATSC)",
+      0, AV_OPT_TYPE_CONST, { .i64 = MPEGTS_FLAG_SYSTEM_B }, 0, INT_MAX,
+      AV_OPT_FLAG_ENCODING_PARAM, "mpegts_flags" },
     // backward compatibility
     { "resend_headers", "Reemit PAT/PMT before writing the next packet",
       offsetof(MpegTSWrite, reemit_pat_pmt), AV_OPT_TYPE_INT,
       { .i64 = 0 }, 0, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
     { "mpegts_copyts", "don't offset dts/pts",
-      offsetof(MpegTSWrite, copyts), AV_OPT_TYPE_INT,
+      offsetof(MpegTSWrite, copyts), AV_OPT_TYPE_BOOL,
       { .i64 = -1 }, -1, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { "tables_version", "set PAT, PMT and SDT version",
       offsetof(MpegTSWrite, tables_version), AV_OPT_TYPE_INT,
       { .i64 = 0 }, 0, 31, AV_OPT_FLAG_ENCODING_PARAM },
     { "omit_video_pes_length", "Omit the PES packet length for video packets",
-      offsetof(MpegTSWrite, omit_video_pes_length), AV_OPT_TYPE_INT,
+      offsetof(MpegTSWrite, omit_video_pes_length), AV_OPT_TYPE_BOOL,
       { .i64 = 1 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { "pcr_period", "PCR retransmission time",
       offsetof(MpegTSWrite, pcr_period), AV_OPT_TYPE_INT,
@@ -1803,9 +1849,11 @@ AVOutputFormat ff_mpegts_muxer = {
     .priv_data_size = sizeof(MpegTSWrite),
     .audio_codec    = AV_CODEC_ID_MP2,
     .video_codec    = AV_CODEC_ID_MPEG2VIDEO,
-    .write_header   = mpegts_write_header,
+    .init           = mpegts_init,
     .write_packet   = mpegts_write_packet,
     .write_trailer  = mpegts_write_end,
+    .deinit         = mpegts_deinit,
+    .check_bitstream = mpegts_check_bitstream,
     .flags          = AVFMT_ALLOW_FLUSH | AVFMT_VARIABLE_FPS,
     .priv_class     = &mpegts_muxer_class,
 };

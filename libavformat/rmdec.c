@@ -1179,7 +1179,7 @@ static int ivr_probe(AVProbeData *p)
 static int ivr_read_header(AVFormatContext *s)
 {
     unsigned tag, type, len, tlen, value;
-    int i, j, n, count, nb_streams, ret;
+    int i, j, n, count, nb_streams = 0, ret;
     uint8_t key[256], val[256];
     AVIOContext *pb = s->pb;
     AVStream *st;
@@ -1376,7 +1376,7 @@ static int ivr_read_packet(AVFormatContext *s, AVPacket *pkt)
                     return AVERROR_EOF;
                 }
             } else {
-                av_log(s, AV_LOG_ERROR, "Unsupported opcode=%d at %lX\n", opcode, avio_tell(pb) - 1);
+                av_log(s, AV_LOG_ERROR, "Unsupported opcode=%d at %"PRIX64"\n", opcode, avio_tell(pb) - 1);
                 return AVERROR(EIO);
             }
         }

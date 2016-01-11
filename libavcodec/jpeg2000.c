@@ -31,6 +31,7 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/mem.h"
 #include "avcodec.h"
+#include "internal.h"
 #include "jpeg2000.h"
 
 #define SHL(a, n) ((n) >= 0 ? (a) << (n) : (a) >> -(n))
@@ -38,11 +39,11 @@
 /* tag tree routines */
 
 /* allocate the memory for tag tree */
-static int32_t tag_tree_size(uint16_t w, uint16_t h)
+static int32_t tag_tree_size(int w, int h)
 {
-    uint32_t res = 0;
+    int64_t res = 0;
     while (w > 1 || h > 1) {
-        res += w * h;
+        res += w * (int64_t)h;
         av_assert0(res + 1 < INT32_MAX);
         w = (w + 1) >> 1;
         h = (h + 1) >> 1;
@@ -221,7 +222,7 @@ static void init_band_stepsize(AVCodecContext *avctx,
          * R_b = R_I + log2 (gain_b )
          * see ISO/IEC 15444-1:2002 E.1.1 eqn. E-3 and E-4 */
         gain            = cbps;
-        band->f_stepsize  = pow(2.0, gain - qntsty->expn[gbandno]);
+        band->f_stepsize  = ff_exp2fi(gain - qntsty->expn[gbandno]);
         band->f_stepsize *= qntsty->mant[gbandno] / 2048.0 + 1.0;
         break;
     default:

@@ -1,8 +1,4 @@
 /*
- * Header file for hardcoded AAC SBR windows
- *
- * Copyright (c) 2014 Reimar Döffinger <Reimar.Doeffinger@gmx.de>
- *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -20,23 +16,27 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <stdlib.h>
-#include "libavutil/internal.h"
 #include "libavutil/common.h"
-#undef CONFIG_HARDCODED_TABLES
-#define CONFIG_HARDCODED_TABLES 0
-#define USE_FIXED 1
-#include "aacsbr_fixed_tablegen.h"
-#include "tableprint.h"
 
-int main(void)
+
+// clip a signed integer into the (-2^23), (2^23-1) range
+static inline int dca_clip23(int a)
 {
-    aacsbr_tableinit();
+    return av_clip_intp2(a, 23);
+}
 
-    write_fileheader();
+static inline int32_t dca_norm(int64_t a, int bits)
+{
+    if (bits > 0)
+        return (int32_t)((a + (INT64_C(1) << (bits - 1))) >> bits);
+    else
+        return (int32_t)a;
+}
 
-    WRITE_ARRAY_ALIGNED("static const", 32, int32_t, sbr_qmf_window_ds);
-    WRITE_ARRAY_ALIGNED("static const", 32, int32_t, sbr_qmf_window_us);
-
-    return 0;
+static inline int64_t dca_round(int64_t a, int bits)
+{
+    if (bits > 0)
+        return (a + (INT64_C(1) << (bits - 1))) & ~((INT64_C(1) << bits) - 1);
+    else
+        return a;
 }

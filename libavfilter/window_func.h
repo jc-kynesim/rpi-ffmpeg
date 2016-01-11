@@ -1,5 +1,5 @@
 /*
- * Generate a header file for hardcoded DSD tables
+ * Copyright (c) 2015 Paul B Mahol
  *
  * This file is part of FFmpeg.
  *
@@ -18,21 +18,15 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <stdlib.h>
-#define CONFIG_HARDCODED_TABLES 0
-#include "dsd_tablegen.h"
-#include "tableprint.h"
-#include <inttypes.h>
 
-int main(void)
-{
-    dsd_ctables_tableinit();
+#ifndef AVFILTER_WINDOW_FUNC_H
+#define AVFILTER_WINDOW_FUNC_H
 
-    write_fileheader();
+enum WindowFunc     { WFUNC_RECT, WFUNC_HANNING, WFUNC_HAMMING, WFUNC_BLACKMAN,
+                      WFUNC_BARTLETT, WFUNC_WELCH, WFUNC_FLATTOP,
+                      WFUNC_BHARRIS, WFUNC_BNUTTALL, WFUNC_SINE, WFUNC_NUTTALL,
+                      WFUNC_BHANN, WFUNC_LANCZOS, WFUNC_GAUSS, WFUNC_TUKEY, NB_WFUNC };
 
-    printf("static const double ctables[CTABLES][256] = {\n");
-    write_float_2d_array(ctables, CTABLES, 256);
-    printf("};\n");
+void ff_generate_window_func(float *lut, int N, int win_func, float *overlap);
 
-    return 0;
-}
+#endif /* AVFILTER_WINDOW_FUNC_H */

@@ -1,7 +1,4 @@
 /*
- * Header file for hardcoded AAC SBR windows
- *
- * Copyright (c) 2014 Reimar Döffinger <Reimar.Doeffinger@gmx.de>
  *
  * This file is part of FFmpeg.
  *
@@ -20,23 +17,19 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <stdlib.h>
-#include "libavutil/internal.h"
-#include "libavutil/common.h"
-#undef CONFIG_HARDCODED_TABLES
-#define CONFIG_HARDCODED_TABLES 0
-#define USE_FIXED 0
-#include "aacsbr_tablegen.h"
-#include "tableprint.h"
+#ifndef AVCODEC_PROFILES_H
+#define AVCODEC_PROFILES_H
 
-int main(void)
-{
-    aacsbr_tableinit();
+#include "avcodec.h"
 
-    write_fileheader();
+extern const AVProfile ff_aac_profiles[];
+extern const AVProfile ff_dca_profiles[];
+extern const AVProfile ff_h264_profiles[];
+extern const AVProfile ff_hevc_profiles[];
+extern const AVProfile ff_jpeg2000_profiles[];
+extern const AVProfile ff_mpeg2_video_profiles[];
+extern const AVProfile ff_mpeg4_video_profiles[];
+extern const AVProfile ff_vc1_profiles[];
+extern const AVProfile ff_vp9_profiles[];
 
-    WRITE_ARRAY_ALIGNED("static const", 32, float, sbr_qmf_window_ds);
-    WRITE_ARRAY_ALIGNED("static const", 32, float, sbr_qmf_window_us);
-
-    return 0;
-}
+#endif

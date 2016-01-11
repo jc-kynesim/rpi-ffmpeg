@@ -117,6 +117,11 @@ struct AVFormatInternal {
     int inject_global_side_data;
 
     int avoid_negative_ts_use_pts;
+
+    /**
+     * Whether or not a header has already been written
+     */
+    int header_written;
 };
 
 struct AVStreamInternal {
@@ -125,6 +130,18 @@ struct AVStreamInternal {
      * from dts.
      */
     int reorder;
+
+    /**
+     * bitstream filter to run on stream
+     * - encoding: Set by muxer using ff_stream_add_bitstream_filter
+     * - decoding: unused
+     */
+    AVBitStreamFilterContext *bsfc;
+
+    /**
+     * Whether or not check_bitstream should still be run on each packet
+     */
+    int bitstream_checked;
 };
 
 #ifdef __GNUC__
@@ -155,8 +172,6 @@ char *ff_data_to_hex(char *buf, const uint8_t *src, int size, int lowercase);
  * @return the number of bytes written (or to be written, if data is null)
  */
 int ff_hex_to_data(uint8_t *data, const char *p);
-
-void ff_program_add_stream_index(AVFormatContext *ac, int progid, unsigned int idx);
 
 /**
  * Add packet to AVFormatContext->packet_buffer list, determining its
@@ -450,6 +465,17 @@ enum AVChromaLocation ff_choose_chroma_location(AVFormatContext *s, AVStream *st
 int ff_generate_avci_extradata(AVStream *st);
 
 /**
+ * Add a bitstream filter to a stream.
+ *
+ * @param st output stream to add a filter to
+ * @param name the name of the filter to add
+ * @param args filter-specific argument string
+ * @return  >0 on success;
+ *          AVERROR code on failure
+ */
+int ff_stream_add_bitstream_filter(AVStream *st, const char *name, const char *args);
+
+/**
  * Wrap errno on rename() error.
  *
  * @param oldpath source path
@@ -515,5 +541,11 @@ int ff_copy_whitelists(AVFormatContext *dst, AVFormatContext *src);
 
 int ffio_open2_wrapper(struct AVFormatContext *s, AVIOContext **pb, const char *url, int flags,
                        const AVIOInterruptCB *int_cb, AVDictionary **options);
+
+/**
+ * Returned by demuxers to indicate that data was consumed but discarded
+ * (ignored streams or junk data). The framework will re-call the demuxer.
+ */
+#define FFERROR_REDO FFERRTAG('R','E','D','O')
 
 #endif /* AVFORMAT_INTERNAL_H */

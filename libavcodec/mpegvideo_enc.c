@@ -78,7 +78,7 @@ static int sse_mb(MpegEncContext *s);
 static void denoise_dct_c(MpegEncContext *s, int16_t *block);
 static int dct_quantize_trellis_c(MpegEncContext *s, int16_t *block, int n, int qscale, int *overflow);
 
-static uint8_t default_mv_penalty[MAX_FCODE + 1][MAX_MV * 2 + 1];
+static uint8_t default_mv_penalty[MAX_FCODE + 1][MAX_DMV * 2 + 1];
 static uint8_t default_fcode_tab[MAX_MV * 2 + 1];
 
 const AVOption ff_mpv_generic_options[] = {
@@ -286,6 +286,7 @@ av_cold int ff_dct_encode_init(MpegEncContext *s) {
 av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
 {
     MpegEncContext *s = avctx->priv_data;
+    AVCPBProperties *cpb_props;
     int i, ret, format_supported;
 
     mpv_encode_defaults(s);
@@ -346,6 +347,7 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
         break;
     }
 
+    avctx->bits_per_raw_sample = av_clip(avctx->bits_per_raw_sample, 0, 8);
     s->bit_rate = avctx->bit_rate;
     s->width    = avctx->width;
     s->height   = avctx->height;
@@ -1035,6 +1037,14 @@ FF_ENABLE_DEPRECATION_WARNINGS
                 return ret;
         }
     }
+
+    cpb_props = ff_add_cpb_side_data(avctx);
+    if (!cpb_props)
+        return AVERROR(ENOMEM);
+    cpb_props->max_bitrate = avctx->rc_max_rate;
+    cpb_props->min_bitrate = avctx->rc_min_rate;
+    cpb_props->avg_bitrate = avctx->bit_rate;
+    cpb_props->buffer_size = avctx->rc_buffer_size;
 
     return 0;
 fail:
@@ -1826,6 +1836,8 @@ vbv_retry:
         if (ret < 0)
             return -1;
 
+#if FF_API_STAT_BITS
+FF_DISABLE_DEPRECATION_WARNINGS
         avctx->header_bits = s->header_bits;
         avctx->mv_bits     = s->mv_bits;
         avctx->misc_bits   = s->misc_bits;
@@ -1835,6 +1847,8 @@ vbv_retry:
         // FIXME f/b_count in avctx
         avctx->p_count     = s->mb_num - s->i_count - s->skip_count;
         avctx->skip_count  = s->skip_count;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
 
         frame_end(s);
 
@@ -1896,9 +1910,9 @@ vbv_retry:
                                        s->pict_type);
 
         if (s->avctx->flags & AV_CODEC_FLAG_PASS1)
-            assert(avctx->header_bits + avctx->mv_bits + avctx->misc_bits +
-                   avctx->i_tex_bits + avctx->p_tex_bits ==
-                       put_bits_count(&s->pb));
+            assert(put_bits_count(&s->pb) == s->header_bits + s->mv_bits +
+                                             s->misc_bits + s->i_tex_bits +
+                                             s->p_tex_bits);
         flush_put_bits(&s->pb);
         s->frame_bits  = put_bits_count(&s->pb);
 
@@ -1939,6 +1953,9 @@ vbv_retry:
             s->out_format == FMT_MPEG1                     &&
             90000LL * (avctx->rc_buffer_size - 1) <=
                 s->avctx->rc_max_rate * 0xFFFFLL) {
+            AVCPBProperties *props;
+            size_t props_size;
+
             int vbv_delay, min_delay;
             double inbits  = s->avctx->rc_max_rate *
                              av_q2d(s->avctx->time_base);
@@ -1965,10 +1982,32 @@ vbv_retry:
             s->vbv_delay_ptr[1]  = vbv_delay >> 5;
             s->vbv_delay_ptr[2] &= 0x07;
             s->vbv_delay_ptr[2] |= vbv_delay << 3;
+
+            props = av_cpb_properties_alloc(&props_size);
+            if (!props)
+                return AVERROR(ENOMEM);
+            props->vbv_delay = vbv_delay * 300;
+
+            ret = av_packet_add_side_data(pkt, AV_PKT_DATA_CPB_PROPERTIES,
+                                          (uint8_t*)props, props_size);
+            if (ret < 0) {
+                av_freep(&props);
+                return ret;
+            }
+
+#if FF_API_VBV_DELAY
+FF_DISABLE_DEPRECATION_WARNINGS
             avctx->vbv_delay     = vbv_delay * 300;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
         }
         s->total_bits     += s->frame_bits;
+#if FF_API_STAT_BITS
+FF_DISABLE_DEPRECATION_WARNINGS
         avctx->frame_bits  = s->frame_bits;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+
 
         pkt->pts = s->current_picture.f->pts;
         if (!s->low_delay && s->pict_type != AV_PICTURE_TYPE_B) {
@@ -4688,7 +4727,7 @@ int ff_dct_quantize_c(MpegEncContext *s,
 #define OFFSET(x) offsetof(MpegEncContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption h263_options[] = {
-    { "obmc",         "use overlapped block motion compensation.", OFFSET(obmc), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
+    { "obmc",         "use overlapped block motion compensation.", OFFSET(obmc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
     { "mb_info",      "emit macroblock info for RFC 2190 packetization, the parameter value is the maximum payload size", OFFSET(mb_info), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VE },
     FF_MPV_COMMON_OPTS
     { NULL },
@@ -4715,10 +4754,10 @@ AVCodec ff_h263_encoder = {
 };
 
 static const AVOption h263p_options[] = {
-    { "umv",        "Use unlimited motion vectors.",    OFFSET(umvplus), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
-    { "aiv",        "Use alternative inter VLC.",       OFFSET(alt_inter_vlc), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
-    { "obmc",       "use overlapped block motion compensation.", OFFSET(obmc), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
-    { "structured_slices", "Write slice start position at every GOB header instead of just GOB number.", OFFSET(h263_slice_structured), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE},
+    { "umv",        "Use unlimited motion vectors.",    OFFSET(umvplus),       AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
+    { "aiv",        "Use alternative inter VLC.",       OFFSET(alt_inter_vlc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
+    { "obmc",       "use overlapped block motion compensation.", OFFSET(obmc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
+    { "structured_slices", "Write slice start position at every GOB header instead of just GOB number.", OFFSET(h263_slice_structured), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE},
     FF_MPV_COMMON_OPTS
     { NULL },
 };

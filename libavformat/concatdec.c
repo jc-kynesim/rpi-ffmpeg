@@ -555,9 +555,7 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
 
     while (1) {
         ret = av_read_frame(cat->avf, pkt);
-        if (ret == AVERROR_EOF || packet_after_outpoint(cat, pkt)) {
-            if (ret == 0)
-                av_packet_unref(pkt);
+        if (ret == AVERROR_EOF) {
             if ((ret = open_next_file(avf)) < 0)
                 return ret;
             continue;
@@ -567,6 +565,12 @@ static int concat_read_packet(AVFormatContext *avf, AVPacket *pkt)
         if ((ret = match_streams(avf)) < 0) {
             av_packet_unref(pkt);
             return ret;
+        }
+        if (packet_after_outpoint(cat, pkt)) {
+            av_packet_unref(pkt);
+            if ((ret = open_next_file(avf)) < 0)
+                return ret;
+            continue;
         }
         cs = &cat->cur_file->streams[pkt->stream_index];
         if (cs->out_stream_index < 0) {
@@ -706,9 +710,9 @@ static int concat_seek(AVFormatContext *avf, int stream,
 
 static const AVOption options[] = {
     { "safe", "enable safe mode",
-      OFFSET(safe), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 1, DEC },
+      OFFSET(safe), AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, DEC },
     { "auto_convert", "automatically convert bitstream format",
-      OFFSET(auto_convert), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, DEC },
+      OFFSET(auto_convert), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, DEC },
     { "segment_time_metadata", "output file segment start time and duration as packet metadata",
       OFFSET(segment_time_metadata), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, DEC },
     { NULL }

@@ -39,6 +39,7 @@
 #include "libavutil/display.h"
 #include "libavutil/opt.h"
 #include "libavutil/aes.h"
+#include "libavutil/aes_ctr.h"
 #include "libavutil/sha.h"
 #include "libavutil/timecode.h"
 #include "libavcodec/ac3tab.h"
@@ -447,6 +448,12 @@ retry:
             snprintf(key2, sizeof(key2), "%s-%s", key, language);
             av_dict_set(&c->fc->metadata, key2, str, 0);
         }
+        if (!strcmp(key, "encoder")) {
+            int major, minor, micro;
+            if (sscanf(str, "HandBrake %d.%d.%d", &major, &minor, &micro) == 3) {
+                c->handbrake_version = 1000000*major + 1000*minor + micro;
+            }
+        }
     }
     av_log(c->fc, AV_LOG_TRACE, "lang \"%3s\" ", language);
     av_log(c->fc, AV_LOG_TRACE, "tag \"%s\" value \"%s\" atom \"%.4s\" %d %"PRId64"\n",
@@ -643,7 +650,7 @@ static int mov_read_hdlr(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     av_log(c->fc, AV_LOG_TRACE, "ctype= %.4s (0x%08x)\n", (char*)&ctype, ctype);
     av_log(c->fc, AV_LOG_TRACE, "stype= %.4s\n", (char*)&type);
 
-    if (c->fc->nb_streams < 1) {  // meta before first trak
+    if (c->trak_index < 0) {  // meta not inside a trak
         if (type == MKTAG('m','d','t','a')) {
             c->found_hdlr_mdta = 1;
         }
@@ -1749,9 +1756,12 @@ static void mov_parse_stsd_video(MOVContext *c, AVIOContext *pb,
                                  AVStream *st, MOVStreamContext *sc)
 {
     uint8_t codec_name[32];
-    unsigned int color_depth, len, j;
-    int color_greyscale;
-    int color_table_id;
+    int64_t stsd_start;
+    unsigned int len;
+
+    /* The first 16 bytes of the video sample description are already
+     * read in ff_mov_read_stsd_entries() */
+    stsd_start = avio_tell(pb) - 16;
 
     avio_rb16(pb); /* version */
     avio_rb16(pb); /* revision level */
@@ -1789,74 +1799,11 @@ static void mov_parse_stsd_video(MOVContext *c, AVIOContext *pb,
         st->codec->codec_id = AV_CODEC_ID_FLV1;
 
     st->codec->bits_per_coded_sample = avio_rb16(pb); /* depth */
-    color_table_id = avio_rb16(pb); /* colortable id */
-    av_log(c->fc, AV_LOG_TRACE, "depth %d, ctab id %d\n",
-            st->codec->bits_per_coded_sample, color_table_id);
-    /* figure out the palette situation */
-    color_depth     = st->codec->bits_per_coded_sample & 0x1F;
-    color_greyscale = st->codec->bits_per_coded_sample & 0x20;
-    /* Do not create a greyscale palette for cinepak */
-    if (color_greyscale && st->codec->codec_id == AV_CODEC_ID_CINEPAK)
-        return;
 
-    /* if the depth is 2, 4, or 8 bpp, file is palettized */
-    if ((color_depth == 2) || (color_depth == 4) || (color_depth == 8)) {
-        /* for palette traversal */
-        unsigned int color_start, color_count, color_end;
-        unsigned int a, r, g, b;
+    avio_seek(pb, stsd_start, SEEK_SET);
 
-        if (color_greyscale) {
-            int color_index, color_dec;
-            /* compute the greyscale palette */
-            st->codec->bits_per_coded_sample = color_depth;
-            color_count = 1 << color_depth;
-            color_index = 255;
-            color_dec   = 256 / (color_count - 1);
-            for (j = 0; j < color_count; j++) {
-                r = g = b = color_index;
-                sc->palette[j] = (0xFFU << 24) | (r << 16) | (g << 8) | (b);
-                color_index -= color_dec;
-                if (color_index < 0)
-                    color_index = 0;
-            }
-        } else if (color_table_id) {
-            const uint8_t *color_table;
-            /* if flag bit 3 is set, use the default palette */
-            color_count = 1 << color_depth;
-            if (color_depth == 2)
-                color_table = ff_qt_default_palette_4;
-            else if (color_depth == 4)
-                color_table = ff_qt_default_palette_16;
-            else
-                color_table = ff_qt_default_palette_256;
-
-            for (j = 0; j < color_count; j++) {
-                r = color_table[j * 3 + 0];
-                g = color_table[j * 3 + 1];
-                b = color_table[j * 3 + 2];
-                sc->palette[j] = (0xFFU << 24) | (r << 16) | (g << 8) | (b);
-            }
-        } else {
-            /* load the palette from the file */
-            color_start = avio_rb32(pb);
-            color_count = avio_rb16(pb);
-            color_end   = avio_rb16(pb);
-            if ((color_start <= 255) && (color_end <= 255)) {
-                for (j = color_start; j <= color_end; j++) {
-                    /* each A, R, G, or B component is 16 bits;
-                        * only use the top 8 bits */
-                    a = avio_r8(pb);
-                    avio_r8(pb);
-                    r = avio_r8(pb);
-                    avio_r8(pb);
-                    g = avio_r8(pb);
-                    avio_r8(pb);
-                    b = avio_r8(pb);
-                    avio_r8(pb);
-                    sc->palette[j] = (a << 24 ) | (r << 16) | (g << 8) | (b);
-                }
-            }
-        }
+    if (ff_get_qtpalette(st->codec->codec_id, pb, sc->palette)) {
+        st->codec->bits_per_coded_sample &= 0x1F;
         sc->has_palette = 1;
     }
 }
@@ -1914,6 +1861,13 @@ static void mov_parse_stsd_audio(MOVContext *c, AVIOContext *pb,
                 break;
             }
         }
+    }
+
+    if (sc->format == 0) {
+        if (st->codec->bits_per_coded_sample == 8)
+            st->codec->codec_id = mov_codec_id(st, MKTAG('r','a','w',' '));
+        else if (st->codec->bits_per_coded_sample == 16)
+            st->codec->codec_id = mov_codec_id(st, MKTAG('t','w','o','s'));
     }
 
     switch (st->codec->codec_id) {
@@ -2226,6 +2180,7 @@ int ff_mov_read_stsd_entries(MOVContext *c, AVIOContext *pb, int entries)
 
         sc->pseudo_stream_id = st->codec->codec_tag ? -1 : pseudo_stream_id;
         sc->dref_id= dref_id;
+        sc->format = format;
 
         id = mov_codec_id(st, format);
 
@@ -3073,9 +3028,12 @@ static int mov_read_trak(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     st->priv_data = sc;
     st->codec->codec_type = AVMEDIA_TYPE_DATA;
     sc->ffindex = st->index;
+    c->trak_index = st->index;
 
     if ((ret = mov_read_default(c, pb, atom)) < 0)
         return ret;
+
+    c->trak_index = -1;
 
     /* sanity checks */
     if (sc->chunk_count && (!sc->stts_count || !sc->stsc_count ||
@@ -4007,6 +3965,164 @@ static int mov_read_free(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     return 0;
 }
 
+static int mov_read_frma(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    uint32_t format = avio_rl32(pb);
+    MOVStreamContext *sc;
+    enum AVCodecID id;
+    AVStream *st;
+
+    if (c->fc->nb_streams < 1)
+        return 0;
+    st = c->fc->streams[c->fc->nb_streams - 1];
+    sc = st->priv_data;
+
+    switch (sc->format)
+    {
+    case MKTAG('e','n','c','v'):        // encrypted video
+    case MKTAG('e','n','c','a'):        // encrypted audio
+        id = mov_codec_id(st, format);
+        if (st->codec->codec_id != AV_CODEC_ID_NONE &&
+            st->codec->codec_id != id) {
+            av_log(c->fc, AV_LOG_WARNING,
+                   "ignoring 'frma' atom of '%.4s', stream has codec id %d\n",
+                   (char*)&format, st->codec->codec_id);
+            break;
+        }
+
+        st->codec->codec_id = id;
+        sc->format = format;
+        break;
+
+    default:
+        av_log(c->fc, AV_LOG_WARNING,
+               "ignoring 'frma' atom of '%.4s', stream format is '%.4s'\n",
+               (char*)&format, (char*)&sc->format);
+        break;
+    }
+
+    return 0;
+}
+
+static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+    size_t auxiliary_info_size;
+
+    if (c->decryption_key_len == 0 || c->fc->nb_streams < 1)
+        return 0;
+
+    st = c->fc->streams[c->fc->nb_streams - 1];
+    sc = st->priv_data;
+
+    if (sc->cenc.aes_ctr) {
+        av_log(c->fc, AV_LOG_ERROR, "duplicate senc atom\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    avio_r8(pb); /* version */
+    sc->cenc.use_subsamples = avio_rb24(pb) & 0x02; /* flags */
+
+    avio_rb32(pb);        /* entries */
+
+    if (atom.size < 8) {
+        av_log(c->fc, AV_LOG_ERROR, "senc atom size %"PRId64" too small\n", atom.size);
+        return AVERROR_INVALIDDATA;
+    }
+
+    /* save the auxiliary info as is */
+    auxiliary_info_size = atom.size - 8;
+
+    sc->cenc.auxiliary_info = av_malloc(auxiliary_info_size);
+    if (!sc->cenc.auxiliary_info) {
+        return AVERROR(ENOMEM);
+    }
+
+    sc->cenc.auxiliary_info_end = sc->cenc.auxiliary_info + auxiliary_info_size;
+
+    sc->cenc.auxiliary_info_pos = sc->cenc.auxiliary_info;
+
+    if (avio_read(pb, sc->cenc.auxiliary_info, auxiliary_info_size) != auxiliary_info_size) {
+        av_log(c->fc, AV_LOG_ERROR, "failed to read the auxiliary info");
+        return AVERROR_INVALIDDATA;
+    }
+
+    /* initialize the cipher */
+    sc->cenc.aes_ctr = av_aes_ctr_alloc();
+    if (!sc->cenc.aes_ctr) {
+        return AVERROR(ENOMEM);
+    }
+
+    return av_aes_ctr_init(sc->cenc.aes_ctr, c->decryption_key);
+}
+
+static int cenc_filter(MOVContext *c, MOVStreamContext *sc, uint8_t *input, int size)
+{
+    uint32_t encrypted_bytes;
+    uint16_t subsample_count;
+    uint16_t clear_bytes;
+    uint8_t* input_end = input + size;
+
+    /* read the iv */
+    if (AES_CTR_IV_SIZE > sc->cenc.auxiliary_info_end - sc->cenc.auxiliary_info_pos) {
+        av_log(c->fc, AV_LOG_ERROR, "failed to read iv from the auxiliary info\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    av_aes_ctr_set_iv(sc->cenc.aes_ctr, sc->cenc.auxiliary_info_pos);
+    sc->cenc.auxiliary_info_pos += AES_CTR_IV_SIZE;
+
+    if (!sc->cenc.use_subsamples)
+    {
+        /* decrypt the whole packet */
+        av_aes_ctr_crypt(sc->cenc.aes_ctr, input, input, size);
+        return 0;
+    }
+
+    /* read the subsample count */
+    if (sizeof(uint16_t) > sc->cenc.auxiliary_info_end - sc->cenc.auxiliary_info_pos) {
+        av_log(c->fc, AV_LOG_ERROR, "failed to read subsample count from the auxiliary info\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    subsample_count = AV_RB16(sc->cenc.auxiliary_info_pos);
+    sc->cenc.auxiliary_info_pos += sizeof(uint16_t);
+
+    for (; subsample_count > 0; subsample_count--)
+    {
+        if (6 > sc->cenc.auxiliary_info_end - sc->cenc.auxiliary_info_pos) {
+            av_log(c->fc, AV_LOG_ERROR, "failed to read subsample from the auxiliary info\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        /* read the number of clear / encrypted bytes */
+        clear_bytes = AV_RB16(sc->cenc.auxiliary_info_pos);
+        sc->cenc.auxiliary_info_pos += sizeof(uint16_t);
+        encrypted_bytes = AV_RB32(sc->cenc.auxiliary_info_pos);
+        sc->cenc.auxiliary_info_pos += sizeof(uint32_t);
+
+        if ((uint64_t)clear_bytes + encrypted_bytes > input_end - input) {
+            av_log(c->fc, AV_LOG_ERROR, "subsample size exceeds the packet size left\n");
+            return AVERROR_INVALIDDATA;
+        }
+
+        /* skip the clear bytes */
+        input += clear_bytes;
+
+        /* decrypt the encrypted bytes */
+        av_aes_ctr_crypt(sc->cenc.aes_ctr, input, input, encrypted_bytes);
+        input += encrypted_bytes;
+    }
+
+    if (input < input_end) {
+        av_log(c->fc, AV_LOG_ERROR, "leftover packet bytes after subsample processing\n");
+        return AVERROR_INVALIDDATA;
+    }
+
+    return 0;
+}
+
 static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('A','C','L','R'), mov_read_aclr },
 { MKTAG('A','P','R','G'), mov_read_avid },
@@ -4081,6 +4197,9 @@ static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('C','i','n', 0x8e), mov_read_targa_y216 },
 { MKTAG('f','r','e','e'), mov_read_free },
 { MKTAG('-','-','-','-'), mov_read_custom },
+{ MKTAG('s','i','n','f'), mov_read_default },
+{ MKTAG('f','r','m','a'), mov_read_frma },
+{ MKTAG('s','e','n','c'), mov_read_senc },
 { 0, NULL }
 };
 
@@ -4439,6 +4558,9 @@ static int mov_read_close(AVFormatContext *s)
         av_freep(&sc->elst_data);
         av_freep(&sc->rap_group);
         av_freep(&sc->display_matrix);
+
+        av_freep(&sc->cenc.auxiliary_info);
+        av_aes_ctr_free(sc->cenc.aes_ctr);
     }
 
     if (mov->dv_demux) {
@@ -4616,7 +4738,14 @@ static int mov_read_header(AVFormatContext *s)
     MOVAtom atom = { AV_RL32("root") };
     int i;
 
+    if (mov->decryption_key_len != 0 && mov->decryption_key_len != AES_CTR_KEY_SIZE) {
+        av_log(s, AV_LOG_ERROR, "Invalid decryption key len %d expected %d\n",
+            mov->decryption_key_len, AES_CTR_KEY_SIZE);
+        return AVERROR(EINVAL);
+    }
+
     mov->fc = s;
+    mov->trak_index = -1;
     /* .mov and .mp4 aren't streamable anyway (only progressive download if moov is before mdat) */
     if (pb->seekable)
         atom.size = avio_size(pb);
@@ -4688,6 +4817,13 @@ static int mov_read_header(AVFormatContext *s)
                 if ((err = mov_rewrite_dvd_sub_extradata(st)) < 0)
                     return err;
             }
+        }
+        if (mov->handbrake_version &&
+            mov->handbrake_version <= 1000000*0 + 1000*10 + 2 &&  // 0.10.2
+            st->codec->codec_id == AV_CODEC_ID_MP3
+        ) {
+            av_log(s, AV_LOG_VERBOSE, "Forcing full parsing for mp3 stream\n");
+            st->need_parsing = AVSTREAM_PARSE_FULL;
         }
     }
 
@@ -4925,6 +5061,13 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
     if (mov->aax_mode)
         aax_filter(pkt->data, pkt->size, mov);
 
+    if (sc->cenc.aes_ctr) {
+        ret = cenc_filter(mov, sc, pkt->data, pkt->size);
+        if (ret) {
+            return ret;
+        }
+    }
+
     return 0;
 }
 
@@ -5044,13 +5187,13 @@ static int mov_read_seek(AVFormatContext *s, int stream_index, int64_t sample_ti
 static const AVOption mov_options[] = {
     {"use_absolute_path",
         "allow using absolute path when opening alias, this is a possible security issue",
-        OFFSET(use_absolute_path), AV_OPT_TYPE_INT, {.i64 = 0},
+        OFFSET(use_absolute_path), AV_OPT_TYPE_BOOL, {.i64 = 0},
         0, 1, FLAGS},
     {"seek_streams_individually",
         "Seek each stream individually to the to the closest point",
-        OFFSET(seek_individually), AV_OPT_TYPE_INT, { .i64 = 1 },
+        OFFSET(seek_individually), AV_OPT_TYPE_BOOL, { .i64 = 1 },
         0, 1, FLAGS},
-    {"ignore_editlist", "", OFFSET(ignore_editlist), AV_OPT_TYPE_INT, {.i64 = 0},
+    {"ignore_editlist", "", OFFSET(ignore_editlist), AV_OPT_TYPE_BOOL, {.i64 = 0},
         0, 1, FLAGS},
     {"ignore_chapters", "", OFFSET(ignore_chapters), AV_OPT_TYPE_BOOL, {.i64 = 0},
         0, 1, FLAGS},
@@ -5075,6 +5218,8 @@ static const AVOption mov_options[] = {
         "Fixed key used for handling Audible AAX files", OFFSET(audible_fixed_key),
         AV_OPT_TYPE_BINARY, {.str="77214d4b196a87cd520045fd20a51d67"},
         .flags = AV_OPT_FLAG_DECODING_PARAM },
+    { "decryption_key", "The media decryption key (hex)", OFFSET(decryption_key), AV_OPT_TYPE_BINARY, .flags = AV_OPT_FLAG_DECODING_PARAM },
+
     { NULL },
 };
 
