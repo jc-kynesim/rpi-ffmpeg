@@ -1,9 +1,10 @@
-echo WOMABTS
+echo "Configure for PI2"
 
 RPI_ROOT=/home/jc/rpi
 RPI_ROOTFS=$RPI_ROOT/opt/pi2_rootfs
 RPI_OPT_VC=$RPI_ROOTFS/opt/vc
 RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_ROOTFS/usr/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
+#RPI_DEFS="-D__VCCOREVER__=0x04000000 -DRPI=1"
 RPI_DEFS="-D__VCCOREVER__=0x04000000"
 RPI_LIBDIRS="-L$RPI_ROOTFS/lib -L$RPI_ROOTFS/usr/lib -L$RPI_OPT_VC/lib"
 #RPI_KEEPS="-save-temps=obj"

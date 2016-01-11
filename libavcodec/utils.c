@@ -29,7 +29,7 @@
 
 #include "config.h"
 
-#if ARCH_ARM
+#ifdef RPI
 #define RPI_GPU_BUFFERS
 #endif
 

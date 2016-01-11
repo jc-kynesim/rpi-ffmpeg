@@ -1,7 +1,7 @@
 #ifndef RPI_PROFILE_H
 #define RPI_PROFILE_H
 
-#if ARCH_ARM
+#ifdef RPI
 #define RPI_PROFILE 1
 #else
 #define RPI_PROFILE 0

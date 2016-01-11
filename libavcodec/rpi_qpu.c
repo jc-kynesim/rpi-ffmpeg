@@ -1,3 +1,4 @@
+#ifdef RPI
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 // define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
 //#define RPI_TIME_TOTAL_QPU
@@ -17,7 +18,6 @@
 #include "libavutil/avassert.h"
 
 #include "config.h"
-#if ARCH_ARM
 
 #include <pthread.h>
 #include <time.h>
@@ -1219,4 +1219,4 @@ void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, i
 
 #endif
 
-#endif  // ARCH_ARM
+#endif // RPI

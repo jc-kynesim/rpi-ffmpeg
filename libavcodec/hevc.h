@@ -25,9 +25,6 @@
 
 // define RPI to split the CABAC/prediction/transform into separate stages
 #include "config.h"
-#if ARCH_ARM
-#define RPI
-#endif
 
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"

@@ -1940,7 +1940,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     else
                     {
                         uint8_t * const stat_coeff =
-                            lc->stat_coeff + (!c_idx_nz ? 2 : 0) + trans_skip_or_bypass;
+                            lc->stat_coeff + trans_skip_or_bypass + 2 - ((c_idx_nz) << 1);
                         const unsigned int c_rice_param = *stat_coeff >> 2;
                         const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode(s, c_rice_param);
 
