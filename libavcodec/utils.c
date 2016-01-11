@@ -25,10 +25,13 @@
  * utils.
  */
  
+#include "config.h"
+
+#ifdef RPI
 // Move video buffers to GPU memory
 #define RPI_GPU_BUFFERS
+#endif
 
-#include "config.h"
 #include "libavutil/atomic.h"
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
