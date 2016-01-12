@@ -22,6 +22,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
  
+// ##############
+// This file causes conformance tests to fail:
+// 'AMVP_C_Samsung_6',
+// 'RAP_B_Bossen_2',
+// 'AMP_A_Samsung_6'
+// The filter.c @ HoT works if simply dropped on top of this file
+// I think that breakage occured when the DSP function went in as I can't
+// see any significant changes between wher this was branched off master
+// and master HoT (barring a lot os s->sps becoming s->ps.sps)
+// ##############
+
 //#define DISABLE_SAO
 //#define DISABLE_DEBLOCK
 //#define DISABLE_STRENGTHS
@@ -31,7 +42,6 @@
 #include "libavutil/common.h"
 #include "libavutil/internal.h"
 
-#include "cabac_functions.h"
 #include "golomb.h"
 #include "hevc.h"
 
@@ -1050,6 +1060,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
 #endif
     if (s->ps.sps->sao_enabled) {
         int y_end = y >= s->ps.sps->height - ctb_size;
+
         if (y && x)
             sao_filter_CTB(s, x - ctb_size, y - ctb_size);
         if (x && y_end)

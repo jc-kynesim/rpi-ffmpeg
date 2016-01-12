@@ -36,6 +36,8 @@
 #define UNCHECKED_BITSTREAM_READER !CONFIG_SAFE_BITSTREAM_READER
 #endif
 
+#define CABAC_TRACE_STATE 0
+
 #if ARCH_AARCH64
 #   include "aarch64/cabac.h"
 #endif
@@ -51,6 +53,8 @@ static CABAC_TABLE_CONST uint8_t * const ff_h264_lps_range = ff_h264_cabac_table
 static CABAC_TABLE_CONST uint8_t * const ff_h264_mlps_state = ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET;
 static CABAC_TABLE_CONST uint8_t * const ff_h264_last_coeff_flag_offset_8x8 = ff_h264_cabac_tables + H264_LAST_COEFF_FLAG_OFFSET_8x8_OFFSET;
 
+
+#if !defined(get_cabac_bypass) || !defined(get_cabac_terminate)
 static void refill(CABACContext *c){
 #if CABAC_BITS == 16
         c->low+= (c->bytestream[0]<<9) + (c->bytestream[1]<<1);
@@ -63,7 +67,9 @@ static void refill(CABACContext *c){
 #endif
         c->bytestream += CABAC_BITS / 8;
 }
+#endif
 
+#ifndef get_cabac_terminate
 static inline void renorm_cabac_decoder_once(CABACContext *c){
     int shift= (uint32_t)(c->range - 0x100)>>31;
     c->range<<= shift;
@@ -71,13 +77,18 @@ static inline void renorm_cabac_decoder_once(CABACContext *c){
     if(!(c->low & CABAC_MASK))
         refill(c);
 }
+#endif
 
 #ifndef get_cabac_inline
 static void refill2(CABACContext *c){
-    int i, x;
-
+    int i;
+    unsigned x;
+#if !HAVE_FAST_CLZ
     x= c->low ^ (c->low-1);
     i= 7 - ff_h264_norm_shift[x>>(CABAC_BITS-1)];
+#else
+    i = ff_ctz(c->low) - CABAC_BITS;
+#endif
 
     x= -CABAC_MASK;
 
@@ -93,11 +104,18 @@ static void refill2(CABACContext *c){
 #endif
         c->bytestream += CABAC_BITS/8;
 }
+#endif
 
+
+#ifndef get_cabac_inline
 static av_always_inline int get_cabac_inline(CABACContext *c, uint8_t * const state){
     int s = *state;
     int RangeLPS= ff_h264_lps_range[2*(c->range&0xC0) + s];
     int bit, lps_mask;
+
+#if CABAC_TRACE_STATE
+    printf("--- range=%d, offset=%d, state=%d\n", c->range, c->low >> (CABAC_BITS+1), s);
+#endif
 
     c->range -= RangeLPS;
     lps_mask= ((c->range<<(CABAC_BITS+1)) - c->low)>>31;
@@ -112,6 +130,9 @@ static av_always_inline int get_cabac_inline(CABACContext *c, uint8_t * const st
     lps_mask= ff_h264_norm_shift[c->range];
     c->range<<= lps_mask;
     c->low  <<= lps_mask;
+#if CABAC_TRACE_STATE
+    printf("bit=%d, n=%d, range=%d, offset=%d, state=%d\n", bit, lps_mask, c->range, c->low >> (CABAC_BITS+1), *state);
+#endif
     if(!(c->low & CABAC_MASK))
         refill2(c);
     return bit;
@@ -127,20 +148,31 @@ static int av_unused get_cabac(CABACContext *c, uint8_t * const state){
 }
 
 #ifndef get_cabac_bypass
-static int av_unused get_cabac_bypass(CABACContext *c){
+static inline int av_unused get_cabac_bypass(CABACContext *c){
     int range;
+    int rv;
+
     c->low += c->low;
 
     if(!(c->low & CABAC_MASK))
         refill(c);
 
     range= c->range<<(CABAC_BITS+1);
+
     if(c->low < range){
-        return 0;
+#if CABAC_TRACE_STATE
+        printf("bypass 0: o=%u, r=%u\n", c->low >> (CABAC_BITS + 1), c->range);
+#endif
+        rv = 0;
     }else{
         c->low -= range;
-        return 1;
+#if CABAC_TRACE_STATE
+        printf("bypass 1: o=%u, r=%u\n", c->low >> (CABAC_BITS + 1), c->range);
+#endif
+        rv = 1;
     }
+
+    return rv;
 }
 #endif
 
@@ -161,24 +193,38 @@ static av_always_inline int get_cabac_bypass_sign(CABACContext *c, int val){
 }
 #endif
 
+#if 0
+//#ifndef get_cabac_bypass_sign
+static av_always_inline int get_cabac_bypass_sign(CABACContext *c, int val){
+    return get_cabac_bypass(c) ? val : -val;
+}
+#endif
+
+
 /**
  *
  * @return the number of bytes read or 0 if no end
  */
+#ifndef get_cabac_terminate
 static int av_unused get_cabac_terminate(CABACContext *c){
     c->range -= 2;
     if(c->low < c->range<<(CABAC_BITS+1)){
+#if CABAC_TRACE_STATE
+        printf("terminate 0: range=%d, offset=%d\n", c->range, c->low >> (CABAC_BITS+1));
+#endif
         renorm_cabac_decoder_once(c);
         return 0;
     }else{
         return c->bytestream - c->bytestream_start;
     }
 }
+#endif
 
 /**
  * Skip @p n bytes and reset the decoder.
  * @return the address of the first skipped byte or NULL if there's less than @p n bytes left
  */
+#ifndef skip_bytes
 static av_unused const uint8_t* skip_bytes(CABACContext *c, int n) {
     const uint8_t *ptr = c->bytestream;
 
@@ -194,5 +240,6 @@ static av_unused const uint8_t* skip_bytes(CABACContext *c, int n) {
 
     return ptr;
 }
+#endif
 
 #endif /* AVCODEC_CABAC_FUNCTIONS_H */

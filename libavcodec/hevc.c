@@ -33,11 +33,11 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/stereo3d.h"
 
+#include "hevc.h"
 #include "bswapdsp.h"
 #include "bytestream.h"
 #include "cabac_functions.h"
 #include "golomb.h"
-#include "hevc.h"
 
 #ifdef RPI
   #include "rpi_qpu.h"
@@ -2163,7 +2163,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
         int y0_c = y0 >> s->ps.sps->vshift[1];
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
-        
+
 #ifdef RPI_LUMA_QPU
         if (s->enable_rpi) {
             int reflist = 0;
@@ -2175,7 +2175,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             int x1 = x0 + (mv->x >> 2);
             int y1 = y0 + (mv->y >> 2);
             int weight_flag = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
-                              (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);    
+                              (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
             uint32_t *y = s->curr_y_mvs;      
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
@@ -2275,7 +2275,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
             int x1 = x0 + (mv->x >> 2);
             int y1 = y0 + (mv->y >> 2);
             int weight_flag = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
-                              (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);    
+                              (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
             uint32_t *y = s->curr_y_mvs;      
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=16) {
@@ -2366,7 +2366,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
         int y0_c = y0 >> s->ps.sps->vshift[1];
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
-        
+
 #ifdef RPI_LUMA_QPU
         if (s->enable_rpi) {
             const Mv *mv    = &current_mv.mv[0];
@@ -3666,6 +3666,22 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int x_ctb       = 0;
     int y_ctb       = 0;
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
+#ifdef RPI
+#ifdef RPI_INTER_QPU
+    s->enable_rpi = !s->ps.pps->cross_component_prediction_enabled_flag
+                    && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
+#else
+    s->enable_rpi = !s->ps.pps->cross_component_prediction_enabled_flag;
+#endif                    
+                    
+    if (!s->enable_rpi) {
+      if (s->ps.pps->cross_component_prediction_enabled_flag)
+        printf("Cross component\n");
+      if (s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE)
+        printf("Weighted B slice\n");
+    }  
+    //printf("L0=%d L1=%d\n",s->sh.nb_refs[L1],s->sh.nb_refs[L1]);
+#endif
 
 #ifdef RPI
 #ifdef RPI_INTER_QPU
@@ -3697,6 +3713,14 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         }
     }
     
+#ifdef RPI_WORKER
+    s->pass0_job = 0;
+    s->pass1_job = 0;
+#endif
+#ifdef RPI
+    rpi_begin(s);
+#endif
+
 #ifdef RPI_WORKER
     s->pass0_job = 0;
     s->pass1_job = 0;
@@ -4149,7 +4173,7 @@ static int decode_nal_unit(HEVCContext *s, const HEVCNAL *nal)
                         s->nal_unit_type == NAL_STSA_N  ||
                         s->nal_unit_type == NAL_RADL_N  ||
                         s->nal_unit_type == NAL_RASL_N);     
-                        
+
         if (!s->used_for_ref && s->avctx->skip_frame >= AVDISCARD_NONREF) {
             s->is_decoded = 0;
             break;
@@ -4379,7 +4403,6 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
         *got_output = ret;
         return 0;
     }
-
     s->ref = NULL;
     ret    = decode_nal_units(s, avpkt->data, avpkt->size);
     if (ret < 0)
