@@ -3671,10 +3671,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
 #ifdef RPI
 #ifdef RPI_INTER_QPU
-    s->enable_rpi = !s->ps.pps->cross_component_prediction_enabled_flag
+    s->enable_rpi = s->ps.sps->bit_depth == 8 && !s->ps.pps->cross_component_prediction_enabled_flag
                     && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
 #else
-    s->enable_rpi = !s->ps.pps->cross_component_prediction_enabled_flag;
+    s->enable_rpi = s->ps.sps->bit_depth == 8 && !s->ps.pps->cross_component_prediction_enabled_flag;
 #endif
 
     if (!s->enable_rpi) {
