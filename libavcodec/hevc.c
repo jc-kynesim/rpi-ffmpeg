@@ -34,7 +34,7 @@
 #include "libavutil/stereo3d.h"
 
 #include "hevc.h"
-#include "profiles.h"
+//#include "profiles.h"
 #include "bswapdsp.h"
 #include "bytestream.h"
 #include "cabac_functions.h"

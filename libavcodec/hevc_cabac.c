@@ -1263,7 +1263,7 @@ static int coeff_abs_level_remaining_decode(HEVCContext * const s, int rc_rice_p
 
     while (prefix < CABAC_MAX_BIN && get_cabac_bypass(c))
         prefix++;
-    if (prefix == CABAC_MAX_BIN)
+    if (prefix == CABAC_MAX_BIN) {
         av_log(s->avctx, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", prefix);
         return 0;
     }
