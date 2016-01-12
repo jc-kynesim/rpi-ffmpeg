@@ -19,39 +19,39 @@
 #define Z
 #endif
 
-X unsigned int rpi_residual_sig_coeffs Z;
-X unsigned int rpi_residual_sig_bits Z;
+X unsigned int av_rpi_residual_sig_coeffs Z;
+X unsigned int av_rpi_residual_sig_bits Z;
 
-X uint64_t rpi_residual_group_cycles Z;
-X unsigned int rpi_residual_group_cnt Z;
+X uint64_t av_rpi_residual_group_cycles Z;
+X unsigned int av_rpi_residual_group_cnt Z;
 #define RPI_residual_group_MAX_DURATION 5000
 
-X uint64_t rpi_residual_xy_final_cycles Z;
-X unsigned int rpi_residual_xy_final_cnt Z;
+X uint64_t av_rpi_residual_xy_final_cycles Z;
+X unsigned int av_rpi_residual_xy_final_cnt Z;
 #define RPI_residual_xy_final_MAX_DURATION 5000
 
-X uint64_t rpi_residual_abs_cycles Z;
-X unsigned int rpi_residual_abs_cnt Z;
+X uint64_t av_rpi_residual_abs_cycles Z;
+X unsigned int av_rpi_residual_abs_cnt Z;
 #define RPI_residual_abs_MAX_DURATION 5000
 
-X uint64_t rpi_residual_greater1_cycles Z;
-X unsigned int rpi_residual_greater1_cnt Z;
+X uint64_t av_rpi_residual_greater1_cycles Z;
+X unsigned int av_rpi_residual_greater1_cnt Z;
 #define RPI_residual_greater1_MAX_DURATION 10000
 
-X uint64_t rpi_residual_scale_cycles Z;
-X unsigned int rpi_residual_scale_cnt Z;
+X uint64_t av_rpi_residual_scale_cycles Z;
+X unsigned int av_rpi_residual_scale_cnt Z;
 #define RPI_residual_scale_MAX_DURATION 10000
 
-X uint64_t rpi_residual_core_cycles Z;
-X unsigned int rpi_residual_core_cnt Z;
+X uint64_t av_rpi_residual_core_cycles Z;
+X unsigned int av_rpi_residual_core_cnt Z;
 #define RPI_residual_core_MAX_DURATION 100000
 
-X uint64_t rpi_residual_base_cycles Z;
-X unsigned int rpi_residual_base_cnt Z;
+X uint64_t av_rpi_residual_base_cycles Z;
+X unsigned int av_rpi_residual_base_cnt Z;
 #define RPI_residual_base_MAX_DURATION 100000
 
-X uint64_t rpi_residual_sig_cycles Z;
-X unsigned int rpi_residual_sig_cnt Z;
+X uint64_t av_rpi_residual_sig_cycles Z;
+X unsigned int av_rpi_residual_sig_cnt Z;
 #define RPI_residual_sig_MAX_DURATION 10000
 
 
@@ -60,30 +60,30 @@ X unsigned int rpi_residual_sig_cnt Z;
 
 #define PROFILE_INIT()\
 do {\
-    enable_pmu();\
-    enable_ccnt();\
+    av_arm_enable_pmu();\
+    av_arm_enable_ccnt();\
 } while (0)
 
 #define PROFILE_START()\
 do {\
-    volatile uint32_t perf_1 = read_ccnt();\
+    volatile uint32_t perf_1 = av_arm_read_ccnt();\
     volatile uint32_t perf_2
 
 
 #define PROFILE_ACC(x)\
-    perf_2 = read_ccnt();\
+    perf_2 = av_arm_read_ccnt();\
     {\
         const uint32_t duration = perf_2 - perf_1;\
         if (duration < RPI_##x##_MAX_DURATION)\
         {\
-            rpi_##x##_cycles += duration;\
-            rpi_##x##_cnt += 1;\
+            av_rpi_##x##_cycles += duration;\
+            av_rpi_##x##_cnt += 1;\
         }\
     }\
 } while(0)
 
 #define PROFILE_PRINTF(x)\
-    printf("%-20s cycles=%14" PRIu64 " cnt=%u\n", #x, rpi_##x##_cycles, rpi_##x##_cnt)
+    printf("%-20s cycles=%14" PRIu64 " cnt=%u\n", #x, av_rpi_##x##_cycles, av_rpi_##x##_cnt)
 
 #else
 

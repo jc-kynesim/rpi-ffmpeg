@@ -1135,7 +1135,7 @@ static av_always_inline void last_significant_coeff_xy_prefix_decode(HEVCContext
     int max = (log2_size << 1) - 1;
     int ctx_offset, ctx_shift;
 
-    PROFILE_START();
+//    PROFILE_START();
 
     if (!c_idx_nz) {
         ctx_offset = 3 * (log2_size - 2)  + ((log2_size - 1) >> 2);
@@ -1155,7 +1155,7 @@ static av_always_inline void last_significant_coeff_xy_prefix_decode(HEVCContext
         i++;
     *last_scy_prefix = i;
 
-    PROFILE_ACC(residual_xy_final);
+//    PROFILE_ACC(residual_xy_final);
 }
 
 static av_always_inline int last_significant_coeff_suffix_decode(HEVCContext *s,
@@ -1343,7 +1343,7 @@ static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned i
     unsigned int i;
     const unsigned int n = FFMIN(n_end, 8);
 
-    PROFILE_START();
+//    PROFILE_START();
 
     // Really this is i != n but the simple unconditional loop is cheaper
     // and faster
@@ -1377,7 +1377,7 @@ static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned i
         }
     }
 
-    PROFILE_ACC(residual_greater1);
+//    PROFILE_ACC(residual_greater1);
     return rv;
 }
 
@@ -1439,11 +1439,11 @@ static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state
 {
     int rv;
 
-    PROFILE_START();
+//    PROFILE_START();
 
     rv = get_cabac_sig_coeff_flag_idxs(c, state0, n, ctx_map, flag_idx) - flag_idx;
 
-    PROFILE_ACC(residual_sig);
+//    PROFILE_ACC(residual_sig);
 
     return rv;
 }
@@ -1472,7 +1472,7 @@ static inline int next_subset(HEVCContext * const s, int i, const int c_idx_nz,
     const uint8_t * const scan_x_cg, const uint8_t * const scan_y_cg,
     int * const pPrev_sig)
 {
-    PROFILE_START();
+//    PROFILE_START();
 
     while (--i >= 0) {
         unsigned int x_cg = scan_x_cg[i];
@@ -1496,7 +1496,7 @@ static inline int next_subset(HEVCContext * const s, int i, const int c_idx_nz,
         }
     }
 
-    PROFILE_ACC(residual_group);
+//    PROFILE_ACC(residual_group);
     return i;
 }
 
@@ -2028,7 +2028,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 {
                     int m = nb_significant_coeff_flag - 1;
 
-                    PROFILE_START();
+//                    PROFILE_START();
 
                     if (i == 0 && significant_coeff_flag_idx[m] == 0)
                     {
@@ -2054,7 +2054,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                         } while (--m >= 0);
                     }
 
-                    PROFILE_ACC(residual_scale);
+//                    PROFILE_ACC(residual_scale);
                 }
 
             }
