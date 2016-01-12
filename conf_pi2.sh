@@ -15,6 +15,7 @@ RPI_KEEPS=""
  --cpu=cortex-a7\
  --target-os=linux\
  --disable-thumb\
+ --enable-shared\
  --extra-cflags="$RPI_KEEPS $RPI_DEFS $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFS $RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS -Wl,-rpath=/opt/vc/lib,-rpath-link=$RPI_OPT_VC/lib,-rpath=/lib,-rpath=/usr/lib,-rpath-link=$RPI_ROOTFS/lib,-rpath-link=$RPI_ROOTFS/usr/lib"\
