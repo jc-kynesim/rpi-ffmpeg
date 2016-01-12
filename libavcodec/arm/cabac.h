@@ -34,7 +34,7 @@
 #else
 #define LOAD_16BITS_BEHI\
         "ldr        %[tmp]        , [%[c], %[end]]              \n\t"\
-		"cmp        %[tmp]        , %[ptr]                      \n\t"\
+        "cmp        %[tmp]        , %[ptr]                      \n\t"\
         "ldrcsh     %[tmp]        , [%[ptr]]    , #2            \n\t"\
         "rev        %[tmp]        , %[tmp]                      \n\t"
 #endif
@@ -133,8 +133,8 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "mvnge      %[bit]        , %[bit]                      \n\t"
         "movge      %[range]      , %[tmp]                      \n\t"
 
-		"clz        %[tmp]        , %[range]                    \n\t"
-		"sub        %[tmp]        , #23                         \n\t"
+        "clz        %[tmp]        , %[range]                    \n\t"
+        "sub        %[tmp]        , #23                         \n\t"
 
         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
@@ -182,21 +182,21 @@ static inline int get_cabac_bypass_arm(CABACContext * const c)
     int rv = 0;
     unsigned int tmp;
     __asm (
-		"lsl        %[low]        , #1                          \n\t"
+        "lsl        %[low]        , #1                          \n\t"
         "cmp        %[low]        , %[range]    , lsl #17       \n\t"
-		"adc        %[rv]         , %[rv]       , #0            \n\t"
+        "adc        %[rv]         , %[rv]       , #0            \n\t"
         "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-		"lsls       %[tmp]        , %[low]      , #16           \n\t"
-		"bne        1f                                          \n\t"
+        "lsls       %[tmp]        , %[low]      , #16           \n\t"
+        "bne        1f                                          \n\t"
         LOAD_16BITS_BEHI
-		"add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
+        "add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
         "movw       %[tmp]        , #0xFFFF                     \n\t"
-		"sub        %[low]        , %[low]      , %[tmp]        \n\t"
-		"1:                                                     \n\t"
+        "sub        %[low]        , %[low]      , %[tmp]        \n\t"
+        "1:                                                     \n\t"
         : // Outputs
-		      [rv]"+&r"(rv),
+              [rv]"+&r"(rv),
              [low]"+&r"(c->low),
-		     [tmp]"=&r"(tmp),
+             [tmp]"=&r"(tmp),
              [ptr]"+&r"(c->bytestream)
         : // Inputs
 #if !UNCHECKED_BITSTREAM_READER
@@ -215,21 +215,21 @@ static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
 {
     unsigned int tmp;
     __asm (
-		"lsl        %[low]        , #1                          \n\t"
+        "lsl        %[low]        , #1                          \n\t"
         "cmp        %[low]        , %[range]    , lsl #17       \n\t"
-		"rsbcc      %[rv]         , %[rv]       , #0            \n\t"
+        "rsbcc      %[rv]         , %[rv]       , #0            \n\t"
         "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-		"lsls       %[tmp]        , %[low]      , #16           \n\t"
-		"bne        1f                                          \n\t"
+        "lsls       %[tmp]        , %[low]      , #16           \n\t"
+        "bne        1f                                          \n\t"
         LOAD_16BITS_BEHI
-		"add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
+        "add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
         "movw       %[tmp]        , #0xFFFF                     \n\t"
-		"sub        %[low]        , %[low]      , %[tmp]        \n\t"
-		"1:                                                     \n\t"
+        "sub        %[low]        , %[low]      , %[tmp]        \n\t"
+        "1:                                                     \n\t"
         : // Outputs
-		      [rv]"+&r"(rv),
+              [rv]"+&r"(rv),
              [low]"+&r"(c->low),
-		     [tmp]"=&r"(tmp),
+             [tmp]"=&r"(tmp),
              [ptr]"+&r"(c->bytestream)
         : // Inputs
 #if !UNCHECKED_BITSTREAM_READER
