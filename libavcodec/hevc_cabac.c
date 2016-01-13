@@ -1780,7 +1780,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
     i = num_last_subset;
     do {
-        int implicit_non_zero_coeff;
+        int implicit_non_zero_coeff = 0;
         int n_end;
 
         uint8_t significant_coeff_flag_idx[16];
