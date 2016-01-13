@@ -85,7 +85,7 @@ static inline void update_rice_arm(uint8_t * const stat_coeff,
 
 // Get the residual greater than 1 bits
 
-#define get_cabac_greater1_bits get_cabac_greater1_bits_arm
+//#define get_cabac_greater1_bits get_cabac_greater1_bits_arm
 static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, const unsigned int n,
     uint8_t * const state0)
 {
