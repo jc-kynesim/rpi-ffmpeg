@@ -1780,7 +1780,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
     i = num_last_subset;
     do {
-        int implicit_non_zero_coeff = 0;
+        int implicit_non_zero_coeff;
         int n_end;
 
         uint8_t significant_coeff_flag_idx[16];
@@ -1824,8 +1824,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 }
             };
             const uint8_t *ctx_idx_map_p;
-
             int scf_offset = 0;
+
             if (s->ps.sps->transform_skip_context_enabled_flag && trans_skip_or_bypass) {
                 ctx_idx_map_p = ctx_idx_maps[0][3];
                 scf_offset = 40 + c_idx_nz;
@@ -1840,6 +1840,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     if (!c_idx_nz) {
                         if (i != 0)
                             scf_offset += 3;
+
                         if (log2_trafo_size == 3) {
                             scf_offset += (scan_idx == SCAN_DIAG) ? 9 : 15;
                         } else {
@@ -1907,6 +1908,15 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
             PROFILE_START();
 
+            // * THe following code block doesn't deal with these flags:
+            //   (nor did the one it replaces)
+            //
+            // cabac_bypass_alignment_enabled_flag
+            //    This should be easy but I can't find a test case
+            // extended_precision_processing_flag
+            //    This can extend the required precision past 16bits
+            //    so is probably tricky - also no example found yet
+
 #if USE_N_END_1
             if (nb_significant_coeff_flag == 1) {
                 // There is a small gain to be had from special casing the single
@@ -1926,9 +1936,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     coded_val = get_cabac(&s->HEVClc->cc, s->HEVClc->cabac_state + idx_gt2);
                 }
 
-                // ?????? cabac_bypass_alignment_enabled_flag
-                // ?????? extended_precision_processing_flag
-
                 // Probably not worth the overhead of starting by22 for just one value
                 coeff_sign_flag = get_cabac_bypass(&s->HEVClc->cc);
 
@@ -1936,9 +1943,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 {
                     if (!s->ps.sps->persistent_rice_adaptation_enabled_flag) {
                         trans_coeff_level = 3 + coeff_abs_level_remaining_decode(s, 0);
-                    }
-                    else
-                    {
+                    } else {
                         uint8_t * const stat_coeff =
                             lc->stat_coeff + trans_skip_or_bypass + 2 - ((c_idx_nz) << 1);
                         const unsigned int c_rice_param = *stat_coeff >> 2;
@@ -1964,23 +1969,24 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             else
 #endif
             {
-                int sign_hidden;
-                int levels[16]; // Should be able to get away with int16_t but it fails some conf
+                int sign_hidden = may_hide_sign;
+                int levels[16]; // Should be able to get away with int16_t but that fails some tests
                 uint32_t coeff_sign_flags;
                 uint32_t coded_vals = 0;
+                // Sum(abs(level[]))
+                // In fact we only need the bottom bit and in some future
+                // version that may be all we calculate
                 unsigned int sum_abs;
 
                 coded_vals = get_greaterx_bits(s, nb_significant_coeff_flag, levels,
                     &prev_subset_coded, &sum_abs, idx0_gt1, idx_gt2);
 
-                sign_hidden = may_hide_sign;
                 if (significant_coeff_flag_idx[0] - significant_coeff_flag_idx[nb_significant_coeff_flag - 1] <= 3)
                     sign_hidden = 0;
 
-                bypass_start(s);
+                // -- Start bypass block
 
-                // ?????? cabac_bypass_alignment_enabled_flag
-                // ?????? extended_precision_processing_flag
+                bypass_start(s);
 
                 coeff_sign_flags = coeff_sign_flag_decode_bypass(s, nb_significant_coeff_flag - sign_hidden);
 
@@ -1994,7 +2000,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                     do {
                         {
-                            unsigned int z = hevc_clz32(coded_vals) + 1;
+                            const unsigned int z = hevc_clz32(coded_vals) + 1;
                             level += z;
                             coded_vals <<= z;
                         }
@@ -2024,26 +2030,31 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
                 bypass_finish(s);
 
+                // -- Finish bypass block
 
+                // Scale loop
                 {
                     int m = nb_significant_coeff_flag - 1;
 
 //                    PROFILE_START();
 
+                    // Deal with DC component (if any) first
                     if (i == 0 && significant_coeff_flag_idx[m] == 0)
                     {
                         const int k = (int32_t)(coeff_sign_flags << m) >> 31;
-                        blk_coeffs[0] = trans_scale_sat((levels[m] ^ k) - k, scale, dc_scale, shift);
+                        blk_coeffs[0] = trans_scale_sat(
+                            (levels[m] ^ k) - k, scale, dc_scale, shift);
                         --m;
                     }
 
 #if !USE_N_END_1
-                    // If N_END_! then m was at least 1 initially
+                    // If N_END_! set then m was at least 1 initially
                     if (m >= 0)
 #endif
                     {
                         do {
-                            const xy_off_t * const xy_off = scan_xy_off + significant_coeff_flag_idx[m];
+                            const xy_off_t * const xy_off = scan_xy_off +
+                                significant_coeff_flag_idx[m];
                             const int k = (int32_t)(coeff_sign_flags << m) >> 31;
 
                             blk_coeffs[xy_off->coeff] = trans_scale_sat(
@@ -2060,7 +2071,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
             PROFILE_ACC(residual_core);
         }
-    } while ((i = next_subset(s, i, c_idx_nz, significant_coeff_group_flag, scan_x_cg, scan_y_cg, &prev_sig)) >= 0);
+    } while ((i = next_subset(s, i, c_idx_nz,
+        significant_coeff_group_flag, scan_x_cg, scan_y_cg, &prev_sig)) >= 0);
 
     PROFILE_ACC(residual_base);
     
