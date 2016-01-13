@@ -64,6 +64,7 @@ static inline void update_rice_arm(uint8_t * const stat_coeff,
     int t;
     __asm__ (
     "movs  %[t], %[coeff], LSR %[shift]     \n\t"
+    "it    eq                               \n\t"
     "subeq %[stat], %[stat], #1             \n\t"
     "cmp   %[t], #2                         \n\t"
     "adc   %[stat], %[stat], #0            \n\t"
@@ -96,6 +97,7 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "1:                                                     \n\t"
          "add        %[i]          , %[i]        , #1            \n\t"
          "cmp        %[rv]         , #0                          \n\t"
+         "ite        eq                                          \n\t"
          "usateq     %[st]         , #2          , %[i]          \n\t"
          "movne      %[st]         , #0                          \n\t"
 
@@ -107,6 +109,7 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "sub        %[range]      , %[range]    , %[tmp]        \n\t"
 
          "cmp        %[low]        , %[range], lsl #17           \n\t"
+         "ittt       ge                                          \n\t"
          "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
          "mvnge      %[bit]        , %[bit]                      \n\t"
          "movge      %[range]      , %[tmp]                      \n\t"
@@ -125,6 +128,7 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
 // There is a small speed gain from combining both conditions, using a single
 // branch and then working out what that meant later
          "lsls       %[tmp]        , %[low]      , #16           \n\t"
+         "it         ne                                          \n\t"
          "cmpne      %[n]          , %[i]                        \n\t"
          "bne        1b                                          \n\t"
 
@@ -142,7 +146,12 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "clz        %[r_b]        , %[r_b]                      \n\t"
          "sub        %[r_b]        , %[r_b]      , #16           \n\t"
 
+#if CONFIG_THUMB
+         "lsl        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
+         "add        %[low]        , %[low]      , %[tmp]        \n\t"
+#else
          "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
+#endif
 
          "cmp        %[n]          , %[i]                        \n\t"
          "bne        1b                                          \n\t"
@@ -189,13 +198,15 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
          "sub        %[range]      , %[range]    , %[tmp]        \n\t"
 
          "cmp        %[low]        , %[range], lsl #17           \n\t"
+         "ittt       ge                                          \n\t"
          "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
          "mvnge      %[bit]        , %[bit]                      \n\t"
          "movge      %[range]      , %[tmp]                      \n\t"
 
          "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
          "tst        %[bit]        , #1                          \n\t"
-         "strneb     %[n]          , [%[idx]]    , #1            \n\t"
+         "it         ne                                          \n\t"
+         "strbne     %[n]          , [%[idx]]    , #1            \n\t"
 
 // Renorm
          "clz        %[tmp]        , %[range]                    \n\t"
@@ -207,7 +218,8 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 // There is a small speed gain from combining both conditions, using a single
 // branch and then working out what that meant later
          "subs       %[n]          , %[n]        , #1            \n\t"
-         "lslnes     %[tmp]        , %[low]      , #16           \n\t"
+         "itt        ne                                          \n\t"
+         "lslsne     %[tmp]        , %[low]      , #16           \n\t"
          "bne        1b                                          \n\t"
 
 // If we have bits left then n must be 0 so give up now
@@ -224,7 +236,12 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
          "clz        %[r_b]        , %[r_b]                      \n\t"
          "sub        %[r_b]        , %[r_b]      , #16           \n\t"
 
+#if CONFIG_THUMB
+         "lsl        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
+         "add        %[low]        , %[low]      , %[tmp]        \n\t"
+#else
          "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
+#endif
 
 // Check to see if we still have more to do
          "cmp        %[n]          , #0                          \n\t"
@@ -267,9 +284,10 @@ static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
 {
     uint32_t rv, tmp;
     __asm__ (
-        "bic    %[rv],  %[low],   #1  \n\t"
-        "cmp    %[inv], #0          \n\t"
-        "umullne  %[tmp], %[rv], %[inv], %[rv] \n\t"
+        "bic      %[rv]  , %[low], #1            \n\t"
+        "cmp      %[inv] , #0                    \n\t"
+        "it       ne                             \n\t"
+        "umullne  %[tmp] , %[rv] , %[inv], %[rv] \n\t"
         :  // Outputs
              [rv]"=&r"(rv),
              [tmp]"=r"(tmp)
