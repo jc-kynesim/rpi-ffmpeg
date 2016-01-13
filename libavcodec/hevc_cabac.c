@@ -31,7 +31,8 @@
 // either a fast 32-bit divide or a fast 32x32->64[63:32] instruction
 // x86 has fast int divide
 // Arm doesn't have divide or general fast 64 bit, but does have the multiply
-#define USE_BY22 (HAVE_FAST_64BIT || ARCH_ARM || ARCH_x86)
+// * Beware: ARCH_xxx isn't set if configure --disable-asm is used
+#define USE_BY22 (HAVE_FAST_64BIT || ARCH_ARM || ARCH_X86)
 // Use native divide if we have a fast one - otherwise use mpy 1/x
 // x86 has a fast integer divide - arm doesn't - unsure about other
 // architectures
