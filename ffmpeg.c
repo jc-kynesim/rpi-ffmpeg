@@ -22,13 +22,13 @@
  * @file
  * multimedia converter based on the FFmpeg libraries
  */
-#include "config.h"
 
 #ifdef RPI
 #define RPI_DISPLAY
 //#define RPI_ZERO_COPY
 #endif
 
+#include "config.h"
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
@@ -87,7 +87,6 @@
 #include "libavcodec/rpi_qpu.h"
 #endif
 #endif
-#include "rpi_prof.h"
 
 #if HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
@@ -4302,7 +4301,6 @@ int main(int argc, char **argv)
     show_banner(argc, argv, options);
 
     term_init();
-    PROFILE_INIT();
 
     /* parse options and open all input/output files */
     ret = ffmpeg_parse_options(argc, argv);
@@ -4333,15 +4331,6 @@ int main(int argc, char **argv)
     if (do_benchmark) {
         av_log(NULL, AV_LOG_INFO, "bench: utime=%0.3fs\n", ti / 1000000.0);
     }
-    PROFILE_PRINTF(residual_group);
-    PROFILE_PRINTF(residual_xy_final);
-    PROFILE_PRINTF(residual_abs);
-    PROFILE_PRINTF(residual_greater1);
-    PROFILE_PRINTF(residual_scale);
-    PROFILE_PRINTF(residual_sig);
-    PROFILE_PRINTF(residual_core);
-    PROFILE_PRINTF(residual_base);
-
     av_log(NULL, AV_LOG_DEBUG, "%"PRIu64" frames successfully decoded, %"PRIu64" decoding errors\n",
            decode_error_stat[0], decode_error_stat[1]);
     if ((decode_error_stat[0] + decode_error_stat[1]) * max_error_rate < decode_error_stat[1])
