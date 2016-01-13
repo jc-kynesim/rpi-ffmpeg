@@ -1302,7 +1302,8 @@ static inline uint32_t coeff_sign_flag_decode_bypass(HEVCContext * const s, cons
 static inline unsigned int get_cabac_greater1_bits(CABACContext * const c, const unsigned int n,
     uint8_t * const state0)
 {
-    unsigned int i, rv;
+    unsigned int i;
+    unsigned int rv = 0;
     for (i = 0; i != n; ++i) {
         const unsigned int idx = rv != 0 ? 0 : i < 3 ? i + 1 : 3;
         const unsigned int b = get_cabac(c, state0 + idx);
@@ -1323,7 +1324,7 @@ static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned i
     CABACContext * const c = &s->HEVClc->cc;
     uint8_t * const state0 = s->HEVClc->cabac_state + idx0_gt1;
     uint8_t * const state_gt2 = s->HEVClc->cabac_state + idx_gt2;
-    unsigned int rv = 0;
+    unsigned int rv;
     unsigned int i;
     const unsigned int n = FFMIN(n_end, 8);
 
