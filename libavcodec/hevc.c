@@ -3668,6 +3668,22 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int x_ctb       = 0;
     int y_ctb       = 0;
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
+#ifdef RPI
+#ifdef RPI_INTER_QPU
+    s->enable_rpi = !s->ps.pps->cross_component_prediction_enabled_flag
+                    && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
+#else
+    s->enable_rpi = !s->ps.pps->cross_component_prediction_enabled_flag;
+#endif
+
+    if (!s->enable_rpi) {
+      if (s->ps.pps->cross_component_prediction_enabled_flag)
+        printf("Cross component\n");
+      if (s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE)
+        printf("Weighted B slice\n");
+    }
+    //printf("L0=%d L1=%d\n",s->sh.nb_refs[L1],s->sh.nb_refs[L1]);
+#endif
 
 #ifdef RPI
 #ifdef RPI_INTER_QPU
@@ -3698,6 +3714,14 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             return AVERROR_INVALIDDATA;
         }
     }
+
+#ifdef RPI_WORKER
+    s->pass0_job = 0;
+    s->pass1_job = 0;
+#endif
+#ifdef RPI
+    rpi_begin(s);
+#endif
 
 #ifdef RPI_WORKER
     s->pass0_job = 0;
