@@ -55,7 +55,7 @@
 #if USE_BY22 && !USE_BY22_DIV
 #define I(x) (uint32_t)((0x10000000000ULL / (uint64_t)(x)) + 1ULL)
 
-const uint32_t alt1cabac_inv_range[256] __attribute__((aligned(256))) = {
+static const uint32_t cabac_by22_inv_range[256] = {
                                                     0,      I(257), I(258), I(259),
     I(260), I(261), I(262), I(263), I(264), I(265), I(266), I(267), I(268), I(269),
     I(270), I(271), I(272), I(273), I(274), I(275), I(276), I(277), I(278), I(279),
@@ -615,7 +615,7 @@ static inline void get_cabac_by22_start(CABACContext * const c)
     const uint32_t m = hevc_mem_bits32(c->bytestream, 0);
     uint32_t x = (c->low << (22 - CABAC_BITS)) ^ ((m ^ 0x80000000U) >> (9 + CABAC_BITS - bits));
 #if !USE_BY22_DIV
-    const uint32_t inv = alt1cabac_inv_range[c->range & 0xff];
+    const uint32_t inv = cabac_by22_inv_range[c->range & 0xff];
 #endif
 
     c->bytestream -= (CABAC_BITS / 8);
