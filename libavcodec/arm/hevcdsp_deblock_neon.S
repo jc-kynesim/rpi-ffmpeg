@@ -409,10 +409,12 @@ function ff_hevc_deblocking_boundary_strengths_neon, export=1
         beq         90f
 
         tst         a3, #1
+        itee        ne
         ldrne       a3, [v5, #0]    @ curr->mv[0]
         ldreq       a3, [v5, #4]    @ curr->mv[1]
         moveq       v1, v2
         tst         v8, #1
+        itee        ne
         ldrne       v8, [v6, #0]    @ neigh->mv[0]
         ldreq       v8, [v6, #4]    @ neigh->mv[1]
         moveq       v3, v4
@@ -424,9 +426,14 @@ function ff_hevc_deblocking_boundary_strengths_neon, export=1
         sel         a3, a3, ip
         ands        a3, a3, lr
         @ drop through
-10:     movne       a3, #1
+10:     it          ne
+        movne       a3, #1
 11:     subs        a2, a2, #1
-12:     strbhs      a3, [v7], a4
+12:
+A       strbhs      a3, [v7], a4
+T       itt         hs
+T       strbhs      a3, [v7]
+T       addhs       v7, v7, a4
         subs        a2, a2, #1
         bhs         12b
 
@@ -442,6 +449,7 @@ function ff_hevc_deblocking_boundary_strengths_neon, export=1
         bne         10b
 
         teq         v1, v3
+        it          eq
         teqeq       v2, v4
         bne         40f
         teq         v1, v2
@@ -487,6 +495,7 @@ function ff_hevc_deblocking_boundary_strengths_neon, export=1
         b           10b
 
 40:     teq         v1, v4
+        ite         eq
         teqeq       v2, v3
         bne         10b
 
