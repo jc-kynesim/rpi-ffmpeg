@@ -1542,6 +1542,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     int pred_mode_intra = (c_idx == 0) ? lc->tu.intra_pred_mode :
                                          lc->tu.intra_pred_mode_c;
 
+    int prev_sig = 0;
+    const int c_idx_nz = (c_idx != 0);
+
+    int may_hide_sign;
+
     memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
 
     // Derive QP for dequant
