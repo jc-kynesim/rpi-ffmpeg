@@ -31,6 +31,13 @@
 #define LOAD_16BITS_BEHI\
         "ldrh       %[tmp]        , [%[ptr]]    , #2            \n\t"\
         "rev        %[tmp]        , %[tmp]                      \n\t"
+#elif CONFIG_THUMB
+#define LOAD_16BITS_BEHI\
+        "ldr        %[tmp]        , [%[c], %[end]]              \n\t"\
+        "cmp        %[tmp]        , %[ptr]                      \n\t"\
+        "it         cs                                          \n\t"\
+        "ldrhcs     %[tmp]        , [%[ptr]]    , #2            \n\t"\
+        "rev        %[tmp]        , %[tmp]                      \n\t"
 #else
 #define LOAD_16BITS_BEHI\
         "ldr        %[tmp]        , [%[c], %[end]]              \n\t"\
@@ -129,6 +136,7 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "sub        %[range]      , %[range]    , %[tmp]        \n\t"
 
         "cmp        %[low]        , %[range]    , lsl #17       \n\t"
+        "ittt       ge                                          \n\t"
         "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
         "mvnge      %[bit]        , %[bit]                      \n\t"
         "movge      %[range]      , %[tmp]                      \n\t"
@@ -152,8 +160,12 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "rbit       %[r_b]        , %[low]                      \n\t"
         "clz        %[r_b]        , %[r_b]                      \n\t"
         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
-
+#if CONFIG_THUMB
+        "lsl        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
+        "add        %[low]        , %[low]      , %[tmp]        \n\t"
+#else
         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
+#endif
         "2:                                                     \n\t"
         :    [bit]"=&r"(bit),
              [low]"+&r"(c->low),
@@ -185,6 +197,7 @@ static inline int get_cabac_bypass_arm(CABACContext * const c)
         "lsl        %[low]        , #1                          \n\t"
         "cmp        %[low]        , %[range]    , lsl #17       \n\t"
         "adc        %[rv]         , %[rv]       , #0            \n\t"
+        "it         cs                                          \n\t"
         "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
         "lsls       %[tmp]        , %[low]      , #16           \n\t"
         "bne        1f                                          \n\t"
@@ -217,6 +230,7 @@ static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
     __asm (
         "lsl        %[low]        , #1                          \n\t"
         "cmp        %[low]        , %[range]    , lsl #17       \n\t"
+        "ite        cc                                          \n\t"
         "rsbcc      %[rv]         , %[rv]       , #0            \n\t"
         "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
         "lsls       %[tmp]        , %[low]      , #16           \n\t"
