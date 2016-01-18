@@ -970,7 +970,7 @@ void ff_hevc_flush_dpb(HEVCContext *s);
  */
 int ff_hevc_compute_poc(HEVCContext *s, int poc_lsb);
 
-RefPicList *ff_hevc_get_ref_list(HEVCContext *s, HEVCFrame *frame,
+RefPicList *ff_hevc_get_ref_list(const HEVCContext *s, const HEVCFrame *frame,
                                  int x0, int y0);
 
 /**
