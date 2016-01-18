@@ -752,6 +752,11 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
     return;
 #endif
 
+    if (log2_trafo_size < log2_min_pu_size) {
+        trafo_in_min_pus = 1;
+        min_pu_in_4pix = 1;
+    }
+
     boundary_upper = y0 > 0 && !(y0 & 7);
     if (boundary_upper &&
         ((!s->sh.slice_loop_filter_across_slices_enabled_flag &&
