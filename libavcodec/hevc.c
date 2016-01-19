@@ -4380,6 +4380,26 @@ static int verify_md5(HEVCContext *s, AVFrame *frame)
     return 0;
 }
 
+#ifdef RPI_ZERO_COPY
+static void *hevc_callback(int command, void *cookie)
+{
+  AVFrame *frame = cookie;
+  //printf("hevc_callback(%d,%p\n", command, cookie);
+  switch (command) {
+    case 0: {
+      GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[0]);
+      return (void *)p->vc_handle;
+    }
+    case 1: {
+      av_frame_free(&frame);
+      break;
+    }
+    default: av_assert0(0); break;
+  }
+  return NULL;
+}
+#endif
+
 static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
                              AVPacket *avpkt)
 {
@@ -4391,6 +4411,15 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
         if (ret < 0)
             return ret;
 
+#ifdef RPI_ZERO_COPY
+        if (ret) {
+          AVFrame *frame = av_frame_alloc();
+          av_frame_ref(frame, data);
+          ((AVFrame *)data)->data[3] = (uint8_t *)hevc_callback;
+          ((AVFrame *)data)->linesize[3] = (int)frame;
+          //printf("frame_ref1(%p)\n", frame);
+        }
+#endif
         *got_output = ret;
         return 0;
     }
@@ -4427,6 +4456,13 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
 
     if (s->output_frame->buf[0]) {
         av_frame_move_ref(data, s->output_frame);
+#ifdef RPI_ZERO_COPY
+        AVFrame *frame = av_frame_alloc();
+        av_frame_ref(frame, data);
+        ((AVFrame *)data)->data[3] = (uint8_t *)hevc_callback;
+        ((AVFrame *)data)->linesize[3] = (int)frame;
+        //printf("frame_ref2(%p)\n", frame);
+#endif
         *got_output = 1;
     }
 

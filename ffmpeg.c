@@ -25,7 +25,7 @@
 
 #ifdef RPI
 #define RPI_DISPLAY
-//#define RPI_ZERO_COPY
+#define RPI_ZERO_COPY
 #endif
 
 #include "config.h"
@@ -83,9 +83,7 @@
 #include <interface/mmal/util/mmal_default_components.h>
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_util_params.h>
-#ifdef RPI_ZERO_COPY
 #include "libavcodec/rpi_qpu.h"
-#endif
 #endif
 
 #if HAVE_SYS_RESOURCE_H
@@ -271,6 +269,13 @@ static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
     int h2 = (h+15)&~15;
     if (!display || !rpi_pool)
         return;
+#ifdef RPI_ZERO_COPY
+    void *(*callback)(int, void *) = (void *(*)(int, void *))fr->data[3];
+    void *frame = (void *)fr->linesize[3];
+    //printf("callback=%p frame=%p\n", callback, frame);
+    if (callback && frame)
+      callback(1, frame);
+#endif
     MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
     if (!buf) {
       // Running too fast so drop the frame

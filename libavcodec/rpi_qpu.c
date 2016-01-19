@@ -217,6 +217,7 @@ static void gpu_unlock(void) {
 
 static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb) {
   p->numbytes = numbytes;
+  p->suballoc = 0;
   p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
   av_assert0(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
@@ -295,6 +296,7 @@ void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2)
 
 static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
   p->numbytes = numbytes;
+  p->suballoc = 0;
   p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );

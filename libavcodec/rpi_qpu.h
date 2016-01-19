@@ -3,6 +3,7 @@
 
 // Define RPI_FAST_CACHEFLUSH to use the VCSM cache flush code
 #define RPI_FAST_CACHEFLUSH
+#define RPI_ZERO_COPY
 
 typedef struct gpu_mem_ptr_s {
   unsigned char *arm; // Pointer to memory mapped on ARM side
@@ -10,6 +11,7 @@ typedef struct gpu_mem_ptr_s {
   int vcsm_handle; // Handle for use by VCSM
   int vc;       // Address for use in GPU code
   int numbytes; // Size of memory block
+  int suballoc;
 } GPU_MEM_PTR_T;
 
 // General GPU functions
