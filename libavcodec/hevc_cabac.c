@@ -662,7 +662,7 @@ static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
 // Flush n bypass bits. n must be >= 1 to guarantee correct operation
 // val is an unmodified copy of whatever _by22_peek returned
 #ifndef get_cabac_by22_flush
-static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, const uint32_t val)
+static inline void get_cabac_by22_flush(CABACContext * const c, const unsigned int n, const uint32_t val)
 {
     // Subtract the bits used & reshift up to the top of the word
 #if USE_BY22_DIV
@@ -1389,8 +1389,8 @@ static inline int trans_scale_sat(const int level, const unsigned int scale, con
 
 #ifndef update_rice
 static inline void update_rice(uint8_t * const stat_coeff,
-    const unsigned int last_coeff_abs_level_remaining,
-    const unsigned int c_rice_param)
+                              const unsigned int last_coeff_abs_level_remaining,
+                              const unsigned int c_rice_param)
 {
     const unsigned int x = last_coeff_abs_level_remaining >> c_rice_param;
     if (x >= 3)
@@ -1404,9 +1404,9 @@ static inline void update_rice(uint8_t * const stat_coeff,
 // n must be > 0 on entry
 #ifndef get_cabac_sig_coeff_flag_idxs
 static inline uint8_t * get_cabac_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state0,
-    unsigned int n,
-    const uint8_t const * ctx_map,
-    uint8_t * p)
+                                                     unsigned int n,
+                                                     const uint8_t const * ctx_map,
+                                                     uint8_t * p)
 {
     do {
         if (get_cabac(c, state0 + ctx_map[n]))
@@ -1449,9 +1449,9 @@ static int get_sig_coeff_flag_idxs(CABACContext * const c, uint8_t * const state
 
 
 static inline int next_subset(HEVCContext * const s, int i, const int c_idx_nz,
-    uint8_t * const significant_coeff_group_flag,
-    const uint8_t * const scan_x_cg, const uint8_t * const scan_y_cg,
-    int * const pPrev_sig)
+                             uint8_t * const significant_coeff_group_flag,
+                             const uint8_t * const scan_x_cg, const uint8_t * const scan_y_cg,
+                             int * const pPrev_sig)
 {
     while (--i >= 0) {
         unsigned int x_cg = scan_x_cg[i];
