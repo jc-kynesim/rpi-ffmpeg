@@ -124,6 +124,7 @@ static av_always_inline int get_cabac_inline(CABACContext *c, uint8_t * const st
     c->low  <<= lps_mask;
     if(!(c->low & CABAC_MASK))
         refill2(c);
+    printf("gc: r=%d, low=%07x, range=%d\n", bit, c->low, c->range);
     return bit;
 }
 #endif
@@ -139,6 +140,7 @@ static int av_unused get_cabac(CABACContext *c, uint8_t * const state){
 #ifndef get_cabac_bypass
 static int av_unused get_cabac_bypass(CABACContext *c){
     int range;
+    int r;
     c->low += c->low;
 
     if(!(c->low & CABAC_MASK))
@@ -146,11 +148,13 @@ static int av_unused get_cabac_bypass(CABACContext *c){
 
     range= c->range<<(CABAC_BITS+1);
     if(c->low < range){
-        return 0;
+        r = 0;
     }else{
         c->low -= range;
-        return 1;
+        r = 1;
     }
+    printf("by: r=%d, low=%07x, range=%d\n", r, c->low, range);
+    return r;
 }
 #endif
 

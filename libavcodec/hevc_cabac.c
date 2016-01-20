@@ -1253,6 +1253,8 @@ static int coeff_abs_level_remaining_decode(HEVCContext * const s, int rc_rice_p
     int last_coeff_abs_level_remaining;
     int i;
 
+    printf("++ rice=%d\n", rc_rice_param);
+
     while (prefix < CABAC_MAX_BIN && get_cabac_bypass(c))
         prefix++;
     if (prefix == CABAC_MAX_BIN) {
@@ -1263,13 +1265,13 @@ static int coeff_abs_level_remaining_decode(HEVCContext * const s, int rc_rice_p
     if (prefix < 3) {
         for (i = 0; i < rc_rice_param; i++)
             suffix = (suffix << 1) | get_cabac_bypass(c);
-//        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
+        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
         last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
     } else {
         int prefix_minus3 = prefix - 3;
         for (i = 0; i < prefix_minus3 + rc_rice_param; i++)
             suffix = (suffix << 1) | get_cabac_bypass(c);
-//        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
+        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
         last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                               << rc_rice_param) + suffix;
     }
@@ -1386,7 +1388,8 @@ static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned i
 static inline int trans_scale_sat(int m, const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
 {
     int r = av_clip_int16((((level * (int)(scale * scale_m)) >> shift) + 1) >> 1);
-    printf("-- m=%d, t=%d->%d\n", m, level, r);
+    static int z = 0;
+    printf("-- z=%d, m=%d, t=%d->%d\n", z++, m, level, r);
     return r;
 }
 #endif
@@ -1397,11 +1400,16 @@ static inline void update_rice(uint8_t * const stat_coeff,
                               const unsigned int last_coeff_abs_level_remaining,
                               const unsigned int c_rice_param)
 {
-    const unsigned int x = last_coeff_abs_level_remaining >> c_rice_param;
-    if (x >= 3)
+    const unsigned int x = (last_coeff_abs_level_remaining << 1) >> c_rice_param;
+
+    printf("++ *stat=%d/%d, abs=%d, rice=%d\n", *stat_coeff, x, last_coeff_abs_level_remaining, c_rice_param);
+
+    if (x >= 6)
         (*stat_coeff)++;
     else if (x == 0 && *stat_coeff > 0)
         (*stat_coeff)--;
+
+    printf("++ *stat=%d\n", *stat_coeff);
 }
 #endif
 
