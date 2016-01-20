@@ -21,8 +21,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#define UNCHECKED_BITSTREAM_READER 1
-
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
 
@@ -638,9 +636,9 @@ static inline void get_cabac_by22_start(CABACContext * const c)
 #endif
 
     c->bytestream -= (CABAC_BITS / 8);
-    c->by22.bits = bits;
+    c->u.by22.bits = bits;
 #if !USE_BY22_DIV
-    c->by22.range = c->range;
+    c->u.by22.range = c->range;
     c->range = inv;
 #endif
     c->low = x;
@@ -650,14 +648,14 @@ static inline void get_cabac_by22_start(CABACContext * const c)
 // Must be called at the end of the bypass block to return to normal operation
 static inline void get_cabac_by22_finish(CABACContext * const c)
 {
-    unsigned int used = c->by22.bits;
+    unsigned int used = c->u.by22.bits;
     unsigned int bytes_used = (used / CABAC_BITS) * (CABAC_BITS / 8);
     unsigned int bits_used = used & (CABAC_BITS == 16 ? 15 : 7);
 
     c->bytestream += bytes_used + (CABAC_BITS / 8);
     c->low = (((uint32_t)c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
 #if !USE_BY22_DIV
-    c->range = c->by22.range;
+    c->range = c->u.by22.range;
 #endif
 }
 
@@ -695,13 +693,13 @@ static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, 
 #if USE_BY22_DIV
     const uint32_t low = (((unsigned int)c->low << n) - (((val >> (32 - n)) * (unsigned int)c->range) << 23));
 #else
-    const uint32_t low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->by22.range) << 23));
+    const uint32_t low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->u.by22.range) << 23));
 #endif
 
     // and refill lower bits
     // We will probably OR over some existing bits but that doesn't matter
-    c->by22.bits += n;
-    c->low = low | (hevc_mem_bits32(c->bytestream, c->by22.bits) >> 9);
+    c->u.by22.bits += n;
+    c->low = low | (hevc_mem_bits32(c->bytestream, c->u.by22.bits) >> 9);
 }
 #endif
 

@@ -50,7 +50,7 @@ typedef struct CABACContext{
             uint16_t bits;
             uint16_t range;
         } by22;
-    };
+    } u;
     const uint8_t *bytestream_start;
     const uint8_t *bytestream;
     const uint8_t *bytestream_end;

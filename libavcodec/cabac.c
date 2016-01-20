@@ -167,7 +167,7 @@ void ff_init_cabac_encoder(CABACContext *c, uint8_t *buf, int buf_size){
 
     c->low= 0;
     c->range= 0x1FE;
-    c->outstanding_count= 0;
+    c->u.outstanding_count= 0;
     c->pb.bit_left++; //avoids firstBitFlag
 }
 
@@ -210,7 +210,7 @@ int ff_init_cabac_decoder(CABACContext *c, const uint8_t *buf, int buf_size){
 
 static inline void put_cabac_bit(CABACContext *c, int b){
     put_bits(&c->pb, 1, b);
-    for(;c->outstanding_count; c->outstanding_count--){
+    for(;c->u.outstanding_count; c->u.outstanding_count--){
         put_bits(&c->pb, 1, 1-b);
     }
 }
@@ -221,7 +221,7 @@ static inline void renorm_cabac_encoder(CABACContext *c){
         if(c->low<0x100){
             put_cabac_bit(c, 0);
         }else if(c->low<0x200){
-            c->outstanding_count++;
+            c->u.outstanding_count++;
             c->low -= 0x100;
         }else{
             put_cabac_bit(c, 1);
@@ -261,7 +261,7 @@ static void put_cabac_bypass(CABACContext *c, int bit){
     if(c->low<0x200){
         put_cabac_bit(c, 0);
     }else if(c->low<0x400){
-        c->outstanding_count++;
+        c->u.outstanding_count++;
         c->low -= 0x200;
     }else{
         put_cabac_bit(c, 1);
