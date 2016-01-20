@@ -43,6 +43,9 @@
 // code size.
 #define USE_N_END_1 1
 
+#if ARCH_ARM
+#include "arm/hevc_cabac.h"
+#endif
 
 #define CABAC_MAX_BIN 31
 
