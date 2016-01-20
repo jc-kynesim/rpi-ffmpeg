@@ -982,11 +982,13 @@ static av_always_inline int coeff_abs_level_remaining_decode(HEVCContext *s, int
     if (prefix < 3) {
         for (i = 0; i < rc_rice_param; i++)
             suffix = (suffix << 1) | get_cabac_bypass(&s->HEVClc->cc);
+        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
         last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
     } else {
         int prefix_minus3 = prefix - 3;
         for (i = 0; i < prefix_minus3 + rc_rice_param; i++)
             suffix = (suffix << 1) | get_cabac_bypass(&s->HEVClc->cc);
+        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
         last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                               << rc_rice_param) + suffix;
     }
@@ -1387,6 +1389,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             }
 
             for (m = 0; m < n_end; m++) {
+                int64_t t;
+
                 n = significant_coeff_flag_idx[m];
                 GET_COORD(offset, n);
                 if (m < 8) {
@@ -1431,6 +1435,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 if (coeff_sign_flag >> 15)
                     trans_coeff_level = -trans_coeff_level;
                 coeff_sign_flag <<= 1;
+
+                t = trans_coeff_level;
                 if(!lc->cu.cu_transquant_bypass_flag) {
                     if (s->ps.sps->scaling_list_enable_flag && !(transform_skip_flag && log2_trafo_size > 2)) {
                         if(y_c || x_c || log2_trafo_size < 4) {
@@ -1455,6 +1461,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     }
                 }
                 coeffs[y_c * trafo_size + x_c] = trans_coeff_level;
+
+                printf("-- m=%d, t=%ld->%ld\n", m, t, trans_coeff_level);
             }
         }
     }
