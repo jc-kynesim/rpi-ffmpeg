@@ -552,40 +552,15 @@ static av_always_inline uint32_t hevc_mem_bits32(const void * buf, const unsigne
 }
 #endif
 
-#if AV_GCC_VERSION_AT_LEAST(3,4) && !defined(hevc_clz32)
+#if !defined(hevc_clz32)
 #define hevc_clz32 hevc_clz32_builtin
 static av_always_inline unsigned int hevc_clz32_builtin(const uint32_t x)
 {
-    // __builtin_clz says it works on ints - so adjust if int is >32 bits long
-    return __builtin_clz(x) - (sizeof(int) * 8 - 32);
+    // ff_clz says works on ints (probably) - so adjust if int is >32 bits long
+    // the fact that x is passed in as uint32_t will have cleared the top bits
+    return ff_clz(x) - (sizeof(int) * 8 - 32);
 }
 #endif
-
-// It is unlikely that we will ever need this but include for completeness
-#ifndef hevc_clz32
-static inline unsigned int hevc_clz32(unsigned int x)
-{
-    unsigned int n = 1;
-    if ((x & 0xffff0000) == 0) {
-        n += 16;
-        x <<= 16;
-    }
-    if ((x & 0xff000000) == 0) {
-        n += 8;
-        x <<= 8;
-    }
-    if ((x & 0xf0000000) == 0) {
-        n += 4;
-        x <<= 4;
-    }
-    if ((x & 0xc0000000) == 0) {
-        n += 2;
-        x <<= 2;
-    }
-    return n - ((x >> 31) & 1);
-}
-#endif
-
 
 #if !USE_BY22
 // If no by22 then _by22 functions will revert to normal and so _peek/_flush
