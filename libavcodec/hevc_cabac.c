@@ -24,10 +24,63 @@
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
 
-#include "cabac_functions.h"
 #include "hevc.h"
+#include "cabac_functions.h"
+
+// BY22 is probably faster than simple bypass if the processor has
+// either a fast 32-bit divide or a fast 32x32->64[63:32] instruction
+// x86 has fast int divide
+// Arm doesn't have divide or general fast 64 bit, but does have the multiply
+// * Beware: ARCH_xxx isn't set if configure --disable-asm is used
+#define USE_BY22 (HAVE_FAST_64BIT || ARCH_ARM || ARCH_X86)
+// Use native divide if we have a fast one - otherwise use mpy 1/x
+// x86 has a fast integer divide - arm doesn't - unsure about other
+// architectures
+#define USE_BY22_DIV  ARCH_X86
+
+// Special case blocks with a single significant ceoff
+// Decreases the complexity of the code for a common case but increases the
+// code size.
+#define USE_N_END_1 1
+
 
 #define CABAC_MAX_BIN 31
+
+
+#if USE_BY22 && !USE_BY22_DIV
+#define I(x) (uint32_t)((0x10000000000ULL / (uint64_t)(x)) + 1ULL)
+
+static const uint32_t cabac_by22_inv_range[256] = {
+                                                    0,      I(257), I(258), I(259),
+    I(260), I(261), I(262), I(263), I(264), I(265), I(266), I(267), I(268), I(269),
+    I(270), I(271), I(272), I(273), I(274), I(275), I(276), I(277), I(278), I(279),
+    I(280), I(281), I(282), I(283), I(284), I(285), I(286), I(287), I(288), I(289),
+    I(290), I(291), I(292), I(293), I(294), I(295), I(296), I(297), I(298), I(299),
+    I(300), I(301), I(302), I(303), I(304), I(305), I(306), I(307), I(308), I(309),
+    I(310), I(311), I(312), I(313), I(314), I(315), I(316), I(317), I(318), I(319),
+    I(320), I(321), I(322), I(323), I(324), I(325), I(326), I(327), I(328), I(329),
+    I(330), I(331), I(332), I(333), I(334), I(335), I(336), I(337), I(338), I(339),
+    I(340), I(341), I(342), I(343), I(344), I(345), I(346), I(347), I(348), I(349),
+    I(350), I(351), I(352), I(353), I(354), I(355), I(356), I(357), I(358), I(359),
+    I(360), I(361), I(362), I(363), I(364), I(365), I(366), I(367), I(368), I(369),
+    I(370), I(371), I(372), I(373), I(374), I(375), I(376), I(377), I(378), I(379),
+    I(380), I(381), I(382), I(383), I(384), I(385), I(386), I(387), I(388), I(389),
+    I(390), I(391), I(392), I(393), I(394), I(395), I(396), I(397), I(398), I(399),
+    I(400), I(401), I(402), I(403), I(404), I(405), I(406), I(407), I(408), I(409),
+    I(410), I(411), I(412), I(413), I(414), I(415), I(416), I(417), I(418), I(419),
+    I(420), I(421), I(422), I(423), I(424), I(425), I(426), I(427), I(428), I(429),
+    I(430), I(431), I(432), I(433), I(434), I(435), I(436), I(437), I(438), I(439),
+    I(440), I(441), I(442), I(443), I(444), I(445), I(446), I(447), I(448), I(449),
+    I(450), I(451), I(452), I(453), I(454), I(455), I(456), I(457), I(458), I(459),
+    I(460), I(461), I(462), I(463), I(464), I(465), I(466), I(467), I(468), I(469),
+    I(470), I(471), I(472), I(473), I(474), I(475), I(476), I(477), I(478), I(479),
+    I(480), I(481), I(482), I(483), I(484), I(485), I(486), I(487), I(488), I(489),
+    I(490), I(491), I(492), I(493), I(494), I(495), I(496), I(497), I(498), I(499),
+    I(500), I(501), I(502), I(503), I(504), I(505), I(506), I(507), I(508), I(509),
+    I(510), I(511)
+};
+#undef I
+#endif  // USE_BY22
 
 /**
  * number of bin by SyntaxElement.
@@ -506,8 +559,123 @@ static av_always_inline unsigned int hevc_clz32_builtin(const uint32_t x)
 }
 #endif
 
+#if !USE_BY22
+// If no by22 then _by22 functions will revert to normal and so _peek/_flush
+// will no longer be called but the setup calls will still exist and we want
+// to null them out
 #define bypass_start(s)
 #define bypass_finish(s)
+#else
+// Use BY22 for residual bypass block
+
+#define bypass_start(s) get_cabac_by22_start(&s->HEVClc->cc)
+#define bypass_finish(s) get_cabac_by22_finish(&s->HEVClc->cc)
+
+// BY22 notes that bypass is simply a divide into the bitstream and so we
+// can peek out large quantities of bits at one and treat the result as if
+// it was VLC.  In many cases this will lead to O(1) processing rather than
+// O(n) though the setup and teardown is sufficiently expensive that it is
+// only worth using if we expect to be dealing with more than a few bits
+// The definition of "a few bits" will vary from platform to platform but
+// tests on ARM show that it probably isn't worth it for a single coded
+// residual, but is for >1 - this is probaly reinforced that if there are
+// more residuals then they are likely to be bigger and this will make the
+// O(1) nature of the code more worthwhile.
+
+
+#if !USE_BY22_DIV
+// * 1/x @ 32 bits gets us 22 bits of accuracy
+#define CABAC_BY22_PEEK_BITS  22
+#else
+// A real 32-bit divide gets us another bit
+// If we have a 64 bit int & a unit time divider then we should get a lot
+// of bits (55)  but that is untested and it is unclear if it would give
+// us a large advantage
+#define CABAC_BY22_PEEK_BITS  23
+#endif
+
+// Bypass block start
+// Must be called before _by22_peek is used as it sets the CABAC environment
+// into the correct state.  _by22_finish must be called to return to 'normal'
+// (i.e. non-bypass) cabac decoding
+static inline void get_cabac_by22_start(CABACContext * const c)
+{
+    const unsigned int bits = __builtin_ctz(c->low);
+    const uint32_t m = hevc_mem_bits32(c->bytestream, 0);
+    uint32_t x = (c->low << (22 - CABAC_BITS)) ^ ((m ^ 0x80000000U) >> (9 + CABAC_BITS - bits));
+#if !USE_BY22_DIV
+    const uint32_t inv = cabac_by22_inv_range[c->range & 0xff];
+#endif
+
+    c->bytestream -= (CABAC_BITS / 8);
+    c->u.by22.bits = bits;
+#if !USE_BY22_DIV
+    c->u.by22.range = c->range;
+    c->range = inv;
+#endif
+    c->low = x;
+}
+
+// Bypass block finish
+// Must be called at the end of the bypass block to return to normal operation
+static inline void get_cabac_by22_finish(CABACContext * const c)
+{
+    unsigned int used = c->u.by22.bits;
+    unsigned int bytes_used = (used / CABAC_BITS) * (CABAC_BITS / 8);
+    unsigned int bits_used = used & (CABAC_BITS == 16 ? 15 : 7);
+
+    c->bytestream += bytes_used + (CABAC_BITS / 8);
+    c->low = (((uint32_t)c->low >> (22 - CABAC_BITS + bits_used)) | 1) << bits_used;
+#if !USE_BY22_DIV
+    c->range = c->u.by22.range;
+#endif
+}
+
+// Peek bypass bits
+// _by22_start must be called before _by22_peek is called and _by22_flush
+// must be called afterwards to flush any used bits
+// The actual number of valid bits returned is
+// min(<coded bypass block length>, CABAC_BY22_PEEK_BITS). CABAC_BY22_PEEK_BITS
+// will be at least 22 which should be long enough for any prefix or suffix
+// though probably not long enough for the worst case combination
+#ifndef get_cabac_by22_peek
+static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
+{
+#if USE_BY22_DIV
+    return ((unsigned int)c->low / (unsigned int)c->range) << 9;
+#else
+    uint32_t x = c->low & ~1U;
+    const uint32_t inv = c->range;
+
+    if (inv != 0)
+        x = (uint32_t)(((uint64_t)x * (uint64_t)inv) >> 32);
+
+    return x << 1;
+#endif
+}
+#endif
+
+// Flush bypass bits peeked by _by22_peek
+// Flush n bypass bits. n must be >= 1 to guarantee correct operation
+// val is an unmodified copy of whatever _by22_peek returned
+#ifndef get_cabac_by22_flush
+static inline void get_cabac_by22_flush(CABACContext * const c, const unsigned int n, const uint32_t val)
+{
+    // Subtract the bits used & reshift up to the top of the word
+#if USE_BY22_DIV
+    const uint32_t low = (((unsigned int)c->low << n) - (((val >> (32 - n)) * (unsigned int)c->range) << 23));
+#else
+    const uint32_t low = (((uint32_t)c->low << n) - (((val >> (32 - n)) * c->u.by22.range) << 23));
+#endif
+
+    // and refill lower bits
+    // We will probably OR over some existing bits but that doesn't matter
+    c->u.by22.bits += n;
+    c->low = low | (hevc_mem_bits32(c->bytestream, c->u.by22.bits) >> 9);
+}
+#endif
+
+#endif  // USE_BY22
 
 
 void ff_hevc_save_states(HEVCContext *s, int ctb_addr_ts)
