@@ -1382,7 +1382,9 @@ static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned i
 #ifndef trans_scale_sat
 static inline int trans_scale_sat(const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
 {
-    return av_clip_int16((((level * (int)(scale * scale_m)) >> shift) + 1) >> 1);
+    int r = av_clip_int16((((level * (int)(scale * scale_m)) >> shift) + 1) >> 1);
+    printf("-- %d, %d\n", level, r);
+    return r;
 }
 #endif
 
@@ -1978,6 +1980,25 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 // Scale loop
                 {
                     int m = nb_significant_coeff_flag - 1;
+                    int m2;
+
+                    // Deal with DC component (if any) first
+                    if (i == 0 && significant_coeff_flag_idx[m] == 0)
+                    {
+                        --m;
+                    }
+
+                    for (m2 = 0; m2 < m; ++m2) {
+                        const xy_off_t * const xy_off = scan_xy_off +
+                            significant_coeff_flag_idx[m2];
+                        const int k = (int32_t)(coeff_sign_flags << m2) >> 31;
+
+                        blk_coeffs[xy_off->coeff] = trans_scale_sat(
+                            (levels[m2] ^ k) - k,
+                            scale,
+                            blk_scale[xy_off->scale],
+                            shift);
+                    }
 
                     // Deal with DC component (if any) first
                     if (i == 0 && significant_coeff_flag_idx[m] == 0)
@@ -1985,26 +2006,8 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                         const int k = (int32_t)(coeff_sign_flags << m) >> 31;
                         blk_coeffs[0] = trans_scale_sat(
                             (levels[m] ^ k) - k, scale, dc_scale, shift);
-                        --m;
                     }
 
-#if !USE_N_END_1
-                    // If N_END_! set then m was at least 1 initially
-                    if (m >= 0)
-#endif
-                    {
-                        do {
-                            const xy_off_t * const xy_off = scan_xy_off +
-                                significant_coeff_flag_idx[m];
-                            const int k = (int32_t)(coeff_sign_flags << m) >> 31;
-
-                            blk_coeffs[xy_off->coeff] = trans_scale_sat(
-                                (levels[m] ^ k) - k,
-                                scale,
-                                blk_scale[xy_off->scale],
-                                shift);
-                        } while (--m >= 0);
-                    }
                 }
 
             }
