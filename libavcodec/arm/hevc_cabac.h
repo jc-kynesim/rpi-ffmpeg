@@ -63,14 +63,15 @@ static inline void update_rice_arm(uint8_t * const stat_coeff,
 {
     int t;
     __asm__ (
-    "movs  %[t], %[coeff], LSR %[shift]     \n\t"
+    "lsl   %[t], %[coeff], #1               \n\t"
+    "lsrs  %[t], %[t], %[shift]             \n\t"
     "it    eq                               \n\t"
     "subeq %[stat], %[stat], #1             \n\t"
-    "cmp   %[t], #2                         \n\t"
-    "adc   %[stat], %[stat], #0            \n\t"
-    "usat  %[stat], #8, %[stat]            \n\t"
+    "cmp   %[t], #5                         \n\t"
+    "adc   %[stat], %[stat], #0             \n\t"
+    "usat  %[stat], #8, %[stat]             \n\t"
     : [stat]"+&r"(*stat_coeff),
-          [t]"=r"(t)
+         [t]"=&r"(t)
     :  [coeff]"r"(last_coeff_abs_level_remaining),
        [shift]"r"(c_rice_param)
     : "cc"
