@@ -1392,8 +1392,8 @@ static inline void update_rice(uint8_t * const stat_coeff,
                               const unsigned int last_coeff_abs_level_remaining,
                               const unsigned int c_rice_param)
 {
-    const unsigned int x = last_coeff_abs_level_remaining >> c_rice_param;
-    if (x >= 3)
+    const unsigned int x = (last_coeff_abs_level_remaining << 1) >> c_rice_param;
+    if (x >= 6)
         (*stat_coeff)++;
     else if (x == 0 && *stat_coeff > 0)
         (*stat_coeff)--;
