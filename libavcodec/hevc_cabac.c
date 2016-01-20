@@ -32,7 +32,8 @@
 // x86 has fast int divide
 // Arm doesn't have divide or general fast 64 bit, but does have the multiply
 // * Beware: ARCH_xxx isn't set if configure --disable-asm is used
-#define USE_BY22 (HAVE_FAST_64BIT || ARCH_ARM || ARCH_X86)
+#define USE_BY22 0
+//#define USE_BY22 (HAVE_FAST_64BIT || ARCH_ARM || ARCH_X86)
 // Use native divide if we have a fast one - otherwise use mpy 1/x
 // x86 has a fast integer divide - arm doesn't - unsure about other
 // architectures
@@ -41,7 +42,7 @@
 // Special case blocks with a single significant ceoff
 // Decreases the complexity of the code for a common case but increases the
 // code size.
-#define USE_N_END_1 1
+#define USE_N_END_1 0
 
 #if ARCH_ARM
 #include "arm/hevc_cabac.h"
@@ -1262,11 +1263,13 @@ static int coeff_abs_level_remaining_decode(HEVCContext * const s, int rc_rice_p
     if (prefix < 3) {
         for (i = 0; i < rc_rice_param; i++)
             suffix = (suffix << 1) | get_cabac_bypass(c);
+//        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
         last_coeff_abs_level_remaining = (prefix << rc_rice_param) + suffix;
     } else {
         int prefix_minus3 = prefix - 3;
         for (i = 0; i < prefix_minus3 + rc_rice_param; i++)
             suffix = (suffix << 1) | get_cabac_bypass(c);
+//        printf("++ prefix=%d, suffix=%d\n", prefix, suffix);
         last_coeff_abs_level_remaining = (((1 << prefix_minus3) + 3 - 1)
                                               << rc_rice_param) + suffix;
     }
@@ -1380,10 +1383,10 @@ static inline uint32_t get_greaterx_bits(HEVCContext * const s, const unsigned i
 // to achieve it
 
 #ifndef trans_scale_sat
-static inline int trans_scale_sat(const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
+static inline int trans_scale_sat(int m, const int level, const unsigned int scale, const unsigned int scale_m, const unsigned int shift)
 {
     int r = av_clip_int16((((level * (int)(scale * scale_m)) >> shift) + 1) >> 1);
-    printf("-- %d, %d\n", level, r);
+    printf("-- m=%d, t=%d->%d\n", m, level, r);
     return r;
 }
 #endif
@@ -1981,19 +1984,23 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 {
                     int m = nb_significant_coeff_flag - 1;
                     int m2;
+                    int m_end = m;
+                    int has_dc = 0;
 
                     // Deal with DC component (if any) first
                     if (i == 0 && significant_coeff_flag_idx[m] == 0)
                     {
-                        --m;
+                        --m_end;
+                        has_dc = 1;
                     }
 
-                    for (m2 = 0; m2 < m; ++m2) {
+                    for (m2 = 0; m2 <= m_end; ++m2) {
                         const xy_off_t * const xy_off = scan_xy_off +
                             significant_coeff_flag_idx[m2];
                         const int k = (int32_t)(coeff_sign_flags << m2) >> 31;
 
                         blk_coeffs[xy_off->coeff] = trans_scale_sat(
+                            m2,
                             (levels[m2] ^ k) - k,
                             scale,
                             blk_scale[xy_off->scale],
@@ -2001,10 +2008,10 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     }
 
                     // Deal with DC component (if any) first
-                    if (i == 0 && significant_coeff_flag_idx[m] == 0)
+                    if (has_dc)
                     {
                         const int k = (int32_t)(coeff_sign_flags << m) >> 31;
-                        blk_coeffs[0] = trans_scale_sat(
+                        blk_coeffs[0] = trans_scale_sat(m,
                             (levels[m] ^ k) - k, scale, dc_scale, shift);
                     }
 
