@@ -1459,8 +1459,8 @@ static inline int next_subset(HEVCContext * const s, int i, const int c_idx_nz,
 
         // For the flag decode we only care about Z/NZ but
         // we use the full Right + Down * 2 when calculating
-        // significant coeff flags so we obtain it here
-        //.
+        // significant coeff flags so we obtain it here.
+        //
         // The group flag array is one longer than it needs to
         // be so we don't need to check for y_cg limits
         unsigned int prev_sig = ((significant_coeff_group_flag[y_cg] >> (x_cg + 1)) & 1) |
