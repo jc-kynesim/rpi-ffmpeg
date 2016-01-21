@@ -261,25 +261,52 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     return display;
 }
 
-static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
+#ifdef RPI_ZERO_COPY
+typedef void * frcallback_fn(int, void *);
+
+typedef struct frbuf_envss
+{
+    frcallback_fn * callback;
+    void * frame;
+} frbuf_env;
+
+static void frderef(frbuf_env * const frb)
+{
+    if (frb->frame != NULL && frb->callback) {
+        frb->callback(1, frb->frame);
+    }
+    frb->frame = NULL;
+    frb->callback = (frcallback_fn *)0;
+}
+
+static frbuf_env fr_prev;
+#endif
+
+
+static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const fr)
 {
     int w = fr->width;
     int h = fr->height;
     int w2 = (w+31)&~31;
     int h2 = (h+15)&~15;
+#ifdef RPI_ZERO_COPY
+    frbuf_env frb = {
+        (frcallback_fn *)fr->data[3],
+        (void *)fr->linesize[3]
+    };
+#endif
+
     if (!display || !rpi_pool)
         return;
-#ifdef RPI_ZERO_COPY
-    void *(*callback)(int, void *) = (void *(*)(int, void *))fr->data[3];
-    void *frame = (void *)fr->linesize[3];
-    //printf("callback=%p frame=%p\n", callback, frame);
-    if (callback && frame)
-      callback(1, frame);
-#endif
+
     MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
     if (!buf) {
       // Running too fast so drop the frame
-      return;
+//        printf("Drop frame\n");
+#ifdef RPI_ZERO_COPY
+        frderef(&frb);
+#endif
+        return;
     }
     assert(buf);
     buf->cmd = 0;
@@ -298,6 +325,11 @@ static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
 #endif
 
     mmal_port_send_buffer(display->input[0], buf);  // I assume this will automatically get released
+
+#ifdef RPI_ZERO_COPY
+    frderef(&fr_prev);
+    fr_prev = frb;
+#endif
 }
 
 static void display_exit(MMAL_COMPONENT_T* display)
