@@ -216,13 +216,18 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
     return pool;
 }
 
-static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
-    AVFrame * frame = buffer->user_data;
-    if (frame != NULL) {
-        printf("%s: buffer->frame=%p\n", __func__, frame);
-        av_frame_free(&frame);
+static void unref_mmal_av_buffer(MMAL_BUFFER_HEADER_T *buffer)
+{
+    AVBufferRef *bref = buffer->user_data;
+    if (bref != NULL) {
+        printf("%s: buffer ref=%p\n", __func__, bref);
+        av_buffer_unref(&bref);
         buffer->user_data = NULL;
     }
+}
+
+static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
+    unref_mmal_av_buffer(buffer);
   mmal_buffer_header_release(buffer);
 }
 
@@ -272,26 +277,6 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     return display;
 }
 
-#ifdef RPI_ZERO_COPY
-typedef void * frcallback_fn(int, void *);
-
-typedef struct frbuf_envss
-{
-    frcallback_fn * callback;
-    void * frame;
-} frbuf_env;
-
-static void frderef(frbuf_env * const frb)
-{
-    if (frb->frame != NULL && frb->callback) {
-        printf("Deref frame: %p\n", frb->frame);
-        av_frame_free(&frb->frame);
-    }
-    frb->callback = (frcallback_fn *)0;
-}
-
-#endif
-
 
 static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const fr)
 {
@@ -299,12 +284,6 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const
     int h = fr->height;
     int w2 = (w+31)&~31;
     int h2 = (h+15)&~15;
-#ifdef RPI_ZERO_COPY
-    frbuf_env frb = {
-        (frcallback_fn *)fr->data[3],
-        (void *)fr->linesize[3]
-    };
-#endif
 
     if (!display || !rpi_pool)
         return;
@@ -313,9 +292,6 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const
     if (!buf) {
       // Running too fast so drop the frame
         printf("Drop frame\n");
-#ifdef RPI_ZERO_COPY
-        frderef(&frb);
-#endif
         return;
     }
     assert(buf);
@@ -323,10 +299,14 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const
     buf->length = (w2 * h2 * 3)/2;
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
-    buf->user_data = frb.frame;
 #ifdef RPI_ZERO_COPY
-    buf->data = get_vc_handle(fr->buf[0]);
+{
+    AVBufferRef * bref = av_buffer_ref(fr->buf[0]);
+    buf->user_data = bref;
+    buf->data = get_vc_handle(bref);
     buf->alloc_size = (w2*h2*3)/2;
+    printf("Create buf %p\n", bref);
+}
 #else
     //mmal_buffer_header_mem_lock(buf);
     memcpy(buf->data, fr->data[0], w2 * h);
@@ -335,8 +315,10 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const
     //mmal_buffer_header_mem_unlock(buf);
 #endif
 
-    mmal_port_send_buffer(display->input[0], buf);  // I assume this will automatically get released
-
+    if (mmal_port_send_buffer(display->input[0], buf) != MMAL_SUCCESS)
+    {
+        unref_mmal_av_buffer(buf);
+    }
 }
 
 static void display_exit(MMAL_COMPONENT_T* display)

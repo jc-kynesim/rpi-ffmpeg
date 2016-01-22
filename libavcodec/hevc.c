@@ -4458,13 +4458,6 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
 
     if (s->output_frame->buf[0]) {
         av_frame_move_ref(data, s->output_frame);
-#ifdef RPI_ZERO_COPY
-        AVFrame *frame = av_frame_alloc();
-        av_frame_ref(frame, data);
-        ((AVFrame *)data)->data[3] = (uint8_t *)hevc_callback;
-        ((AVFrame *)data)->linesize[3] = (int)frame;
-        //printf("frame_ref2(%p)\n", frame);
-#endif
         *got_output = 1;
     }
 
