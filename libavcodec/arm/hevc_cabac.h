@@ -67,7 +67,7 @@ static inline void update_rice_arm(uint8_t * const stat_coeff,
     "lsrs  %[t], %[t], %[shift]             \n\t"
     "it    eq                               \n\t"
     "subeq %[stat], %[stat], #1             \n\t"
-    "cmp   %[t], #5                         \n\t"
+    "cmp   %[t], #6                         \n\t"
     "adc   %[stat], %[stat], #0             \n\t"
     "usat  %[stat], #8, %[stat]             \n\t"
     : [stat]"+&r"(*stat_coeff),
