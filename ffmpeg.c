@@ -217,8 +217,19 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 }
 
 static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
+    AVFrame * frame = buffer->user_data;
+    if (frame != NULL) {
+        printf("%s: buffer->frame=%p\n", __func__, frame);
+        av_frame_free(&frame);
+        buffer->user_data = NULL;
+    }
   mmal_buffer_header_release(buffer);
 }
+
+static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
+  mmal_buffer_header_release(buffer);
+}
+
 
 static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 {
@@ -254,7 +265,7 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     rpi_pool = display_alloc_pool(display->input[0], w2, h2);
 
     mmal_port_enable(display->input[0],display_cb_input);
-    mmal_port_enable(display->control,display_cb_input);
+    mmal_port_enable(display->control,display_cb_control);
 
     printf("Allocated display %d %d\n",w,h);
 
@@ -273,13 +284,12 @@ typedef struct frbuf_envss
 static void frderef(frbuf_env * const frb)
 {
     if (frb->frame != NULL && frb->callback) {
-        frb->callback(1, frb->frame);
+        printf("Deref frame: %p\n", frb->frame);
+        av_frame_free(&frb->frame);
     }
-    frb->frame = NULL;
     frb->callback = (frcallback_fn *)0;
 }
 
-static frbuf_env fr_prev;
 #endif
 
 
@@ -302,7 +312,7 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const
     MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
     if (!buf) {
       // Running too fast so drop the frame
-//        printf("Drop frame\n");
+        printf("Drop frame\n");
 #ifdef RPI_ZERO_COPY
         frderef(&frb);
 #endif
@@ -313,6 +323,7 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const
     buf->length = (w2 * h2 * 3)/2;
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
+    buf->user_data = frb.frame;
 #ifdef RPI_ZERO_COPY
     buf->data = get_vc_handle(fr->buf[0]);
     buf->alloc_size = (w2*h2*3)/2;
@@ -326,10 +337,6 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame * const
 
     mmal_port_send_buffer(display->input[0], buf);  // I assume this will automatically get released
 
-#ifdef RPI_ZERO_COPY
-    frderef(&fr_prev);
-    fr_prev = frb;
-#endif
 }
 
 static void display_exit(MMAL_COMPONENT_T* display)
