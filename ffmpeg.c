@@ -2678,7 +2678,7 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
     return *p;
 }
 
-#if 0
+#if !defined(RPI) || !RPI_ONE_BUF
 static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 {
     InputStream *ist = s->opaque;
@@ -2688,7 +2688,7 @@ static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 
     return avcodec_default_get_buffer2(s, frame, flags);
 }
-#endif
+#else
 
 static void rpi_free_display_buffer(void *opaque, uint8_t *data)
 {
@@ -2762,13 +2762,12 @@ fail0:
 }
 
 
-static int rpi_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
+static int get_buffer(struct AVCodecContext *s, AVFrame *frame, int flags)
 {
     int rv;
 
     if ((s->codec->capabilities & AV_CODEC_CAP_DR1) == 0 ||
         frame->format != AV_PIX_FMT_YUV420P)
-//    if (1)
     {
         printf("Do default alloc: format=%#x\n", frame->format);
         rv = avcodec_default_get_buffer2(s, frame, flags);
@@ -2778,14 +2777,16 @@ static int rpi_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
         rv = rpi_get_display_buffer(s, frame, flags);
     }
 
-    printf("%s: %dx%d lsize=%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opage[0]=%p\n", __func__,
+    printf("%s: %dx%d lsize=%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
         frame->width, frame->height,
         frame->linesize[0], frame->linesize[1], frame->linesize[2],
         frame->data[0], frame->data[1], frame->data[2],
         frame->buf[0], frame->buf[1], frame->buf[2],
-        av_buffer_pool_opaque(frame->buf[0]));
+        av_buffer_opaque(frame->buf[0]));
     return rv;
 }
+#endif
+
 
 static int init_input_stream(int ist_index, char *error, int error_len)
 {
@@ -2802,7 +2803,7 @@ static int init_input_stream(int ist_index, char *error, int error_len)
 
         ist->dec_ctx->opaque                = ist;
         ist->dec_ctx->get_format            = get_format;
-        ist->dec_ctx->get_buffer2           = rpi_get_buffer2;
+        ist->dec_ctx->get_buffer2           = get_buffer;
         ist->dec_ctx->thread_safe_callbacks = 1;
 
         av_opt_set_int(ist->dec_ctx, "refcounted_frames", 1, 0);

@@ -112,10 +112,6 @@ static uint32_t rpi_filter_coefs[8][1] = {
         { ENCODE_COEFFS(  -2,  10,  58,  -2) }
 };
 
-static uint32_t get_vc_address(AVBufferRef *bref) {
-  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
-  return p->vc;
-}
 #endif
 
 
@@ -2184,9 +2180,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
@@ -2194,7 +2190,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   } else {
                       *y++ = 1; // Weight of 1 and offset of 0
                   }
-                  *y++ = (get_vc_address(s->frame->buf[0]) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
+                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
             }
@@ -2233,8 +2229,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref0->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref0->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
@@ -2245,8 +2241,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                           *u++ = 1; // Weight of 1 and offset of 0
                           *u++ = 1;
                       }
-                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
-                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                      *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
                 s->curr_u_mvs = u;
@@ -2284,9 +2280,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
@@ -2294,7 +2290,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   } else {
                       *y++ = 1; // Weight of 1 and offset of 0
                   }
-                  *y++ = (get_vc_address(s->frame->buf[0]) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
+                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
             }
@@ -2334,8 +2330,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref1->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref1->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
                       *u++ = rpi_filter_coefs[_mx][0];
@@ -2347,8 +2343,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                           *u++ = 1; // Weight of 1 and offset of 0
                           *u++ = 1;
                       }
-                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
-                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                      *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
                 s->curr_u_mvs = u;
@@ -2390,13 +2386,13 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y2 - 3 + start_y) << 16) + ( (x2 - 3 + start_x) & 0xffff); // Second fetch is for ref1
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   *y++ = ( (bw<8 ? bw : 8) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   *y++ = 1; // B frame weighted prediction not supported
-                  *y++ = (get_vc_address(s->frame->buf[0]) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
+                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter_b;
                 }
             }
@@ -2440,8 +2436,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b0;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref0->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref0->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
@@ -2451,14 +2447,14 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x2_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y2_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref1->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref1->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx2][0];
                       *u++ = rpi_filter_coefs[_my2][0];
                       u+=2; // Weights not supported in B slices
-                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
-                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                      *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
                 s->curr_u_mvs = u;
@@ -3257,12 +3253,13 @@ static int32_t filter8_luma(uint8_t *data, int x0, int y0, int pitch, int my_mx,
    return vsum;
 }
 
-static uint8_t *test_frame(HEVCContext *s,uint32_t p, AVFrame *frame, int cIdx)
+static uint8_t *test_frame(HEVCContext *s,uint32_t p, AVFrame *frame, const int cIdx)
 {
   //int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[cIdx];
   int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[cIdx];
   int pitch = frame->linesize[cIdx];
-  uint32_t base = get_vc_address(frame->buf[cIdx]);
+  uint32_t base = c_idx == 0 ? get_vc_address_y(frame);
+    c_idx == 1 ? get_vc_address_u(frame) : get_vc_address_v(frame);
   if (p>=base && p<base+pitch*pic_height) {
     return frame->data[cIdx] + (p-base);
   }

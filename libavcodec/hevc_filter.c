@@ -879,16 +879,24 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CR
 
 #ifdef RPI_INTER_QPU
-static void flush_buffer(AVBufferRef *bref) {
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
+static void flush_buffer_y(const AVFrame * const frame) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[0]);
     gpu_cache_flush(p);
 }
 
-// Return Physical address for this image
-static uint32_t get_vc_address(AVBufferRef *bref) {
-  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
-  return p->vc;
+static void flush_buffer_u(const AVFrame * const frame) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    gpu_cache_flush(p);
 }
+
+static void flush_buffer_v(const AVFrame * const frame) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[2]);
+    gpu_cache_flush(p);
+}
+
+
+#ifdef RPI_DEBLOCK_VPU
+#error Not fixed yet
 
 // ff_hevc_flush_buffer_lines
 // flushes and invalidates all pixel rows in [start,end-1]
@@ -930,20 +938,23 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
         vcsm_clean_invalid( &iocache );
 #else
         if (flush_chroma) {
-          flush_buffer(s->frame->buf[1]);
-          flush_buffer(s->frame->buf[2]);
+          flush_buffer_u(s->frame);
+          flush_buffer_v(s->frame);
         }
         if (flush_luma) {
-          flush_buffer(s->frame->buf[0]);
+          flush_buffer_y(s->frame);
         }
 #endif
 }
-
+#endif
 
 void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && s->used_for_ref) {
       // TODO make this use ff_hevc_flush_buffer_lines
+#if RPI_ONE_BUF
+#error Fix me!
+#endif
 #ifdef RPI_FAST_CACHEFLUSH
         struct vcsm_user_clean_invalid_s iocache = {};
         int curr_y = ((int *)f->progress->data)[0];
@@ -977,10 +988,10 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 #endif
         vcsm_clean_invalid( &iocache );
 #else
-        flush_buffer(s->frame->buf[1]);
-        flush_buffer(s->frame->buf[2]);
+        flush_buffer_u(s->frame);
+        flush_buffer_v(s->frame);
 #ifdef RPI_LUMA_QPU
-        flush_buffer(s->frame->buf[0]);
+        flush_buffer_y(s->frame);
 #endif
 
 #endif
@@ -992,6 +1003,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 #endif
 
 #ifdef RPI_DEBLOCK_VPU
+#error XXX
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
 static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 {
@@ -1000,21 +1012,21 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   // TODO flush buffer of beta/tc setup when it becomes cached
 
   // Prepare three commands at once to avoid calling overhead
-  s->vpu_cmds_arm[0][0] = get_vc_address(s->frame->buf[0]) + s->frame->linesize[0] * y;
+  s->vpu_cmds_arm[0][0] = get_vc_address_y(s->frame) + s->frame->linesize[0] * y;
   s->vpu_cmds_arm[0][1] = s->frame->linesize[0];
   s->vpu_cmds_arm[0][2] = s->setup_width;
   s->vpu_cmds_arm[0][3] = (int) ( s->y_setup_vc + s->setup_width * (y>>4) );
   s->vpu_cmds_arm[0][4] = ctb_size>>4;
   s->vpu_cmds_arm[0][5] = 2;
 
-  s->vpu_cmds_arm[1][0] = get_vc_address(s->frame->buf[1]) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
+  s->vpu_cmds_arm[1][0] = get_vc_address_u(s->frame) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
   s->vpu_cmds_arm[1][1] = s->frame->linesize[1];
   s->vpu_cmds_arm[1][2] = s->uv_setup_width;
   s->vpu_cmds_arm[1][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
   s->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
   s->vpu_cmds_arm[1][5] = 3;
 
-  s->vpu_cmds_arm[2][0] = get_vc_address(s->frame->buf[2]) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
+  s->vpu_cmds_arm[2][0] = get_vc_address_v(s->frame) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
   s->vpu_cmds_arm[2][1] = s->frame->linesize[2];
   s->vpu_cmds_arm[2][2] = s->uv_setup_width;
   s->vpu_cmds_arm[2][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
