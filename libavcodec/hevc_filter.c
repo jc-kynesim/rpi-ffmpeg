@@ -880,18 +880,18 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 
 #ifdef RPI_INTER_QPU
 static void flush_buffer_y(const AVFrame * const frame) {
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[0]);
-    gpu_cache_flush(p);
+    GPU_MEM_PTR_T p = get_gpu_mem_ptr_y(frame);
+    gpu_cache_flush(&p);
 }
 
 static void flush_buffer_u(const AVFrame * const frame) {
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
-    gpu_cache_flush(p);
+    GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(frame);
+    gpu_cache_flush(&p);
 }
 
 static void flush_buffer_v(const AVFrame * const frame) {
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[2]);
-    gpu_cache_flush(p);
+    GPU_MEM_PTR_T p = get_gpu_mem_ptr_v(frame);
+    gpu_cache_flush(&p);
 }
 
 
@@ -909,30 +909,30 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
         int curr_uv = curr_y >> s->ps.sps->vshift[1];
         int n_uv = n >> s->ps.sps->vshift[1];
         int sz,base;
-        GPU_MEM_PTR_T *p;
+        GPU_MEM_PTR_T p;
         if (curr_uv < 0) curr_uv = 0;
         if (n_uv<=curr_uv) { return; }
         sz = s->frame->linesize[1] * (n_uv-curr_uv);
         base = s->frame->linesize[1] * curr_uv;
         if (flush_chroma) {
-          p = av_buffer_pool_opaque(s->frame->buf[1]);
-          iocache.s[0].handle = p->vcsm_handle;
+          p = get_gpu_mem_ptr_u(s->frame);
+          iocache.s[0].handle = p.vcsm_handle;
           iocache.s[0].cmd = 3; // clean+invalidate
-          iocache.s[0].addr = (int)p->arm + base;
+          iocache.s[0].addr = (int)p.arm + base;
           iocache.s[0].size  = sz;
-          p = av_buffer_pool_opaque(s->frame->buf[2]);
-          iocache.s[1].handle = p->vcsm_handle;
+          p = get_gpu_mem_ptr_v(s->frame);
+          iocache.s[1].handle = p.vcsm_handle;
           iocache.s[1].cmd = 3; // clean+invalidate
-          iocache.s[1].addr = (int)p->arm + base;
+          iocache.s[1].addr = (int)p.arm + base;
           iocache.s[1].size  = sz;
         }
         if (flush_luma) {
-          p = av_buffer_pool_opaque(s->frame->buf[0]);
+          p = get_gpu_mem_ptr_y(s->frame);
           sz = s->frame->linesize[0] * (n-curr_y);
           base = s->frame->linesize[0] * curr_y;
-          iocache.s[2].handle = p->vcsm_handle;
+          iocache.s[2].handle = p.vcsm_handle;
           iocache.s[2].cmd = 3; // clean+invalidate
-          iocache.s[2].addr = (int)p->arm + base;
+          iocache.s[2].addr = (int)p.arm + base;
           iocache.s[2].size  = sz;
         }
         vcsm_clean_invalid( &iocache );
@@ -952,38 +952,35 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && s->used_for_ref) {
       // TODO make this use ff_hevc_flush_buffer_lines
-#if RPI_ONE_BUF
-#error Fix me!
-#endif
 #ifdef RPI_FAST_CACHEFLUSH
         struct vcsm_user_clean_invalid_s iocache = {};
         int curr_y = ((int *)f->progress->data)[0];
         int curr_uv = curr_y >> s->ps.sps->vshift[1];
         int n_uv = n >> s->ps.sps->vshift[1];
         int sz,base;
-        GPU_MEM_PTR_T *p;
+        GPU_MEM_PTR_T p;
         if (curr_uv < 0) curr_uv = 0;
         if (n_uv<=curr_uv) { return; }
         sz = s->frame->linesize[1] * (n_uv-curr_uv);
         base = s->frame->linesize[1] * curr_uv;
-        p = av_buffer_pool_opaque(s->frame->buf[1]);
-        iocache.s[0].handle = p->vcsm_handle;
+        p = get_gpu_mem_ptr_u(s->frame);
+        iocache.s[0].handle = p.vcsm_handle;
         iocache.s[0].cmd = 3; // clean+invalidate
-        iocache.s[0].addr = (int)p->arm + base;
+        iocache.s[0].addr = (int)p.arm + base;
         iocache.s[0].size  = sz;
-        p = av_buffer_pool_opaque(s->frame->buf[2]);
-        iocache.s[1].handle = p->vcsm_handle;
+        p = get_gpu_mem_ptr_v(s->frame);
+        iocache.s[1].handle = p.vcsm_handle;
         iocache.s[1].cmd = 3; // clean+invalidate
-        iocache.s[1].addr = (int)p->arm + base;
+        iocache.s[1].addr = (int)p.arm + base;
         iocache.s[1].size  = sz;
 
 #ifdef RPI_LUMA_QPU
-        p = av_buffer_pool_opaque(s->frame->buf[0]);
+        p = get_gpu_mem_ptr_y(s->frame);
         sz = s->frame->linesize[0] * (n-curr_y);
         base = s->frame->linesize[0] * curr_y;
-        iocache.s[2].handle = p->vcsm_handle;
+        iocache.s[2].handle = p.vcsm_handle;
         iocache.s[2].cmd = 3; // clean+invalidate
-        iocache.s[2].addr = (int)p->arm + base;
+        iocache.s[2].addr = (int)p.arm + base;
         iocache.s[2].size  = sz;
 #endif
         vcsm_clean_invalid( &iocache );

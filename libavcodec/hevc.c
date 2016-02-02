@@ -3546,6 +3546,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #ifdef RPI
 
 #ifndef RPI_FAST_CACHEFLUSH
+#error RPI_FAST_CACHEFLUSH is broken
 static void flush_buffer(AVBufferRef *bref) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
     gpu_cache_flush(p);
@@ -3556,7 +3557,7 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
 {
 #ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(s->frame);
     int n = s->ps.sps->height;
     int curr_y = 0;
     int curr_uv = 0;
@@ -3564,21 +3565,21 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
     int sz,base;
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
-    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].handle = p.vcsm_handle;
     iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int)(p->arm) + base;
+    iocache.s[0].addr = (int)(p.arm) + base;
     iocache.s[0].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[2]);
-    iocache.s[1].handle = p->vcsm_handle;
+    p = get_gpu_mem_ptr_v(s->frame);
+    iocache.s[1].handle = p.vcsm_handle;
     iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = (int)(p->arm) + base;
+    iocache.s[1].addr = (int)(p.arm) + base;
     iocache.s[1].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[0]);
+    p = get_gpu_mem_ptr_y(s->frame);
     sz = s->frame->linesize[0] * (n-curr_y);
     base = s->frame->linesize[0] * curr_y;
-    iocache.s[2].handle = p->vcsm_handle;
+    iocache.s[2].handle = p.vcsm_handle;
     iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = (int)(p->arm) + base;
+    iocache.s[2].addr = (int)(p.arm) + base;
     iocache.s[2].size  = sz;
     vcsm_clean_invalid( &iocache );
 #else
@@ -3596,7 +3597,7 @@ static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM
     int curr_y;
     int curr_uv;
     int n_uv;
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(s->frame);
     int sz,base;
     int (*d)[2] = s->dblk_cmds[job];
     int low=(*d)[1];
@@ -3613,21 +3614,21 @@ static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM
 
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
-    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].handle = p.vcsm_handle;
     iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int)(p->arm) + base;
+    iocache.s[0].addr = (int)(p.arm) + base;
     iocache.s[0].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[2]);
-    iocache.s[1].handle = p->vcsm_handle;
+    p = get_gpu_mem_ptr_v(s->frame);
+    iocache.s[1].handle = p.vcsm_handle;
     iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = (int)(p->arm) + base;
+    iocache.s[1].addr = (int)(p.arm) + base;
     iocache.s[1].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[0]);
+    p = get_gpu_mem_ptr_y(s->frame);
     sz = s->frame->linesize[0] * (n-curr_y);
     base = s->frame->linesize[0] * curr_y;
-    iocache.s[2].handle = p->vcsm_handle;
+    iocache.s[2].handle = p.vcsm_handle;
     iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = (int)(p->arm) + base;
+    iocache.s[2].addr = (int)(p.arm) + base;
     iocache.s[2].size  = sz;
 
     iocache.s[3].handle = p0->vcsm_handle;

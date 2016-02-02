@@ -186,6 +186,7 @@ static MMAL_COMPONENT_T* rpi_display = NULL;
 static MMAL_POOL_T *rpi_pool = NULL;
 
 #ifdef RPI_ZERO_COPY
+#error XXX
 static uint8_t *get_vc_handle(AVBufferRef *bref) {
   GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
   return (uint8_t *)p->vc_handle;
@@ -2782,7 +2783,7 @@ static int get_buffer(struct AVCodecContext *s, AVFrame *frame, int flags)
         frame->linesize[0], frame->linesize[1], frame->linesize[2],
         frame->data[0], frame->data[1], frame->data[2],
         frame->buf[0], frame->buf[1], frame->buf[2],
-        av_buffer_opaque(frame->buf[0]));
+        av_buffer_get_opaque(frame->buf[0]));
     return rv;
 }
 #endif
