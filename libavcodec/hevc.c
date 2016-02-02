@@ -235,26 +235,26 @@ static void pic_arrays_free(HEVCContext *s)
     int job;
     for(job=0;job<RPI_MAX_JOBS;job++) {
       if (s->coeffs_buf_arm[job][0]) {
-        gpu_free(&s->coeffs_buf_default[job]);
+        av_gpu_free(&s->coeffs_buf_default[job]);
         s->coeffs_buf_arm[job][0] = 0;
       }
       if (s->coeffs_buf_arm[job][2]) {
-        gpu_free(&s->coeffs_buf_accelerated[job]);
+        av_gpu_free(&s->coeffs_buf_accelerated[job]);
         s->coeffs_buf_arm[job][2] = 0;
       }
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
     if (s->y_setup_arm) {
-      gpu_free(&s->y_setup_ptr);
+      av_gpu_free(&s->y_setup_ptr);
       s->y_setup_arm = 0;
     }
     if (s->uv_setup_arm) {
-      gpu_free(&s->uv_setup_ptr);
+      av_gpu_free(&s->uv_setup_ptr);
       s->uv_setup_arm = 0;
     }
     if (s->vpu_cmds_arm) {
-      gpu_free(&s->vpu_cmds_ptr);
+      av_gpu_free(&s->vpu_cmds_ptr);
       s->vpu_cmds_arm = 0;
     }
 #endif
@@ -307,11 +307,11 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     for(job=0;job<RPI_MAX_JOBS;job++) {
       printf("Allocated %d\n",coefs_per_row);
       for(job=0;job<RPI_MAX_JOBS;job++) {
-        gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
+        av_gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
         s->coeffs_buf_arm[job][0] = (int16_t*) s->coeffs_buf_default[job].arm;
         if (!s->coeffs_buf_arm[job][0])
             goto fail;
-        gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
+        av_gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
         s->coeffs_buf_arm[job][2] = (int16_t*) s->coeffs_buf_accelerated[job].arm;
         s->coeffs_buf_vc[job][2] = s->coeffs_buf_accelerated[job].vc;
         if (!s->coeffs_buf_arm[job][2])
@@ -4563,13 +4563,13 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
 #ifdef RPI_INTER_QPU
       if (s->unif_mvs[i]) {
-        gpu_free( &s->unif_mvs_ptr[i] );
+        av_gpu_free( &s->unif_mvs_ptr[i] );
         s->unif_mvs[i] = 0;
       }
 #endif
 #ifdef RPI_LUMA_QPU
       if (s->y_unif_mvs[i]) {
-        gpu_free( &s->y_unif_mvs_ptr[i] );
+        av_gpu_free( &s->y_unif_mvs_ptr[i] );
         s->y_unif_mvs[i] = 0;
       }
 #endif
@@ -4635,6 +4635,8 @@ static av_cold void memclear16(int16_t *p, int n)
 #endif
 #endif
 
+
+
 static av_cold int hevc_init_context(AVCodecContext *avctx)
 {
     HEVCContext *s = avctx->priv_data;
@@ -4670,7 +4672,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         uint32_t *p;
 		for(job=0;job<RPI_MAX_JOBS;job++) {
 #ifdef RPI_CACHE_UNIF_MVS
-          gpu_malloc_cached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
+          av_gpu_malloc_cached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #else
           gpu_malloc_uncached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #endif
@@ -4695,7 +4697,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         int y_commands_per_qpu = Y_COMMANDS_PER_QPU;
         uint32_t *p;
 #ifdef RPI_CACHE_UNIF_MVS
-        gpu_malloc_cached( 12 * y_commands_per_qpu * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
+        av_gpu_malloc_cached( 12 * y_commands_per_qpu * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
 #else
         gpu_malloc_uncached( 12 * y_commands_per_qpu * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
 #endif

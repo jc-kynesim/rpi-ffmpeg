@@ -288,11 +288,6 @@ void avcodec_align_dimensions2(AVCodecContext *s, int *width, int *height,
 
     switch (s->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
-#ifdef RPI_GPU_BUFFERS
-        w_align = 32; //FIXME assume 16 pixel per macroblock
-        h_align = 16; // interlaced needs 2 macroblocks height
-        break;
-#endif
     case AV_PIX_FMT_YUYV422:
     case AV_PIX_FMT_YVYU422:
     case AV_PIX_FMT_UYVY422:
@@ -524,8 +519,7 @@ int avcodec_fill_audio_frame(AVFrame *frame, int nb_channels,
 static void rpi_buffer_default_free(void *opaque, uint8_t *data)
 {
     GPU_MEM_PTR_T *p = opaque;
-    if (!p->suballoc)
-      gpu_free(p);
+    av_gpu_free(p);
     av_free(p);
 }
 
@@ -535,68 +529,27 @@ static AVBufferRef *rpi_buffer_alloc(int size)
     uint8_t    *data = NULL;
     GPU_MEM_PTR_T *p;
 
+    static int total=0;
+    total+=size;
+
     p = av_malloc(sizeof *p);
     if (!p)
         return NULL;
 
-/*
-  unsigned char *arm; // Pointer to memory mapped on ARM side
-  int vc_handle;   // Videocore handle of relocatable memory
-  int vcsm_handle; // Handle for use by VCSM
-  int vc;       // Address for use in GPU code
-  int numbytes; // Size of memory block
-*/
-int actual_size = size-(16 + STRIDE_ALIGN - 1);
-static int count = 0;
-static GPU_MEM_PTR_T last_alloc;
-    if (count == 0)
-    {
-       av_assert0(!last_alloc.arm);
-       size = actual_size + (actual_size>>1) + (16 + STRIDE_ALIGN - 1);
-       if (gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
-          return NULL;
-       p->numbytes = actual_size;
-       last_alloc = *p;
-       count++;
-    } else if (last_alloc.arm) {
-       *p = last_alloc;
-       av_assert0(4 * actual_size == p->numbytes);
-       p->suballoc = 1;
-       p->numbytes = actual_size;
-       size = 0;
-    }
-    else {
-      av_assert0(0);
-      if (gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
-        return NULL;
-      p->numbytes = actual_size;
-    }
-    static int total=0;
-    total+=size;
-
-    if (!p->arm)
+    if (av_gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
         return NULL;
 
-    if (p->suballoc) // must be U/V
-    {
-       av_assert0(count == 1 || count == 2);
-       av_assert0(p->vc && p->arm);
-       p->vc += actual_size<<2;
-       p->arm += actual_size<<2;
-       if (count == 2) {
-         p->vc += actual_size;
-         p->arm += actual_size;
-         memset(&last_alloc, 0, sizeof last_alloc);
-         count = 0;
-       } else count = 2;
-    }
-
-    printf("Rpi alloc %8d/%8d ARM=%p VC=%x->%x\n",actual_size,total,p->arm,p->vc,p->vc+actual_size);
+    data = p->arm;
+    printf("Rpi alloc %d/%d ARM=%p VC=%x->%x\n",size,total,p->arm,p->vc,p->vc+size);
     //memset(data, 64, size);
 
-    ret = av_buffer_create(p->arm, actual_size, rpi_buffer_default_free, p, 0);
+    if (!data)
+        return NULL;
+
+    ret = av_buffer_create(data, size, rpi_buffer_default_free, p, 0);
     if (!ret) {
-        rpi_buffer_default_free(p, NULL);
+        av_gpu_free(p);
+        av_freep(&p);
     }
 
     return ret;
