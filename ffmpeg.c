@@ -25,7 +25,7 @@
 
 #ifdef RPI
 #define RPI_DISPLAY
-//#define RPI_ZERO_COPY
+#define RPI_ZERO_COPY
 #endif
 
 #include "config.h"
@@ -185,14 +185,6 @@ static void free_input_threads(void);
 static MMAL_COMPONENT_T* rpi_display = NULL;
 static MMAL_POOL_T *rpi_pool = NULL;
 
-#ifdef RPI_ZERO_COPY
-#error XXX
-static uint8_t *get_vc_handle(AVBufferRef *bref) {
-  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
-  return (uint8_t *)p->vc_handle;
-}
-#endif
-
 static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 {
     MMAL_POOL_T* pool;
@@ -208,7 +200,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
     for (i = 0; i < NUM_BUFFERS; ++i)
     {
        MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
-       void* bufPtr = buffer->data;
+       char * bufPtr = buffer->data;
        memset(bufPtr, i*30, w*h);
        memset(bufPtr+w*h, 128, (w*h)/2);
     }
@@ -217,7 +209,19 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
     return pool;
 }
 
-static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
+static void unref_fr_buf_from_mmal(MMAL_BUFFER_HEADER_T * const mbuf)
+{
+#ifdef RPI_ZERO_COPY
+    av_buffer_unref((AVBufferRef **)&mbuf->user_data);
+#endif
+}
+
+static void display_cb_input(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer) {
+    unref_fr_buf_from_mmal(buffer);
+    mmal_buffer_header_release(buffer);
+}
+
+static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
   mmal_buffer_header_release(buffer);
 }
 
@@ -255,7 +259,7 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     rpi_pool = display_alloc_pool(display->input[0], w2, h2);
 
     mmal_port_enable(display->input[0],display_cb_input);
-    mmal_port_enable(display->control,display_cb_input);
+    mmal_port_enable(display->control,display_cb_control);
 
     printf("Allocated display %d %d\n",w,h);
 
@@ -264,10 +268,6 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 
 static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const fr)
 {
-    int w = fr->width;
-    int h = fr->height;
-    int w2 = (w+31)&~31;
-    int h2 = (h+15)&~15;
     if (!display || !rpi_pool)
         return;
     MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
@@ -278,23 +278,38 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const 
     }
     assert(buf);
     buf->cmd = 0;
-    buf->length = (w2 * h2 * 3)/2;
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
 #ifdef RPI_ZERO_COPY
-    buf->data = get_vc_handle(fr->buf[0]);
-    buf->alloc_size = (w2*h2*3)/2;
+{
+    AVBufferRef * fr_buf = av_buffer_ref(fr->buf[0]);
+    const GPU_MEM_PTR_T * const p = av_buffer_get_opaque(fr_buf);
+
+    buf->user_data = fr_buf;
+    buf->data = p->vc_handle;
+    buf->length = p->numbytes;
+    buf->alloc_size = p->numbytes;
+}
 #else
+{
+    int w = fr->width;
+    int h = fr->height;
+    int w2 = (w+31)&~31;
+    int h2 = (h+15)&~15;
+
+    buf->length = (w2 * h2 * 3)/2;
+
     //mmal_buffer_header_mem_lock(buf);
     memcpy(buf->data, fr->data[0], w2 * h);
     memcpy(buf->data+w2*h2, fr->data[1], w2 * h / 4);
     memcpy(buf->data+w2*h2*5/4, fr->data[2], w2 * h / 4);
     //mmal_buffer_header_mem_unlock(buf);
+}
 #endif
 
     if (mmal_port_send_buffer(display->input[0], buf) != MMAL_SUCCESS)
     {
-//        unref_av_buffers(buf->user_data);
+        unref_fr_buf_from_mmal(buf);
         mmal_buffer_header_release(buf);
     }
 }
@@ -2694,7 +2709,7 @@ static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 static void rpi_free_display_buffer(void *opaque, uint8_t *data)
 {
     GPU_MEM_PTR_T *const gmem = opaque;
-    printf("%s: data=%p\n", __func__, data);
+//    printf("%s: data=%p\n", __func__, data);
     av_gpu_free(gmem);
 }
 
@@ -2712,7 +2727,7 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     int rv;
     unsigned int i;
 
-    printf("Do local alloc: format=%#x, %dx%d: %u\n", frame->format, frame->width, frame->height, size_pic);
+//    printf("Do local alloc: format=%#x, %dx%d: %u\n", frame->format, frame->width, frame->height, size_pic);
 
     if (gmem == NULL) {
         printf("av_malloc(GPU_MEM_PTR_T) failed\n");
@@ -2748,10 +2763,6 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     frame->extended_data = frame->data;
     // Leave extended buf alone
 
-    memset(frame->data[0], 0, size_y);
-    memset(frame->data[1], 0, size_c);
-    memset(frame->data[2], 0, size_c);
-
     return 0;
 
 fail2:
@@ -2770,7 +2781,7 @@ static int get_buffer(struct AVCodecContext *s, AVFrame *frame, int flags)
     if ((s->codec->capabilities & AV_CODEC_CAP_DR1) == 0 ||
         frame->format != AV_PIX_FMT_YUV420P)
     {
-        printf("Do default alloc: format=%#x\n", frame->format);
+//        printf("Do default alloc: format=%#x\n", frame->format);
         rv = avcodec_default_get_buffer2(s, frame, flags);
     }
     else
@@ -2778,12 +2789,14 @@ static int get_buffer(struct AVCodecContext *s, AVFrame *frame, int flags)
         rv = rpi_get_display_buffer(s, frame, flags);
     }
 
+#if 0
     printf("%s: %dx%d lsize=%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
         frame->width, frame->height,
         frame->linesize[0], frame->linesize[1], frame->linesize[2],
         frame->data[0], frame->data[1], frame->data[2],
         frame->buf[0], frame->buf[1], frame->buf[2],
         av_buffer_get_opaque(frame->buf[0]));
+#endif
     return rv;
 }
 #endif
