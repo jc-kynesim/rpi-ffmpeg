@@ -112,10 +112,6 @@ static uint32_t rpi_filter_coefs[8][1] = {
         { ENCODE_COEFFS(  -2,  10,  58,  -2) }
 };
 
-static uint32_t get_vc_address(AVBufferRef *bref) {
-  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
-  return p->vc;
-}
 #endif
 
 
@@ -235,26 +231,26 @@ static void pic_arrays_free(HEVCContext *s)
     int job;
     for(job=0;job<RPI_MAX_JOBS;job++) {
       if (s->coeffs_buf_arm[job][0]) {
-        gpu_free(&s->coeffs_buf_default[job]);
+        av_gpu_free(&s->coeffs_buf_default[job]);
         s->coeffs_buf_arm[job][0] = 0;
       }
       if (s->coeffs_buf_arm[job][2]) {
-        gpu_free(&s->coeffs_buf_accelerated[job]);
+        av_gpu_free(&s->coeffs_buf_accelerated[job]);
         s->coeffs_buf_arm[job][2] = 0;
       }
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
     if (s->y_setup_arm) {
-      gpu_free(&s->y_setup_ptr);
+      av_gpu_free(&s->y_setup_ptr);
       s->y_setup_arm = 0;
     }
     if (s->uv_setup_arm) {
-      gpu_free(&s->uv_setup_ptr);
+      av_gpu_free(&s->uv_setup_ptr);
       s->uv_setup_arm = 0;
     }
     if (s->vpu_cmds_arm) {
-      gpu_free(&s->vpu_cmds_ptr);
+      av_gpu_free(&s->vpu_cmds_ptr);
       s->vpu_cmds_arm = 0;
     }
 #endif
@@ -307,11 +303,11 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     for(job=0;job<RPI_MAX_JOBS;job++) {
       printf("Allocated %d\n",coefs_per_row);
       for(job=0;job<RPI_MAX_JOBS;job++) {
-        gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
+        av_gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
         s->coeffs_buf_arm[job][0] = (int16_t*) s->coeffs_buf_default[job].arm;
         if (!s->coeffs_buf_arm[job][0])
             goto fail;
-        gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
+        av_gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
         s->coeffs_buf_arm[job][2] = (int16_t*) s->coeffs_buf_accelerated[job].arm;
         s->coeffs_buf_vc[job][2] = s->coeffs_buf_accelerated[job].vc;
         if (!s->coeffs_buf_arm[job][2])
@@ -2184,9 +2180,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
@@ -2194,7 +2190,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   } else {
                       *y++ = 1; // Weight of 1 and offset of 0
                   }
-                  *y++ = (get_vc_address(s->frame->buf[0]) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
+                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
             }
@@ -2233,8 +2229,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref0->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref0->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
@@ -2245,8 +2241,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                           *u++ = 1; // Weight of 1 and offset of 0
                           *u++ = 1;
                       }
-                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
-                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                      *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
                 s->curr_u_mvs = u;
@@ -2284,9 +2280,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
@@ -2294,7 +2290,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   } else {
                       *y++ = 1; // Weight of 1 and offset of 0
                   }
-                  *y++ = (get_vc_address(s->frame->buf[0]) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
+                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
             }
@@ -2334,8 +2330,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref1->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref1->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
                       *u++ = rpi_filter_coefs[_mx][0];
@@ -2347,8 +2343,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                           *u++ = 1; // Weight of 1 and offset of 0
                           *u++ = 1;
                       }
-                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
-                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                      *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
                 s->curr_u_mvs = u;
@@ -2390,13 +2386,13 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y2 - 3 + start_y) << 16) + ( (x2 - 3 + start_x) & 0xffff); // Second fetch is for ref1
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[0]);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   *y++ = ( (bw<8 ? bw : 8) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   *y++ = 1; // B frame weighted prediction not supported
-                  *y++ = (get_vc_address(s->frame->buf[0]) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
+                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter_b;
                 }
             }
@@ -2440,8 +2436,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b0;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref0->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref0->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
@@ -2451,14 +2447,14 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x2_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y2_c - 1 + start_y;
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[1]);
-                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address(ref1->frame->buf[2]);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_u(ref1->frame);
+                      u++[-RPI_CHROMA_COMMAND_WORDS] = get_vc_address_v(ref1->frame);
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx2][0];
                       *u++ = rpi_filter_coefs[_my2][0];
                       u+=2; // Weights not supported in B slices
-                      *u++ = (get_vc_address(s->frame->buf[1]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
-                      *u++ = (get_vc_address(s->frame->buf[2]) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
+                      *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
+                      *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
                 }
                 s->curr_u_mvs = u;
@@ -3257,12 +3253,13 @@ static int32_t filter8_luma(uint8_t *data, int x0, int y0, int pitch, int my_mx,
    return vsum;
 }
 
-static uint8_t *test_frame(HEVCContext *s,uint32_t p, AVFrame *frame, int cIdx)
+static uint8_t *test_frame(HEVCContext *s,uint32_t p, AVFrame *frame, const int cIdx)
 {
   //int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[cIdx];
   int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[cIdx];
   int pitch = frame->linesize[cIdx];
-  uint32_t base = get_vc_address(frame->buf[cIdx]);
+  uint32_t base = c_idx == 0 ? get_vc_address_y(frame);
+    c_idx == 1 ? get_vc_address_u(frame) : get_vc_address_v(frame);
   if (p>=base && p<base+pitch*pic_height) {
     return frame->data[cIdx] + (p-base);
   }
@@ -3549,6 +3546,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #ifdef RPI
 
 #ifndef RPI_FAST_CACHEFLUSH
+#error RPI_FAST_CACHEFLUSH is broken
 static void flush_buffer(AVBufferRef *bref) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
     gpu_cache_flush(p);
@@ -3559,7 +3557,7 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
 {
 #ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(s->frame);
     int n = s->ps.sps->height;
     int curr_y = 0;
     int curr_uv = 0;
@@ -3567,21 +3565,21 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
     int sz,base;
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
-    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].handle = p.vcsm_handle;
     iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int)(p->arm) + base;
+    iocache.s[0].addr = (int)(p.arm) + base;
     iocache.s[0].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[2]);
-    iocache.s[1].handle = p->vcsm_handle;
+    p = get_gpu_mem_ptr_v(s->frame);
+    iocache.s[1].handle = p.vcsm_handle;
     iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = (int)(p->arm) + base;
+    iocache.s[1].addr = (int)(p.arm) + base;
     iocache.s[1].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[0]);
+    p = get_gpu_mem_ptr_y(s->frame);
     sz = s->frame->linesize[0] * (n-curr_y);
     base = s->frame->linesize[0] * curr_y;
-    iocache.s[2].handle = p->vcsm_handle;
+    iocache.s[2].handle = p.vcsm_handle;
     iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = (int)(p->arm) + base;
+    iocache.s[2].addr = (int)(p.arm) + base;
     iocache.s[2].size  = sz;
     vcsm_clean_invalid( &iocache );
 #else
@@ -3599,7 +3597,7 @@ static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM
     int curr_y;
     int curr_uv;
     int n_uv;
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(s->frame);
     int sz,base;
     int (*d)[2] = s->dblk_cmds[job];
     int low=(*d)[1];
@@ -3616,21 +3614,21 @@ static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM
 
     sz = s->frame->linesize[1] * (n_uv-curr_uv);
     base = s->frame->linesize[1] * curr_uv;
-    iocache.s[0].handle = p->vcsm_handle;
+    iocache.s[0].handle = p.vcsm_handle;
     iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int)(p->arm) + base;
+    iocache.s[0].addr = (int)(p.arm) + base;
     iocache.s[0].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[2]);
-    iocache.s[1].handle = p->vcsm_handle;
+    p = get_gpu_mem_ptr_v(s->frame);
+    iocache.s[1].handle = p.vcsm_handle;
     iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = (int)(p->arm) + base;
+    iocache.s[1].addr = (int)(p.arm) + base;
     iocache.s[1].size  = sz;
-    p = av_buffer_pool_opaque(frame->buf[0]);
+    p = get_gpu_mem_ptr_y(s->frame);
     sz = s->frame->linesize[0] * (n-curr_y);
     base = s->frame->linesize[0] * curr_y;
-    iocache.s[2].handle = p->vcsm_handle;
+    iocache.s[2].handle = p.vcsm_handle;
     iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = (int)(p->arm) + base;
+    iocache.s[2].addr = (int)(p.arm) + base;
     iocache.s[2].size  = sz;
 
     iocache.s[3].handle = p0->vcsm_handle;
@@ -4534,13 +4532,13 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
 #ifdef RPI_INTER_QPU
       if (s->unif_mvs[i]) {
-        gpu_free( &s->unif_mvs_ptr[i] );
+        av_gpu_free( &s->unif_mvs_ptr[i] );
         s->unif_mvs[i] = 0;
       }
 #endif
 #ifdef RPI_LUMA_QPU
       if (s->y_unif_mvs[i]) {
-        gpu_free( &s->y_unif_mvs_ptr[i] );
+        av_gpu_free( &s->y_unif_mvs_ptr[i] );
         s->y_unif_mvs[i] = 0;
       }
 #endif
@@ -4641,7 +4639,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         uint32_t *p;
 		for(job=0;job<RPI_MAX_JOBS;job++) {
 #ifdef RPI_CACHE_UNIF_MVS
-          gpu_malloc_cached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
+          av_gpu_malloc_cached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #else
           gpu_malloc_uncached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #endif
@@ -4666,7 +4664,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         int y_commands_per_qpu = Y_COMMANDS_PER_QPU;
         uint32_t *p;
 #ifdef RPI_CACHE_UNIF_MVS
-        gpu_malloc_cached( 12 * y_commands_per_qpu * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
+        av_gpu_malloc_cached( 12 * y_commands_per_qpu * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
 #else
         gpu_malloc_uncached( 12 * y_commands_per_qpu * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
 #endif
