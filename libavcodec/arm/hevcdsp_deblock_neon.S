@@ -22,6 +22,10 @@
 #include "libavutil/arm/asm.S"
 #include "neon.S"
 
+# IO  r2
+#  O  r3
+#  O  r12
+# I   lr
 .macro hevc_loop_filter_chroma_start
         ldr      r12, [r2]
         ldr      r3, [r2, #4]
@@ -31,6 +35,8 @@
         bxeq     lr
 .endm
 
+# I   r3
+# I   r12
 .macro hevc_loop_filter_chroma_body
         vsubl.u8  q3, d4, d2
         vsubl.u8  q11, d18, d19
@@ -49,6 +55,9 @@
         vqmovun.s16 d4, q2
 .endm
 
+#  O  r12
+# IO  r3
+# I   lr
 .macro hevc_loop_filter_luma_start
         ldr     r12, [r3]
         ldr      r3, [r3, #4]
@@ -60,6 +69,12 @@
         lsr      r3, #16
 .endm
 
+# I   r2
+# IO  r5
+# IO  r6
+#  O  r7
+#  O  r8
+#  O  r9
 .macro hevc_loop_filter_luma_body
         vmovl.u8  q8, d16
         vmovl.u8  q9, d18
