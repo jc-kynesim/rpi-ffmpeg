@@ -277,7 +277,7 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const 
     buf->flags = 0;
 #ifdef RPI_ZERO_COPY
 {
-    const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(fr);
+    const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(fr, 1);
 
     buf->user_data = fr_buf;
     buf->data = av_rpi_zc_vc_handle(fr_buf);

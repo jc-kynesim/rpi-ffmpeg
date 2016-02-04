@@ -147,7 +147,7 @@ static AVBufferRef * zc_copy(const AVFrame * const src)
 }
 
 
-AVRpiZcRefPtr av_rpi_zc_ref(const AVFrame * const frame)
+AVRpiZcRefPtr av_rpi_zc_ref(const AVFrame * const frame, const int maycopy)
 {
     if (frame->format != AV_PIX_FMT_YUV420P)
     {
@@ -157,14 +157,30 @@ AVRpiZcRefPtr av_rpi_zc_ref(const AVFrame * const frame)
 
     if (frame->buf[1] != NULL)
     {
-        printf("%s: *** Not a single buf frame: copying\n", __func__);
-        return zc_copy(frame);
+        if (maycopy)
+        {
+            printf("%s: *** Not a single buf frame: copying\n", __func__);
+            return zc_copy(frame);
+        }
+        else
+        {
+            printf("%s: *** Not a single buf frame: NULL\n", __func__);
+            return NULL;
+        }
     }
 
     if (pic_gm_ptr(frame->buf[0]) == NULL)
     {
-        printf("%s: *** Not one of our buffers: copying\n", __func__);
-        return zc_copy(frame);
+        if (maycopy)
+        {
+            printf("%s: *** Not one of our buffers: copying\n", __func__);
+            return zc_copy(frame);
+        }
+        else
+        {
+            printf("%s: *** Not one of our buffers: NULL\n", __func__);
+            return NULL;
+        }
     }
 
     return av_buffer_ref(frame->buf[0]);
