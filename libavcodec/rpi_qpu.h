@@ -52,42 +52,75 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
 }
 
 #else
+
+static inline int gpu_is_buf1(const AVFrame * const frame)
+{
+    return frame->buf[1] == NULL;
+}
+
+static inline GPU_MEM_PTR_T * gpu_buf1_gmem(const AVFrame * const frame)
+{
+    return av_buffer_get_opaque(frame->buf[0]);
+}
+
+static inline GPU_MEM_PTR_T * gpu_buf3_gmem(const AVFrame * const frame, const int n)
+{
+    return av_buffer_pool_opaque(frame->buf[n]);
+}
+
+
 static inline uint32_t get_vc_address_y(const AVFrame * const frame) {
-    GPU_MEM_PTR_T *p = av_buffer_get_opaque(frame->buf[0]);
-    return p->vc;
+    return gpu_is_buf1(frame) ? gpu_buf1_gmem(frame)->vc : gpu_buf3_gmem(frame, 0)->vc;
 }
 
 static inline uint32_t get_vc_address_u(const AVFrame * const frame) {
-    GPU_MEM_PTR_T *p = av_buffer_get_opaque(frame->buf[0]);
-    return p->vc + frame->data[1] - frame->data[0];
+    return gpu_is_buf1(frame) ?
+        gpu_buf1_gmem(frame)->vc + frame->data[1] - frame->data[0] :
+        gpu_buf3_gmem(frame, 1)->vc;
 }
 
 static inline uint32_t get_vc_address_v(const AVFrame * const frame) {
-    GPU_MEM_PTR_T *p = av_buffer_get_opaque(frame->buf[0]);
-    return p->vc + frame->data[2] - frame->data[0];
+    return gpu_is_buf1(frame) ?
+        gpu_buf1_gmem(frame)->vc + frame->data[2] - frame->data[0] :
+        gpu_buf3_gmem(frame, 2)->vc;
 }
 
 
 static inline GPU_MEM_PTR_T get_gpu_mem_ptr_y(const AVFrame * const frame) {
-    GPU_MEM_PTR_T g = *(GPU_MEM_PTR_T *)av_buffer_get_opaque(frame->buf[0]);
-    g.numbytes = frame->data[1] - frame->data[0];
-    return g;
+    if (gpu_is_buf1(frame))
+    {
+        GPU_MEM_PTR_T g = *gpu_buf1_gmem(frame);
+        g.numbytes = frame->data[1] - frame->data[0];
+        return g;
+    }
+    else
+        return *gpu_buf3_gmem(frame, 0);
 }
 
 static inline GPU_MEM_PTR_T get_gpu_mem_ptr_u(const AVFrame * const frame) {
-    GPU_MEM_PTR_T g = *(GPU_MEM_PTR_T *)av_buffer_get_opaque(frame->buf[0]);
-    g.arm += frame->data[1] - frame->data[0];
-    g.vc += frame->data[1] - frame->data[0];
-    g.numbytes = frame->data[2] - frame->data[1];  // chroma size
-    return g;
+    if (gpu_is_buf1(frame))
+    {
+        GPU_MEM_PTR_T g = *gpu_buf1_gmem(frame);
+        g.arm += frame->data[1] - frame->data[0];
+        g.vc += frame->data[1] - frame->data[0];
+        g.numbytes = frame->data[2] - frame->data[1];  // chroma size
+        return g;
+    }
+    else
+        return *gpu_buf3_gmem(frame, 1);
 }
 
 static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
-    GPU_MEM_PTR_T g = *(GPU_MEM_PTR_T *)av_buffer_get_opaque(frame->buf[0]);
-    g.arm += frame->data[2] - frame->data[0];
-    g.vc += frame->data[2] - frame->data[0];
-    g.numbytes = frame->data[2] - frame->data[1];  // chroma size
-    return g;
+    if (gpu_is_buf1(frame))
+    {
+        GPU_MEM_PTR_T g = *gpu_buf1_gmem(frame);
+        g.arm += frame->data[2] - frame->data[0];
+        g.vc += frame->data[2] - frame->data[0];
+        g.numbytes = frame->data[2] - frame->data[1];  // chroma size
+        return g;
+    }
+    else
+        return *gpu_buf3_gmem(frame, 2);
 }
 
 #endif

@@ -3,41 +3,7 @@
 #ifdef RPI
 #include "rpi_qpu.h"
 #include "rpi_zc.h"
-
-static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
-{
-    return buf == NULL ? NULL : av_buffer_get_opaque(buf);
-}
-
-AVRpiZcRefPtr av_rpi_zc_ref(const AVFrame * const frame)
-{
-    if (frame->buf[1] != NULL)
-    {
-        printf("%s: *** Not a single buf frame\n", __func__);
-    }
-    return av_buffer_ref(frame->buf[0]);
-}
-
-int av_rpi_zc_vc_handle(const AVRpiZcRefPtr fr_ref)
-{
-    const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
-    return p == NULL ? -1 : p->vc_handle;
-}
-
-int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref)
-{
-    const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
-    return p == NULL ? 0 : p->numbytes;
-}
-
-void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref)
-{
-    if (fr_ref != NULL)
-    {
-        av_buffer_unref(&fr_ref);
-    }
-}
-
+#include "libavutil/buffer_internal.h"
 
 // Callback when buffer unrefed to zero
 static void rpi_free_display_buffer(void *opaque, uint8_t *data)
@@ -47,7 +13,15 @@ static void rpi_free_display_buffer(void *opaque, uint8_t *data)
     gpu_free(gmem);
 }
 
-static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * const frame, const int flags)
+static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
+{
+    // Kludge where we check the free fn to check this is really
+    // one of our buffers - can't think of a better way
+    return buf == NULL || buf->buffer->free != rpi_free_display_buffer ? NULL :
+        av_buffer_get_opaque(buf);
+}
+
+static int rpi_get_display_buffer(AVFrame * const frame)
 {
     GPU_MEM_PTR_T * const gmem = av_malloc(sizeof(GPU_MEM_PTR_T));
     const unsigned int stride_y = (frame->width + 31) & ~31;
@@ -120,7 +94,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
     }
     else
     {
-        rv = rpi_get_display_buffer(s, frame, flags);
+        rv = rpi_get_display_buffer(frame);
     }
 
 #if 0
@@ -133,6 +107,91 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
 #endif
     return rv;
 }
+
+
+static AVBufferRef * zc_copy(const AVFrame * const src)
+{
+    AVFrame dest_frame;
+    AVFrame * const dest = &dest_frame;
+    unsigned int i;
+    uint8_t * psrc, * pdest;
+
+    dest->width = src->width;
+    dest->height = src->height;
+
+    if (rpi_get_display_buffer(dest) != 0)
+    {
+        return NULL;
+    }
+
+    for (i = 0, psrc = src->data[0], pdest = dest->data[0];
+         i != dest->height;
+         ++i, psrc += src->linesize[0], pdest += dest->linesize[0])
+    {
+        memcpy(pdest, psrc, dest->width);
+    }
+    for (i = 0, psrc = src->data[1], pdest = dest->data[1];
+         i != dest->height / 2;
+         ++i, psrc += src->linesize[1], pdest += dest->linesize[1])
+    {
+        memcpy(pdest, psrc, dest->width / 2);
+    }
+    for (i = 0, psrc = src->data[2], pdest = dest->data[2];
+         i != dest->height / 2;
+         ++i, psrc += src->linesize[2], pdest += dest->linesize[2])
+    {
+        memcpy(pdest, psrc, dest->width / 2);
+    }
+
+    return dest->buf[0];
+}
+
+
+AVRpiZcRefPtr av_rpi_zc_ref(const AVFrame * const frame)
+{
+    if (frame->format != AV_PIX_FMT_YUV420P)
+    {
+        printf("%s: *** Format not YUV420P: %d\n", __func__, frame->format);
+        return NULL;
+    }
+
+    if (frame->buf[1] != NULL)
+    {
+        printf("%s: *** Not a single buf frame: copying\n", __func__);
+        return zc_copy(frame);
+    }
+
+    if (pic_gm_ptr(frame->buf[0]) == NULL)
+    {
+        printf("%s: *** Not one of our buffers: copying\n", __func__);
+        return zc_copy(frame);
+    }
+
+    return av_buffer_ref(frame->buf[0]);
+}
+
+int av_rpi_zc_vc_handle(const AVRpiZcRefPtr fr_ref)
+{
+    const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
+    return p == NULL ? -1 : p->vc_handle;
+}
+
+int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref)
+{
+    const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
+    return p == NULL ? 0 : p->numbytes;
+}
+
+void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref)
+{
+    if (fr_ref != NULL)
+    {
+        av_buffer_unref(&fr_ref);
+    }
+}
+
+
+
 
 #endif  // RPI
 
