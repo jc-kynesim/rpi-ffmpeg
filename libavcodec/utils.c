@@ -519,7 +519,7 @@ int avcodec_fill_audio_frame(AVFrame *frame, int nb_channels,
 static void rpi_buffer_default_free(void *opaque, uint8_t *data)
 {
     GPU_MEM_PTR_T *p = opaque;
-    av_gpu_free(p);
+    gpu_free(p);
     av_free(p);
 }
 
@@ -536,7 +536,7 @@ static AVBufferRef *rpi_buffer_alloc(int size)
     if (!p)
         return NULL;
 
-    if (av_gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
+    if (gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
         return NULL;
 
     data = p->arm;
@@ -548,7 +548,7 @@ static AVBufferRef *rpi_buffer_alloc(int size)
 
     ret = av_buffer_create(data, size, rpi_buffer_default_free, p, 0);
     if (!ret) {
-        av_gpu_free(p);
+        gpu_free(p);
         av_freep(&p);
     }
 

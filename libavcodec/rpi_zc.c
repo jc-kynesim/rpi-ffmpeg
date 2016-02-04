@@ -39,11 +39,12 @@ void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref)
 }
 
 
+// Callback when buffer unrefed to zero
 static void rpi_free_display_buffer(void *opaque, uint8_t *data)
 {
     GPU_MEM_PTR_T *const gmem = opaque;
 //    printf("%s: data=%p\n", __func__, data);
-    av_gpu_free(gmem);
+    gpu_free(gmem);
 }
 
 static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * const frame, const int flags)
@@ -68,7 +69,7 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
         goto fail0;
     }
 
-    if ((rv = av_gpu_malloc_cached(size_pic, gmem)) != 0)
+    if ((rv = gpu_malloc_cached(size_pic, gmem)) != 0)
     {
         printf("av_gpu_malloc_cached(%d) failed\n", size_pic);
         goto fail1;
@@ -99,7 +100,7 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     return 0;
 
 fail2:
-    av_gpu_free(gmem);
+    gpu_free(gmem);
 fail1:
     av_free(gmem);
 fail0:

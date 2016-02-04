@@ -312,7 +312,7 @@ static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
 // This allocates data that will be
 //    Cached in ARM L2
 //    Uncached in VPU L2
-int av_gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
+int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
 {
   int r;
   gpu_lock();
@@ -354,7 +354,7 @@ void gpu_free_internal(GPU_MEM_PTR_T *p) {
   vcsm_free(p->vcsm_handle);
 }
 
-void av_gpu_free(GPU_MEM_PTR_T *p) {
+void gpu_free(GPU_MEM_PTR_T *p) {
   gpu_lock();
 
   gpu_free_internal(p);

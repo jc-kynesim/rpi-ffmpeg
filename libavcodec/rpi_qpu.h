@@ -16,9 +16,9 @@ typedef struct gpu_mem_ptr_s {
 } GPU_MEM_PTR_T;
 
 // General GPU functions
-extern int av_gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p);
+extern int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p);
 extern int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p);
-extern void av_gpu_free(GPU_MEM_PTR_T *p);
+extern void gpu_free(GPU_MEM_PTR_T *p);
 extern void gpu_cache_flush(const GPU_MEM_PTR_T * const p);
 extern void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2);
 
