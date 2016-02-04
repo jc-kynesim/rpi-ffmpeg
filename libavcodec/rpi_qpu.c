@@ -250,7 +250,7 @@ int gpu_get_mailbox(void)
 }
 
 // Call this to clean and invalidate a region of memory
-void gpu_cache_flush(GPU_MEM_PTR_T *p)
+void gpu_cache_flush(const GPU_MEM_PTR_T * const p)
 {
 #ifdef RPI_FAST_CACHEFLUSH
     struct vcsm_user_clean_invalid_s iocache = {};

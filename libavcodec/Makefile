@@ -8,6 +8,7 @@ HEADERS = avcodec.h                                                     \
           rpi_shader.h                                                  \
           rpi_mailbox.h                                                 \
           rpi_hevc_transform.h                                          \
+          rpi_zc.h                                                      \
           dv_profile.h                                                  \
           d3d11va.h                                                     \
           dxva2.h                                                       \
@@ -42,6 +43,7 @@ OBJS = allcodecs.o                                                      \
        rpi_qpu.o                                                        \
        rpi_shader.o                                                     \
        rpi_mailbox.o                                                    \
+       rpi_zc.o                                                         \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 

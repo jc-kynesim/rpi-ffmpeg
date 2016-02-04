@@ -25,7 +25,7 @@
 
 #ifdef RPI
 #define RPI_DISPLAY
-//#define RPI_ZERO_COPY
+#define RPI_ZERO_COPY
 #endif
 
 #include "config.h"
@@ -83,9 +83,7 @@
 #include <interface/mmal/util/mmal_default_components.h>
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_util_params.h>
-#ifdef RPI_ZERO_COPY
-#include "libavcodec/rpi_qpu.h"
-#endif
+#include "libavcodec/rpi_zc.h"
 #endif
 
 #if HAVE_SYS_RESOURCE_H
@@ -187,13 +185,6 @@ static void free_input_threads(void);
 static MMAL_COMPONENT_T* rpi_display = NULL;
 static MMAL_POOL_T *rpi_pool = NULL;
 
-#ifdef RPI_ZERO_COPY
-static uint8_t *get_vc_handle(AVBufferRef *bref) {
-  GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
-  return (uint8_t *)p->vc_handle;
-}
-#endif
-
 static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 {
     MMAL_POOL_T* pool;
@@ -209,7 +200,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
     for (i = 0; i < NUM_BUFFERS; ++i)
     {
        MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
-       void* bufPtr = buffer->data;
+       char * bufPtr = buffer->data;
        memset(bufPtr, i*30, w*h);
        memset(bufPtr+w*h, 128, (w*h)/2);
     }
@@ -218,7 +209,14 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
     return pool;
 }
 
-static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
+static void display_cb_input(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer) {
+#ifdef RPI_ZERO_COPY
+    av_rpi_zc_unref(buffer->user_data);
+#endif
+    mmal_buffer_header_release(buffer);
+}
+
+static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
   mmal_buffer_header_release(buffer);
 }
 
@@ -256,43 +254,59 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     rpi_pool = display_alloc_pool(display->input[0], w2, h2);
 
     mmal_port_enable(display->input[0],display_cb_input);
-    mmal_port_enable(display->control,display_cb_input);
+    mmal_port_enable(display->control,display_cb_control);
 
     printf("Allocated display %d %d\n",w,h);
 
     return display;
 }
 
-static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
+static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const fr)
 {
-    int w = fr->width;
-    int h = fr->height;
-    int w2 = (w+31)&~31;
-    int h2 = (h+15)&~15;
     if (!display || !rpi_pool)
         return;
     MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
     if (!buf) {
       // Running too fast so drop the frame
+        printf("Drop frame\n");
       return;
     }
     assert(buf);
     buf->cmd = 0;
-    buf->length = (w2 * h2 * 3)/2;
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
 #ifdef RPI_ZERO_COPY
-    buf->data = get_vc_handle(fr->buf[0]);
-    buf->alloc_size = (w2*h2*3)/2;
+{
+    const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(fr, 1);
+
+    buf->user_data = fr_buf;
+    buf->data = av_rpi_zc_vc_handle(fr_buf);
+    buf->alloc_size =
+        buf->length = av_rpi_zc_numbytes(fr_buf);
+}
 #else
+{
+    int w = fr->width;
+    int h = fr->height;
+    int w2 = (w+31)&~31;
+    int h2 = (h+15)&~15;
+
+    buf->length = (w2 * h2 * 3)/2;
+    buf->user_data = NULL;
+
     //mmal_buffer_header_mem_lock(buf);
     memcpy(buf->data, fr->data[0], w2 * h);
     memcpy(buf->data+w2*h2, fr->data[1], w2 * h / 4);
     memcpy(buf->data+w2*h2*5/4, fr->data[2], w2 * h / 4);
     //mmal_buffer_header_mem_unlock(buf);
+}
 #endif
 
-    mmal_port_send_buffer(display->input[0], buf);  // I assume this will automatically get released
+    if (mmal_port_send_buffer(display->input[0], buf) != MMAL_SUCCESS)
+    {
+        av_rpi_zc_unref(buf->user_data);
+        mmal_buffer_header_release(buf);
+    }
 }
 
 static void display_exit(MMAL_COMPONENT_T* display)
@@ -2675,6 +2689,7 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
     return *p;
 }
 
+#ifndef RPI_ZERO_COPY
 static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 {
     InputStream *ist = s->opaque;
@@ -2684,6 +2699,12 @@ static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 
     return avcodec_default_get_buffer2(s, frame, flags);
 }
+#else
+
+#define get_buffer av_rpi_zc_get_buffer2
+
+#endif
+
 
 static int init_input_stream(int ist_index, char *error, int error_len)
 {
