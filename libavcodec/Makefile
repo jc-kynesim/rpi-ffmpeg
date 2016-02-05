@@ -4,6 +4,7 @@ NAME = avcodec
 
 HEADERS = avcodec.h                                                     \
           avfft.h                                                       \
+	  rpi_auxframe.h                                                \
           rpi_qpu.h                                                     \
           rpi_shader.h                                                  \
           rpi_mailbox.h                                                 \
@@ -40,6 +41,7 @@ OBJS = allcodecs.o                                                      \
        resample.o                                                       \
        resample2.o                                                      \
        utils.o                                                          \
+       rpi_auxframe.o                                                   \
        rpi_qpu.o                                                        \
        rpi_shader.o                                                     \
        rpi_mailbox.o                                                    \
