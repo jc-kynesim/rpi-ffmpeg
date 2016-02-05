@@ -1,3 +1,13 @@
+#ifndef LIBAVCODEC_RPI_ZC_H
+#define LIBAVCODEC_RPI_ZC_H
+
+// Zero-Copy frame code for RPi
+// RPi needs Y/U/V planes to be contiguous for display.  By default
+// ffmpeg will allocate separated planes so a memcpy is needed before
+// display.  This code prodes a method a making ffmpeg allocate a single
+// bit of memory for the frame when can then be refrence counted until
+// display ahs finsihed with it.
+
 #include "libavutil/frame.h"
 #include "libavcodec/avcodec.h"
 
@@ -5,6 +15,13 @@
 typedef AVBufferRef * AVRpiZcRefPtr;
 
 // Replacement fn for avctx->get_buffer2
+// Should be set before calling avcodec_decode_open2
+//
+// N.B. in addition to to setting avctx->get_buffer2, avctx->refcounted_frames
+// must be set to 1 as otherwise the buffer info is killed before being returned
+// by avcodec_decode_video2.  Note also that this means that the AVFrame that is
+// return must be manually derefed with av_frame_unref.  This should be done
+// after av_rpi_zc_ref has been called.
 int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 
 // Generate a ZC reference to the buffer(s) in this frame
@@ -27,5 +44,5 @@ int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref);
 // If fr_ref is NULL then this will NOP
 void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref);
 
-
+#endif
 
