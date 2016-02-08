@@ -223,16 +223,16 @@ static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
 static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 {
     MMAL_COMPONENT_T* display;
-    int w2 = (w+31)&~31;
-    int h2 = (h+15)&~15;
     MMAL_DISPLAYREGION_T region =
     {
-        {MMAL_PARAMETER_DISPLAYREGION, sizeof(region)},
+        .hdr = {MMAL_PARAMETER_DISPLAYREGION, sizeof(region)},
         .set = MMAL_DISPLAY_SET_LAYER | MMAL_DISPLAY_SET_FULLSCREEN | MMAL_DISPLAY_SET_DEST_RECT,
         .layer = 2,
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
+    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(w, h);
+
     bcm_host_init();  // TODO is this needed?
     mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &display);
     assert(display);
@@ -241,8 +241,8 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 
     MMAL_ES_FORMAT_T* format = display->input[0]->format;
     format->encoding = MMAL_ENCODING_I420;
-    format->es->video.width = w2;
-    format->es->video.height = h2;
+    format->es->video.width = geo.stride_y;
+    format->es->video.height = geo.height_y;
     format->es->video.crop.x = 0;
     format->es->video.crop.y = 0;
     format->es->video.crop.width = w;
@@ -251,12 +251,12 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 
     mmal_component_enable(display);
 
-    rpi_pool = display_alloc_pool(display->input[0], w2, h2);
+    rpi_pool = display_alloc_pool(display->input[0], geo.stride_y, geo.height_y);
 
     mmal_port_enable(display->input[0],display_cb_input);
     mmal_port_enable(display->control,display_cb_control);
 
-    printf("Allocated display %d %d\n",w,h);
+    printf("Allocated display %dx%d in %dx%d\n", w, h, geo.stride_y, geo.height_y);
 
     return display;
 }
@@ -286,6 +286,7 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const 
 }
 #else
 {
+#error YYY
     int w = fr->width;
     int h = fr->height;
     int w2 = (w+31)&~31;

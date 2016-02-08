@@ -14,6 +14,18 @@
 // "Opaque" pointer to whatever we are using as a buffer reference
 typedef AVBufferRef * AVRpiZcRefPtr;
 
+typedef struct AVRpiZcFrameGeometry
+{
+    unsigned int stride_y;
+    unsigned int height_y;
+    unsigned int stride_c;
+    unsigned int height_c;
+} AVRpiZcFrameGeometry;
+
+
+AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
+    const unsigned int video_width, const unsigned int video_height);
+
 // Replacement fn for avctx->get_buffer2
 // Should be set before calling avcodec_decode_open2
 //

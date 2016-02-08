@@ -21,15 +21,24 @@ static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
         av_buffer_get_opaque(buf);
 }
 
+AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
+    const unsigned int video_width, const unsigned int video_height)
+{
+    AVRpiZcFrameGeometry geo;
+    geo.stride_y = (video_width + 32 + 31) & ~31;
+    geo.stride_c = geo.stride_y / 2;
+//    geo.height_y = (video_height + 15) & ~15;
+    geo.height_y = (video_height + 32 + 31) & ~31;
+    geo.height_c = geo.height_y / 2;
+    return geo;
+}
+
 static int rpi_get_display_buffer(AVFrame * const frame)
 {
+    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->width, frame->height);
     GPU_MEM_PTR_T * const gmem = av_malloc(sizeof(GPU_MEM_PTR_T));
-    const unsigned int stride_y = (frame->width + 31) & ~31;
-    const unsigned int height_y = (frame->height + 15) & ~15;
-    const unsigned int size_y = stride_y * height_y;
-    const unsigned int stride_c = stride_y / 2;
-    const unsigned int height_c = height_y / 2;
-    const unsigned int size_c = stride_c * height_c;
+    const unsigned int size_y = geo.stride_y * geo.height_y;
+    const unsigned int size_c = geo.stride_c * geo.height_c;
     const unsigned int size_pic = size_y + size_c * 2;
     AVBufferRef * buf;
     int rv;
@@ -49,7 +58,8 @@ static int rpi_get_display_buffer(AVFrame * const frame)
         goto fail1;
     }
 
-    if ((buf = av_buffer_create(gmem->arm, size_pic, rpi_free_display_buffer, gmem, 0)) == NULL) {
+    if ((buf = av_buffer_create(gmem->arm, size_pic, rpi_free_display_buffer, gmem, AV_BUFFER_FLAG_READONLY)) == NULL)
+    {
         printf("av_buffer_create() failed\n");
         rv = -1;
         goto fail2;
@@ -62,9 +72,9 @@ static int rpi_get_display_buffer(AVFrame * const frame)
     }
 
     frame->buf[0] = buf;
-    frame->linesize[0] = stride_y;
-    frame->linesize[1] = stride_c;
-    frame->linesize[2] = stride_c;
+    frame->linesize[0] = geo.stride_y;
+    frame->linesize[1] = geo.stride_c;
+    frame->linesize[2] = geo.stride_c;
     frame->data[0] = gmem->arm;
     frame->data[1] = frame->data[0] + size_y;
     frame->data[2] = frame->data[1] + size_c;
@@ -82,8 +92,13 @@ fail0:
 }
 
 
+#define RPI_GET_BUFFER2 0
+
 int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
 {
+#if !RPI_GET_BUFFER2
+    return avcodec_default_get_buffer2(s, frame, flags);
+#else
     int rv;
 
     if ((s->codec->capabilities & AV_CODEC_CAP_DR1) == 0 ||
@@ -106,6 +121,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
         av_buffer_get_opaque(frame->buf[0]));
 #endif
     return rv;
+#endif
 }
 
 
