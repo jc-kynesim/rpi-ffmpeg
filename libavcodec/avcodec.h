@@ -3439,6 +3439,13 @@ typedef struct AVCodecContext {
     unsigned properties;
 #define FF_CODEC_PROPERTY_LOSSLESS        0x00000001
 #define FF_CODEC_PROPERTY_CLOSED_CAPTIONS 0x00000002
+
+    /**
+     * Opaque pointer for use by replacement get_buffer2 code
+     *
+     * @author jc (08/02/2016)
+     */
+    void * get_buffer_context;
 } AVCodecContext;
 
 AVRational av_codec_get_pkt_timebase         (const AVCodecContext *avctx);

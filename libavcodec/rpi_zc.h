@@ -43,7 +43,8 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 //   If maycopy=1 && the src frame is in a form where we can easily copy
 //     the data, then allocate a new buffer and copy the data into it
 //   Otherwise return NULL
-AVRpiZcRefPtr av_rpi_zc_ref(const AVFrame * const frame, const int maycopy);
+AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
+    const AVFrame * const frame, const int maycopy);
 
 // Get the vc_handle from the frame ref
 // Returns -1 if ref doesn't look valid
@@ -55,6 +56,12 @@ int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref);
 // Unreference the buffer refed/allocated by _zc_ref
 // If fr_ref is NULL then this will NOP
 void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref);
+
+// Init ZC context
+int av_rpi_zc_init(struct AVCodecContext * const s);
+
+// Free ZC context
+void av_rpi_zc_uninit(struct AVCodecContext * const s);
 
 #endif
 

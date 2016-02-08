@@ -184,6 +184,7 @@ static void free_input_threads(void);
 
 static MMAL_COMPONENT_T* rpi_display = NULL;
 static MMAL_POOL_T *rpi_pool = NULL;
+static volatile int rpi_display_count = 0;
 
 static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 {
@@ -212,6 +213,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 static void display_cb_input(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer) {
 #ifdef RPI_ZERO_COPY
     av_rpi_zc_unref(buffer->user_data);
+    --rpi_display_count;
 #endif
     mmal_buffer_header_release(buffer);
 }
@@ -261,7 +263,7 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     return display;
 }
 
-static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const fr)
+static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* const display, const AVFrame* const fr)
 {
     if (!display || !rpi_pool)
         return;
@@ -277,12 +279,14 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const 
     buf->flags = 0;
 #ifdef RPI_ZERO_COPY
 {
-    const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(fr, 1);
+    const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
 
     buf->user_data = fr_buf;
     buf->data = av_rpi_zc_vc_handle(fr_buf);
     buf->alloc_size =
         buf->length = av_rpi_zc_numbytes(fr_buf);
+
+    ++rpi_display_count;
 }
 #else
 {
@@ -303,10 +307,14 @@ static void display_frame(MMAL_COMPONENT_T* const display, const AVFrame* const 
 }
 #endif
 
+    while (rpi_display_count >= 3) {
+        usleep(5000);
+    }
+
     if (mmal_port_send_buffer(display->input[0], buf) != MMAL_SUCCESS)
     {
-        av_rpi_zc_unref(buf->user_data);
-        mmal_buffer_header_release(buf);
+        printf("** send failed: depth=%d\n", rpi_display_count);
+        display_cb_input(NULL, buf);
     }
 }
 
@@ -707,6 +715,11 @@ static void ffmpeg_cleanup(int ret)
         avformat_close_input(&input_files[i]->ctx);
         av_freep(&input_files[i]);
     }
+
+#ifdef RPI_DISPLAY
+    display_exit(rpi_display);
+#endif
+
     for (i = 0; i < nb_input_streams; i++) {
         InputStream *ist = input_streams[i];
 
@@ -718,6 +731,7 @@ static void ffmpeg_cleanup(int ret)
         av_freep(&ist->filters);
         av_freep(&ist->hwaccel_device);
 
+        av_rpi_zc_uninit(ist->dec_ctx);
         avcodec_free_context(&ist->dec_ctx);
 
         av_freep(&input_streams[i]);
@@ -745,9 +759,6 @@ static void ffmpeg_cleanup(int ret)
     term_exit();
     ffmpeg_exited = 1;
 
-#ifdef RPI_DISPLAY
-    display_exit(rpi_display);
-#endif
 }
 
 void remove_avoptions(AVDictionary **a, AVDictionary *b)
@@ -1131,17 +1142,18 @@ static void do_video_out(AVFormatContext *s,
     int frame_size = 0;
     InputStream *ist = NULL;
     AVFilterContext *filter = ost->filter->filter;
-#ifdef RPI_DISPLAY
-    if (next_picture)
-    {
-	if (!rpi_display)
-           rpi_display = display_init(0,0,next_picture->width,next_picture->height);
-        display_frame(rpi_display,next_picture);
-    }
-#endif
 
     if (ost->source_index >= 0)
         ist = input_streams[ost->source_index];
+
+#ifdef RPI_DISPLAY
+    if (next_picture && ist != NULL)
+    {
+        if (!rpi_display)
+           rpi_display = display_init(0,0,next_picture->width,next_picture->height);
+        display_frame(ist->dec_ctx, rpi_display, next_picture);
+    }
+#endif
 
     if (filter->inputs[0]->frame_rate.num > 0 &&
         filter->inputs[0]->frame_rate.den > 0)
@@ -2690,7 +2702,6 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
     return *p;
 }
 
-#ifndef RPI_ZERO_COPY
 static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 {
     InputStream *ist = s->opaque;
@@ -2700,12 +2711,6 @@ static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 
     return avcodec_default_get_buffer2(s, frame, flags);
 }
-#else
-
-#define get_buffer av_rpi_zc_get_buffer2
-
-#endif
-
 
 static int init_input_stream(int ist_index, char *error, int error_len)
 {
@@ -2723,6 +2728,12 @@ static int init_input_stream(int ist_index, char *error, int error_len)
         ist->dec_ctx->opaque                = ist;
         ist->dec_ctx->get_format            = get_format;
         ist->dec_ctx->get_buffer2           = get_buffer;
+
+#ifdef RPI_ZERO_COPY
+        // Overrides the above get_buffer2
+        av_rpi_zc_init(ist->dec_ctx);
+#endif
+
         ist->dec_ctx->thread_safe_callbacks = 1;
 
         av_opt_set_int(ist->dec_ctx, "refcounted_frames", 1, 0);
