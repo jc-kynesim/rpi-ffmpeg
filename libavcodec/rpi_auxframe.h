@@ -9,6 +9,8 @@ struct AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int fl
 #define RPI_AUX_FRAME_XBLK_SHIFT 4  // blk width 16
 #define RPI_AUX_FRAME_XBLK_WIDTH (1 << RPI_AUX_FRAME_XBLK_SHIFT)
 
+#define RPI_AUX_FRAME_BUF_NO (AV_NUM_DATA_POINTERS - 1)
+
 typedef struct RpiAuxframeDesc
 {
     struct AVBufferRef * buf;
@@ -16,6 +18,30 @@ typedef struct RpiAuxframeDesc
     uint8_t * data_c;
     unsigned int stride;
 } RpiAuxframeDesc;
+
+static inline const RpiAuxframeDesc * rpi_auxframe_desc(const AVFrame * const frame)
+{
+    return (const RpiAuxframeDesc *)(frame->buf[RPI_AUX_FRAME_BUF_NO] == NULL ? NULL :
+        frame->buf[RPI_AUX_FRAME_BUF_NO]->data);
+}
+
+static inline uint8_t * rpi_auxframe_ptr_y(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y)
+{
+    return d == NULL ? NULL : d->data_y +
+        (x & (RPI_AUX_FRAME_XBLK_WIDTH - 1)) +
+        (y << RPI_AUX_FRAME_XBLK_SHIFT) +
+        (x >> RPI_AUX_FRAME_XBLK_SHIFT) * d->stride;
+}
+
+// X,Y in chroma coords
+static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y)
+{
+    return d == NULL ? NULL : d->data_c +
+        ((x << 1) & (RPI_AUX_FRAME_XBLK_WIDTH - 1)) +
+        (y << RPI_AUX_FRAME_XBLK_SHIFT) +
+        (x >> (RPI_AUX_FRAME_XBLK_SHIFT - 1)) * d->stride;
+}
+
 
 int rpi_auxframe_attach(struct AVFrame * const frame);
 

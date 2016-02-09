@@ -41,6 +41,8 @@ AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int flags)
         goto fail2;
     }
 
+    memset(buf->data, 0x80, numbytes);
+
     printf("%s(%d): %p\n", __func__, numbytes, buf->data);
 
     return buf;

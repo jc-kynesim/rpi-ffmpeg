@@ -52,7 +52,7 @@
   #endif
 
   // By passing jobs to a worker thread we hope to be able to catch up during slow frames
-  #define RPI_MAX_JOBS 2
+  #define RPI_MAX_JOBS 1
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs

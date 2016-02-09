@@ -40,6 +40,7 @@
 #ifdef RPI
 #include "rpi_user_vcsm.h"
 #include "rpi_qpu.h"
+#include "rpi_auxframe.h"
 #endif
 
 #define LUMA 0
@@ -510,6 +511,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     int pcmf = (s->ps.sps->pcm_enabled_flag &&
                 s->ps.sps->pcm.loop_filter_disable_flag) ||
                s->ps.pps->transquant_bypass_enable_flag;
+    const RpiAuxframeDesc *const aux_desc = rpi_auxframe_desc(s->frame);
 
 #ifdef DISABLE_DEBLOCK_NONREF
     if (!s->used_for_ref)
@@ -583,13 +585,29 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
             }
         }
 
-        if(!y)
-             continue;
+        if(y == 0)
+        {
+            // Copy chunk at the top
+            uint8_t * aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
+            if (aux_dst != NULL) {
+                unsigned int i;
+                // Copy blocks of 8 bytes
+                const uint8_t * s8 = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+                uint8_t * d8 = aux_dst;
+                for (i = 0; i != 4; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+                    *(uint64_t *)d8 = *(const uint64_t *)s8;
+                }
+            }
+            continue;
+        }
 
         // horizontal filtering luma
         for (x = x0 ? x0 - 8 : 0; x < x_end2; x += 8) {
             const int bs0 = s->horizontal_bs[( x      + y * s->bs_width) >> 2];
             const int bs1 = s->horizontal_bs[((x + 4) + y * s->bs_width) >> 2];
+            uint8_t * aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
+            src     = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+
             if (bs0 || bs1) {
                 const int qp = (get_qPy(s, x, y - 1)     + get_qPy(s, x, y)     + 1) >> 1;
 
@@ -599,7 +617,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 beta = betatable[av_clip(qp + beta_offset, 0, MAX_QP)];
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                src     = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
                 if (pcmf) {
                     no_p[0] = get_pcm(s, x, y - 1);
                     no_p[1] = get_pcm(s, x + 4, y - 1);
@@ -607,7 +624,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     no_q[1] = get_pcm(s, x + 4, y);
                     s->hevcdsp.hevc_h_loop_filter_luma_c(src,
                                                          s->frame->linesize[LUMA],
-                                                         beta, tc, no_p, no_q);
+                                                         beta, tc, no_p, no_q, aux_dst);
                 } else
 #ifdef RPI_DEBLOCK_VPU
                 if (s->enable_rpi_deblock) {
@@ -624,7 +641,28 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #endif
                     s->hevcdsp.hevc_h_loop_filter_luma(src,
                                                        s->frame->linesize[LUMA],
-                                                       beta, tc, no_p, no_q);
+                                                       beta, tc, no_p, no_q, aux_dst);
+            }
+
+            if (aux_dst != NULL) {
+                unsigned int i;
+                // Copy blocks of 8 bytes
+                const uint8_t * s8 = (src - s->frame->linesize[LUMA] * 4);
+                uint8_t * d8 = (aux_dst - 4 * RPI_AUX_FRAME_XBLK_WIDTH);
+                for (i = 0; i != 8; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+                    *(uint64_t *)d8 = *(const uint64_t *)s8;
+                }
+            }
+
+            // Copy bottom rom
+            if (aux_dst != NULL && y + 8 >= s->ps.sps->height) {
+                unsigned int i;
+                // Copy blocks of 8 bytes
+                const uint8_t * s8 = (src + s->frame->linesize[LUMA] * 4);
+                uint8_t * d8 = (aux_dst + 4 * RPI_AUX_FRAME_XBLK_WIDTH);
+                for (i = 0; i != 4; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+                    *(uint64_t *)d8 = *(const uint64_t *)s8;
+                }
             }
         }
     }
@@ -690,6 +728,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     if ((bs0 == 2) || (bs1 == 2)) {
                         const int qp0 = bs0 == 2 ? (get_qPy(s, x,           y - 1) + get_qPy(s, x,           y) + 1) >> 1 : 0;
                         const int qp1 = bs1 == 2 ? (get_qPy(s, x + (4 * h), y - 1) + get_qPy(s, x + (4 * h), y) + 1) >> 1 : 0;
+                        uint8_t * const aux_dst = rpi_auxframe_ptr_c(aux_desc, x, y);
 
                         c_tc[0]   = bs0 == 2 ? chroma_tc(s, qp0, chroma, tc_offset)     : 0;
                         c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
@@ -701,7 +740,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             no_q[1] = get_pcm(s, x + (4 * h), y);
                             s->hevcdsp.hevc_h_loop_filter_chroma_c(src,
                                                                    s->frame->linesize[chroma],
-                                                                   c_tc, no_p, no_q);
+                                                                   c_tc, no_p, no_q, aux_dst);
                         } else
 #ifdef RPI_DEBLOCK_VPU
                         if (s->enable_rpi_deblock) {
@@ -718,7 +757,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #endif
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
                                                                  s->frame->linesize[chroma],
-                                                                 c_tc, no_p, no_q);
+                                                                 c_tc, no_p, no_q, aux_dst);
                     }
                 }
             }

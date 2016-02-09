@@ -84,6 +84,7 @@
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_util_params.h>
 #include "libavcodec/rpi_zc.h"
+#include "libavcodec/rpi_auxframe.h"
 #endif
 
 #if HAVE_SYS_RESOURCE_H
@@ -267,6 +268,26 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 {
     if (!display || !rpi_pool)
         return;
+
+#if 1
+    {
+        const RpiAuxframeDesc * const aux = rpi_auxframe_desc(fr);
+
+        if (aux != NULL)
+        {
+            int x, y;
+            for (y = 0; y != fr->height; ++y) {
+                for (x = 0; x != fr->width; ++x) {
+                    if (*rpi_auxframe_ptr_y(aux, x, y) != fr->data[0][x + y * fr->linesize[0]]) {
+                        printf("Aux mismatch @ %d,%d: %02x/%02x\n", x, y,
+                            *rpi_auxframe_ptr_y(aux, x, y), fr->data[0][x + y * fr->linesize[0]]);
+                    }
+                }
+            }
+        }
+    }
+
+#endif
 
     if (rpi_display_count >= 3) {
         av_log(s, AV_LOG_VERBOSE, "Frame dropped\n");
