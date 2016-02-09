@@ -41,6 +41,7 @@
 
 #ifdef RPI
   #include "rpi_qpu.h"
+  #include "rpi_auxframe.h"
   #include "rpi_user_vcsm.h"
   // Move Inter prediction into separate pass
   #define RPI_INTER
@@ -4096,6 +4097,11 @@ static int hevc_frame_start(HEVCContext *s)
 
     if (!s->avctx->hwaccel)
         ff_thread_finish_setup(s->avctx);
+
+#ifdef RPI
+    if (s->used_for_ref)
+        rpi_auxframe_attach(s->frame);
+#endif
 
     return 0;
 

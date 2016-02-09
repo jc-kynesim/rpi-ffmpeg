@@ -9,7 +9,7 @@
 static void rpi_gpu_buf_delete(void *opaque, uint8_t *data)
 {
     GPU_MEM_PTR_T *const gmem = opaque;
-//    printf("%s: data=%p\n", __func__, data);
+    printf("%s: data=%p\n", __func__, data);
     gpu_free(gmem);
 }
 
@@ -23,6 +23,7 @@ AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int flags)
     AVBufferRef * buf;
     GPU_MEM_PTR_T * const gmem = av_malloc(sizeof(GPU_MEM_PTR_T));
     int rv;
+
 
     if (gmem == NULL) {
         printf("av_malloc(GPU_MEM_PTR_T) failed\n");
@@ -39,6 +40,8 @@ AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int flags)
         printf("av_buffer_create() failed\n");
         goto fail2;
     }
+
+    printf("%s(%d): %p\n", __func__, numbytes, buf->data);
 
     return buf;
 
@@ -83,7 +86,7 @@ int rpi_auxframe_attach(AVFrame * const frame)
 
     // Kludge into the bufer array at the end
     // This will be auto-freed / copied as required but shouldn't confuse
-    // and other software (zero-copy) that checks buf[1] to see what sort
+    // any other software (zero-copy) that checks buf[1] to see what sort
     // of frame allocation we have
     if ((frame->buf[AV_NUM_DATA_POINTERS - 1] =
          av_buffer_create((uint8_t *)afd, sizeof(*afd), auxframe_desc_buffer_delete, afd, AV_BUFFER_FLAG_READONLY)) == NULL)
