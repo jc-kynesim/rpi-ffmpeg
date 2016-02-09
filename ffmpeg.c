@@ -267,11 +267,17 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 {
     if (!display || !rpi_pool)
         return;
+
+    if (rpi_display_count >= 3) {
+        av_log(s, AV_LOG_VERBOSE, "Frame dropped\n");
+        return;
+    }
+
     MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
     if (!buf) {
-      // Running too fast so drop the frame
-        printf("Drop frame\n");
-      return;
+        // Running too fast so drop the frame
+        printf("Q alloc failure\n");
+        return;
     }
     assert(buf);
     buf->cmd = 0;

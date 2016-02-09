@@ -14,6 +14,9 @@
 // "Opaque" pointer to whatever we are using as a buffer reference
 typedef AVBufferRef * AVRpiZcRefPtr;
 
+struct AVZcEnv;
+typedef struct AVZcEnv * AVZcEnvPtr;
+
 typedef struct AVRpiZcFrameGeometry
 {
     unsigned int stride_y;
@@ -57,10 +60,23 @@ int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref);
 // If fr_ref is NULL then this will NOP
 void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref);
 
-// Init ZC context
+// Allocate an environment for the buffer pool used by the ZC code
+// This should be put in avctx->get_buffer_context so it can be found by
+// av_rpi_zc_get_buffer2 when it is called from ffmpeg
+AVZcEnvPtr av_rpi_zc_env_alloc(void);
+
+// Allocate the environment used by the ZC code
+void av_rpi_zc_env_free(AVZcEnvPtr);
+
+
+// Init ZC into a context
+// There is nothing magic in this fn - it just packages setting
+// get_buffer2 & get_buffer_context
 int av_rpi_zc_init(struct AVCodecContext * const s);
 
-// Free ZC context
+// Free ZC from a context
+// There is nothing magic in this fn - it just packages unsetting
+// get_buffer2 & get_buffer_context
 void av_rpi_zc_uninit(struct AVCodecContext * const s);
 
 #endif

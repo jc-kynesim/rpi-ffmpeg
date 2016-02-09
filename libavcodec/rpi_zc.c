@@ -26,16 +26,14 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const int size)
 {
     ZcPoolEnt * const zp = av_malloc(sizeof(ZcPoolEnt));
 
-    printf("%s: alloc: %d\n", __func__, size);
-
     if (zp == NULL) {
-        printf("av_malloc(ZcPoolEnt) failed\n");
+        av_log(NULL, AV_LOG_ERROR, "av_malloc(ZcPoolEnt) failed\n");
         goto fail0;
     }
 
     if (gpu_malloc_cached(size, &zp->gmem) != 0)
     {
-        printf("av_gpu_malloc_cached(%d) failed\n", size);
+        av_log(NULL, AV_LOG_ERROR, "av_gpu_malloc_cached(%d) failed\n", size);
         goto fail1;
     }
 
@@ -49,22 +47,45 @@ fail0:
     return NULL;
 }
 
+static void zc_pool_ent_free(ZcPoolEnt * const zp)
+{
+    gpu_free(&zp->gmem);
+    av_free(zp);
+}
+
+static void zc_pool_flush(ZcPool * const pool)
+{
+    ZcPoolEnt * p = pool->head;
+    pool->head = NULL;
+    while (p != NULL)
+    {
+        ZcPoolEnt * const zp = p;
+        p = p->next;
+        zc_pool_ent_free(zp);
+    }
+}
+
 static ZcPoolEnt * zc_pool_alloc(ZcPool * const pool, const int numbytes)
 {
     ZcPoolEnt * zp;
     pthread_mutex_lock(&pool->lock);
-    if (numbytes == pool->numbytes && pool->head != NULL)
+
+    if (numbytes != pool->numbytes)
     {
-        printf("%s: Alloc from pool\n", __func__);
+        zc_pool_flush(pool);
+        pool->numbytes = numbytes;
+    }
+
+    if (pool->head != NULL)
+    {
         zp = pool->head;
         pool->head = zp->next;
     }
     else
     {
-        printf("%s: Alloc from sys\n", __func__);
         zp = zc_pool_ent_alloc(pool, numbytes);
     }
-    pool->numbytes = numbytes;
+
     pthread_mutex_unlock(&pool->lock);
     return zp;
 }
@@ -77,17 +98,14 @@ static void zc_pool_free(ZcPoolEnt * const zp)
         pthread_mutex_lock(&pool->lock);
         if (pool->numbytes == zp->gmem.numbytes)
         {
-            printf("%s: Free to head\n", __func__);
             zp->next = pool->head;
             pool->head = zp;
             pthread_mutex_unlock(&pool->lock);
         }
         else
         {
-            printf("%s: Free to sys\n", __func__);
             pthread_mutex_unlock(&pool->lock);
-            gpu_free(&zp->gmem);
-            av_free(zp);
+            zc_pool_ent_free(zp);
         }
     }
 }
@@ -104,18 +122,14 @@ static void
 zc_pool_destroy(ZcPool * const pool)
 {
     pool->numbytes = -1;
-    while (pool->head != NULL)
-    {
-        zc_pool_free(pool->head);
-    }
+    zc_pool_flush(pool);
     pthread_mutex_destroy(&pool->lock);
 }
 
 
-typedef struct ZcEnv
+typedef struct AVZcEnv
 {
     ZcPool pool;
-    volatile int refs;
 } ZcEnv;
 
 // Callback when buffer unrefed to zero
@@ -151,16 +165,14 @@ static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
     ZcPoolEnt *const zp = zc_pool_alloc(pool, size);
     AVBufferRef * buf;
 
-    printf("%s: alloc: %d\n", __func__, size);
-
     if (zp == NULL) {
-        printf("zc_pool_alloc(%d) failed\n", size);
+        av_log(NULL, AV_LOG_ERROR, "zc_pool_alloc(%d) failed\n", size);
         goto fail0;
     }
 
     if ((buf = av_buffer_create(zp->gmem.arm, size, rpi_free_display_buffer, zp, AV_BUFFER_FLAG_READONLY)) == NULL)
     {
-        printf("av_buffer_create() failed\n");
+        av_log(NULL, AV_LOG_ERROR, "av_buffer_create() failed\n");
         goto fail2;
     }
 
@@ -289,7 +301,7 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
 
     if (frame->format != AV_PIX_FMT_YUV420P)
     {
-        printf("%s: *** Format not YUV420P: %d\n", __func__, frame->format);
+        av_log(s, AV_LOG_WARNING, "%s: *** Format not YUV420P: %d\n", __func__, frame->format);
         return NULL;
     }
 
@@ -297,12 +309,12 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
     {
         if (maycopy)
         {
-            printf("%s: *** Not a single buf frame: copying\n", __func__);
+            av_log(s, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);
             return zc_copy(s, frame);
         }
         else
         {
-            printf("%s: *** Not a single buf frame: NULL\n", __func__);
+            av_log(s, AV_LOG_WARNING, "%s: *** Not a single buf frame: NULL\n", __func__);
             return NULL;
         }
     }
@@ -311,12 +323,12 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
     {
         if (maycopy)
         {
-            printf("%s: *** Not one of our buffers: copying\n", __func__);
+            av_log(s, AV_LOG_INFO, "%s: *** Not one of our buffers: copying\n", __func__);
             return zc_copy(s, frame);
         }
         else
         {
-            printf("%s: *** Not one of our buffers: NULL\n", __func__);
+            av_log(s, AV_LOG_WARNING, "%s: *** Not one of our buffers: NULL\n", __func__);
             return NULL;
         }
     }
@@ -344,17 +356,35 @@ void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref)
     }
 }
 
-int av_rpi_zc_init(struct AVCodecContext * const s)
+AVZcEnvPtr av_rpi_zc_env_alloc(void)
 {
     ZcEnv * const zc = av_mallocz(sizeof(ZcEnv));
     if (zc == NULL)
     {
-        av_log(s, AV_LOG_ERROR, "ZC Init: Context allocation failed\n");
-        return AVERROR(ENOMEM);
+        av_log(NULL, AV_LOG_ERROR, "av_rpi_zc_env_alloc: Context allocation failed\n");
+        return NULL;
     }
 
     zc_pool_init(&zc->pool);
-    zc->refs = 0;
+    return zc;
+}
+
+void av_rpi_zc_env_free(AVZcEnvPtr zc)
+{
+    if (zc != NULL)
+    {
+        zc_pool_destroy(&zc->pool); ;
+        av_free(zc);
+    }
+}
+
+int av_rpi_zc_init(struct AVCodecContext * const s)
+{
+    ZcEnv * const zc = av_rpi_zc_env_alloc();
+    if (zc == NULL)
+    {
+        return AVERROR(ENOMEM);
+    }
 
     s->get_buffer_context = zc;
     s->get_buffer2 = av_rpi_zc_get_buffer2;
@@ -368,9 +398,7 @@ void av_rpi_zc_uninit(struct AVCodecContext * const s)
         ZcEnv * const zc = s->get_buffer_context;
         s->get_buffer2 = avcodec_default_get_buffer2;
         s->get_buffer_context = NULL;
-
-        zc_pool_destroy(&zc->pool); ;
-        av_free(zc);
+        av_rpi_zc_env_free(zc);
     }
 }
 
