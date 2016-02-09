@@ -588,14 +588,16 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
         if(y == 0)
         {
             // Copy chunk at the top
-            uint8_t * aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
-            if (aux_dst != NULL) {
-                unsigned int i;
-                // Copy blocks of 8 bytes
-                const uint8_t * s8 = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
-                uint8_t * d8 = aux_dst;
-                for (i = 0; i != 4; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
-                    *(uint64_t *)d8 = *(const uint64_t *)s8;
+            for (x = x0 ? x0 - 8 : 0; x < x_end2; x += 8) {
+                uint8_t * aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
+                if (aux_dst != NULL) {
+                    unsigned int i;
+                    // Copy blocks of 8 bytes
+                    const uint8_t * s8 = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+                    uint8_t * d8 = aux_dst;
+                    for (i = 0; i != 4; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+                        *(uint64_t *)d8 = *(const uint64_t *)s8;
+                    }
                 }
             }
             continue;
