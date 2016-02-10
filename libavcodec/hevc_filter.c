@@ -511,25 +511,18 @@ static inline void aux_cpy_c(const AVFrame *const frame, const unsigned int c_id
     const RpiAuxframeDesc * const aux_desc, unsigned int x, unsigned int y,
     const unsigned int n_w, const unsigned int n_h)
 {
-#if 1
     if (aux_desc != NULL) {
         unsigned int i, j;
 
 //        printf("%d: %dx%d %d,%d\n", c_idx, n_w, n_h, x, y);
 
-        assert(c_idx == 1 || c_idx == 2);
-        assert(x >= 0 && x + n_w < 1920);
-        assert(y >= 0 && y + n_h < 800);
-
         y >>= 1;
         x >>= 1;
         for (j = 0; j != (n_w >> 3); ++j, x += 4) {
             uint8_t *aux_dst =
-                rpi_auxframe_ptr_c(aux_desc, x, y) + (c_idx - 1) * (RPI_AUX_FRAME_XBLK_WIDTH / 2);
+                rpi_auxframe_ptr_c(aux_desc, x, y, c_idx - 1);
             const uint8_t * s8 = frame->data[c_idx] + y * frame->linesize[c_idx] + x;
             uint8_t * d8 = aux_dst;
-
-            assert(d8 >= aux_desc->data_c && d8 < aux_desc->buf->data + aux_desc->buf->size);
 
             for (i = 0; i != (n_h >> 1); ++i, s8 += frame->linesize[c_idx], d8 += RPI_AUX_FRAME_XBLK_WIDTH)
             {
@@ -537,7 +530,6 @@ static inline void aux_cpy_c(const AVFrame *const frame, const unsigned int c_id
             }
         }
     }
-#endif
 }
 
 
@@ -806,9 +798,10 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
                                  s->frame->linesize[chroma],
                                  c_tc, no_p, no_q,
-                                 rpi_auxframe_ptr_c(aux_desc, x, y));
+//                                NULL);
+                                 rpi_auxframe_ptr_c(aux_desc, x >> 1, y >> 1, chroma - 1));
                             // *** Kill when asm written
-                            aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
+//                            aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
                         }
                     }
                     else

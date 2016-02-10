@@ -323,8 +323,7 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
         ldr     r12, [r3]
         ldr      r3, [r3, #4]
         lsl      r3, #16
-        orr      r3, r12
-        cmp      r3, #0
+        orrs     r3, r12
         it       eq
         beq      y_cpy
         lsr      r3, #16
@@ -437,7 +436,12 @@ function ff_hevc_v_loop_filter_chroma_neon, export=1
 endfunc
 
 function ff_hevc_h_loop_filter_chroma_neon, export=1
-        hevc_loop_filter_chroma_start
+        ldr      r12, [r2]
+        ldr      r3, [r2, #4]
+        adds     r2, r3, r12
+        it       eq
+        beq      c_cpy
+
         sub      r0, r0, r1, lsl #1
         vld1.8   {d18}, [r0], r1
         vld1.8   {d2}, [r0], r1
@@ -447,7 +451,49 @@ function ff_hevc_h_loop_filter_chroma_neon, export=1
         hevc_loop_filter_chroma_body
         vst1.8   {d2}, [r0], r1
         vst1.8   {d4}, [r0]
+
+        ldr      r2, [sp, #4]
+        cmp      r2, #0
+        it       eq
+        bxeq     lr
+
+        sub      r0, r0, r1, lsl #2
+        vld1.8  {d16}, [r0], r1
+        vld1.8  {d17}, [r0], r1
+        add      r0, r0, r1, lsl #2
+        vld1.8  {d20}, [r0], r1
+        vld1.8  {d21}, [r0], r1
+
+by_ch_cpy:
+        add      r2, r2, #-4 * 16
+        mov      r3, #16
+        vst1.8   {d16}, [r2], r3
+        vst1.8   {d17}, [r2], r3
+        vst1.8   {d18}, [r2], r3
+        vst1.8    {d2}, [r2], r3
+        vst1.8    {d4}, [r2], r3
+        vst1.8   {d19}, [r2], r3
+        vst1.8   {d20}, [r2], r3
+        vst1.8   {d21}, [r2]
         bx       lr
+
+c_cpy:
+        ldr      r2, [sp, #4]
+        cmp      r2, #0
+        it       eq
+        bxeq     lr
+
+        sub      r0, r0, r1, lsl #2
+        vld1.8  {d16}, [r0], r1
+        vld1.8  {d17}, [r0], r1
+        vld1.8  {d18}, [r0], r1
+        vld1.8   {d2}, [r0], r1
+        vld1.8   {d4}, [r0], r1
+        vld1.8  {d19}, [r0], r1
+        vld1.8  {d20}, [r0], r1
+        vld1.8  {d21}, [r0], r1
+        b       by_ch_cpy
+
 endfunc
 
 /* ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,

@@ -36,16 +36,17 @@ static inline uint8_t * rpi_auxframe_ptr_y(const RpiAuxframeDesc * const d, cons
 }
 
 // X,Y in chroma coords
-static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y)
+static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y, const unsigned int c)
 {
     return d == NULL ? NULL : d->data_c +
         (x & (RPI_AUX_FRAME_XBLK_WIDTH / 2 - 1)) +
         (y << RPI_AUX_FRAME_XBLK_SHIFT) +
-        (x >> (RPI_AUX_FRAME_XBLK_SHIFT - 1)) * (d->stride >> 1);
+        (x >> (RPI_AUX_FRAME_XBLK_SHIFT - 1)) * (d->stride >> 1) +
+        (c << (RPI_AUX_FRAME_XBLK_SHIFT - 1));
 }
 
-#define rpi_auxframe_ptr_u rpi_auxframe_ptr_c
-#define rpi_auxframe_ptr_v(d,x,y) (rpi_auxframe_ptr_c(d,x,y) + RPI_AUX_FRAME_XBLK_WIDTH/2)
+#define rpi_auxframe_ptr_u(d,x,y) rpi_auxframe_ptr_c(d,x,y,0)
+#define rpi_auxframe_ptr_v(d,x,y) rpi_auxframe_ptr_c(d,x,y,1)
 
 int rpi_auxframe_attach(struct AVFrame * const frame);
 
