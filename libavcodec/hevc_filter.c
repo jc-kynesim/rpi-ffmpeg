@@ -658,7 +658,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
             if (bs0 || bs1) {
                 const int qp = (get_qPy(s, x, y - 1)     + get_qPy(s, x, y)     + 1) >> 1;
-                uint8_t * const aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
 
                 tc_offset   = x >= x0 ? cur_tc_offset : left_tc_offset;
                 beta_offset = x >= x0 ? cur_beta_offset : left_beta_offset;
@@ -674,7 +673,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     no_q[1] = get_pcm(s, x + 4, y);
                     s->hevcdsp.hevc_h_loop_filter_luma_c(src,
                                                          s->frame->linesize[LUMA],
-                                                         beta, tc, no_p, no_q, aux_dst);
+                                                         beta, tc, no_p, no_q);
+                    aux_cpy(s->frame, 0, aux_desc, x, y - 4, 8, 8);
                 } else
 #ifdef RPI_DEBLOCK_VPU
                 if (s->enable_rpi_deblock) {
@@ -691,8 +691,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #endif
                 {
                     s->hevcdsp.hevc_h_loop_filter_luma(src,
-                                                       s->frame->linesize[LUMA],
-                                                       beta, tc, no_p, no_q, aux_dst);
+                       s->frame->linesize[LUMA],
+                       beta, tc, no_p, no_q,
+                       rpi_auxframe_ptr_y(aux_desc, x, y));
                 }
             }
             else
@@ -774,7 +775,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     if ((bs0 == 2) || (bs1 == 2)) {
                         const int qp0 = bs0 == 2 ? (get_qPy(s, x,           y - 1) + get_qPy(s, x,           y) + 1) >> 1 : 0;
                         const int qp1 = bs1 == 2 ? (get_qPy(s, x + (4 * h), y - 1) + get_qPy(s, x + (4 * h), y) + 1) >> 1 : 0;
-                        uint8_t * const aux_dst = rpi_auxframe_ptr_c(aux_desc, x, y);
 
                         c_tc[0]   = bs0 == 2 ? chroma_tc(s, qp0, chroma, tc_offset)     : 0;
                         c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
@@ -786,7 +786,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             no_q[1] = get_pcm(s, x + (4 * h), y);
                             s->hevcdsp.hevc_h_loop_filter_chroma_c(src,
                                                                    s->frame->linesize[chroma],
-                                                                   c_tc, no_p, no_q, aux_dst);
+                                                                   c_tc, no_p, no_q);
+                            aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
                         } else
 #ifdef RPI_DEBLOCK_VPU
                         if (s->enable_rpi_deblock) {
@@ -801,12 +802,19 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             setup[1][b][0][a + 1] = c_tc[1];
                         } else
 #endif
+                        {
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
-                                                                 s->frame->linesize[chroma],
-                                                                 c_tc, no_p, no_q, aux_dst);
+                                 s->frame->linesize[chroma],
+                                 c_tc, no_p, no_q,
+                                 rpi_auxframe_ptr_c(aux_desc, x, y));
+                            // *** Kill when asm written
+                            aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
+                        }
                     }
-
-                    aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
+                    else
+                    {
+                        aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
+                    }
                 }
 
                 // Copy bottom row
