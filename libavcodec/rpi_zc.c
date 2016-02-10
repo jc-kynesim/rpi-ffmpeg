@@ -388,6 +388,8 @@ int av_rpi_zc_init(struct AVCodecContext * const s)
 
     s->get_buffer_context = zc;
     s->get_buffer2 = av_rpi_zc_get_buffer2;
+    s->thread_safe_callbacks = 1;
+    s->refcounted_frames = 1;
     return 0;
 }
 
@@ -398,6 +400,8 @@ void av_rpi_zc_uninit(struct AVCodecContext * const s)
         ZcEnv * const zc = s->get_buffer_context;
         s->get_buffer2 = avcodec_default_get_buffer2;
         s->get_buffer_context = NULL;
+        s->thread_safe_callbacks = 0;
+        s->refcounted_frames = 0;
         av_rpi_zc_env_free(zc);
     }
 }

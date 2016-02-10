@@ -279,8 +279,24 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
             for (y = 0; y != fr->height; ++y) {
                 for (x = 0; x != fr->width; ++x) {
                     if (*rpi_auxframe_ptr_y(aux, x, y) != fr->data[0][x + y * fr->linesize[0]]) {
-                        printf("Aux mismatch @ %d,%d: %02x/%02x\n", x, y,
+                        printf("Aux mismatch Y @ %d,%d: %02x/%02x\n", x, y,
                             *rpi_auxframe_ptr_y(aux, x, y), fr->data[0][x + y * fr->linesize[0]]);
+                    }
+                }
+            }
+            for (y = 0; y != fr->height / 2; ++y) {
+                for (x = 0; x != fr->width / 2; ++x) {
+                    if (*rpi_auxframe_ptr_u(aux, x, y) != fr->data[1][x + y * fr->linesize[1]]) {
+                        printf("Aux mismatch U @ %d,%d: %02x/%02x\n", x, y,
+                            *rpi_auxframe_ptr_u(aux, x, y), fr->data[1][x + y * fr->linesize[1]]);
+                    }
+                }
+            }
+            for (y = 0; y != fr->height / 2; ++y) {
+                for (x = 0; x != fr->width / 2; ++x) {
+                    if (*rpi_auxframe_ptr_v(aux, x, y) != fr->data[2][x + y * fr->linesize[2]]) {
+                        printf("Aux mismatch V @ %d,%d: %02x/%02x\n", x, y,
+                            *rpi_auxframe_ptr_v(aux, x, y), fr->data[2][x + y * fr->linesize[2]]);
                     }
                 }
             }

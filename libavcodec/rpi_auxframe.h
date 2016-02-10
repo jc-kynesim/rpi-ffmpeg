@@ -11,6 +11,8 @@ struct AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int fl
 
 #define RPI_AUX_FRAME_BUF_NO (AV_NUM_DATA_POINTERS - 1)
 
+#define RPI_AUX_FRAME_TEST 1
+
 typedef struct RpiAuxframeDesc
 {
     struct AVBufferRef * buf;
@@ -37,11 +39,13 @@ static inline uint8_t * rpi_auxframe_ptr_y(const RpiAuxframeDesc * const d, cons
 static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y)
 {
     return d == NULL ? NULL : d->data_c +
-        ((x << 1) & (RPI_AUX_FRAME_XBLK_WIDTH - 1)) +
+        (x & (RPI_AUX_FRAME_XBLK_WIDTH / 2 - 1)) +
         (y << RPI_AUX_FRAME_XBLK_SHIFT) +
-        (x >> (RPI_AUX_FRAME_XBLK_SHIFT - 1)) * d->stride;
+        (x >> (RPI_AUX_FRAME_XBLK_SHIFT - 1)) * (d->stride >> 1);
 }
 
+#define rpi_auxframe_ptr_u rpi_auxframe_ptr_c
+#define rpi_auxframe_ptr_v(d,x,y) (rpi_auxframe_ptr_c(d,x,y) + RPI_AUX_FRAME_XBLK_WIDTH/2)
 
 int rpi_auxframe_attach(struct AVFrame * const frame);
 

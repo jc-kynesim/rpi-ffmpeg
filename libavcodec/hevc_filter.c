@@ -485,6 +485,64 @@ static int get_pcm(HEVCContext *s, int x, int y)
     return s->is_pcm[y_pu * s->ps.sps->min_pu_width + x_pu];
 }
 
+// * 8-bit pels only
+// **** Optimize me!
+static inline void aux_cpy(const AVFrame *const frame, const unsigned int c_idx,
+    const RpiAuxframeDesc * const aux_desc, unsigned int x, const unsigned int y,
+    const unsigned int n_w, const unsigned int n_h)
+{
+    if (aux_desc != NULL) {
+        unsigned int i, j;
+
+        for (j = 0; j != (n_w >> 3); ++j, x += 8) {
+            uint8_t *aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
+            const uint8_t * s8 = frame->data[c_idx] + y * frame->linesize[c_idx] + x;
+            uint8_t * d8 = aux_dst;
+
+            for (i = 0; i != n_h; ++i, s8 += frame->linesize[c_idx], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+                *(uint64_t *)d8 = *(const uint64_t *)s8;
+            }
+        }
+    }
+}
+
+// x, y, w, h in luma coords
+static inline void aux_cpy_c(const AVFrame *const frame, const unsigned int c_idx,
+    const RpiAuxframeDesc * const aux_desc, unsigned int x, unsigned int y,
+    const unsigned int n_w, const unsigned int n_h)
+{
+#if 1
+    if (aux_desc != NULL) {
+        unsigned int i, j;
+
+//        printf("%d: %dx%d %d,%d\n", c_idx, n_w, n_h, x, y);
+
+        assert(c_idx == 1 || c_idx == 2);
+        assert(x >= 0 && x + n_w < 1920);
+        assert(y >= 0 && y + n_h < 800);
+
+        y >>= 1;
+        x >>= 1;
+        for (j = 0; j != (n_w >> 3); ++j, x += 4) {
+            uint8_t *aux_dst =
+                rpi_auxframe_ptr_c(aux_desc, x, y) + (c_idx - 1) * (RPI_AUX_FRAME_XBLK_WIDTH / 2);
+            const uint8_t * s8 = frame->data[c_idx] + y * frame->linesize[c_idx] + x;
+            uint8_t * d8 = aux_dst;
+
+            assert(d8 >= aux_desc->data_c && d8 < aux_desc->buf->data + aux_desc->buf->size);
+
+            for (i = 0; i != (n_h >> 1); ++i, s8 += frame->linesize[c_idx], d8 += RPI_AUX_FRAME_XBLK_WIDTH)
+            {
+                *(uint32_t *)d8 = *(const uint32_t *)s8;
+            }
+        }
+    }
+#endif
+}
+
+
+
+
 #define TC_CALC(qp, bs)                                                 \
     tctable[av_clip((qp) + DEFAULT_INTRA_TC_OFFSET * ((bs) - 1) +       \
                     (tc_offset >> 1 << 1),                              \
@@ -587,19 +645,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
         if(y == 0)
         {
-            // Copy chunk at the top
-            for (x = x0 ? x0 - 8 : 0; x < x_end2; x += 8) {
-                uint8_t * aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
-                if (aux_dst != NULL) {
-                    unsigned int i;
-                    // Copy blocks of 8 bytes
-                    const uint8_t * s8 = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
-                    uint8_t * d8 = aux_dst;
-                    for (i = 0; i != 4; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
-                        *(uint64_t *)d8 = *(const uint64_t *)s8;
-                    }
-                }
-            }
+            x = x0 ? x0 - 8 : 0;
+            aux_cpy(s->frame, 0, aux_desc, x, 0, x_end2 - x, 4);
             continue;
         }
 
@@ -646,26 +693,13 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                        beta, tc, no_p, no_q, aux_dst);
             }
 
-            if (aux_dst != NULL) {
-                unsigned int i;
-                // Copy blocks of 8 bytes
-                const uint8_t * s8 = (src - s->frame->linesize[LUMA] * 4);
-                uint8_t * d8 = (aux_dst - 4 * RPI_AUX_FRAME_XBLK_WIDTH);
-                for (i = 0; i != 8; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
-                    *(uint64_t *)d8 = *(const uint64_t *)s8;
-                }
-            }
+            aux_cpy(s->frame, 0, aux_desc, x, y - 4, 8, 8);
+        }
 
-            // Copy bottom rom
-            if (aux_dst != NULL && y + 8 >= s->ps.sps->height) {
-                unsigned int i;
-                // Copy blocks of 8 bytes
-                const uint8_t * s8 = (src + s->frame->linesize[LUMA] * 4);
-                uint8_t * d8 = (aux_dst + 4 * RPI_AUX_FRAME_XBLK_WIDTH);
-                for (i = 0; i != 4; ++i, s8 += s->frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
-                    *(uint64_t *)d8 = *(const uint64_t *)s8;
-                }
-            }
+        // Copy bottom row
+        if (y + 8 >= s->ps.sps->height) {
+            x = x0 ? x0 - 8 : 0;
+            aux_cpy(s->frame, 0, aux_desc, x, y + 4, x_end2 - x, 4);
         }
     }
 
@@ -716,14 +750,19 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     }
                 }
 
-                if(!y)
-                    continue;
-
                 // horizontal filtering chroma
                 tc_offset = x0 ? left_tc_offset : cur_tc_offset;
                 x_end2 = x_end;
                 if (x_end != s->ps.sps->width)
                     x_end2 = x_end - 8 * h;
+
+                if (y == 0)
+                {
+                    x = x0 ? x0 - 8 * h : 0;
+                    aux_cpy_c(s->frame, chroma, aux_desc, x, 0, x_end2 - x, 4 * v);
+                    continue;
+                }
+
                 for (x = x0 ? x0 - 8 * h : 0; x < x_end2; x += (8 * h)) {
                     const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
                     const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
@@ -761,6 +800,14 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                                  s->frame->linesize[chroma],
                                                                  c_tc, no_p, no_q, aux_dst);
                     }
+
+                    aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
+                }
+
+                // Copy bottom row
+                if (y + 8 * v >= s->ps.sps->height) {
+                    x = x0 ? x0 - 8 * h : 0;
+                    aux_cpy_c(s->frame, chroma, aux_desc, x, y + 4 * v, x_end2 - x, 4 * v);
                 }
             }
         }

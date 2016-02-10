@@ -41,7 +41,9 @@ AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int flags)
         goto fail2;
     }
 
-    memset(buf->data, 0x80, numbytes);
+#if RPI_AUX_FRAME_TEST
+    memset(buf->data, 0xff, numbytes);
+#endif
 
     printf("%s(%d): %p\n", __func__, numbytes, buf->data);
 
@@ -67,24 +69,23 @@ static void auxframe_desc_buffer_delete(void *opaque, uint8_t *data)
 
 int rpi_auxframe_attach(AVFrame * const frame)
 {
-    const unsigned int stride_af = frame->height << RPI_AUX_FRAME_XBLK_SHIFT;
+    const unsigned int stride_af_y = ((frame->height + 1) & ~1) << RPI_AUX_FRAME_XBLK_SHIFT;
     const unsigned int height_af_y = (frame->width + RPI_AUX_FRAME_XBLK_WIDTH - 1) >> RPI_AUX_FRAME_XBLK_SHIFT;
     // ?? 4:4:4 ??  Do we care ??
-    const unsigned int height_af_c = (frame->width + RPI_AUX_FRAME_XBLK_WIDTH * 2 - 1) >> (RPI_AUX_FRAME_XBLK_SHIFT + 1);
 
     RpiAuxframeDesc *const afd = av_malloc(sizeof(RpiAuxframeDesc));
 
     if (afd == NULL)
         return -1;
 
-    if ((afd->buf = rpi_gpu_buf_alloc(stride_af * (height_af_y + height_af_c), AV_BUFFER_FLAG_READONLY)) == NULL)
+    if ((afd->buf = rpi_gpu_buf_alloc((stride_af_y * height_af_y * 3) / 2, AV_BUFFER_FLAG_READONLY)) == NULL)
     {
         goto fail1;
     }
 
-    afd->stride = stride_af;
+    afd->stride = stride_af_y;
     afd->data_y = rpi_gpu_buf_data_arm(afd->buf);
-    afd->data_c = afd->data_y + stride_af * height_af_y;
+    afd->data_c = afd->data_y + stride_af_y * height_af_y;
 
     // Kludge into the bufer array at the end
     // This will be auto-freed / copied as required but shouldn't confuse
