@@ -60,7 +60,7 @@
         lsr      r3, #16
 .endm
 
-.macro hevc_loop_filter_luma_body
+.macro hevc_loop_filter_luma_body  l_unchanged
         vmovl.u8  q8, d16
         vmovl.u8  q9, d18
         vmovl.u8  q10, d20
@@ -113,7 +113,7 @@
         vcgt.s16   q5, q1, q5
         vmov       r7, s12
         cmp        r7, #0
-        beq        bypasswrite
+        beq        \l_unchanged
 
         vpadd.i32  d0, d14, d12
         vpadd.i32  d1, d15, d13
@@ -301,7 +301,7 @@ function ff_hevc_v_loop_filter_luma_neon, export=1
         vld1.8   {d30}, [r0], r1
         sub      r0, r0, r1, lsl #3
         transpose_8x8 d16, d18, d20, d22, d24, d26, d28, d30
-        hevc_loop_filter_luma_body
+        hevc_loop_filter_luma_body by_yv
         transpose_8x8 d16, d18, d20, d22, d24, d26, d28, d30
         vst1.8   {d16}, [r0], r1
         vst1.8   {d18}, [r0], r1
@@ -311,13 +311,24 @@ function ff_hevc_v_loop_filter_luma_neon, export=1
         vst1.8   {d26}, [r0], r1
         vst1.8   {d28}, [r0], r1
         vst1.8   {d30}, [r0]
+by_yv:
         vpop     {d8-d15}
         pop      {r5-r11}
         bx lr
 endfunc
 
 function ff_hevc_h_loop_filter_luma_neon, export=1
-        hevc_loop_filter_luma_start
+@        hevc_loop_filter_luma_start
+
+        ldr     r12, [r3]
+        ldr      r3, [r3, #4]
+        lsl      r3, #16
+        orr      r3, r12
+        cmp      r3, #0
+        it       eq
+        beq      y_cpy
+        lsr      r3, #16
+
         push     {r5-r11}
         vpush    {d8-d15}
         sub      r0, r0, r1, lsl #2
@@ -331,17 +342,72 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
         vld1.8  {d30}, [r0], r1
         sub        r0, r0, r1, lsl #3
         add        r0, r1
-        hevc_loop_filter_luma_body
+        hevc_loop_filter_luma_body by_yh
         vst1.8   {d18}, [r0], r1
         vst1.8   {d20}, [r0], r1
         vst1.8   {d22}, [r0], r1
         vst1.8   {d24}, [r0], r1
         vst1.8   {d26}, [r0], r1
         vst1.8   {d28}, [r0]
-bypasswrite:
         vpop     {d8-d15}
         pop      {r5-r11}
+
+        ldr      r2, [sp, #8]
+        cmp      r2, #0
+        it       eq
+        bxeq     lr
+
+by_yh_cpy:
+        add      r2, r2, #-4 * 16
+        mov      r3, #16
+        vst1.8   {d16}, [r2], r3
+        vst1.8   {d18}, [r2], r3
+        vst1.8   {d20}, [r2], r3
+        vst1.8   {d22}, [r2], r3
+        vst1.8   {d24}, [r2], r3
+        vst1.8   {d26}, [r2], r3
+        vst1.8   {d28}, [r2], r3
+        vst1.8   {d30}, [r2]
+
         bx lr
+
+y_cpy:
+        ldr      r2, [sp, #8]
+        cmp      r2, #0
+        it       eq
+        bxeq     lr
+
+        sub      r0, r0, r1, lsl #2
+        vld1.8  {d16}, [r0], r1
+        vld1.8  {d18}, [r0], r1
+        vld1.8  {d20}, [r0], r1
+        vld1.8  {d22}, [r0], r1
+        vld1.8  {d24}, [r0], r1
+        vld1.8  {d26}, [r0], r1
+        vld1.8  {d28}, [r0], r1
+        vld1.8  {d30}, [r0], r1
+        b       by_yh_cpy
+
+by_yh:
+        vpop     {d8-d15}
+        pop      {r5-r11}
+
+        ldr      r2, [sp, #8]
+        cmp      r2, #0
+        it       eq
+        bxeq     lr
+
+        vqmovun.s16 d16, q8
+        vqmovun.s16 d18, q9
+        vqmovun.s16 d20, q10
+        vqmovun.s16 d22, q11
+        vqmovun.s16 d24, q12
+        vqmovun.s16 d26, q13
+        vqmovun.s16 d28, q14
+        vqmovun.s16 d30, q15
+        b       by_yh_cpy
+
+
 endfunc
 
 function ff_hevc_v_loop_filter_chroma_neon, export=1

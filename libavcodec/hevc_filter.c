@@ -654,11 +654,11 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
         for (x = x0 ? x0 - 8 : 0; x < x_end2; x += 8) {
             const int bs0 = s->horizontal_bs[( x      + y * s->bs_width) >> 2];
             const int bs1 = s->horizontal_bs[((x + 4) + y * s->bs_width) >> 2];
-            uint8_t * aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
             src     = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
 
             if (bs0 || bs1) {
                 const int qp = (get_qPy(s, x, y - 1)     + get_qPy(s, x, y)     + 1) >> 1;
+                uint8_t * const aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
 
                 tc_offset   = x >= x0 ? cur_tc_offset : left_tc_offset;
                 beta_offset = x >= x0 ? cur_beta_offset : left_beta_offset;
@@ -666,6 +666,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 beta = betatable[av_clip(qp + beta_offset, 0, MAX_QP)];
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
+
                 if (pcmf) {
                     no_p[0] = get_pcm(s, x, y - 1);
                     no_p[1] = get_pcm(s, x + 4, y - 1);
@@ -688,12 +689,16 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     setup[1][b][1][a + 1] = tc[1];
                 } else
 #endif
+                {
                     s->hevcdsp.hevc_h_loop_filter_luma(src,
                                                        s->frame->linesize[LUMA],
                                                        beta, tc, no_p, no_q, aux_dst);
+                }
             }
-
-            aux_cpy(s->frame, 0, aux_desc, x, y - 4, 8, 8);
+            else
+            {
+                aux_cpy(s->frame, 0, aux_desc, x, y - 4, 8, 8);
+            }
         }
 
         // Copy bottom row
