@@ -486,27 +486,60 @@ static int get_pcm(HEVCContext *s, int x, int y)
 }
 
 // * 8-bit pels only
-// **** Optimize me!
-static inline void aux_cpy(const AVFrame *const frame, const unsigned int c_idx,
+static inline void aux_cpy_y(const AVFrame *const frame,
     const RpiAuxframeDesc * const aux_desc, unsigned int x, const unsigned int y,
-    const unsigned int n_w, const unsigned int n_h)
+    int n_w, const unsigned int n_h)
 {
     if (aux_desc != NULL) {
-        unsigned int i, j;
+        do
+        {
+            const uint8_t * s8 = frame->data[LUMA] + y * frame->linesize[LUMA] + x;
+            uint8_t * d8 = rpi_auxframe_ptr_y(aux_desc, x, y);
+            unsigned int i;
 
-        for (j = 0; j != (n_w >> 3); ++j, x += 8) {
-            uint8_t *aux_dst = rpi_auxframe_ptr_y(aux_desc, x, y);
-            const uint8_t * s8 = frame->data[c_idx] + y * frame->linesize[c_idx] + x;
-            uint8_t * d8 = aux_dst;
+#if RPI_AUX_FRAME_XBLK_WIDTH != 16
+#error Check assumptions in this copy
+#endif
 
-            for (i = 0; i != n_h; ++i, s8 += frame->linesize[c_idx], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
-                *(uint64_t *)d8 = *(const uint64_t *)s8;
+            if ((x & 15) == 0 && n_w >= 16)
+            {
+                for (i = 0; i != n_h; ++i, s8 += frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+                    const uint64_t x0 = ((const uint64_t *)s8)[0];
+                    const uint64_t x1 = ((const uint64_t *)s8)[1];
+                    ((uint64_t *)d8)[0] = x0;
+                    ((uint64_t *)d8)[1] = x1;
+                }
+                n_w -= 16;
+                x += 16;
             }
+            else
+            {
+                for (i = 0; i != n_h; ++i, s8 += frame->linesize[LUMA], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+                    *(uint64_t *)d8 = *(const uint64_t *)s8;
+                }
+                n_w -= 8;
+                x += 8;
+            }
+
+        } while (n_w > 0);
+    }
+}
+
+static inline void aux_cpy_y_8x8(const AVFrame *const frame, const uint8_t * s8,
+    const RpiAuxframeDesc * const aux_desc, const unsigned int x, const unsigned int y)
+{
+    if (aux_desc != NULL) {
+        unsigned int i;
+        uint8_t * d8 = rpi_auxframe_ptr_y(aux_desc, x, y);
+
+        for (i = 0; i != 8; ++i, s8 += frame->linesize[0], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+            *(uint64_t *)d8 = *(const uint64_t *)s8;
         }
     }
 }
 
-// x, y, w, h in luma coords
+
+// *** N.B. x, y, w, h in luma coords
 static inline void aux_cpy_c(const AVFrame *const frame, const unsigned int c_idx,
     const RpiAuxframeDesc * const aux_desc, unsigned int x, unsigned int y,
     const unsigned int n_w, const unsigned int n_h)
@@ -514,11 +547,14 @@ static inline void aux_cpy_c(const AVFrame *const frame, const unsigned int c_id
     if (aux_desc != NULL) {
         unsigned int i, j;
 
-//        printf("%d: %dx%d %d,%d\n", c_idx, n_w, n_h, x, y);
+        assert((x & 15) == 0);
+        assert((y & 15) == 0);
+        assert((n_h & 1) == 0);
+        assert((n_w & 15) == 0);
 
         y >>= 1;
         x >>= 1;
-        for (j = 0; j != (n_w >> 3); ++j, x += 4) {
+        for (j = 0; j != (n_w >> 4); ++j, x += 8) {
             uint8_t *aux_dst =
                 rpi_auxframe_ptr_c(aux_desc, x, y, c_idx - 1);
             const uint8_t * s8 = frame->data[c_idx] + y * frame->linesize[c_idx] + x;
@@ -526,12 +562,25 @@ static inline void aux_cpy_c(const AVFrame *const frame, const unsigned int c_id
 
             for (i = 0; i != (n_h >> 1); ++i, s8 += frame->linesize[c_idx], d8 += RPI_AUX_FRAME_XBLK_WIDTH)
             {
-                *(uint32_t *)d8 = *(const uint32_t *)s8;
+                *(uint64_t *)d8 = *(const uint64_t *)s8;
             }
         }
     }
 }
 
+// chroma coords
+static inline void aux_cpy_c_8x8(const AVFrame *const frame, const uint8_t * s8,
+    const RpiAuxframeDesc * const aux_desc, const unsigned int x, const unsigned int y, const unsigned int c)
+{
+    if (aux_desc != NULL) {
+        unsigned int i;
+        uint8_t * d8 = rpi_auxframe_ptr_c(aux_desc, x, y, c - 1);
+
+        for (i = 0; i != 8; ++i, s8 += frame->linesize[c], d8 += RPI_AUX_FRAME_XBLK_WIDTH) {
+            *(uint64_t *)d8 = *(const uint64_t *)s8;
+        }
+    }
+}
 
 
 
@@ -638,7 +687,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
         if(y == 0)
         {
             x = x0 ? x0 - 8 : 0;
-            aux_cpy(s->frame, 0, aux_desc, x, 0, x_end2 - x, 4);
+            aux_cpy_y(s->frame, aux_desc, x, 0, x_end2 - x, 4);
             continue;
         }
 
@@ -666,7 +715,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     s->hevcdsp.hevc_h_loop_filter_luma_c(src,
                                                          s->frame->linesize[LUMA],
                                                          beta, tc, no_p, no_q);
-                    aux_cpy(s->frame, 0, aux_desc, x, y - 4, 8, 8);
+                    aux_cpy_y_8x8(s->frame, src - s->frame->linesize[LUMA] * 4, aux_desc, x, y - 4);
                 } else
 #ifdef RPI_DEBLOCK_VPU
                 if (s->enable_rpi_deblock) {
@@ -690,14 +739,14 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
             }
             else
             {
-                aux_cpy(s->frame, 0, aux_desc, x, y - 4, 8, 8);
+                aux_cpy_y_8x8(s->frame, src - s->frame->linesize[LUMA] * 4, aux_desc, x, y - 4);
             }
         }
 
         // Copy bottom row
         if (y + 8 >= s->ps.sps->height) {
             x = x0 ? x0 - 8 : 0;
-            aux_cpy(s->frame, 0, aux_desc, x, y + 4, x_end2 - x, 4);
+            aux_cpy_y(s->frame, aux_desc, x, y + 4, x_end2 - x, 4);
         }
     }
 
@@ -764,13 +813,13 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 for (x = x0 ? x0 - 8 * h : 0; x < x_end2; x += (8 * h)) {
                     const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
                     const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
+                    src       = &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
                     if ((bs0 == 2) || (bs1 == 2)) {
                         const int qp0 = bs0 == 2 ? (get_qPy(s, x,           y - 1) + get_qPy(s, x,           y) + 1) >> 1 : 0;
                         const int qp1 = bs1 == 2 ? (get_qPy(s, x + (4 * h), y - 1) + get_qPy(s, x + (4 * h), y) + 1) >> 1 : 0;
 
                         c_tc[0]   = bs0 == 2 ? chroma_tc(s, qp0, chroma, tc_offset)     : 0;
                         c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
-                        src       = &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
                         if (pcmf) {
                             no_p[0] = get_pcm(s, x,           y - 1);
                             no_p[1] = get_pcm(s, x + (4 * h), y - 1);
@@ -779,7 +828,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             s->hevcdsp.hevc_h_loop_filter_chroma_c(src,
                                                                    s->frame->linesize[chroma],
                                                                    c_tc, no_p, no_q);
-                            aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
+                            aux_cpy_c_8x8(s->frame, src - s->frame->linesize[chroma] * 4, aux_desc, x >> 1, (y >> 1) - 4, chroma);
                         } else
 #ifdef RPI_DEBLOCK_VPU
                         if (s->enable_rpi_deblock) {
@@ -798,15 +847,12 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
                                  s->frame->linesize[chroma],
                                  c_tc, no_p, no_q,
-//                                NULL);
                                  rpi_auxframe_ptr_c(aux_desc, x >> 1, y >> 1, chroma - 1));
-                            // *** Kill when asm written
-//                            aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
                         }
                     }
                     else
                     {
-                        aux_cpy_c(s->frame, chroma, aux_desc, x, y - 4 * v, 8 * h, 8 * v);
+                        aux_cpy_c_8x8(s->frame, src - s->frame->linesize[chroma] * 4, aux_desc, x >> 1, (y >> 1) - 4, chroma);
                     }
                 }
 
