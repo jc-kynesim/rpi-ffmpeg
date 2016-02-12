@@ -24,13 +24,13 @@
 # ra18                                          0x4000
 # ra19                                          next ra17
 #
-# rb16                                          pitch
+# rb16   rb_pitch                               pitch
 # rb17                                          height + 1
 # rb18                                          height + 3
-# rb19                                          next ra16
+# rb19   rx_frame_base2_next                    next ra16
 #
 # ra20                                          1
-# ra21                                          ra_21
+# ra21   ra_y2                                  ra_21
 # ra22                                          256
 # ra23                                          rx_shift2_next
 #
@@ -40,20 +40,20 @@
 # rb23                                          24
 #
 # rb24                                          vdw_setup_1(dst_pitch)
-# rb25                                          frame width-1
+# rb25   rb_frame_width_minus_1                 frame width-1
 # rb26                                          height<<23 + width<<16 + vdw_setup_0
 # rb27                                          vdw_setup_0 (depends on QPU number)
 # rb28                                          vpm_setup (depends on QPU number) for writing 8bit results into VPM
 # rb29                                          vdw_setup_1(dst_pitch-width)
-# rb30                                          frame height-1
+# rb30   rb_frame_height_minus_1               frame height-1
 # rb31                                          used as temp to count loop iterations
 #
 # ra24                                          clipped(row start address+8+elem_num)&~3
-# ra25                                          per-channel shifts 2
-# ra26                                          next ra24
+# ra25   ra_frame_base2                         per-channel shifts 2
+# ra26   ra_frame_base_next                     next ra24
 # ra27                                          next ra25
 # ra28                                          next y
-# ra29                                          y for next texture access
+# ra29   ra_y                                   y for next texture access
 # ra30                                          64
 #
 # ra31                                          next kernel address
