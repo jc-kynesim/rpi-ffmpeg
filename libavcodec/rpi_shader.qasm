@@ -659,7 +659,8 @@ nop        ; nop # delay slot 2
   sub rb_frame_width_minus_1,r1,1
   sub rb_frame_height_minus_1,r0,1
 
-# get source pitch
+# get source pitch / 16
+# /16 wanted as we generate x & ~15
   mov rb_pitch, unif
 
 # get destination pitch
@@ -688,9 +689,9 @@ nop        ; nop # delay slot 2
   max r1, r1, 0
   min r1, r1, rb_frame_height_minus_1
 #  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-#  add t0s, r2, r1 ; mov ra_frame_base, r2
-  nop             ; mul24 r1, r1, -16   # r2 contains the addresses (not including y offset) for frame0
-  sub t0s, r2, r1 ; mov ra_frame_base, r2
+  shl r1, r1, 4
+
+  add t0s, r2, r1 ; mov ra_frame_base, r2
 
   mov r1, ra10 # y_x
   shl r0,r1,r3 # r0 is x<<16
@@ -712,9 +713,9 @@ nop        ; nop # delay slot 2
   max r1, r1, 0
   min r1, r1, rb_frame_height_minus_1
 #  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-#  add t1s, r2, r1 ; mov ra_frame_base2, r2
-  nop             ; mul24 r1, r1, -16   # r2 contains the addresses (not including y offset) for frame0
-  sub t1s, r2, r1 ; mov ra_frame_base2, r2
+  shl r1, r1, 4
+
+  add t1s, r2, r1 ; mov ra_frame_base2, r2
 
 
 # load constants
@@ -930,18 +931,18 @@ nop        ; nop # delay slot 2
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
 #  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-#  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
   add ra_y, ra_y, 1
-  nop                          ; mul24 r2, r2, -16
-  sub t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+  shl r2, r2, 4
+
+  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
 #  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
-#  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
   add ra_y2, ra_y2, 1
-  nop                           ; mul24 r2, r2, -16
-  sub t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+  shl r2, r2, 4
+
+  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -1036,18 +1037,18 @@ nop        ; nop # delay slot 2
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
 #  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-#  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
   add ra_y, ra_y, 1
-  nop                          ; mul24 r2, r2, -16
-  sub t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+  shl r2, r2, 4
+
+  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
 #  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
-#  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
   add ra_y2, ra_y2, 1
-  nop                           ; mul24 r2, r2, -16
-  sub t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+  shl r2, r2, 4
+
+  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
