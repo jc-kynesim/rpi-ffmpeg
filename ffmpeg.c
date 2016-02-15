@@ -270,12 +270,13 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
     if (!display || !rpi_pool)
         return;
 
-#if 1
     {
         const RpiAuxframeDesc * const aux = rpi_auxframe_desc(fr);
 
+        printf("<<<<<<<<< frame: %p, buf: %p\n", fr, fr->buf[7]);
         av_assert0(aux != NULL);
 
+#ifdef RPI_INTER_QPU
         if (aux != NULL)
         {
             int x, y;
@@ -304,9 +305,9 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
                 }
             }
         }
+#endif
     }
 
-#endif
 
     if (rpi_display_count >= 3) {
         av_log(s, AV_LOG_VERBOSE, "Frame dropped\n");

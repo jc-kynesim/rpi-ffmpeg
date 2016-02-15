@@ -274,6 +274,7 @@ void av_image_copy_plane(uint8_t       *dst, int dst_linesize,
                          const uint8_t *src, int src_linesize,
                          int bytewidth, int height)
 {
+    printf("+++ Copy plane !!!\n");
     if (!dst || !src)
         return;
     av_assert0(abs(src_linesize) >= bytewidth);

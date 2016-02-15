@@ -162,6 +162,8 @@ static int get_video_buffer(AVFrame *frame, int align)
     if (!desc)
         return AVERROR(EINVAL);
 
+    printf("^^^^ frame:%p: %dx%d\n", frame, frame->width, frame->height);
+
     if ((ret = av_image_check_size(frame->width, frame->height, 0, NULL)) < 0)
         return ret;
 
@@ -379,6 +381,7 @@ int av_frame_ref(AVFrame *dst, const AVFrame *src)
 
     /* duplicate the frame data if it's not refcounted */
     if (!src->buf[0]) {
+        printf("*** Copy\n");
         ret = av_frame_get_buffer(dst, 32);
         if (ret < 0)
             return ret;
@@ -400,6 +403,8 @@ int av_frame_ref(AVFrame *dst, const AVFrame *src)
             goto fail;
         }
     }
+    printf("... Ref fmt %d %dx%d, %p:%p -> %p:%p\n", src->format, src->width, src->height,
+        src, src->buf[7], dst, dst->buf[7]);
 
     if (src->extended_buf) {
         dst->extended_buf = av_mallocz_array(sizeof(*dst->extended_buf),

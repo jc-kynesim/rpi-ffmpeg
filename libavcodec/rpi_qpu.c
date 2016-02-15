@@ -580,6 +580,7 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
   //   vpu_execute_code( code,  r0,  r1,  r2,  r3,  r4,  r5);
   //   return -1; // TODO perhaps a wraparound bug here?
   // }
+  printf("%s\n", __func__);
 
   pthread_mutex_lock(&post_mutex);
   {
@@ -610,6 +611,7 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
                       int qpu_codeb, int unifs1b, int unifs2b, int unifs3b, int unifs4b, int unifs5b, int unifs6b, int unifs7b, int unifs8b, int unifs9b, int unifs10b, int unifs11b, int unifs12b
                       )
 {
+  printf("%s\n", __func__);
 
   pthread_mutex_lock(&post_mutex);
   {
@@ -620,6 +622,14 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
       printf("Too many commands submitted\n");
       exit(-1);
     }
+
+    printf("8: %#x: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+        qpu_code,
+        unifs1, unifs2,unifs3,unifs4,unifs5,unifs6,unifs7,unifs8);
+    printf("12: %#x: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+        qpu_codeb,
+        unifs1b, unifs2b,unifs3b,unifs4b,unifs5b,unifs6b,unifs7b,unifs8b,unifs9b,unifs10b,unifs11b,unifs12b);
+
     p[0] = vpu_code;
     p[1] = r0;
     p[2] = r1;
@@ -723,6 +733,10 @@ void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int un
   static int count=0;
 #endif
 
+  printf("12: %d,%d %d,%d: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+      code, num, code2, num2,
+      unifs1, unifs2,unifs3,unifs4,unifs5,unifs6,unifs7,unifs8,unifs9,unifs10,unifs11,unifs12);
+
   gpu_lock();
 #ifdef RPI_TIME_TOTAL_QPU
   start_time = Microseconds();
@@ -777,6 +791,10 @@ void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, i
   int end_time;
   static int count=0;
 #endif
+
+  printf("8: %d: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+      code,
+      unifs1, unifs2,unifs3,unifs4,unifs5,unifs6,unifs7,unifs8);
 
   gpu_lock();
 #ifdef RPI_TIME_TOTAL_QPU

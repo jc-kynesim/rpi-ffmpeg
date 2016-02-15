@@ -3,6 +3,8 @@
 #include "rpi_qpu.h"
 #include "rpi_zc.h"
 
+#include "rpi_auxframe.h"
+
 #include "libavutil/buffer_internal.h"
 
 struct ZcPoolEnt;
@@ -217,6 +219,8 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     frame->data[2] = frame->data[1] + size_c;
     frame->extended_data = frame->data;
     // Leave extended buf alone
+
+    rpi_auxframe_attach(frame);  //****
 
     return 0;
 }

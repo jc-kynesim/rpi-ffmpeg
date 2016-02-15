@@ -7,7 +7,7 @@ struct AVBufferRef;
 uint8_t * rpi_gpu_buf_data_arm(const struct AVBufferRef * const buf);
 struct AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int flags);
 
-#define RPI_AUX_FRAME_USE 1
+#define RPI_AUX_FRAME_USE 0
 
 #define RPI_AUX_FRAME_XBLK_SHIFT 4  // blk width 16
 #define RPI_AUX_FRAME_XBLK_WIDTH (1 << RPI_AUX_FRAME_XBLK_SHIFT)
@@ -38,6 +38,7 @@ static inline uint32_t rpi_auxframe_vc_y(const AVFrame * const frame)
     av_assert0(frame->buf[7] != NULL);
     rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(rpi_auxframe_desc(frame)->buf))->vc;
     printf("vc=%08x\n", rv);
+    fflush(stdout);
     return rv;
 }
 
