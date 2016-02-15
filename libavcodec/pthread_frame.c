@@ -791,8 +791,6 @@ static int thread_get_buffer_internal(AVCodecContext *avctx, ThreadFrame *f, int
 
     ff_init_buffer_info(avctx, f->f);
 
-    printf("%s: %p\n", __func__, f->f);
-
     if (!(avctx->active_thread_type & FF_THREAD_FRAME))
         return ff_get_buffer(avctx, f->f, flags);
 

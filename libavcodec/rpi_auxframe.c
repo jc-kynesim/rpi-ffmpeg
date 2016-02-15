@@ -9,7 +9,6 @@
 static void rpi_gpu_buf_delete(void *opaque, uint8_t *data)
 {
     GPU_MEM_PTR_T *const gmem = opaque;
-    printf("%s: data=%p\n", __func__, data);
     gpu_free(gmem);
 }
 
@@ -44,9 +43,6 @@ AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int flags)
 #if RPI_AUX_FRAME_TEST
     memset(buf->data, 0xff, numbytes);
 #endif
-
-    printf("%s(%d): %p\n", __func__, numbytes, buf->data);
-
     return buf;
 
 fail2:

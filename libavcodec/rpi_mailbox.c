@@ -214,7 +214,6 @@ unsigned execute_code(int file_desc, unsigned code, unsigned r0, unsigned r1, un
 {
    int i=0;
    unsigned p[32];
-   printf("%s\n", __func__);
    p[i++] = 0; // size
    p[i++] = 0x00000000; // process request
 
@@ -260,8 +259,6 @@ unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigne
    int i=0;
    unsigned p[32];
 
-   printf("%s\n", __func__);
-
    p[i++] = 0; // size
    p[i++] = 0x00000000; // process request
    p[i++] = 0x30011; // (the tag id)
@@ -286,8 +283,6 @@ void execute_multi(int file_desc,
    unsigned code_2, unsigned r0_2, unsigned r1_2, unsigned r2_2, unsigned r3_2, unsigned r4_2, unsigned r5_2) {
    int i=0;
    unsigned p[32];
-
-   printf("%s\n", __func__);
 
    p[i++] = 0; // size
    p[i++] = 0x00000000; // process request

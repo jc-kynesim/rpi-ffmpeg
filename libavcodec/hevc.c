@@ -3156,13 +3156,12 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = 0; // ref_y2_base
         *s->y_mvs[job][i]++ = (s->ps.sps->width << 16) + s->ps.sps->height;
 #if RPI_AUX_FRAME_USE
-        *s->y_mvs[job][i]++ = 0;
-//        *s->y_mvs[job][i]++ = rpi_auxframe_stride_y(s->frame) >> RPI_AUX_FRAME_XBLK_SHIFT; // pitch
+//        *s->y_mvs[job][i]++ = 0;
+        *s->y_mvs[job][i]++ = rpi_auxframe_stride_y(s->frame) >> RPI_AUX_FRAME_XBLK_SHIFT; // pitch
 #else
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
 #endif
-        *s->y_mvs[job][i]++ = 0;
-//        *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst_pitch
+        *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst_pitch
         if (weight_flag) {
             int offset = 1 << (s->sh.luma_log2_weight_denom + 6 - 1);
             int shift = s->sh.luma_log2_weight_denom + 6;
@@ -4115,7 +4114,6 @@ static int hevc_frame_start(HEVCContext *s)
 //    if (s->frame->key_frame)
 //        rpi_auxframe_attach(s->frame);
 #endif
-    printf(">>>>> frame: %p; buf=%p\n", s->frame, s->frame->buf[7]);
 
     return 0;
 
