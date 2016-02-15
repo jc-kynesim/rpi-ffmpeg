@@ -646,10 +646,10 @@ nop        ; nop # delay slot 2
   mov r3, 16
 
   # Need to save these because we need to know the frame dimensions before computing texture coordinates
-  mov ra8, unif
-  mov ra9, unif
-  mov ra10, unif
-  mov ra11, unif
+  mov ra8, unif   # y_x
+  mov ra9, unif   # ref_y_base
+  mov ra10, unif  # y2_x2
+  mov ra11, unif  # ref_y2_base
 
 # Read image dimensions
   mov r1, unif # width_height
@@ -679,10 +679,18 @@ nop        ; nop # delay slot 2
   add ra_y, r1, 1
   and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
   add r2, r2, r0  # r2 is address for frame0 (not including y offset)
+
+# Correct for layout
+  and r0, r0, ~15
+  sub r2, r2, r0  ; mul24 r0, r0, rb_pitch
+  add r2, r2, r0
+
   max r1, r1, 0
   min r1, r1, rb_frame_height_minus_1
-  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-  add t0s, r2, r1 ; mov ra_frame_base, r2
+#  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
+#  add t0s, r2, r1 ; mov ra_frame_base, r2
+  nop             ; mul24 r1, r1, -16   # r2 contains the addresses (not including y offset) for frame0
+  sub t0s, r2, r1 ; mov ra_frame_base, r2
 
   mov r1, ra10 # y_x
   shl r0,r1,r3 # r0 is x<<16
@@ -695,10 +703,18 @@ nop        ; nop # delay slot 2
   add ra_y2, r1, 1
   and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
   add r2, r2, r0  # r2 is address for frame1 (not including y offset)
+
+# Correct for layout
+  and r0, r0, ~15
+  sub r2, r2, r0  ; mul24 r0, r0, rb_pitch
+  add r2, r2, r0
+
   max r1, r1, 0
   min r1, r1, rb_frame_height_minus_1
-  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-  add t1s, r2, r1 ; mov ra_frame_base2, r2
+#  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
+#  add t1s, r2, r1 ; mov ra_frame_base2, r2
+  nop             ; mul24 r1, r1, -16   # r2 contains the addresses (not including y offset) for frame0
+  sub t1s, r2, r1 ; mov ra_frame_base2, r2
 
 
 # load constants
@@ -783,6 +799,12 @@ nop        ; nop # delay slot 2
   shl ra_xshift_next, r0, 3 # Compute shifts
   mov ra_y_next, r1
   and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
+
+# Correct for layout
+  and r1, r0, ~15
+  sub r0, r0, r1  ; mul24 r1, r1, rb_pitch
+  add r0, r0, r1
+
   add ra_frame_base_next, r2, r0 ; mov r1, unif # y2_x2
 
   shl r0,r1,r3 # r0 is x2<<16
@@ -794,6 +816,12 @@ nop        ; nop # delay slot 2
   shl rx_xshift2_next, r0, 3 # Compute shifts
   mov ra_y2_next, r1
   and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
+
+# Correct for layout
+  and r1, r0, ~15
+  sub r0, r0, r1  ; mul24 r1, r1, rb_pitch
+  add r0, r0, r1
+
   add rx_frame_base2_next, r2, r0  # r2 is address for frame1 (not including y offset)
 
 # set up VPM write
@@ -901,13 +929,19 @@ nop        ; nop # delay slot 2
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
-  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+#  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
+#  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+  add ra_y, ra_y, 1
+  nop                          ; mul24 r2, r2, -16
+  sub t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
-  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
-  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+#  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
+#  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+  add ra_y2, ra_y2, 1
+  nop                           ; mul24 r2, r2, -16
+  sub t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -1001,13 +1035,19 @@ nop        ; nop # delay slot 2
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
-  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+#  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
+#  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+  add ra_y, ra_y, 1
+  nop                          ; mul24 r2, r2, -16
+  sub t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
-  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
-  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+#  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
+#  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+  add ra_y2, ra_y2, 1
+  nop                           ; mul24 r2, r2, -16
+  sub t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
 
 # generate seven shifted versions
 # interleave with scroll of vertical context

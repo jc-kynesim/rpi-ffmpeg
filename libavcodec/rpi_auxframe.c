@@ -69,7 +69,7 @@ static void auxframe_desc_buffer_delete(void *opaque, uint8_t *data)
 
 int rpi_auxframe_attach(AVFrame * const frame)
 {
-    const unsigned int stride_af_y = ((frame->height + 1) & ~1) << RPI_AUX_FRAME_XBLK_SHIFT;
+    const unsigned int stride_af_y = rpi_auxframe_stride_y(frame);
     const unsigned int height_af_y = (frame->width + RPI_AUX_FRAME_XBLK_WIDTH - 1) >> RPI_AUX_FRAME_XBLK_SHIFT;
     // ?? 4:4:4 ??  Do we care ??
 

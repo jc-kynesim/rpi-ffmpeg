@@ -49,6 +49,7 @@
 #include "libavformat/avformat.h"
 #include "libavdevice/avdevice.h"
 #include "libswresample/swresample.h"
+#include "libavutil/avassert.h"
 #include "libavutil/opt.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/parseutils.h"
@@ -272,6 +273,8 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 #if 1
     {
         const RpiAuxframeDesc * const aux = rpi_auxframe_desc(fr);
+
+        av_assert0(aux != NULL);
 
         if (aux != NULL)
         {

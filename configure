@@ -4253,6 +4253,9 @@ case "$arch" in
             spic=$shared
         fi
     ;;
+    arm)
+        add_cppflags -DRPI
+    ;;
     ppc)
         check_cc <<EOF && subarch="ppc64"
         int test[(int)sizeof(char*) - 7];

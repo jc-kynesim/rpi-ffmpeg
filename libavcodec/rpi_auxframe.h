@@ -1,3 +1,5 @@
+#include "libavutil/avassert.h"
+#include "libavcodec/rpi_qpu.h"
 
 struct AVFrame;
 struct AVBufferRef;
@@ -5,6 +7,7 @@ struct AVBufferRef;
 uint8_t * rpi_gpu_buf_data_arm(const struct AVBufferRef * const buf);
 struct AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int flags);
 
+#define RPI_AUX_FRAME_USE 1
 
 #define RPI_AUX_FRAME_XBLK_SHIFT 4  // blk width 16
 #define RPI_AUX_FRAME_XBLK_WIDTH (1 << RPI_AUX_FRAME_XBLK_SHIFT)
@@ -27,6 +30,17 @@ static inline const RpiAuxframeDesc * rpi_auxframe_desc(const AVFrame * const fr
         frame->buf[RPI_AUX_FRAME_BUF_NO]->data);
 }
 
+static inline uint32_t rpi_auxframe_vc_y(const AVFrame * const frame)
+{
+    uint32_t rv;
+    printf("%p, %p, %08x\n", frame, frame->buf[7], frame->buf[7] == NULL ? ~0U :
+        ((GPU_MEM_PTR_T*)av_buffer_get_opaque(rpi_auxframe_desc(frame)->buf))->vc);
+    av_assert0(frame->buf[7] != NULL);
+    rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(rpi_auxframe_desc(frame)->buf))->vc;
+    printf("vc=%08x\n", rv);
+    return rv;
+}
+
 static inline uint8_t * rpi_auxframe_ptr_y(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y)
 {
     return d == NULL ? NULL : d->data_y +
@@ -43,6 +57,13 @@ static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, cons
         (y << RPI_AUX_FRAME_XBLK_SHIFT) +
         (x >> (RPI_AUX_FRAME_XBLK_SHIFT - 1)) * (d->stride >> 1) +
         (c << (RPI_AUX_FRAME_XBLK_SHIFT - 1));
+}
+
+// The stride this frame would have given its width / height
+// Does require the frame to actually have a desc attached
+static inline unsigned int rpi_auxframe_stride_y(const AVFrame * const frame)
+{
+    return ((frame->height + 1) & ~1) << RPI_AUX_FRAME_XBLK_SHIFT;
 }
 
 #define rpi_auxframe_ptr_u(d,x,y) rpi_auxframe_ptr_c(d,x,y,0)

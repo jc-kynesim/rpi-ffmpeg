@@ -2093,6 +2093,13 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
     }
 }
 
+
+#if RPI_AUX_FRAME_USE
+#define get_vc_address_ref_y(fr) rpi_auxframe_vc_y(fr)
+#else
+#define get_vc_address_ref_y(fr) get_vc_address_y(fr)
+#endif
+
 static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                                 int nPbW, int nPbH,
                                 int log2_cb_size, int partIdx, int idx)
@@ -2181,9 +2188,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_ref_y(ref0->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_ref_y(ref0->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
@@ -2281,9 +2288,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_ref_y(ref1->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_ref_y(ref1->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
@@ -2387,9 +2394,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_ref_y(ref0->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y2 - 3 + start_y) << 16) + ( (x2 - 3 + start_x) & 0xffff); // Second fetch is for ref1
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
+                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_ref_y(ref1->frame);
                   *y++ = ( (bw<8 ? bw : 8) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   *y++ = 1; // B frame weighted prediction not supported
@@ -3148,7 +3155,11 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = 0; // y2_x2
         *s->y_mvs[job][i]++ = 0; // ref_y2_base
         *s->y_mvs[job][i]++ = (s->ps.sps->width << 16) + s->ps.sps->height;
+#if RPI_AUX_FRAME_USE
+        *s->y_mvs[job][i]++ = rpi_auxframe_stride_y(s->frame); // pitch
+#else
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
+#endif
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst_pitch
         if (weight_flag) {
             int offset = 1 << (s->sh.luma_log2_weight_denom + 6 - 1);
@@ -4099,7 +4110,7 @@ static int hevc_frame_start(HEVCContext *s)
         ff_thread_finish_setup(s->avctx);
 
 #ifdef RPI
-    if (s->used_for_ref)
+//    if (s->used_for_ref)
         rpi_auxframe_attach(s->frame);
 #endif
 
