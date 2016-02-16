@@ -37,6 +37,21 @@ static inline uint32_t rpi_auxframe_vc_y(const AVFrame * const frame)
     return rv;
 }
 
+static inline uint32_t rpi_auxframe_vc_u(const AVFrame * const frame)
+{
+    const RpiAuxframeDesc * const desc = rpi_auxframe_desc(frame);
+    uint32_t rv;
+    rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(desc->buf))->vc + (desc->data_c - desc->data_y);
+    return rv;
+}
+
+static inline uint32_t rpi_auxframe_vc_v(const AVFrame * const frame)
+{
+    return rpi_auxframe_vc_u(frame) + RPI_AUX_FRAME_XBLK_WIDTH / 2;
+}
+
+
+
 static inline uint8_t * rpi_auxframe_ptr_y(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y)
 {
     return d == NULL ? NULL : d->data_y +
@@ -60,6 +75,13 @@ static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, cons
 static inline unsigned int rpi_auxframe_stride_y(const AVFrame * const frame)
 {
     return ((frame->height + 1) & ~1) << RPI_AUX_FRAME_XBLK_SHIFT;
+}
+
+// The stride this frame would have given its width / height
+// Does require the frame to actually have a desc attached
+static inline unsigned int rpi_auxframe_stride_c(const AVFrame * const frame)
+{
+    return ((frame->height + 1) & ~1) << (RPI_AUX_FRAME_XBLK_SHIFT - 1);
 }
 
 #define rpi_auxframe_ptr_u(d,x,y) rpi_auxframe_ptr_c(d,x,y,0)

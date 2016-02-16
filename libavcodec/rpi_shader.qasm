@@ -85,6 +85,9 @@
 .set ra_y_next,                    ra28
 .set ra_y,                         ra29
 
+.set k_xblk_shift, 4
+.set k_uv_offset,  8
+.set k_cx_hi_mask, ~7
 
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
@@ -137,23 +140,32 @@ mov ra15, 0
 mov r0, ra_x           # Load x
 max r0, r0, 0; mov r1, ra_y # Load y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, ra_frame_base  # Load the frame base
-shl ra_xshift_next, r0, 3 ; mov r2, ra_u2v_ref_offset
+#shl ra_xshift_next, r0, 3 ; mov r2, ra_u2v_ref_offset
+shl ra_xshift_next, r0, 3
 add ra_y, r1, 1
-add r0, r0, r3
-and r0, r0, ~3
-max r1, r1, 0 ; mov ra_x, r0 # y
+#shl ra_xshift_next, r0, 3 ; mov r2, ra_u2v_ref_offset
+and r2, r0, ~3
+add r0, r2, r3
+
+and r2, r2, ~7
+sub r0, r0, r2; mul24 r2, r2, rb_pitch
+add r0, r0, r2
+
+max r1, r1, 0 ; mov ra_x, r0               # clip(y); ra_x = (clip(x) & ~3) + frame_base_u
 min r1, r1, rb_frame_height_minus_1
 # submit texture requests for first line
-add r2, r2, r0 ; mul24 r1, r1, rb_pitch
-add t0s, r0, r1 ; mov ra_frame_base, r2
-add t1s, r2, r1
+add ra_frame_base, k_uv_offset, r0
+
+shl r1, r1, k_xblk_shift     # r1 = y * 16
+add t0s, ra_x, r1
+add t1s, ra_frame_base, r1
 
 mov r2,8
 shl rb12,unif,r2 # offset before shift
 add rb13,unif,r2  # denominator
 
 # Compute part of VPM to use for DMA output
-mov r2, unif
+mov r2, unif    # unif: vpm_id
 shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
 and r2, r2, 15
 mov r1, r2
@@ -177,7 +189,7 @@ max r1, ra_y, 0
 min r1, r1, rb_frame_height_minus_1
 add ra_y, ra_y, 1
 bra -, ra31
-nop ; mul24 r1, r1, rb_pitch
+shl r1, r1, k_xblk_shift
 add t0s, r1, ra_x
 add t1s, r1, ra_frame_base
 
@@ -202,34 +214,41 @@ max r0, r0, 0; mov r1, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
 shl ra_xshift_next, r0, 3
 sub r2, unif, r3 # compute offset from frame base u to frame base v
-add r0, r0, r3
-and rb_x_next, r0, ~3
+
+# Discard the calculated UV offset in favour of our known value...
+and r2, r0, ~3
+add r0, r2, r3
+and r2, r2, k_cx_hi_mask
+sub r0, r0, r2; mul24 r2, r2, rb_pitch
+add r0, r0, r2
+
+mov rb_x_next, r0
 mov ra_y_next, r1
-add ra_frame_base_next, rb_x_next, r2
+add ra_frame_base_next, r0, k_uv_offset
 
 # set up VPM write
 mov vw_setup, rb28
 
 # get width,height of block
 mov r2, 16
-mov r0, unif
-shr r1, r0, r2 # Extract width
-sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-and r0, r0, rb22 # Extract height
+mov r0, unif                                # unif: width_height
+shr r1, r0, r2                              # Extract width
+sub rb29, rb24, r1                          # Compute vdw_setup1(dst_pitch-width)
+and r0, r0, rb22                            # Extract height
 add rb17, r0, 1
 add rb18, r0, 3
 shl r0, r0, 7
-add r0, r0, r1 # Combine width and height of destination area
-shl r0, r0, r2 # Shift into bits 16 upwards of the vdw_setup0 register
+add r0, r0, r1                              # Combine width and height of destination area
+shl r0, r0, r2                              # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27
 
 # get filter coefficients
 
-mov r0, unif
+mov r0, unif                                # unif hcoeffs
 asr ra3, r0, rb23;      mul24 r0, r0, ra22
 asr ra2, r0, rb23;      mul24 r0, r0, ra22
 asr ra1, r0, rb23;      mul24 r0, r0, ra22
-asr ra0, r0, rb23;      mov r0, unif
+asr ra0, r0, rb23;      mov r0, unif        # unif: vcoeffs
 asr rb11, r0, rb23;     mul24 r0, r0, ra22
 asr rb10, r0, rb23;     mul24 r0, r0, ra22
 asr rb9, r0, rb23;      mul24 r0, r0, ra22
@@ -258,15 +277,16 @@ mov r3, 0
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                     ; ldtmu0     # loop counter increment
+sub.setf -, r3, rb17      ; v8adds r3, r3, ra20           ; ldtmu0     # loop counter increment
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
-mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-shr r1, r4, ra_xshift    ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
+mov.ifz ra_y, ra_y_next
+shr r1, r4, ra_xshift     ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
 
 max r2, ra_y, 0  # y
 min r2, r2, rb_frame_height_minus_1
-add ra_y, ra_y, 1         ; mul24 r2, r2, r3
+add ra_y, ra_y, 1
+shl r2, r2, k_xblk_shift
 add t0s, ra_x, r2    ; v8subs r1, r1, rb20
 add t1s, ra_frame_base, r2
 
@@ -345,10 +365,17 @@ max r0, r0, 0; mov r1, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
 shl ra_xshift_next, r0, 3
 sub r2, unif, r3 # compute offset from frame base u to frame base v
-add r0, r0, r3
-and rb_x_next, r0, ~3
+
+# Discard calc offset & use our own
+and r2, r0, ~3
+add r0, r2, r3
+and r2, r2, k_cx_hi_mask
+sub r0, r0, r2; mul24 r2, r2, rb_pitch
+add r0, r0, r2
+
+mov rb_x_next, r0
 mov ra_y_next, r1
-add ra_frame_base_next, rb_x_next, r2
+add ra_frame_base_next, r0, 8
 
 # set up VPM write, we need to save 16bit precision
 mov vw_setup, rb21
@@ -399,12 +426,13 @@ mov r3, 0
 sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                     ; ldtmu0     # loop counter increment
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
-mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
+mov.ifz ra_y, ra_y_next
 shr r1, r4, ra_xshift    ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
 
 max r2, ra_y, 0  # y
 min r2, r2, rb_frame_height_minus_1
-add ra_y, ra_y, 1         ; mul24 r2, r2, r3
+add ra_y, ra_y, 1
+shl r2, r2, k_xblk_shift
 add t0s, ra_x, r2    ; v8subs r1, r1, rb20
 add t1s, ra_frame_base, r2
 
@@ -465,10 +493,22 @@ max r0, r0, 0; mov r1, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
 shl ra_xshift_next, r0, 3
 sub r2, unif, r3 # compute offset from frame base u to frame base v
-add r0, r0, r3
-and rb_x_next, r0, ~3
+
+# Discard the calculated UV offset in favour of our known value...
+and r2, r0, ~3
+add r0, r2, r3
+and r2, r2, k_cx_hi_mask
+sub r0, r0, r2; mul24 r2, r2, rb_pitch
+add r0, r0, r2
+
+mov rb_x_next, r0
 mov ra_y_next, r1
-add ra_frame_base_next, rb_x_next, r2
+add ra_frame_base_next, r0, k_uv_offset
+
+#add r0, r0, r3
+#and rb_x_next, r0, ~3
+#mov ra_y_next, r1
+#add ra_frame_base_next, rb_x_next, r2
 
 # set up VPM write
 mov vw_setup, rb28
@@ -534,7 +574,8 @@ shr r1, r4, ra_xshift    ; v8subs r0, r0, rb20  # v8subs masks out all but botto
 
 max r2, ra_y, 0  # y
 min r2, r2, rb_frame_height_minus_1
-add ra_y, ra_y, 1         ; mul24 r2, r2, r3
+add ra_y, ra_y, 1
+shl r2, r2, k_xblk_shift
 add t0s, ra_x, r2    ; v8subs r1, r1, rb20
 add t1s, ra_frame_base, r2
 
@@ -930,7 +971,6 @@ nop        ; nop # delay slot 2
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
-#  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
   add ra_y, ra_y, 1
   shl r2, r2, 4
 
@@ -938,7 +978,6 @@ nop        ; nop # delay slot 2
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
-#  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
   add ra_y2, ra_y2, 1
   shl r2, r2, 4
 
