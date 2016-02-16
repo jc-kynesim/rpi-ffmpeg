@@ -220,8 +220,6 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     frame->extended_data = frame->data;
     // Leave extended buf alone
 
-    rpi_auxframe_attach(frame);  //****
-
     return 0;
 }
 

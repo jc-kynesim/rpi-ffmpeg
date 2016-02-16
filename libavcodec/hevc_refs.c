@@ -28,6 +28,8 @@
 #include "thread.h"
 #include "hevc.h"
 
+#include "rpi_auxframe.h"
+
 void ff_hevc_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags)
 {
     /* frame->frame can be NULL if context init failed */
@@ -151,6 +153,10 @@ int ff_hevc_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
     ref = alloc_frame(s);
     if (!ref)
         return AVERROR(ENOMEM);
+
+    if (s->used_for_ref) {
+        rpi_auxframe_attach(ref->frame, 0);
+    }
 
     *frame = ref->frame;
     s->ref = ref;
@@ -406,6 +412,8 @@ static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
     frame = alloc_frame(s);
     if (!frame)
         return NULL;
+
+    rpi_auxframe_attach(frame, 1);
 
     if (!s->avctx->hwaccel) {
         if (!s->ps.sps->pixel_shift) {

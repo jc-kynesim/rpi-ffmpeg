@@ -63,7 +63,7 @@ static void auxframe_desc_buffer_delete(void *opaque, uint8_t *data)
     av_free(afd);
 }
 
-int rpi_auxframe_attach(AVFrame * const frame)
+int rpi_auxframe_attach(AVFrame * const frame, const int make_grey)
 {
     const unsigned int stride_af_y = rpi_auxframe_stride_y(frame);
     const unsigned int height_af_y = (frame->width + RPI_AUX_FRAME_XBLK_WIDTH - 1) >> RPI_AUX_FRAME_XBLK_SHIFT;
@@ -74,6 +74,8 @@ int rpi_auxframe_attach(AVFrame * const frame)
     if (afd == NULL)
         return -1;
 
+    av_assert0(frame->buf[AV_NUM_DATA_POINTERS - 1] == NULL);
+
     if ((afd->buf = rpi_gpu_buf_alloc((stride_af_y * height_af_y * 3) / 2, AV_BUFFER_FLAG_READONLY)) == NULL)
     {
         goto fail1;
@@ -82,6 +84,11 @@ int rpi_auxframe_attach(AVFrame * const frame)
     afd->stride = stride_af_y;
     afd->data_y = rpi_gpu_buf_data_arm(afd->buf);
     afd->data_c = afd->data_y + stride_af_y * height_af_y;
+
+    if (make_grey)
+    {
+        memset(afd->data_y, 0x80, (stride_af_y * height_af_y * 3) / 2);
+    }
 
     // Kludge into the bufer array at the end
     // This will be auto-freed / copied as required but shouldn't confuse

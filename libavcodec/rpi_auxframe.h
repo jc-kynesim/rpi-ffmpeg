@@ -33,6 +33,7 @@ static inline const RpiAuxframeDesc * rpi_auxframe_desc(const AVFrame * const fr
 static inline uint32_t rpi_auxframe_vc_y(const AVFrame * const frame)
 {
     uint32_t rv;
+//    av_assert0(frame->buf[7] != NULL);
     rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(rpi_auxframe_desc(frame)->buf))->vc;
     return rv;
 }
@@ -41,6 +42,7 @@ static inline uint32_t rpi_auxframe_vc_u(const AVFrame * const frame)
 {
     const RpiAuxframeDesc * const desc = rpi_auxframe_desc(frame);
     uint32_t rv;
+//    av_assert0(frame->buf[7] != NULL);
     rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(desc->buf))->vc + (desc->data_c - desc->data_y);
     return rv;
 }
@@ -87,5 +89,5 @@ static inline unsigned int rpi_auxframe_stride_c(const AVFrame * const frame)
 #define rpi_auxframe_ptr_u(d,x,y) rpi_auxframe_ptr_c(d,x,y,0)
 #define rpi_auxframe_ptr_v(d,x,y) rpi_auxframe_ptr_c(d,x,y,1)
 
-int rpi_auxframe_attach(struct AVFrame * const frame);
+int rpi_auxframe_attach(struct AVFrame * const frame, const int make_grey);
 
