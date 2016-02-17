@@ -275,7 +275,7 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 
 //        av_assert0(aux != NULL);
 
-#ifdef RPI_INTER_QPU
+#if defined(RPI_INTER_QPU) && RPI_AUX_FRAME_TEST
         if (aux != NULL)
         {
             int x, y;

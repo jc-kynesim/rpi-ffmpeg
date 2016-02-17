@@ -56,20 +56,28 @@ static inline uint32_t rpi_auxframe_vc_v(const AVFrame * const frame)
 
 static inline uint8_t * rpi_auxframe_ptr_y(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y)
 {
+#if 1
     return d == NULL ? NULL : d->data_y +
         (x & (RPI_AUX_FRAME_XBLK_WIDTH - 1)) +
         (y << RPI_AUX_FRAME_XBLK_SHIFT) +
         (x >> RPI_AUX_FRAME_XBLK_SHIFT) * d->stride;
+#else
+    return NULL;
+#endif
 }
 
 // X,Y in chroma coords
 static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, const unsigned int x, const unsigned int y, const unsigned int c)
 {
+#if 1
     return d == NULL ? NULL : d->data_c +
         (x & (RPI_AUX_FRAME_XBLK_WIDTH / 2 - 1)) +
         (y << RPI_AUX_FRAME_XBLK_SHIFT) +
         (x >> (RPI_AUX_FRAME_XBLK_SHIFT - 1)) * (d->stride >> 1) +
         (c << (RPI_AUX_FRAME_XBLK_SHIFT - 1));
+#else
+    return NULL;
+#endif
 }
 
 // The stride this frame would have given its width / height
