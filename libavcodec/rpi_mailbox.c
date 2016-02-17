@@ -259,7 +259,7 @@ static int z = 0;
 
 void qpu_stat_poke(void)
 {
-    z = 0;
+//    z = 0;
 }
 
 unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigned noflush, unsigned timeout) {
@@ -267,7 +267,7 @@ unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigne
    unsigned p[32];
 
    noflush |= (z == 0 ? 4 : 0) | (z == 1 ? 2 : 0);
-   ++z;
+   z = (z + 1) & 0xff;
 
    p[i++] = 0; // size
    p[i++] = 0x00000000; // process request
@@ -295,7 +295,7 @@ void execute_multi(int file_desc,
    unsigned p[32];
 
    noflush |= (z == 0 ? 4 : 0) | (z == 1 ? 2 : 0);
-   ++z;
+   z = (z + 1) & 0xff;
 
    p[i++] = 0; // size
    p[i++] = 0x00000000; // process request
