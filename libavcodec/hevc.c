@@ -43,6 +43,8 @@
   #include "rpi_qpu.h"
   #include "rpi_auxframe.h"
   #include "rpi_user_vcsm.h"
+  #include "rpi_mailbox.h"
+
   // Move Inter prediction into separate pass
   #define RPI_INTER
 
@@ -4089,6 +4091,8 @@ static int hevc_frame_start(HEVCContext *s)
 
     if (s->ps.pps->tiles_enabled_flag)
         lc->end_of_tiles_x = s->ps.pps->column_width[0] << s->ps.sps->log2_ctb_size;
+
+    qpu_stat_poke();
 
     ret = ff_hevc_set_new_ref(s, &s->frame, s->poc);
     if (ret < 0)

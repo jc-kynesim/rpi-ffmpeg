@@ -22,4 +22,6 @@ extern void execute_multi(int file_desc,
    unsigned code_2, unsigned r0_2, unsigned r1_2, unsigned r2_2, unsigned r3_2, unsigned r4_2, unsigned r5_2);
 extern unsigned qpu_enable(int file_desc, unsigned enable);
 
+void qpu_stat_poke(void);
+
 #endif

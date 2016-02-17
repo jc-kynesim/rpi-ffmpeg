@@ -257,12 +257,16 @@ unsigned qpu_enable(int file_desc, unsigned enable)
 
 static int z = 0;
 
+void qpu_stat_poke(void)
+{
+    z = 0;
+}
 
 unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigned noflush, unsigned timeout) {
    int i=0;
    unsigned p[32];
 
-   noflush |= (z == 0 ? 2 : 0) | ((z & 0x3ff) == 0x3ff ? 4 : 0);
+   noflush |= (z == 0 ? 4 : 0) | (z == 1 ? 2 : 0);
    ++z;
 
    p[i++] = 0; // size
@@ -290,7 +294,7 @@ void execute_multi(int file_desc,
    int i=0;
    unsigned p[32];
 
-   noflush |= (z == 0 ? 2 : 0) | ((z & 0x3ff) == 0x3ff ? 4 : 0);
+   noflush |= (z == 0 ? 4 : 0) | (z == 1 ? 2 : 0);
    ++z;
 
    p[i++] = 0; // size
