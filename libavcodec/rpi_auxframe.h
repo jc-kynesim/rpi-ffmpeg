@@ -14,7 +14,7 @@ struct AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int fl
 
 #define RPI_AUX_FRAME_BUF_NO (AV_NUM_DATA_POINTERS - 1)
 
-#define RPI_AUX_FRAME_TEST 1
+#define RPI_AUX_FRAME_TEST 0
 
 typedef struct RpiAuxframeDesc
 {

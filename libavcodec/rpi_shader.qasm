@@ -51,7 +51,7 @@
 # ra24                                          clipped(row start address+8+elem_num)&~3
 # ra25   ra_frame_base2                         per-channel shifts 2
 # ra26   ra_frame_base_next                     next ra24
-# ra27                                          next ra25
+# ra27   ra_x2shift_next                        next ra25
 # ra28                                          next y
 # ra29   ra_y                                   y for next texture access
 # ra30                                          64
@@ -72,7 +72,6 @@
 .set ra_frame_base_next,           ra26
 .set ra_xshift,                    ra17
 
-.set ra_u2v_ref_offset,            ra25
 .set ra_frame_base2,               ra25
 
 .set ra_xshift_next,               ra19
@@ -80,7 +79,6 @@
 .set rx_xshift2_next,              ra23
 
 .set ra_x2shift_next,              ra27
-.set ra_u2v_dst_offset,            ra27
 
 .set ra_y_next,                    ra28
 .set ra_y,                         ra29
@@ -100,18 +98,17 @@ mov ra31, unif
 add ra_x, unif, elem_num # Store x
 mov ra_y, unif # Store y
 mov ra_frame_base, unif # Store frame u base
-nop
-sub ra_u2v_ref_offset, unif, ra_frame_base # Store offset to add to move from u to v in reference frame
+mov -, unif             # Discard v base
 
 # Read image dimensions
-sub rb25,unif,1
-sub rb30,unif,1
+sub rb_frame_width_minus_1,unif,1  # unif: frame_width
+sub rb_frame_height_minus_1,unif,1 # unif: frame_height
 
 # get source pitch
-mov rb16, unif
+mov rb_pitch, unif                 # unif: pitch
 
 # get destination pitch
-mov r0, unif
+mov r0, unif                       # unif: dst_pich
 mov r1, vdw_setup_1(0)
 add rb24, r1, r0
 
@@ -140,14 +137,12 @@ mov ra15, 0
 mov r0, ra_x           # Load x
 max r0, r0, 0; mov r1, ra_y # Load y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, ra_frame_base  # Load the frame base
-#shl ra_xshift_next, r0, 3 ; mov r2, ra_u2v_ref_offset
 shl ra_xshift_next, r0, 3
 add ra_y, r1, 1
-#shl ra_xshift_next, r0, 3 ; mov r2, ra_u2v_ref_offset
 and r2, r0, ~3
 add r0, r2, r3
 
-and r2, r2, ~7
+and r2, r2, k_cx_hi_mask
 sub r0, r0, r2; mul24 r2, r2, rb_pitch
 add r0, r0, r2
 
@@ -209,13 +204,12 @@ mov ra31, unif
 mov ra_xshift, ra_xshift_next
 
 # get base addresses and per-channel shifts for *next* invocation
-add r0, unif, elem_num    # x
-max r0, r0, 0; mov r1, unif # y
-min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
+add r0, unif, elem_num      # unif: x
+max r0, r0, 0; mov r1, unif # unif: y
+min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # unif: frame_u_base
 shl ra_xshift_next, r0, 3
-sub r2, unif, r3 # compute offset from frame base u to frame base v
+mov -, unif                 # unif: frame_v_base, discard
 
-# Discard the calculated UV offset in favour of our known value...
 and r2, r0, ~3
 add r0, r2, r3
 and r2, r2, k_cx_hi_mask
@@ -360,11 +354,11 @@ mov ra31, unif
 mov ra_xshift, ra_xshift_next
 
 # get base addresses and per-channel shifts for *next* invocation
-add r0, unif, elem_num    # x
-max r0, r0, 0; mov r1, unif # y
-min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
+add r0, unif, elem_num      # unif: x
+max r0, r0, 0; mov ra_y_next, unif # unif: y
+min r0, r0, rb_frame_width_minus_1; mov r3, unif # unif: frame_base
 shl ra_xshift_next, r0, 3
-sub r2, unif, r3 # compute offset from frame base u to frame base v
+mov -, unif                 # unif: frame_v_base, discard
 
 # Discard calc offset & use our own
 and r2, r0, ~3
@@ -374,15 +368,14 @@ sub r0, r0, r2; mul24 r2, r2, rb_pitch
 add r0, r0, r2
 
 mov rb_x_next, r0
-mov ra_y_next, r1
-add ra_frame_base_next, r0, 8
+add ra_frame_base_next, r0, k_uv_offset
 
 # set up VPM write, we need to save 16bit precision
 mov vw_setup, rb21
 
 # get width,height of block
 mov r2, 16
-mov r0, unif
+mov r0, unif   # unif: height
 shr r1, r0, r2 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
 and r0, r0, rb22 # Extract height
@@ -423,7 +416,7 @@ mov r3, 0
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                     ; ldtmu0     # loop counter increment
+sub.setf -, r3, rb17      ; v8adds r3, r3, ra20           ; ldtmu0     # loop counter increment
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
 mov.ifz ra_y, ra_y_next
@@ -489,10 +482,10 @@ mov ra_xshift, ra_xshift_next
 
 # get base addresses and per-channel shifts for *next* invocation
 add r0, unif, elem_num    # x
-max r0, r0, 0; mov r1, unif # y
+max r0, r0, 0; mov ra_y_next, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
 shl ra_xshift_next, r0, 3
-sub r2, unif, r3 # compute offset from frame base u to frame base v
+mov -, unif               # unif: frame__v_base, discard
 
 # Discard the calculated UV offset in favour of our known value...
 and r2, r0, ~3
@@ -502,13 +495,7 @@ sub r0, r0, r2; mul24 r2, r2, rb_pitch
 add r0, r0, r2
 
 mov rb_x_next, r0
-mov ra_y_next, r1
 add ra_frame_base_next, r0, k_uv_offset
-
-#add r0, r0, r3
-#and rb_x_next, r0, ~3
-#mov ra_y_next, r1
-#add ra_frame_base_next, rb_x_next, r2
 
 # set up VPM write
 mov vw_setup, rb28

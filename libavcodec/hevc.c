@@ -2099,7 +2099,7 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
 #if RPI_AUX_FRAME_USE
 #define get_vc_address_ref_y(fr) rpi_auxframe_vc_y(fr)
 #define get_vc_address_ref_u(fr) rpi_auxframe_vc_u(fr)
-#define get_vc_address_ref_v(fr) rpi_auxframe_vc_v(fr)
+#define get_vc_address_ref_v(fr) 0
 #else
 #define get_vc_address_ref_y(fr) get_vc_address_y(fr)
 #define get_vc_address_ref_u(fr) get_vc_address_u(fr)
