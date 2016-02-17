@@ -262,7 +262,7 @@ unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigne
    int i=0;
    unsigned p[32];
 
-   noflush |= (z == 0 ? 2 : 0) | ((z & 0xff) == 0xff ? 4 : 0);
+   noflush |= (z == 0 ? 2 : 0) | ((z & 0x3ff) == 0x3ff ? 4 : 0);
    ++z;
 
    p[i++] = 0; // size
