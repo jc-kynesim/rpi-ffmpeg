@@ -413,7 +413,7 @@ static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
     if (!frame)
         return NULL;
 
-    rpi_auxframe_attach(frame, 1);
+    rpi_auxframe_attach(frame->frame, 1);
 
     if (!s->avctx->hwaccel) {
         if (!s->ps.sps->pixel_shift) {

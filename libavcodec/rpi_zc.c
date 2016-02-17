@@ -196,7 +196,7 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     AVBufferRef * buf;
     unsigned int i;
 
-//    printf("Do local alloc: format=%#x, %dx%d: %u\n", frame->format, frame->width, frame->height, size_pic);
+//    av_log(s, AV_LOG_INFO, "Do local alloc: format=%#x, %dx%d: %u\n", frame->format, frame->width, frame->height, size_pic);
 
     if ((buf = rpi_buf_pool_alloc(&zc->pool, size_pic)) == NULL)
     {
