@@ -14,7 +14,7 @@ struct AVBufferRef * rpi_gpu_buf_alloc(const unsigned int numbytes, const int fl
 
 #define RPI_AUX_FRAME_BUF_NO (AV_NUM_DATA_POINTERS - 1)
 
-#define RPI_AUX_FRAME_TEST 0
+#define RPI_AUX_FRAME_TEST 1
 
 typedef struct RpiAuxframeDesc
 {
@@ -30,11 +30,16 @@ static inline const RpiAuxframeDesc * rpi_auxframe_desc(const AVFrame * const fr
         frame->buf[RPI_AUX_FRAME_BUF_NO]->data);
 }
 
+static inline const GPU_MEM_PTR_T* rpi_auxframe_gmem(const AVFrame * const frame)
+{
+    return (GPU_MEM_PTR_T*)av_buffer_get_opaque(rpi_auxframe_desc(frame)->buf);
+}
+
 static inline uint32_t rpi_auxframe_vc_y(const AVFrame * const frame)
 {
     uint32_t rv;
 //    av_assert0(frame->buf[7] != NULL);
-    rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(rpi_auxframe_desc(frame)->buf))->vc;
+    rv = rpi_auxframe_gmem(frame)->vc;
     return rv;
 }
 

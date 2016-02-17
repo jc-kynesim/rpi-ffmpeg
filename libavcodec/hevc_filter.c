@@ -1075,6 +1075,13 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
           iocache.s[2].addr = (int)p.arm + base;
           iocache.s[2].size  = sz;
         }
+
+        p = *rpi_auxframe_gmem(s->frame);
+        iocache.s[3].handle = p.vcsm_handle;
+        iocache.s[3].cmd = 3; // clean+invalidate
+        iocache.s[3].addr = (int)p.arm;
+        iocache.s[3].size  = p.numbytes;
+
         vcsm_clean_invalid( &iocache );
 #else
         if (flush_chroma) {
@@ -1123,7 +1130,15 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
         iocache.s[2].addr = (int)p.arm + base;
         iocache.s[2].size  = sz;
 #endif
+
+        p = *rpi_auxframe_gmem(s->frame);
+        iocache.s[3].handle = p.vcsm_handle;
+        iocache.s[3].cmd = 3; // clean+invalidate
+        iocache.s[3].addr = (int)p.arm;
+        iocache.s[3].size  = p.numbytes;
+
         vcsm_clean_invalid( &iocache );
+
 #else
         flush_buffer_u(s->frame);
         flush_buffer_v(s->frame);
