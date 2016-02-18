@@ -37,9 +37,10 @@ static inline const GPU_MEM_PTR_T* rpi_auxframe_gmem(const AVFrame * const frame
 
 static inline uint32_t rpi_auxframe_vc_y(const AVFrame * const frame)
 {
+    const RpiAuxframeDesc * const desc = rpi_auxframe_desc(frame);
     uint32_t rv;
 //    av_assert0(frame->buf[7] != NULL);
-    rv = rpi_auxframe_gmem(frame)->vc;
+    rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(desc->buf))->vc + (desc->data_y - desc->buf->data);
     return rv;
 }
 
@@ -48,7 +49,7 @@ static inline uint32_t rpi_auxframe_vc_u(const AVFrame * const frame)
     const RpiAuxframeDesc * const desc = rpi_auxframe_desc(frame);
     uint32_t rv;
 //    av_assert0(frame->buf[7] != NULL);
-    rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(desc->buf))->vc + (desc->data_c - desc->data_y);
+    rv = ((GPU_MEM_PTR_T*)av_buffer_get_opaque(desc->buf))->vc + (desc->data_c - desc->buf->data);
     return rv;
 }
 
