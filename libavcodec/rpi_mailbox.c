@@ -266,8 +266,8 @@ unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigne
    int i=0;
    unsigned p[32];
 
-   noflush |= (z == 0 ? 4 : 0) | (z == 1 ? 2 : 0);
-   z = (z + 1) & 0xff;
+   noflush |= (z == 0 ? 2 : 0) | ((z & 0xff) == 0 ? 4 : 0);
+   ++z;
 
    p[i++] = 0; // size
    p[i++] = 0x00000000; // process request
@@ -294,8 +294,10 @@ void execute_multi(int file_desc,
    int i=0;
    unsigned p[32];
 
-   noflush |= (z == 0 ? 4 : 0) | (z == 1 ? 2 : 0);
-   z = (z + 1) & 0xff;
+   noflush |= (z == 0 ? 2 : 0) | ((z & 0xff) == 0 ? 4 : 0);
+   ++z;
+//   noflush |= (z == 0 ? 4 : 0) | (z == 1 ? 2 : 0) | 16;
+//   z = (z + 1) & 0xff;
 
    p[i++] = 0; // size
    p[i++] = 0x00000000; // process request

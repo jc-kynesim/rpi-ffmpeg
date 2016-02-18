@@ -86,7 +86,7 @@ int rpi_auxframe_attach(AVFrame * const frame, const unsigned int width, const u
     afd->data_y = rpi_gpu_buf_data_arm(afd->buf);
     afd->data_c = afd->data_y + stride_af_y * height_af_y;
 
-//    if (make_grey)
+    if (make_grey)
     {
         memset(rpi_gpu_buf_data_arm(afd->buf), 0x80, total_size);
     }
