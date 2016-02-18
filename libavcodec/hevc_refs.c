@@ -155,7 +155,7 @@ int ff_hevc_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
         return AVERROR(ENOMEM);
 
     if (s->used_for_ref) {
-        rpi_auxframe_attach(ref->frame, 0);
+        rpi_auxframe_attach(ref->frame, s->ps.sps->width, s->ps.sps->height, 0);
     }
 
     *frame = ref->frame;
@@ -413,7 +413,7 @@ static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
     if (!frame)
         return NULL;
 
-    rpi_auxframe_attach(frame->frame, 1);
+    rpi_auxframe_attach(frame->frame, s->ps.sps->width, s->ps.sps->height, 1);
 
     if (!s->avctx->hwaccel) {
         if (!s->ps.sps->pixel_shift) {

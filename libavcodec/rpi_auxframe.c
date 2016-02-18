@@ -63,10 +63,10 @@ static void auxframe_desc_buffer_delete(void *opaque, uint8_t *data)
     av_free(afd);
 }
 
-int rpi_auxframe_attach(AVFrame * const frame, const int make_grey)
+int rpi_auxframe_attach(AVFrame * const frame, const unsigned int width, const unsigned int height, const int make_grey)
 {
-    const unsigned int stride_af_y = rpi_auxframe_stride_y(frame);
-    const unsigned int height_af_y = ((frame->width + RPI_AUX_FRAME_XBLK_WIDTH - 1) >> RPI_AUX_FRAME_XBLK_SHIFT) + 32;
+    const unsigned int stride_af_y = rpi_auxframe_stride_y(height);
+    const unsigned int height_af_y = ((width + RPI_AUX_FRAME_XBLK_WIDTH - 1) >> RPI_AUX_FRAME_XBLK_SHIFT);
     const unsigned int total_size = (stride_af_y * height_af_y * 3) / 2;
     // ?? 4:4:4 ??  Do we care ??
 
@@ -83,7 +83,7 @@ int rpi_auxframe_attach(AVFrame * const frame, const int make_grey)
     }
 
     afd->stride = stride_af_y;
-    afd->data_y = rpi_gpu_buf_data_arm(afd->buf) + (stride_af_y * 8);
+    afd->data_y = rpi_gpu_buf_data_arm(afd->buf);
     afd->data_c = afd->data_y + stride_af_y * height_af_y;
 
 //    if (make_grey)

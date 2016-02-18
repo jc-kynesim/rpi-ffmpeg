@@ -86,22 +86,21 @@ static inline uint8_t * rpi_auxframe_ptr_c(const RpiAuxframeDesc * const d, cons
 #endif
 }
 
-// The stride this frame would have given its width / height
-// Does require the frame to actually have a desc attached
-static inline unsigned int rpi_auxframe_stride_y(const AVFrame * const frame)
+// The stride this frame would have given the height
+static inline unsigned int rpi_auxframe_stride_y(const unsigned int height)
 {
-    return ((frame->height + 1) & ~1) << RPI_AUX_FRAME_XBLK_SHIFT;
+    // Deblock works in fixed size lumps - make sure this is big enough
+    return ((height + 15) & ~15) << RPI_AUX_FRAME_XBLK_SHIFT;
 }
 
 // The stride this frame would have given its width / height
-// Does require the frame to actually have a desc attached
-static inline unsigned int rpi_auxframe_stride_c(const AVFrame * const frame)
+static inline unsigned int rpi_auxframe_stride_c(const unsigned int height)
 {
-    return ((frame->height + 1) & ~1) << (RPI_AUX_FRAME_XBLK_SHIFT - 1);
+    return ((height + 15) & ~15) << (RPI_AUX_FRAME_XBLK_SHIFT - 1);
 }
 
 #define rpi_auxframe_ptr_u(d,x,y) rpi_auxframe_ptr_c(d,x,y,0)
 #define rpi_auxframe_ptr_v(d,x,y) rpi_auxframe_ptr_c(d,x,y,1)
 
-int rpi_auxframe_attach(struct AVFrame * const frame, const int make_grey);
+int rpi_auxframe_attach(struct AVFrame * const frame, const unsigned int width, const unsigned int height, const int make_grey);
 

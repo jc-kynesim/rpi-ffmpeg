@@ -3141,7 +3141,7 @@ static void rpi_begin(HEVCContext *s)
         *s->u_mvs[job][i]++ = pic_height;  // frame_height
 #if RPI_AUX_FRAME_USE
 //        *s->u_mvs[job][i]++ = 0;
-        *s->u_mvs[job][i]++ = rpi_auxframe_stride_c(s->frame) >> (RPI_AUX_FRAME_XBLK_SHIFT - 1); // pitch
+        *s->u_mvs[job][i]++ = rpi_auxframe_stride_c(s->ps.sps->height) >> (RPI_AUX_FRAME_XBLK_SHIFT - 1); // pitch
 #else
         *s->u_mvs[job][i]++ = s->frame->linesize[1];  // src_pitch
 #endif
@@ -3168,7 +3168,7 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = (s->ps.sps->width << 16) + s->ps.sps->height;
 #if RPI_AUX_FRAME_USE
 //        *s->y_mvs[job][i]++ = 0;
-        *s->y_mvs[job][i]++ = rpi_auxframe_stride_y(s->frame) >> RPI_AUX_FRAME_XBLK_SHIFT; // pitch
+        *s->y_mvs[job][i]++ = rpi_auxframe_stride_y(s->ps.sps->height) >> RPI_AUX_FRAME_XBLK_SHIFT; // pitch
 #else
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
 #endif
