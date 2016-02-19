@@ -1042,6 +1042,7 @@ static void flush_buffer_v(const AVFrame * const frame) {
 // flushes and invalidates all pixel rows in [start,end-1]
 static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
 {
+#if 0
 #ifdef RPI_FAST_CACHEFLUSH
         struct vcsm_user_clean_invalid_s iocache = {};
         int curr_y = start;
@@ -1076,11 +1077,13 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
           iocache.s[2].size  = sz;
         }
 
+#if 0
         p = *rpi_auxframe_gmem(s->frame);
         iocache.s[3].handle = p.vcsm_handle;
         iocache.s[3].cmd = 3; // clean+invalidate
         iocache.s[3].addr = (int)p.arm;
         iocache.s[3].size  = p.numbytes;
+#endif
 
         vcsm_clean_invalid( &iocache );
 #else
@@ -1091,6 +1094,7 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
         if (flush_luma) {
           flush_buffer_y(s->frame);
         }
+#endif
 #endif
 }
 #endif

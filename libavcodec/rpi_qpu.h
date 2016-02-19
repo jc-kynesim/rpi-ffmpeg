@@ -24,6 +24,7 @@ extern void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *
 
 #include "libavutil/frame.h"
 #if !RPI_ONE_BUF
+#error XXX
 static inline uint32_t get_vc_address_y(const AVFrame * const frame) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[0]);
     return p->vc;
