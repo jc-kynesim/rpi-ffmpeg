@@ -24,11 +24,14 @@
  * @file
  * utils.
  */
- 
-// Move video buffers to GPU memory
-//#define RPI_GPU_BUFFERS
 
 #include "config.h"
+
+#ifdef RPI
+// Move video buffers to GPU memory
+#define RPI_GPU_BUFFERS
+#endif
+
 #include "libavutil/atomic.h"
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
@@ -525,21 +528,21 @@ static AVBufferRef *rpi_buffer_alloc(int size)
     AVBufferRef *ret = NULL;
     uint8_t    *data = NULL;
     GPU_MEM_PTR_T *p;
-    
+
     static int total=0;
     total+=size;
-    
+
     p = av_malloc(sizeof *p);
     if (!p)
         return NULL;
-        
+
     if (gpu_malloc_cached(size,p)<0)  // Change this line to choose cached or uncached memory.  The caching here refers to the ARM data cache.
         return NULL;
 
     data = p->arm;
     printf("Rpi alloc %d/%d ARM=%p VC=%x->%x\n",size,total,p->arm,p->vc,p->vc+size);
     //memset(data, 64, size);
-    
+
     if (!data)
         return NULL;
 
@@ -598,16 +601,17 @@ static int update_frame_pool(AVCodecContext *avctx, AVFrame *frame)
             pool->linesize[i] = picture.linesize[i];
             if (size[i]) {
 #ifdef RPI_GPU_BUFFERS
-                pool->pools[i] = av_buffer_pool_init(size[i] + 16 + STRIDE_ALIGN - 1,
+                if (avctx->codec_id == AV_CODEC_ID_HEVC)
+                    pool->pools[i] = av_buffer_pool_init(size[i] + 16 + STRIDE_ALIGN - 1,
                                                      CONFIG_MEMORY_POISONING ?
                                                         NULL :
                                                         rpi_buffer_alloc);
-#else
+                else
+#endif
                 pool->pools[i] = av_buffer_pool_init(size[i] + 16 + STRIDE_ALIGN - 1,
                                                      CONFIG_MEMORY_POISONING ?
                                                         NULL :
                                                         av_buffer_allocz);
-#endif                                                        
                 if (!pool->pools[i]) {
                     ret = AVERROR(ENOMEM);
                     goto fail;
@@ -1095,8 +1099,10 @@ end:
 int ff_get_buffer(AVCodecContext *avctx, AVFrame *frame, int flags)
 {
     int ret = get_buffer_internal(avctx, frame, flags);
-    if (ret < 0)
+    if (ret < 0) {
         av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
+        frame->width = frame->height = 0;
+    }
     return ret;
 }
 
@@ -3233,8 +3239,8 @@ void avcodec_string(char *buf, int buf_size, AVCodecContext *enc, int encode)
 
             if (enc->sample_aspect_ratio.num) {
                 av_reduce(&display_aspect_ratio.num, &display_aspect_ratio.den,
-                          enc->width * enc->sample_aspect_ratio.num,
-                          enc->height * enc->sample_aspect_ratio.den,
+                          enc->width * (int64_t)enc->sample_aspect_ratio.num,
+                          enc->height * (int64_t)enc->sample_aspect_ratio.den,
                           1024 * 1024);
                 snprintf(buf + strlen(buf), buf_size - strlen(buf),
                          " [SAR %d:%d DAR %d:%d]",
@@ -3545,7 +3551,7 @@ int av_get_audio_frame_duration(AVCodecContext *avctx, int frame_bytes)
                 return frame_bytes * 8 / bps;
         }
 
-        if (ch > 0) {
+        if (ch > 0 && ch < INT_MAX/16) {
             /* calc from frame_bytes and channels */
             switch (id) {
             case AV_CODEC_ID_ADPCM_AFC:

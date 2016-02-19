@@ -122,10 +122,7 @@ enum {
     NAL_END_STREAM      = 11,
     NAL_FILLER_DATA     = 12,
     NAL_SPS_EXT         = 13,
-    NAL_14              = 14,
-    NAL_15              = 15,
     NAL_AUXILIARY_SLICE = 19,
-    NAL_20              = 20,
     NAL_FF_IGNORE       = 0xff0f001,
 };
 
@@ -815,6 +812,8 @@ typedef struct H264Context {
      * some context properties (which are supposed to stay constant between
      * slices) anymore */
     int setup_finished;
+
+    int got_first_iframe;
 
     // Timestamp stuff
     int sei_buffering_period_present;   ///< Buffering period SEI flag

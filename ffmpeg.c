@@ -22,9 +22,11 @@
  * @file
  * multimedia converter based on the FFmpeg libraries
  */
- 
-//#define RPI_DISPLAY
+
+#ifdef RPI
+#define RPI_DISPLAY
 //#define RPI_ZERO_COPY
+#endif
 
 #include "config.h"
 #include <ctype.h>
@@ -203,7 +205,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
     assert(pool);
 #else
     pool = mmal_port_pool_create(port, NUM_BUFFERS, size);
-    
+
     for (i = 0; i < NUM_BUFFERS; ++i)
     {
        MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
@@ -212,7 +214,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
        memset(bufPtr+w*h, 128, (w*h)/2);
     }
 #endif
-    
+
     return pool;
 }
 
@@ -222,7 +224,7 @@ static void display_cb_input(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
 
 static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 {
-    MMAL_COMPONENT_T* display; 
+    MMAL_COMPONENT_T* display;
     int w2 = (w+31)&~31;
     int h2 = (h+15)&~15;
     MMAL_DISPLAYREGION_T region =
@@ -236,9 +238,9 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     bcm_host_init();  // TODO is this needed?
     mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &display);
     assert(display);
-    
+
     mmal_port_parameter_set(display->input[0], &region.hdr);
-    
+
     MMAL_ES_FORMAT_T* format = display->input[0]->format;
     format->encoding = MMAL_ENCODING_I420;
     format->es->video.width = w2;
@@ -248,20 +250,20 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     format->es->video.crop.width = w;
     format->es->video.crop.height = h;
     mmal_port_format_commit(display->input[0]);
-    
+
     mmal_component_enable(display);
-    
+
     rpi_pool = display_alloc_pool(display->input[0], w2, h2);
-    
+
     mmal_port_enable(display->input[0],display_cb_input);
     mmal_port_enable(display->control,display_cb_input);
-    
+
     printf("Allocated display %d %d\n",w,h);
-    
+
     return display;
 }
 
-static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr) 
+static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
 {
     int w = fr->width;
     int h = fr->height;
@@ -289,7 +291,7 @@ static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
     memcpy(buf->data+w2*h2*5/4, fr->data[2], w2 * h / 4);
     //mmal_buffer_header_mem_unlock(buf);
 #endif
-    
+
     mmal_port_send_buffer(display->input[0], buf);  // I assume this will automatically get released
 }
 
@@ -727,7 +729,7 @@ static void ffmpeg_cleanup(int ret)
     }
     term_exit();
     ffmpeg_exited = 1;
-    
+
 #ifdef RPI_DISPLAY
     display_exit(rpi_display);
 #endif
@@ -2604,6 +2606,9 @@ static void print_sdp(void)
         }
     }
 
+    if (!j)
+        goto fail;
+
     av_sdp_create(avc, j, sdp, sizeof(sdp));
 
     if (!sdp_filename) {
@@ -2619,6 +2624,7 @@ static void print_sdp(void)
         }
     }
 
+fail:
     av_freep(&avc);
 }
 

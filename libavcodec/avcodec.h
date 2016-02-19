@@ -296,10 +296,6 @@ enum AVCodecID {
     AV_CODEC_ID_HAP,
     AV_CODEC_ID_DDS,
 
-    /* H264 MVC type */
-    AV_CODEC_ID_H264MVC    = MKBETAG('M','V','C','C'),
-
-
     AV_CODEC_ID_BRENDER_PIX= MKBETAG('B','P','I','X'),
     AV_CODEC_ID_Y41P       = MKBETAG('Y','4','1','P'),
     AV_CODEC_ID_ESCAPE130  = MKBETAG('E','1','3','0'),
@@ -535,6 +531,10 @@ enum AVCodecID {
     AV_CODEC_ID_PJS        = MKBETAG('P','h','J','S'),
     AV_CODEC_ID_ASS        = MKBETAG('A','S','S',' '),  ///< ASS as defined in Matroska
     AV_CODEC_ID_HDMV_TEXT_SUBTITLE = MKBETAG('B','D','T','X'),
+
+    /* data codecs */
+    AV_CODEC_ID_VBI_DATA= 0x17500,
+    AV_CODEC_ID_VBI_TELETEXT,
 
     /* other specific kind of codecs (generally used for attachments) */
     AV_CODEC_ID_FIRST_UNKNOWN = 0x18000,           ///< A dummy ID pointing at the start of various fake codecs.

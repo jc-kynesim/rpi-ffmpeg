@@ -1087,6 +1087,7 @@ void ff_h264_flush_change(H264Context *h)
 
     h->next_outputed_poc = INT_MIN;
     h->prev_interlaced_frame = 1;
+    h->got_first_iframe = 0;
     idr(h);
 
     h->prev_frame_num = -1;
@@ -1632,12 +1633,6 @@ again:
             case NAL_FILLER_DATA:
             case NAL_SPS_EXT:
             case NAL_AUXILIARY_SLICE:
-                break;
-            case NAL_14:
-            case NAL_15:
-            case NAL_20:
-                av_log(avctx, AV_LOG_ERROR, "NAL type: %d for MVC\n", h->nal_unit_type);
-                avctx->codec_tag = AV_CODEC_ID_H264MVC;
                 break;
             case NAL_FF_IGNORE:
                 break;

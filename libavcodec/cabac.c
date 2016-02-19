@@ -51,7 +51,7 @@ void ff_init_cabac_encoder(CABACContext *c, uint8_t *buf, int buf_size){
  *
  * @param buf_size size of buf in bits
  */
-void ff_init_cabac_decoder(CABACContext *c, const uint8_t *buf, int buf_size){
+int ff_init_cabac_decoder(CABACContext *c, const uint8_t *buf, int buf_size){
     c->bytestream_start=
     c->bytestream= buf;
     c->bytestream_end= buf + buf_size;
@@ -59,11 +59,23 @@ void ff_init_cabac_decoder(CABACContext *c, const uint8_t *buf, int buf_size){
 #if CABAC_BITS == 16
     c->low =  (*c->bytestream++)<<18;
     c->low+=  (*c->bytestream++)<<10;
+    // Keep our fetches on a 2-byte boundry as this should avoid ever having to
+    // do unaligned loads if the compiler (or asm) optimises the double byte
+    // load into a single instruction
+    if(((uintptr_t)c->bytestream & 1) == 0) {
+        c->low += (1 << 9);
+    }
+    else {
+        c->low += ((*c->bytestream++) << 2) + 2;
+    }
 #else
     c->low =  (*c->bytestream++)<<10;
-#endif
     c->low+= ((*c->bytestream++)<<2) + 2;
+#endif
     c->range= 0x1FE;
+    if ((c->range<<(CABAC_BITS+1)) < c->low)
+        return AVERROR_INVALIDDATA;
+    return 0;
 }
 
 void ff_init_cabac_states(void)

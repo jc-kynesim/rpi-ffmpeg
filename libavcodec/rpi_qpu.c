@@ -1,3 +1,4 @@
+#ifdef RPI
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 // define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
 //#define RPI_TIME_TOTAL_QPU
@@ -16,7 +17,7 @@
 #include <stddef.h>
 #include "libavutil/avassert.h"
 
-#if 0
+#include "config.h"
 
 #include <pthread.h>
 #include <time.h>
@@ -31,7 +32,7 @@
 // On Pi2 there is no way to access the VPU L2 cache
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
 // However, if using VCSM allocated buffers, need to use C at the moment because VCSM does not allocate uncached memory correctly
-// The QPU crashes if we mix L2 cached and L2 uncached accesses due to a HW bug. 
+// The QPU crashes if we mix L2 cached and L2 uncached accesses due to a HW bug.
 #define GPU_MEM_FLG 0x4
 // GPU_MEM_MAP is meaningless on the Pi2 and should be left at 0  (On Pi1 it allows ARM to access VPU L2 cache)
 #define GPU_MEM_MAP 0x0
@@ -153,11 +154,11 @@ static int gpu_init(volatile struct GPU **gpu) {
 
   ptr->mb = mb;
   ptr->vc = vc;
-  
+
   printf("GPU allocated at 0x%x\n",vc);
-  
+
   *gpu = ptr;
-  
+
   // Now copy over the QPU code into GPU memory
   {
     int num_bytes = qpu_get_fn(QPU_MC_END) - qpu_get_fn(QPU_MC_SETUP_UV);
@@ -172,7 +173,7 @@ static int gpu_init(volatile struct GPU **gpu) {
   }
   // And the transform coefficients
   memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
-  
+
 #ifdef RPI_ASYNC
   {
     int err;
@@ -186,7 +187,7 @@ static int gpu_init(volatile struct GPU **gpu) {
     }
   }
 #endif
-  
+
   return 0;
 }
 
@@ -204,7 +205,7 @@ static int gpu_idle(void)
 // Make sure we have exclusive access to the mailbox, and enable qpu if necessary.
 static void gpu_lock(void) {
   pthread_mutex_lock(&gpu_mutex);
-  
+
   if (gpu==NULL) {
     gpu_init(&gpu);
   }
@@ -220,7 +221,7 @@ static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb) 
   av_assert0(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
   av_assert0(p->vc_handle);
-  p->arm = vcsm_lock(p->vcsm_handle);  
+  p->arm = vcsm_lock(p->vcsm_handle);
   av_assert0(p->arm);
   p->vc = mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
@@ -295,13 +296,13 @@ void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2)
 static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
   p->numbytes = numbytes;
   p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
-  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" ); 
+  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
   av_assert0(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
   av_assert0(p->vc_handle);
-  p->arm = vcsm_lock(p->vcsm_handle);  
+  p->arm = vcsm_lock(p->vcsm_handle);
   av_assert0(p->arm);
   p->vc = mem_lock(gpu->mb, p->vc_handle);
   av_assert0(p->vc);
@@ -324,16 +325,16 @@ int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
 static void gpu_term(void)
 {
   int mb;
-  
-  if (gpu==NULL) 
+
+  if (gpu==NULL)
     return;
   mb = gpu->mb;
-  
+
 #ifdef RPI_ASYNC
   {
     void *res;
     vpu_post_code(0, 0, 0, 0, 0, 0, -1, NULL);
-    pthread_join(vpu_thread, &res);    
+    pthread_join(vpu_thread, &res);
   }
 #else
   qpu_enable(mb, 0);
@@ -420,19 +421,19 @@ static void *vpu_start(void *arg) {
     p = vpu_cmds[vpu_async_head%MAXCMDS];
     num_jobs = vpu_async_tail - vpu_async_head;
     pthread_mutex_unlock(&post_mutex);
-    
+
     if (p[6] == -1) {
       break; // Last job
     }
     if (p[7] == 0 && p[0] == 0 && p[16]==0)
       goto job_done_early;
-      
+
     if (!qpu_started) {
       int result = qpu_enable(gpu->mb, 1);
       av_assert0(result==0);
       qpu_started = 1;
     }
-    
+
 #ifdef RPI_COMBINE_JOBS
     // First scan for a qpu job
     for (int x=0;x<num_jobs;x++) {
@@ -453,14 +454,14 @@ static void *vpu_start(void *arg) {
     //printf("Have_qpu = %d, have_vpu=%d\n",have_qpu,have_vpu);
 #endif
     qpu_code = p[7];
-    qpu_codeb = p[16];    
-    
-    
+    qpu_codeb = p[16];
+
+
     //if (p[7]) {
         //GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
         //gpu_cache_flush(buf);
-    //}    
-    
+    //}
+
 #ifdef RPI_TIME_TOTAL_POSTED
     start_time = Microseconds();
     if (last_time==0)
@@ -478,11 +479,11 @@ static void *vpu_start(void *arg) {
     if (have_qpu) {
       for(i=0;i<8;i++) {
         gpu->mail[i*2] = p[8+i];
-        gpu->mail[i*2 + 1] = qpu_code;  
+        gpu->mail[i*2 + 1] = qpu_code;
       }
       for(i=0;i<12;i++) {
         gpu->mail2[i*2] = p[17+i];
-        gpu->mail2[i*2 + 1] = qpu_codeb;  
+        gpu->mail2[i*2 + 1] = qpu_codeb;
       }
       if (have_vpu) {
         execute_multi(gpu->mb,
@@ -507,22 +508,22 @@ static void *vpu_start(void *arg) {
         q[0] = 0;
     }
 #else
-    
+
     if (!qpu_code) {
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
     } else {
       for(i=0;i<8;i++) {
         gpu->mail[i*2] = p[8+i];
-        gpu->mail[i*2 + 1] = qpu_code;  
+        gpu->mail[i*2 + 1] = qpu_code;
       }
       for(i=0;i<12;i++) {
         gpu->mail2[i*2] = p[17+i];
-        gpu->mail2[i*2 + 1] = qpu_codeb;  
+        gpu->mail2[i*2 + 1] = qpu_codeb;
       }
 #if (0)
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
       execute_qpu(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */);
-#else 
+#else
       execute_multi(gpu->mb,
                               12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING , 5000,
                               8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
@@ -561,11 +562,11 @@ job_done_early:
     pthread_cond_broadcast(&post_cond_head);
     pthread_mutex_unlock(&post_mutex);
   }
-  
+
   if (qpu_started) {
     qpu_enable(gpu->mb, 0);
   }
-  
+
   return NULL;
 }
 
@@ -579,7 +580,7 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
   //   vpu_execute_code( code,  r0,  r1,  r2,  r3,  r4,  r5);
   //   return -1; // TODO perhaps a wraparound bug here?
   // }
-    
+
   pthread_mutex_lock(&post_mutex);
   {
     int id = vpu_async_tail++;
@@ -604,12 +605,12 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
   }
 }
 
-int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, 
+int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
                       int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8,
                       int qpu_codeb, int unifs1b, int unifs2b, int unifs3b, int unifs4b, int unifs5b, int unifs6b, int unifs7b, int unifs8b, int unifs9b, int unifs10b, int unifs11b, int unifs12b
                       )
 {
-    
+
   pthread_mutex_lock(&post_mutex);
   {
     int id = vpu_async_tail++;
@@ -635,7 +636,7 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
     p[13] = unifs6;
     p[14] = unifs7;
     p[15] = unifs8;
-    
+
     p[16] = qpu_codeb;
     p[17] = unifs1b;
     p[18] = unifs2b;
@@ -649,7 +650,7 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
     p[26] = unifs10b;
     p[27] = unifs11b;
     p[28] = unifs12b;
-    
+
     if (num<=1)
       pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake
     pthread_mutex_unlock(&post_mutex);
@@ -730,10 +731,10 @@ void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int un
   off_time += start_time-last_time;
 #endif
   for(i=0;i<num;i++) {
-    gpu->mail2[i*2 + 1] = code;  
+    gpu->mail2[i*2 + 1] = code;
   }
   for(;i<num+num2;i++) {
-    gpu->mail2[i*2 + 1] = code2;  
+    gpu->mail2[i*2 + 1] = code2;
   }
   gpu->mail2[0 ] = unifs1;
   gpu->mail2[2 ] = unifs2;
@@ -785,7 +786,7 @@ void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, i
   off_time += start_time-last_time;
 #endif
   for(i=0;i<8;i++) {
-    gpu->mail[i*2 + 1] = code;  
+    gpu->mail[i*2 + 1] = code;
   }
   gpu->mail[0 ] = unifs1;
   gpu->mail[2 ] = unifs2;
@@ -811,7 +812,7 @@ void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, i
 #endif
   gpu_unlock();
 }
-  
+
 unsigned int qpu_get_fn(int num) {
     // Make sure that the gpu is initialized
     unsigned int *fn;
@@ -871,7 +872,7 @@ typedef unsigned int uint32_t;
 typedef struct mvs_s {
     GPU_MEM_PTR_T unif_mvs_ptr;
     uint32_t *unif_mvs; // Base of memory for motion vector commands
-    
+
     // _base pointers are to the start of the row
     uint32_t *mvs_base[8];
     // these pointers are to the next free space
@@ -902,14 +903,14 @@ static void rpi_inter_clear(HEVCContext *s)
 static void rpi_execute_inter_qpu(HEVCContext *s)
 {
     int k;
-    uint32_t *unif_vc = (uint32_t *)s->unif_mvs_ptr.vc;   
-                    
+    uint32_t *unif_vc = (uint32_t *)s->unif_mvs_ptr.vc;
+
     for(k=0;k<8;k++) {
         s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
-        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined     
-        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+4] = qpu_get_fn(QPU_MC_SETUP); //  dummy location for V    
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
+        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+4] = qpu_get_fn(QPU_MC_SETUP); //  dummy location for V
     }
-             
+
     s->u_mvs[8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
 
     qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
@@ -1003,23 +1004,23 @@ int rpi_test_shader(void)
 
    uint8_t *in_buffer;
    uint8_t *out_buffer[2];
-   
+
    GPU_MEM_PTR_T unifs_ptr;
    GPU_MEM_PTR_T in_buffer_ptr;
    GPU_MEM_PTR_T out_buffer_ptr[2];
-   
+
    // Addresses in GPU memory of filter programs
    uint32_t mc_setup = 0;
    uint32_t mc_filter = 0;
    uint32_t mc_exit = 0;
-   
+
    int pitch = 0x500;
 
    if (gpu==NULL) {
       gpu_lock();
       gpu_unlock();
    }
-   
+
    printf("This needs to change to reflect new assembler\n");
    // Use table to compute locations of program start points
    mc_setup = code[0] + gpu->vc;
@@ -1060,9 +1061,9 @@ int rpi_test_shader(void)
          //printf("%d %d %p\n",i,gpu->mb,&in_buffer[i]);
          in_buffer[i] = rand();
       }
-           
+
       // Clear output array
-      { 
+      {
         int b;
         for(b=0;b<2;b++) {
           for(i=0;i<16*16;i++) {
@@ -1092,7 +1093,7 @@ int rpi_test_shader(void)
       unifs[18] = ENCODE_COEFFS(vcoeffs[0], vcoeffs[1], vcoeffs[2], vcoeffs[3]);
       unifs[19] = ENCODE_COEFFS(vcoeffs[4], vcoeffs[5], vcoeffs[6], vcoeffs[7]);
       unifs[20] = out_buffer_ptr[1].vc;
-      
+
       printf("Gpu->vc=%x Code=%x dst=%x\n",gpu->vc, mc_filter,out_buffer_ptr[1].vc);
 
       // flush_dcache(); TODO is this needed on ARM side? - tried to use the direct alias to avoid this problem
@@ -1153,37 +1154,37 @@ void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, i
    GPU_MEM_PTR_T unifs_ptr;
    //uint8_t *out_buffer;
    //GPU_MEM_PTR_T out_buffer_ptr;
-   
+
    // Addresses in GPU memory of filter programs
    uint32_t mc_setup = 0;
    uint32_t mc_filter = 0;
    uint32_t mc_exit = 0;
    //int x,y;
-    
+
    if (gpu==NULL) {
       gpu_lock();
       gpu_unlock();
    }
-   
+
    // Use table to compute locations of program start points
    mc_setup = code[0] + gpu->vc;
    mc_filter = code[1] + gpu->vc;
    mc_exit = code[2] + gpu->vc;
-   
+
    if (!vcos_verify(gpu_malloc_uncached(4*64,&unifs_ptr))) {
       return;
    }
    //gpu_malloc_uncached(16*dst_pitch,&out_buffer_ptr);
    //out_buffer = (uint8_t*)out_buffer_ptr.arm;
-   
+
    /*for (y=0; y<16; ++y) {
       for (x=0; x<16; ++x) {
          out_buffer[x+y*dst_pitch] = 7;
       }
     }*/
-   
+
    unifs = (uint32_t*)unifs_ptr.arm;
-   
+
     unifs[0] = mc_filter;
     unifs[1] = (int)in_buffer_vc;
     unifs[2] = src_pitch; // src pitch
@@ -1203,13 +1204,13 @@ void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, i
     //printf("Gpu->vc=%x Code=%x dst=%x\n",gpu->vc, mc_filter,out_buffer_ptr[1].vc);
 
     qpu_run_shader(mc_setup, unifs_ptr.vc);
-    
+
     /*for (y=0; y<16; ++y) {
       for (x=0; x<16; ++x) {
          dst[x+y*dst_pitch] = out_buffer[x+y*dst_pitch];
       }
     }*/
-    
+
     gpu_free(&unifs_ptr);
     //gpu_free(&out_buffer_ptr);
 }
@@ -1217,4 +1218,5 @@ void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, i
 
 
 #endif
-#endif
+
+#endif // RPI

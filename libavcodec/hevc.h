@@ -23,6 +23,9 @@
 #ifndef AVCODEC_HEVC_H
 #define AVCODEC_HEVC_H
 
+// define RPI to split the CABAC/prediction/transform into separate stages
+#include "config.h"
+
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"
 
@@ -37,26 +40,24 @@
 #include "videodsp.h"
 
 // define RPI to split the CABAC/prediction/transform into separate stages
-//#define RPI
-
 #ifdef RPI
 
   #include "rpi_qpu.h"
   // Define RPI_INTER_QPU to use QPU for chroma inter prediction
   #define RPI_INTER_QPU
-  
+
   #ifdef RPI_INTER_QPU
     // Define RPI_LUMA_QPU to also use QPU for luma inter prediction
     #define RPI_LUMA_QPU
   #endif
-  
+
   // By passing jobs to a worker thread we hope to be able to catch up during slow frames
   #define RPI_MAX_JOBS 2
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
   //#define RPI_DEBLOCK_VPU
-  
+
 #endif
 
 #define MAX_DPB_SIZE 16 // A.4.1
@@ -645,7 +646,7 @@ typedef struct SliceHeader {
 
     unsigned int max_num_merge_cand; ///< 5 - 5_minus_max_num_merge_cand
 
-    int *entry_point_offset;
+    unsigned *entry_point_offset;
     int * offset;
     int * size;
     int num_entry_point_offsets;
@@ -810,7 +811,7 @@ typedef struct HEVCLocalContext {
 
     int qPy_pred;
 
-    
+
     uint8_t ctb_left_flag;
     uint8_t ctb_up_flag;
     uint8_t ctb_up_right_flag;
@@ -826,7 +827,7 @@ typedef struct HEVCLocalContext {
     int ct_depth;
     CodingUnit cu;
     PredictionUnit pu;
-    
+
 #define BOUNDARY_LEFT_SLICE     (1 << 0)
 #define BOUNDARY_LEFT_TILE      (1 << 1)
 #define BOUNDARY_UPPER_SLICE    (1 << 2)
@@ -842,10 +843,10 @@ typedef struct HEVCLocalContext {
 // The processing is done in chunks
 // Each chunk corresponds to 24 64x64 luma blocks (24 so it is divisible by 8 for chroma and 12 for luma)
 // This is a distance of 1536 pixels across the screen
-// Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing, 
+// Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
 // but allocate more memory and increase the latency before data in the next frame can be processed
-#define RPI_NUM_CHUNKS 1 
-  
+#define RPI_NUM_CHUNKS 1
+
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
 #define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*24)
 
@@ -926,7 +927,7 @@ typedef struct HEVCContext {
 
     int                 width;
     int                 height;
-    
+
     int used_for_ref;
 
 #ifdef RPI
@@ -949,12 +950,12 @@ typedef struct HEVCContext {
     int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
-    int ctu_per_y_chan; // Number of CTUs per luma QPU 
-    int ctu_per_uv_chan; // Number of CTUs per chroma QPU 
+    int ctu_per_y_chan; // Number of CTUs per luma QPU
+    int ctu_per_uv_chan; // Number of CTUs per chroma QPU
 #ifdef RPI_INTER_QPU
     GPU_MEM_PTR_T unif_mvs_ptr[RPI_MAX_JOBS];
     uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
-    
+
     // _base pointers are to the start of the row
     uint32_t *mvs_base[RPI_MAX_JOBS][8];
     // these pointers are to the next free space
@@ -986,21 +987,21 @@ typedef struct HEVCContext {
     int worker_head; // Contains the number of completed jobs
     int kill_worker; // set to 1 to terminate the worker
 #endif
-    
+
 #ifdef RPI_DEBLOCK_VPU
     int enable_rpi_deblock;
     GPU_MEM_PTR_T y_setup_ptr;
-    uint8_t (*y_setup_arm)[2][2][2][4]; 
-    uint8_t (*y_setup_vc)[2][2][2][4]; 
+    uint8_t (*y_setup_arm)[2][2][2][4];
+    uint8_t (*y_setup_vc)[2][2][2][4];
     int setup_width; // Number of 16x16 blocks across the image
     int setup_height; // Number of 16x16 blocks down the image
-    
+
     GPU_MEM_PTR_T uv_setup_ptr;
     uint8_t (*uv_setup_arm)[2][2][2][4];  // Half of this is unused [][][1][], but easier for the VPU as it allows us to store with zeros and addresses are aligned
-    uint8_t (*uv_setup_vc)[2][2][2][4]; 
+    uint8_t (*uv_setup_vc)[2][2][2][4];
     int uv_setup_width;
     int uv_setup_height;
-    
+
     GPU_MEM_PTR_T vpu_cmds_ptr;
     int (*vpu_cmds_arm)[6]; // r0-r5 for each command
     int vpu_cmds_vc;
@@ -1043,6 +1044,7 @@ typedef struct HEVCContext {
     int bs_height;
 
     int is_decoded;
+    int no_rasl_output_flag;
 
     HEVCPredContext hpc;
     HEVCDSPContext hevcdsp;
@@ -1113,6 +1115,7 @@ typedef struct HEVCContext {
     int sei_hflip, sei_vflip;
 
     int picture_struct;
+
 #ifdef RPI
     int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
 #endif
@@ -1241,10 +1244,10 @@ void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size);
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                  int log2_trafo_size, enum ScanType scan_idx,
                                  int c_idx);
-                                 
+
 #ifdef RPI_INTER_QPU
 extern void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n);
-#endif                                 
+#endif
 
 void ff_hevc_hls_mvd_coding(HEVCContext *s, int x0, int y0, int log2_cb_size);
 

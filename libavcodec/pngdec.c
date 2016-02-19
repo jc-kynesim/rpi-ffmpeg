@@ -663,7 +663,10 @@ static int decode_idat_chunk(AVCodecContext *avctx, PNGDecContext *s,
                 break;
 
             default:
-                av_assert0(0);
+                avpriv_request_sample(avctx, "bit depth %d "
+                        "and color type %d with TRNS",
+                        s->bit_depth, s->color_type);
+                return AVERROR_INVALIDDATA;
             }
 
             s->bpp += byte_depth;
@@ -912,6 +915,11 @@ static int decode_fctl_chunk(AVCodecContext *avctx, PNGDecContext *s,
         cur_w > s->width - x_offset|| cur_h > s->height - y_offset)
             return AVERROR_INVALIDDATA;
 
+    if (blend_op != APNG_BLEND_OP_OVER && blend_op != APNG_BLEND_OP_SOURCE) {
+        av_log(avctx, AV_LOG_ERROR, "Invalid blend_op %d\n", blend_op);
+        return AVERROR_INVALIDDATA;
+    }
+
     if (sequence_number == 0 && dispose_op == APNG_DISPOSE_OP_PREVIOUS) {
         // No previous frame to revert to for the first frame
         // Spec says to just treat it as a APNG_DISPOSE_OP_BACKGROUND
@@ -1007,7 +1015,7 @@ static int handle_p_frame_apng(AVCodecContext *avctx, PNGDecContext *s,
             for (x = s->x_offset; x < s->x_offset + s->cur_w; ++x, foreground += s->bpp, background += s->bpp) {
                 size_t b;
                 uint8_t foreground_alpha, background_alpha, output_alpha;
-                uint8_t output[4];
+                uint8_t output[10];
 
                 // Since we might be blending alpha onto alpha, we use the following equations:
                 // output_alpha = foreground_alpha + (1 - foreground_alpha) * background_alpha
@@ -1046,6 +1054,8 @@ static int handle_p_frame_apng(AVCodecContext *avctx, PNGDecContext *s,
                 }
 
                 output_alpha = foreground_alpha + FAST_DIV255((255 - foreground_alpha) * background_alpha);
+
+                av_assert0(s->bpp <= 10);
 
                 for (b = 0; b < s->bpp - 1; ++b) {
                     if (output_alpha == 0) {
@@ -1254,7 +1264,7 @@ static int decode_frame_png(AVCodecContext *avctx,
         return AVERROR_INVALIDDATA;
     }
 
-    s->y = s->state = 0;
+    s->y = s->state = s->has_trns = 0;
 
     /* init the zlib */
     s->zstream.zalloc = ff_png_zalloc;

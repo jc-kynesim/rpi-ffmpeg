@@ -21,7 +21,7 @@
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
- 
+
 //#define DISABLE_SAO
 //#define DISABLE_DEBLOCK
 //#define DISABLE_STRENGTHS
@@ -283,7 +283,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
     edges[1]   = y_ctb == 0;
     edges[2]   = x_ctb == s->ps.sps->ctb_width  - 1;
     edges[3]   = y_ctb == s->ps.sps->ctb_height - 1;
-    
+
 #ifdef DISABLE_SAO
     return;
 #endif
@@ -510,8 +510,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     int pcmf = (s->ps.sps->pcm_enabled_flag &&
                 s->ps.sps->pcm.loop_filter_disable_flag) ||
                s->ps.pps->transquant_bypass_enable_flag;
-               
-#ifdef DISABLE_DEBLOCK_NONREF    
+
+#ifdef DISABLE_DEBLOCK_NONREF
     if (!s->used_for_ref)
       return; // Don't deblock non-reference frames
 #endif
@@ -621,7 +621,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     setup[1][b][1][a] = tc[0];
                     setup[1][b][1][a + 1] = tc[1];
                 } else
-#endif           
+#endif
                     s->hevcdsp.hevc_h_loop_filter_luma(src,
                                                        s->frame->linesize[LUMA],
                                                        beta, tc, no_p, no_q);
@@ -672,7 +672,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             s->hevcdsp.hevc_v_loop_filter_chroma(src,
                                                                  s->frame->linesize[chroma],
                                                                  c_tc, no_p, no_q);
-                       
+
                     }
                 }
 
@@ -715,7 +715,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             setup[1][b][0][a] = c_tc[0];
                             setup[1][b][0][a + 1] = c_tc[1];
                         } else
-#endif  
+#endif
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
                                                                  s->frame->linesize[chroma],
                                                                  c_tc, no_p, no_q);
@@ -928,7 +928,7 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
           iocache.s[2].size  = sz;
         }
         vcsm_clean_invalid( &iocache );
-#else   
+#else
         if (flush_chroma) {
           flush_buffer(s->frame->buf[1]);
           flush_buffer(s->frame->buf[2]);
@@ -965,7 +965,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
         iocache.s[1].cmd = 3; // clean+invalidate
         iocache.s[1].addr = (int)p->arm + base;
         iocache.s[1].size  = sz;
-        
+
 #ifdef RPI_LUMA_QPU
         p = av_buffer_pool_opaque(s->frame->buf[0]);
         sz = s->frame->linesize[0] * (n-curr_y);
@@ -976,7 +976,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
         iocache.s[2].size  = sz;
 #endif
         vcsm_clean_invalid( &iocache );
-#else            
+#else
         flush_buffer(s->frame->buf[1]);
         flush_buffer(s->frame->buf[2]);
 #ifdef RPI_LUMA_QPU
@@ -998,31 +998,31 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   // Flush image, 4 lines above to bottom of ctb stripe
   ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
   // TODO flush buffer of beta/tc setup when it becomes cached
-  
+
   // Prepare three commands at once to avoid calling overhead
   s->vpu_cmds_arm[0][0] = get_vc_address(s->frame->buf[0]) + s->frame->linesize[0] * y;
   s->vpu_cmds_arm[0][1] = s->frame->linesize[0];
   s->vpu_cmds_arm[0][2] = s->setup_width;
-  s->vpu_cmds_arm[0][3] = (int) ( s->y_setup_vc + s->setup_width * (y>>4) ); 
+  s->vpu_cmds_arm[0][3] = (int) ( s->y_setup_vc + s->setup_width * (y>>4) );
   s->vpu_cmds_arm[0][4] = ctb_size>>4;
   s->vpu_cmds_arm[0][5] = 2;
-  
+
   s->vpu_cmds_arm[1][0] = get_vc_address(s->frame->buf[1]) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
   s->vpu_cmds_arm[1][1] = s->frame->linesize[1];
   s->vpu_cmds_arm[1][2] = s->uv_setup_width;
   s->vpu_cmds_arm[1][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
   s->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
   s->vpu_cmds_arm[1][5] = 3;
-  
+
   s->vpu_cmds_arm[2][0] = get_vc_address(s->frame->buf[2]) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
   s->vpu_cmds_arm[2][1] = s->frame->linesize[2];
   s->vpu_cmds_arm[2][2] = s->uv_setup_width;
   s->vpu_cmds_arm[2][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
   s->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
   s->vpu_cmds_arm[2][5] = 4;
-  
+
   // Call VPU
-  vpu_wait(vpu_post_code( vpu_get_fn(), s->vpu_cmds_vc, 3, 0, 0, 0, 5, 0)); // 5 means to do all the commands                        
+  vpu_wait(vpu_post_code( vpu_get_fn(), s->vpu_cmds_vc, 3, 0, 0, 0, 5, 0)); // 5 means to do all the commands
 }
 
 #endif
