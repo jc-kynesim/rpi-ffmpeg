@@ -1036,7 +1036,7 @@ static void flush_buffer_v(const AVFrame * const frame) {
 
 
 #ifdef RPI_DEBLOCK_VPU
-#error Not fixed yet
+//#error Not fixed yet
 
 // ff_hevc_flush_buffer_lines
 // flushes and invalidates all pixel rows in [start,end-1]
@@ -1155,7 +1155,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 #endif
 
 #ifdef RPI_DEBLOCK_VPU
-#error XXX
+//#error XXX
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
 static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 {

@@ -257,11 +257,6 @@ unsigned qpu_enable(int file_desc, unsigned enable)
 
 static int z = 0;
 
-void qpu_stat_poke(void)
-{
-//    z = 0;
-}
-
 unsigned execute_qpu(int file_desc, unsigned num_qpus, unsigned control, unsigned noflush, unsigned timeout) {
    int i=0;
    unsigned p[32];

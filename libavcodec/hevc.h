@@ -56,7 +56,7 @@
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-  //#define RPI_DEBLOCK_VPU
+  #define RPI_DEBLOCK_VPU
 
 #endif
 

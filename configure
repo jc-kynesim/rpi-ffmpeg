@@ -5535,7 +5535,7 @@ check_cflags -Wdeclaration-after-statement
 check_cflags -Wall
 check_cflags -Wdisabled-optimization
 check_cflags -Wpointer-arith
-check_cflags -Wredundant-decls
+#check_cflags -Wredundant-decls
 check_cflags -Wwrite-strings
 check_cflags -Wtype-limits
 check_cflags -Wundef
@@ -5543,7 +5543,7 @@ check_cflags -Wmissing-prototypes
 check_cflags -Wno-pointer-to-int-cast
 check_cflags -Wstrict-prototypes
 check_cflags -Wempty-body
-enabled extra_warnings && check_cflags -Winline
+#enabled extra_warnings && check_cflags -Winline
 
 check_disable_warning(){
     warning_flag=-W${1#-Wno-}
