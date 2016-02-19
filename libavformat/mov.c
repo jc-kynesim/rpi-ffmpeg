@@ -1512,34 +1512,6 @@ static int mov_read_glbl(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     return 0;
 }
 
-static int mov_read_mvcc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
-{
-    int extradata_size;
-    int ret, i;
-    uint32_t n;
-    AVStream *st;
-
-    if (c->fc->nb_streams < 1)
-        return 0;
-    st = c->fc->streams[c->fc->nb_streams-1];
-    extradata_size = st->codec->extradata_size;
-
-    if ((uint64_t)atom.size > (1<<30))
-        return AVERROR_INVALIDDATA;
-
-    if (extradata_size == 0)
-        return 0;
-    if ((ret = mov_read_extradata(c, pb, atom, AV_CODEC_ID_H264)) < 0)
-        return ret;
-    for (i = 0, n = 0; i < 4; i++)
-        n = (n << 8) | st->codec->extradata[extradata_size+i];
-    n -= 4;
-    for (i = 0; i < 4; i++)
-        st->codec->extradata[extradata_size+i] = (n >> ((3 - i) << 3)) & 0xff;
-    st->codec->codec_tag = AV_CODEC_ID_H264MVC;
-    return 0;
-}
-
 static int mov_read_dvc1(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 {
     AVStream *st;
@@ -3969,7 +3941,6 @@ static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('C','i','n', 0x8e), mov_read_targa_y216 },
 { MKTAG('f','r','e','e'), mov_read_free },
 { MKTAG('-','-','-','-'), mov_read_custom },
-{ MKTAG('m','v','c','C'), mov_read_mvcc },
 { 0, NULL }
 };
 

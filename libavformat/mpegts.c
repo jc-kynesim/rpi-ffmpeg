@@ -702,7 +702,7 @@ static const StreamType ISO_types[] = {
     { 0x11, AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_AAC_LATM   }, /* LATM syntax */
 #endif
     { 0x1b, AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_H264       },
-    { 0x20, AVMEDIA_TYPE_DATA,  AV_CODEC_ID_H264       },
+    { 0x20, AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_H264       },
     { 0x21, AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_JPEG2000   },
     { 0x24, AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_HEVC       },
     { 0x42, AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_CAVS       },
@@ -838,8 +838,6 @@ static int mpegts_set_stream_info(AVStream *st, PESContext *pes,
             sub_pes->sub_st           = pes->sub_st = sub_st;
         }
     }
-    if (pes->stream_type == 0x20) // MVC
-        st->codec->codec_tag = AV_CODEC_ID_H264MVC;
     if (st->codec->codec_id == AV_CODEC_ID_NONE)
         mpegts_find_stream_type(st, pes->stream_type, MISC_types);
     if (st->codec->codec_id == AV_CODEC_ID_NONE) {
