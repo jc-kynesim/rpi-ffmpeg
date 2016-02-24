@@ -287,6 +287,8 @@ ready_\@:
 .endm
 
 function ff_hevc_v_loop_filter_luma_neon, export=1
+        bx lr  /* **************** */
+
         hevc_loop_filter_luma_start
         push     {r5-r11}
         vpush    {d8-d15}
@@ -317,6 +319,8 @@ function ff_hevc_v_loop_filter_luma_neon, export=1
 endfunc
 
 function ff_hevc_h_loop_filter_luma_neon, export=1
+        bx lr  /* **************** */
+
         hevc_loop_filter_luma_start
         push     {r5-r11}
         vpush    {d8-d15}
@@ -345,6 +349,8 @@ bypasswrite:
 endfunc
 
 function ff_hevc_v_loop_filter_chroma_neon, export=1
+        bx lr  /* **************** */
+
         hevc_loop_filter_chroma_start
         sub      r0, #4
         vld1.8   {d16}, [r0], r1
@@ -371,6 +377,8 @@ function ff_hevc_v_loop_filter_chroma_neon, export=1
 endfunc
 
 function ff_hevc_h_loop_filter_chroma_neon, export=1
+        bx lr  /* **************** */
+
         hevc_loop_filter_chroma_start
         sub      r0, r0, r1, lsl #1
         vld1.8   {d18}, [r0], r1
