@@ -245,16 +245,8 @@ static void pic_arrays_free(HEVCContext *s)
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
-    if (s->y_setup_arm) {
-      gpu_free(&s->y_setup_ptr);
-      s->y_setup_arm = 0;
-    }
-    if (s->uv_setup_arm) {
-      gpu_free(&s->uv_setup_ptr);
-      s->uv_setup_arm = 0;
-    }
     if (s->vpu_cmds_arm) {
-      gpu_free(&s->vpu_cmds_ptr);
+        gpu_free(&s->deblock_vpu_gmem);
       s->vpu_cmds_arm = 0;
     }
 #endif
@@ -322,26 +314,44 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
+
     s->enable_rpi_deblock = !sps->sao_enabled;
     s->setup_width = (sps->width+15) / 16;
     s->setup_height = (sps->height+15) / 16;
-    gpu_malloc_uncached(sizeof(*s->y_setup_arm) * s->setup_width * s->setup_height, &s->y_setup_ptr); // TODO make this cached
-    s->y_setup_arm = (void*)s->y_setup_ptr.arm;
-    s->y_setup_vc = (void*)s->y_setup_ptr.vc;
-    memset(s->y_setup_arm, 0, s->y_setup_ptr.numbytes);
-    printf("Setup %d by %d by %d\n",s->setup_width,s->setup_height,sizeof(*s->y_setup_arm));
-
     s->uv_setup_width = ( (sps->width >> sps->hshift[1]) + 15) / 16;
     s->uv_setup_height = ( (sps->height >> sps->vshift[1]) + 15) / 16;
-    gpu_malloc_uncached(sizeof(*s->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height, &s->uv_setup_ptr); // TODO make this cached
-    s->uv_setup_arm = (void*)s->uv_setup_ptr.arm;
-    s->uv_setup_vc = (void*)s->uv_setup_ptr.vc;
-    memset(s->uv_setup_arm, 0, s->uv_setup_ptr.numbytes);
-    printf("Setup uv %d by %d by %d\n",s->uv_setup_width,s->uv_setup_height,sizeof(*s->uv_setup_arm));
 
-    gpu_malloc_uncached(sizeof(*s->vpu_cmds_arm) * 3,&s->vpu_cmds_ptr);
-    s->vpu_cmds_arm = (void*) s->vpu_cmds_ptr.arm;
-    s->vpu_cmds_vc = s->vpu_cmds_ptr.vc;
+    {
+        const unsigned int cmd_size = (sizeof(*s->vpu_cmds_arm) * 3 + 15) & ~15;
+        const unsigned int y_size = (sizeof(*s->y_setup_arm) * s->setup_width * s->setup_height + 15) & ~15;
+        const unsigned int uv_size = (sizeof(*s->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
+        const unsigned int total_size =- cmd_size + y_size + uv_size;
+        int p_vc;
+        uint8_t * p_arm;
+
+        gpu_malloc_cached(total_size, &s->deblock_vpu_gmem);
+        p_vc = s->deblock_vpu_gmem.vc;
+        p_arm = s->deblock_vpu_gmem.arm;
+
+        // Zap all
+        memset(p_arm, 0, s->deblock_vpu_gmem.numbytes);
+
+        // Subdivide
+        s->vpu_cmds_arm = (void*)p_arm;
+        s->vpu_cmds_vc = p_vc;
+
+        p_arm += cmd_size;
+        p_vc += cmd_size;
+
+        s->y_setup_arm = (void*)p_arm;
+        s->y_setup_vc = (void*)p_vc;
+
+        p_arm += y_size;
+        p_vc += y_size;
+
+        s->uv_setup_arm = (void*)p_arm;
+        s->uv_setup_vc = (void*)p_vc;
+    }
 #endif
 
     s->bs_width  = (width  >> 2) + 1;

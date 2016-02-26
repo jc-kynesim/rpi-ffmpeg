@@ -878,7 +878,7 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CB
 #undef CR
 
-#ifdef RPI_INTER_QPU
+#if defined(RPI_INTER_QPU) || defined(RPI_DEBLOCK_VPU)
 static void flush_buffer(AVBufferRef *bref) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
     gpu_cache_flush(p);
@@ -889,7 +889,9 @@ static uint32_t get_vc_address(AVBufferRef *bref) {
   GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
   return p->vc;
 }
+#endif
 
+#ifdef RPI_DEBLOCK_VPU
 // ff_hevc_flush_buffer_lines
 // flushes and invalidates all pixel rows in [start,end-1]
 static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
@@ -938,8 +940,9 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
         }
 #endif
 }
+#endif
 
-
+#ifdef RPI_INTER_QPU
 void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && s->used_for_ref) {
@@ -996,7 +999,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 {
   // Flush image, 4 lines above to bottom of ctb stripe
-  ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
+//  ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
   // TODO flush buffer of beta/tc setup when it becomes cached
 
   // Prepare three commands at once to avoid calling overhead
@@ -1021,8 +1024,10 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   s->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
   s->vpu_cmds_arm[2][5] = 4;
 
+//  gpu_cache_flush(&s->deblock_vpu_gmem);
+
   // Call VPU
-  vpu_wait(vpu_post_code( vpu_get_fn(), s->vpu_cmds_vc, 3, 0, 0, 0, 5, 0)); // 5 means to do all the commands
+//  vpu_wait(vpu_post_code( vpu_get_fn(), s->vpu_cmds_vc, 3, 0, 0, 0, 5, 0)); // 5 means to do all the commands
 }
 
 #endif

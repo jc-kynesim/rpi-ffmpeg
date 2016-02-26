@@ -56,7 +56,7 @@
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-  //#define RPI_DEBLOCK_VPU
+  #define RPI_DEBLOCK_VPU
 
 #endif
 
@@ -990,19 +990,21 @@ typedef struct HEVCContext {
 
 #ifdef RPI_DEBLOCK_VPU
     int enable_rpi_deblock;
-    GPU_MEM_PTR_T y_setup_ptr;
+    GPU_MEM_PTR_T deblock_vpu_gmem;
+
+//    GPU_MEM_PTR_T y_setup_ptr;
     uint8_t (*y_setup_arm)[2][2][2][4];
     uint8_t (*y_setup_vc)[2][2][2][4];
     int setup_width; // Number of 16x16 blocks across the image
     int setup_height; // Number of 16x16 blocks down the image
 
-    GPU_MEM_PTR_T uv_setup_ptr;
+//    GPU_MEM_PTR_T uv_setup_ptr;
     uint8_t (*uv_setup_arm)[2][2][2][4];  // Half of this is unused [][][1][], but easier for the VPU as it allows us to store with zeros and addresses are aligned
     uint8_t (*uv_setup_vc)[2][2][2][4];
     int uv_setup_width;
     int uv_setup_height;
 
-    GPU_MEM_PTR_T vpu_cmds_ptr;
+//    GPU_MEM_PTR_T vpu_cmds_ptr;
     int (*vpu_cmds_arm)[6]; // r0-r5 for each command
     int vpu_cmds_vc;
 #endif
