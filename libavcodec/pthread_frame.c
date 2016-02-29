@@ -511,6 +511,8 @@ void ff_thread_report_progress(ThreadFrame *f, int n, int field)
     pthread_mutex_unlock(&p->progress_mutex);
 }
 
+void av_waiters_change(const int src, const int n);
+
 void ff_thread_await_progress(ThreadFrame *f, int n, int field)
 {
     PerThreadContext *p;
@@ -525,7 +527,11 @@ void ff_thread_await_progress(ThreadFrame *f, int n, int field)
 
     pthread_mutex_lock(&p->progress_mutex);
     while (progress[field] < n)
+    {
+        av_waiters_change(1, 1);
         pthread_cond_wait(&p->progress_cond, &p->progress_mutex);
+        av_waiters_change(1, -1);
+    }
     pthread_mutex_unlock(&p->progress_mutex);
 }
 

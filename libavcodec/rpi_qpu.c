@@ -658,14 +658,89 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
   }
 }
 
+void av_waiters_change(const int src, const int n);
+
+
+typedef struct waiters_env_s
+{
+  unsigned long long time[16];
+  unsigned int last_time;
+  unsigned int n;
+} waiters_env_t;
+
+#define WAITERS_SRC_COUNT 2
+
+static waiters_env_t waiters_global;
+static waiters_env_t waiters_src[WAITERS_SRC_COUNT];
+
+static pthread_mutex_t waiters_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void waiters_update(waiters_env_t * const waiters, const unsigned int now, const int n)
+{
+  if (waiters->last_time != 0) {
+    waiters->time[waiters->n] += now - waiters->last_time;
+  }
+
+  waiters->n += n;
+  waiters->last_time = now;
+}
+
+void av_waiters_change(const int src, const int n)
+{
+  unsigned int now;
+
+  pthread_mutex_lock(&waiters_lock);
+
+  now = Microseconds();
+
+  waiters_update(&waiters_global, now, n);
+  waiters_update(waiters_src + src, now, n);
+
+  pthread_mutex_unlock(&waiters_lock);
+}
+
+static void waiters_report1(const waiters_env_t * const waiters, const int src)
+{
+  printf("Waiters %c: %6lld/%6lld/%6lld/%6lld/%6lld/%6lld/%6lld/%6lld/%6lld\n", src,
+      waiters->time[0] / 1000ULL,
+      waiters->time[1] / 1000ULL,
+      waiters->time[2] / 1000ULL,
+      waiters->time[3] / 1000ULL,
+      waiters->time[4] / 1000ULL,
+      waiters->time[5] / 1000ULL,
+      waiters->time[6] / 1000ULL,
+      waiters->time[7] / 1000ULL,
+      waiters->time[8] / 1000ULL
+      );
+
+}
+
+static void waiters_report(void)
+{
+  int i;
+  waiters_report1(&waiters_global, ' ');
+  for (i = 0; i != WAITERS_SRC_COUNT; ++i) {
+    waiters_report1(waiters_src + i, '0' + i);
+  }
+}
+
 // Wait for completion of the given command
 void vpu_wait(int id)
 {
+  static int waits = 0;
+
   pthread_mutex_lock(&post_mutex);
   while( id + 1 - vpu_async_head > 0)
   {
+    av_waiters_change(0, 1);
     pthread_cond_wait(&post_cond_head, &post_mutex);
+    av_waiters_change(0, -1);
   }
+
+  if ((++waits & 0xff) == 0) {
+    waiters_report();
+  }
+
   pthread_mutex_unlock(&post_mutex);
 }
 
