@@ -177,9 +177,23 @@ static int gpu_init(volatile struct GPU **gpu) {
 #ifdef RPI_ASYNC
   {
     int err;
+    pthread_attr_t pattr;
+    struct sched_param fifo_param;
+
+    // Set VPU service thread to max priority as all other threads can block
+    // waiting for it and it can be the performance bottleneck.
+    // It spends little time unblocked so shouldn't interfere with other high
+    // priority threads
+    pthread_attr_init(&pattr);
+    pthread_attr_setinheritsched(&pattr, PTHREAD_EXPLICIT_SCHED);
+    pthread_attr_setschedpolicy(&pattr, SCHED_FIFO);
+    fifo_param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+    pthread_attr_setschedparam(&pattr, &fifo_param);
+
     vpu_async_tail = 0;
     vpu_async_head = 0;
-    err = pthread_create(&vpu_thread, NULL, vpu_start, NULL);
+    err = pthread_create(&vpu_thread, &pattr, vpu_start, NULL);
+
     //printf("Created thread\n");
     if (err) {
         printf("Failed to create vpu thread\n");
