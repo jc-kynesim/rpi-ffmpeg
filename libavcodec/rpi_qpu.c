@@ -182,9 +182,55 @@ static int gpu_init(volatile struct GPU **gpu) {
     err = pthread_create(&vpu_thread, NULL, vpu_start, NULL);
     //printf("Created thread\n");
     if (err) {
-        printf("Failed to create vpu thread\n");
+        av_log(NULL, AV_LOG_FATAL, "Failed to create vpu thread\n");
         return -4;
     }
+
+    {
+      struct sched_param param = {0};
+      int policy = 0;
+
+      if (pthread_getschedparam(vpu_thread, &policy, &param) != 0)
+      {
+        av_log(NULL, AV_LOG_ERROR, "Unable to get VPU thread scheduling parameters\n");
+      }
+      else
+      {
+        av_log(NULL, AV_LOG_INFO, "VPU thread: policy=%d (%s), pri=%d\n",
+            policy,
+            policy == SCHED_RR ? "RR" : policy == SCHED_FIFO ? "FIFO" : "???" ,
+            param.sched_priority);
+
+        policy = SCHED_FIFO;
+        param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+
+        av_log(NULL, AV_LOG_INFO, "Attempt to set: policy=%d (%s), pri=%d\n",
+            policy,
+            policy == SCHED_RR ? "RR" : policy == SCHED_FIFO ? "FIFO" : "???" ,
+            param.sched_priority);
+
+        if (pthread_setschedparam(vpu_thread, policy, &param) != 0)
+        {
+          av_log(NULL, AV_LOG_ERROR, "Unable to set VPU thread scheduling parameters\n");
+        }
+        else
+        {
+          if (pthread_getschedparam(vpu_thread, &policy, &param) != 0)
+          {
+            av_log(NULL, AV_LOG_ERROR, "Unable to get VPU thread scheduling parameters\n");
+          }
+          else
+          {
+            av_log(NULL, AV_LOG_INFO, "VPU thread (after): policy=%d (%s), pri=%d\n",
+                policy,
+                policy == SCHED_RR ? "RR" : policy == SCHED_FIFO ? "FIFO" : "???" ,
+                param.sched_priority);
+          }
+        }
+      }
+
+    }
+
   }
 #endif
 
