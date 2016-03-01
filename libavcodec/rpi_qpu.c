@@ -131,6 +131,11 @@ static pthread_mutex_t post_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int vpu_cmds[MAXCMDS][32];
 static volatile int vpu_async_tail=0; // Contains the number of posted jobs
 static volatile int vpu_async_head=0;
+
+// We explicitly set the scheduling type & priority for the VPU thread
+// On the whole I think FIFO would be better than RR but whilst that works
+// with ffmpeg it locks up in Kodi (reasons unknown).
+#define VPU_SCHED_TYPE SCHED_RR
 #endif
 
 static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb);
@@ -185,10 +190,22 @@ static int gpu_init(volatile struct GPU **gpu) {
     // It spends little time unblocked so shouldn't interfere with other high
     // priority threads
     pthread_attr_init(&pattr);
-    pthread_attr_setinheritsched(&pattr, PTHREAD_EXPLICIT_SCHED);
-    pthread_attr_setschedpolicy(&pattr, SCHED_FIFO);
-    fifo_param.sched_priority = sched_get_priority_max(SCHED_FIFO);
-    pthread_attr_setschedparam(&pattr, &fifo_param);
+    if (pthread_attr_setinheritsched(&pattr, PTHREAD_EXPLICIT_SCHED) != 0)
+    {
+      av_log(NULL, AV_LOG_ERROR, "%s: setinheritsched failed\n", __func__);
+    }
+    else if (pthread_attr_setschedpolicy(&pattr, VPU_SCHED_TYPE) != 0)
+    {
+      av_log(NULL, AV_LOG_ERROR, "%s: setschedpolicy failed\n", __func__);
+    }
+    else
+    {
+      fifo_param.sched_priority = sched_get_priority_max(VPU_SCHED_TYPE);
+      if (pthread_attr_setschedparam(&pattr, &fifo_param) != 0)
+      {
+        av_log(NULL, AV_LOG_ERROR, "%s: setschedparam failed\n", __func__);
+      }
+    }
 
     vpu_async_tail = 0;
     vpu_async_head = 0;
@@ -196,9 +213,10 @@ static int gpu_init(volatile struct GPU **gpu) {
 
     //printf("Created thread\n");
     if (err) {
-        printf("Failed to create vpu thread\n");
+        av_log(NULL, AV_LOG_FATAL, "Failed to create vpu thread\n");
         return -4;
     }
+    av_log(NULL, AV_LOG_INFO, "VPU thread created OK\n");
   }
 #endif
 
