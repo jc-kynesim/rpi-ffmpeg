@@ -154,7 +154,7 @@ add rb13,unif,r2  # denominator
 
 # Compute part of VPM to use for DMA output
 mov r2, unif
-shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
+#shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
 and r2, r2, 15
 mov r1, r2
 asr r1, r1, 2
@@ -351,7 +351,9 @@ mov ra_y_next, r1
 add ra_frame_base_next, rb_x_next, r2
 
 # set up VPM write, we need to save 16bit precision
-mov vw_setup, rb21
+# ***************************
+#mov vw_setup, rb21
+mov -, rb21
 
 # get width,height of block
 mov r2, 16
@@ -434,12 +436,40 @@ nop                     ; mul24 r1, ra14, rb10
 nop                     ; mul24 r0, ra13, rb9
 add r1, r1, r0          ; mul24 r0, ra12, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb11
-add r1, r1, r0          ; mov -, vw_wait
+# ***************************
+#add r1, r1, r0          ; mov -, vw_wait
+add r1, r1, r0 ; mov r0, 6
+
+
+# Pack UV & Rotate output stash
+# ***** If 8 or less don't connect the two stash sets
+mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+
+asr ra8.16as, r1, r0; mov r0, r1 << 8
+shl r0, r0, 10
+or  r1, r0, ra8; mov  r0, rb7
+
+nop ; mov.ifnz r1, ra7 << 8
+mov ra7, ra6 ; mov rb7, rb6
+mov ra6, ra5 ; mov rb6, rb5
+mov ra5, ra4 ; mov rb5, rb4
+mov ra4,  r0 ; mov rb4,  r1
+
 sub.setf -, r3, rb18
 brr.anyn -, r:uvloop_b0
-asr vpm, r1, 6         # Delay 1 shifts down by shift2=6, but results are still in 16bit precision
+# ***************************
+#asr vpm, r1, 6         # Delay 1 shifts down by shift2=6, but results are still in 16bit precision
+asr -, r1, 6         # Delay 1 shifts down by shift2=6, but results are still in 16bit precision
 nop                    # Delay 2
 nop                    # Delay 3
+
+# Max vertical size is 16 and if we have that then we are fully loaded
+# However 2, 4, 8 can also happen and we need to rework the stash appropriately
+
+# Shift by 8
+
+
+
 
 # in pass0 we don't really need to save any results, but need to discard the uniforms
 # DMA out for U
@@ -494,7 +524,8 @@ shl r0, r0, r2 # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27
 
 # In a B frame, so also set up VPM read (reading back 16bit precision)
-add vr_setup, r3, rb21
+#add vr_setup, r3, rb21
+add -, r3, rb21
 
 # get filter coefficients
 
@@ -567,7 +598,9 @@ add r1, r1, r0          ; mul24 r0, ra15, rb11
 add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
 asr r1, r1, 14          # shift2=6
-add r1, r1, vpm         # Blend in previous VPM contents at this location
+# ***************************
+#add r1, r1, vpm         # Blend in previous VPM contents at this location
+add r1, r1, r1         # Blend in previous VPM contents at this location
 add r1, r1, ra30
 brr.anyn -, r:uvloop_b
 asr r1, r1, 7           # Delay 1

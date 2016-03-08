@@ -178,16 +178,16 @@ static int gpu_init(volatile struct GPU **gpu) {
   {
     int err;
     pthread_attr_t pattr;
-    struct sched_param fifo_param;
-
+//    struct sched_param fifo_param;
     // Set VPU service thread to max priority as all other threads can block
     // waiting for it and it can be the performance bottleneck.
     pthread_attr_init(&pattr);
+#if 0
     pthread_attr_setinheritsched(&pattr, PTHREAD_EXPLICIT_SCHED);
     pthread_attr_setschedpolicy(&pattr, SCHED_FIFO);
     fifo_param.sched_priority = sched_get_priority_max(SCHED_FIFO);
     pthread_attr_setschedparam(&pattr, &fifo_param);
-
+#endif
     vpu_async_tail = 0;
     vpu_async_head = 0;
     err = pthread_create(&vpu_thread, &pattr, vpu_start, NULL);
@@ -203,6 +203,7 @@ static int gpu_init(volatile struct GPU **gpu) {
   return 0;
 }
 
+#if 0
 // Returns 1 if the gpu is currently idle
 static int gpu_idle(void)
 {
@@ -213,6 +214,7 @@ static int gpu_idle(void)
   }
   return 0;
 }
+#endif
 
 // Make sure we have exclusive access to the mailbox, and enable qpu if necessary.
 static void gpu_lock(void) {
@@ -400,6 +402,19 @@ unsigned int vpu_get_constants(void) {
 
 #ifdef RPI_ASYNC
 
+extern int av_stat_bi_pred;
+extern int av_stat_uni_pred;
+
+static const int * fill_mail(volatile int * d, const int * s, unsigned int n)
+{
+  const int code = *s++;
+  do {
+    *d++ = *s++;
+    *d++ = code;
+  } while (--n != 0);
+  return s;
+}
+
 static void *vpu_start(void *arg) {
 #ifdef RPI_TIME_TOTAL_POSTED
   int last_time=0;
@@ -414,16 +429,15 @@ static void *vpu_start(void *arg) {
 #endif
   int qpu_started = 0;
   while(1) {
-    int i;
     int *p; // Pointer for a QPU/VPU job
 #ifdef RPI_COMBINE_JOBS
     int *q = NULL; // Pointer for a VPU only job
     int have_qpu = 0;
     int have_vpu = 0;
 #endif
-    int qpu_code;
-    int qpu_codeb;
-    int num_jobs; // Number of jobs available
+//    int qpu_code;
+//    int qpu_codeb;
+//    int num_jobs; // Number of jobs available
     pthread_mutex_lock(&post_mutex);
     while( vpu_async_tail - vpu_async_head <= 0)
     {
@@ -431,7 +445,7 @@ static void *vpu_start(void *arg) {
       pthread_cond_wait(&post_cond_tail, &post_mutex);
     }
     p = vpu_cmds[vpu_async_head%MAXCMDS];
-    num_jobs = vpu_async_tail - vpu_async_head;
+//    num_jobs = vpu_async_tail - vpu_async_head;
     pthread_mutex_unlock(&post_mutex);
 
     if (p[6] == -1) {
@@ -465,9 +479,6 @@ static void *vpu_start(void *arg) {
     }
     //printf("Have_qpu = %d, have_vpu=%d\n",have_qpu,have_vpu);
 #endif
-    qpu_code = p[7];
-    qpu_codeb = p[16];
-
 
     //if (p[7]) {
         //GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
@@ -488,6 +499,10 @@ static void *vpu_start(void *arg) {
 #define FLAGS_FOR_PROFILING (NO_FLUSH)
 
 #ifdef RPI_COMBINE_JOBS
+#error ZZZ
+    qpu_code = p[7];
+    qpu_codeb = p[QPU_N_CHROMA + 8];
+
     if (have_qpu) {
       for(i=0;i<8;i++) {
         gpu->mail[i*2] = p[8+i];
@@ -521,24 +536,21 @@ static void *vpu_start(void *arg) {
     }
 #else
 
-    if (!qpu_code) {
+    if (p[7] == 0) {
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
     } else {
-      for(i=0;i<8;i++) {
-        gpu->mail[i*2] = p[8+i];
-        gpu->mail[i*2 + 1] = qpu_code;
-      }
-      for(i=0;i<12;i++) {
-        gpu->mail2[i*2] = p[17+i];
-        gpu->mail2[i*2 + 1] = qpu_codeb;
-      }
+      const int * s = p + 7;
+
+      s = fill_mail(gpu->mail, s, QPU_N_CHROMA);
+      fill_mail(gpu->mail2, s, 12);
+
 #if (0)
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
       execute_qpu(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */);
 #else
       execute_multi(gpu->mb,
                               12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING , 5000,
-                              8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
+                              QPU_N_CHROMA,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
                               p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
                               0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
 #endif
@@ -562,11 +574,30 @@ static void *vpu_start(void *arg) {
 #endif
     count++;
     if ((count&0x7f)==0)
-#ifdef RPI_COMBINE_JOBS
-      printf("Posted %d On=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(off_time/1000));
-#else
-      printf("Posted %d On=%dms (%d calls), On_deblock=%dms (%d calls), Off=%dms\n",count,(int)(on_time/1000),count_qpu,(int)(on_time_deblock/1000),count_deblock,(int)(off_time/1000));
-#endif
+    {
+  #ifdef RPI_COMBINE_JOBS
+        printf("Posted %d On=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(off_time/1000));
+  #else
+        printf("Posted %d On=%dms (%d calls), On_deblock=%dms (%d calls), Off=%dms, Uni/Bi=%d/%d\n",
+            count,(int)(on_time/1000),count_qpu,(int)(on_time_deblock/1000),count_deblock,(int)(off_time/1000),
+          av_stat_bi_pred, av_stat_uni_pred);
+
+        {
+          extern int av_stat_pred_sizes[8][8];
+          int i;
+          for (i = 1; i != 7; ++i) {
+            printf("%7d%7d%7d%7d%7d%7d\n",
+                av_stat_pred_sizes[1][i],
+                av_stat_pred_sizes[2][i],
+                av_stat_pred_sizes[3][i],
+                av_stat_pred_sizes[4][i],
+                av_stat_pred_sizes[5][i],
+                av_stat_pred_sizes[6][i]
+                );
+          }
+        }
+  #endif
+    }
 #endif
 job_done_early:
     pthread_mutex_lock(&post_mutex);
@@ -618,7 +649,7 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
 }
 
 int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
-                      int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8,
+                      int qpu_code, const uint32_t unifs_chroma[QPU_N_CHROMA],
                       int qpu_codeb, int unifs1b, int unifs2b, int unifs3b, int unifs4b, int unifs5b, int unifs6b, int unifs7b, int unifs8b, int unifs9b, int unifs10b, int unifs11b, int unifs12b
                       )
 {
@@ -628,40 +659,39 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
     int id = vpu_async_tail++;
     int *p = vpu_cmds[id%MAXCMDS];
     int num = vpu_async_tail - vpu_async_head;
+    unsigned int i;
+
     if (num>MAXCMDS) {
       printf("Too many commands submitted\n");
       exit(-1);
     }
-    p[0] = vpu_code;
-    p[1] = r0;
-    p[2] = r1;
-    p[3] = r2;
-    p[4] = r3;
-    p[5] = r4;
-    p[6] = r5;
-    p[7] = qpu_code;
-    p[8 ] = unifs1;
-    p[9 ] = unifs2;
-    p[10] = unifs3;
-    p[11] = unifs4;
-    p[12] = unifs5;
-    p[13] = unifs6;
-    p[14] = unifs7;
-    p[15] = unifs8;
 
-    p[16] = qpu_codeb;
-    p[17] = unifs1b;
-    p[18] = unifs2b;
-    p[19] = unifs3b;
-    p[20] = unifs4b;
-    p[21] = unifs5b;
-    p[22] = unifs6b;
-    p[23] = unifs7b;
-    p[24] = unifs8b;
-    p[25] = unifs9b;
-    p[26] = unifs10b;
-    p[27] = unifs11b;
-    p[28] = unifs12b;
+    *p++ = vpu_code;
+    *p++ = r0;
+    *p++ = r1;
+    *p++ = r2;
+    *p++ = r3;
+    *p++ = r4;
+    *p++ = r5;
+
+    *p++ = qpu_code;
+    for (i = 0; i != QPU_N_CHROMA; ++i) {
+      *p++ = unifs_chroma[i];
+    }
+
+    *p++ = qpu_codeb;
+    *p++ = unifs1b;
+    *p++ = unifs2b;
+    *p++ = unifs3b;
+    *p++ = unifs4b;
+    *p++ = unifs5b;
+    *p++ = unifs6b;
+    *p++ = unifs7b;
+    *p++ = unifs8b;
+    *p++ = unifs9b;
+    *p++ = unifs10b;
+    *p++ = unifs11b;
+    *p++ = unifs12b;
 
     if (num<=1)
       pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake

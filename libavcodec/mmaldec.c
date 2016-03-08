@@ -40,6 +40,8 @@
 #include "libavutil/opt.h"
 #include "libavutil/log.h"
 
+#error QQQQ
+
 typedef struct FFBufferEntry {
     AVBufferRef *ref;
     void *data;

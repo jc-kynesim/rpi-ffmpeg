@@ -231,8 +231,6 @@ static void *worker_start(void *arg)
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCContext *s)
 {
-    int i;
-
 #ifdef RPI
     int job;
     for(job=0;job<RPI_MAX_JOBS;job++) {
@@ -298,7 +296,6 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
     int coefs_per_row = coefs_per_luma + coefs_per_chroma;
     int job;
-    int i;
 
     av_assert0(sps);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
@@ -2124,6 +2121,10 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
     }
 }
 
+int av_stat_uni_pred = 0;
+int av_stat_bi_pred = 0;
+int av_stat_pred_sizes[8][8] = {{0}};
+
 static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                                 int nPbW, int nPbH,
                                 int log2_cb_size, int partIdx, int idx)
@@ -2168,6 +2169,9 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                               partIdx, merge_idx, &current_mv);
     }
 
+
+    av_stat_pred_sizes[ff_log2(nPbW)][ff_log2(nPbH)]++;
+
     x_pu = x0 >> s->ps.sps->log2_min_pu_size;
     y_pu = y0 >> s->ps.sps->log2_min_pu_size;
 
@@ -2194,6 +2198,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
+
 #ifdef RPI_LUMA_QPU
         if (s->enable_rpi) {
             int reflist = 0;
@@ -2211,6 +2216,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
               for(int start_x=0;start_x < nPbW;start_x+=16) {
                   int bw = nPbW-start_x;
                   int bh = nPbH-start_y;
+
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address(ref0->frame->buf[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
@@ -2258,6 +2264,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       int bw = nPbW_c-start_x;
                       int bh = nPbH_c-start_y;
+                      ++av_stat_uni_pred;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
@@ -2359,6 +2366,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       int bw = nPbW_c-start_x;
                       int bh = nPbH_c-start_y;
+                      ++av_stat_uni_pred;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
@@ -2465,6 +2473,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   for(int start_x=0;start_x < nPbW_c;start_x+=RPI_CHROMA_BLOCK_WIDTH) {
                       int bw = nPbW_c-start_x;
                       int bh = nPbH_c-start_y;
+                      ++av_stat_bi_pred;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv_b0;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c - 1 + start_x;
                       u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c - 1 + start_y;
@@ -3148,7 +3157,7 @@ static void rpi_begin(HEVCContext *s)
     int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
                            (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
 
-    for(i=0;i<8;i++) {
+    for(i=0;i< QPU_N_CHROMA;i++) {
         s->u_mvs[job][i] = s->mvs_base[job][i];
         *s->u_mvs[job][i]++ = 0;
         *s->u_mvs[job][i]++ = 0;
@@ -3484,14 +3493,14 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
       return;
 #endif
     }
-    for(k=0;k<8;k++) {
+    for (k = 0; k < QPU_N_CHROMA; k++) {
         s->u_mvs[job][k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
         s->u_mvs[job][k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP_UV); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
         s->u_mvs[job][k][-RPI_CHROMA_COMMAND_WORDS+4] = qpu_get_fn(QPU_MC_SETUP_UV); // Also need a dummy for V
         av_assert0(s->u_mvs[job][k] - s->mvs_base[job][k] < UV_COMMANDS_PER_QPU);
     }
 
-    s->u_mvs[job][8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
+    s->u_mvs[job][k-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
 
 #ifdef RPI_LUMA_QPU
     for(k=0;k<12;k++) {
@@ -3514,38 +3523,42 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #else
     flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],NULL,NULL, job);
 #endif
-    s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8,
-                                                                      s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3], s->num_coeffs[job][3] >> 10, 0,
-                                   qpu_get_fn(QPU_MC_SETUP_UV),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][0 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][1 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][2 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][3 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][4 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][5 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][6 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(unif_vc+(s->mvs_base[job][7 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
-#ifdef RPI_LUMA_QPU
-                                   qpu_get_fn(QPU_MC_SETUP),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][0 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][1 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][2 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][3 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][4 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][5 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][6 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][7 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][8 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][9 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][10 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
-                                   (uint32_t)(y_unif_vc+(s->y_mvs_base[job][11 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm))
-#else
-                                   0,
-                                   0,0,0,0,
-                                   0,0,0,0,
-                                   0,0,0,0
-#endif
-                                 );
+
+    {
+        uint32_t unifs_chroma[QPU_N_CHROMA];
+        unsigned int i;
+
+        for (i = 0; i != QPU_N_CHROMA; ++i) {
+            unifs_chroma[i] = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
+        }
+
+
+        s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8,
+                                                                          s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3], s->num_coeffs[job][3] >> 10, 0,
+                                       qpu_get_fn(QPU_MC_SETUP_UV),
+                                       unifs_chroma,
+    #ifdef RPI_LUMA_QPU
+                                       qpu_get_fn(QPU_MC_SETUP),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][0 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][1 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][2 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][3 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][4 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][5 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][6 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][7 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][8 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][9 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][10 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm)),
+                                       (uint32_t)(y_unif_vc+(s->y_mvs_base[job][11 ] - (uint32_t*)s->y_unif_mvs_ptr[job].arm))
+    #else
+                                       0,
+                                       0,0,0,0,
+                                       0,0,0,0,
+                                       0,0,0,0
+    #endif
+                                     );
+    }
     for(i=0;i<4;i++)
         s->num_coeffs[job][i] = 0;
 #else
@@ -3753,7 +3766,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
 #ifdef RPI_INTER_QPU
-        s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count % 8];
+        s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count % QPU_N_CHROMA];
 #endif
 #ifdef RPI_LUMA_QPU
         s->curr_y_mvs = s->y_mvs[s->pass0_job][s->ctu_count % 12];
@@ -3762,7 +3775,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
 #ifdef RPI_INTER_QPU
-        s->u_mvs[s->pass0_job][s->ctu_count % 8]= s->curr_u_mvs;
+        s->u_mvs[s->pass0_job][s->ctu_count % QPU_N_CHROMA] = s->curr_u_mvs;
 #endif
 #ifdef RPI_LUMA_QPU
         s->y_mvs[s->pass0_job][s->ctu_count % 12] = s->curr_y_mvs;
