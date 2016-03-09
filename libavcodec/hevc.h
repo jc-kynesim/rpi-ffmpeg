@@ -959,9 +959,9 @@ typedef struct HEVCContext {
     uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
 
     // _base pointers are to the start of the row
-    uint32_t *mvs_base[RPI_MAX_JOBS][8];
+    uint32_t *mvs_base[RPI_MAX_JOBS][QPU_N_CHROMA];
     // these pointers are to the next free space
-    uint32_t *u_mvs[RPI_MAX_JOBS][8];
+    uint32_t *u_mvs[RPI_MAX_JOBS][QPU_N_CHROMA];
     uint32_t *curr_u_mvs; // Current uniform stream to use for chroma
     // Function pointers
     uint32_t mc_filter_uv;

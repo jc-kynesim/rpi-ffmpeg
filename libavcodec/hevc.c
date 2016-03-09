@@ -54,7 +54,7 @@
   // RPI_CACHE_UNIF_MVS doesn't seem to make much difference, so left undefined.
 
   // Define RPI_SIMULATE_QPUS for debugging to run QPU code on the ARMs
-  //#define RPI_SIMULATE_QPUS
+  #define RPI_SIMULATE_QPUS
   #ifdef RPI_WORKER
     #include "pthread.h"
   #endif
@@ -3330,7 +3330,7 @@ static uint8_t *compute_arm_addr(HEVCContext *s,uint32_t p, int cIdx)
   return NULL;
 }
 
-static void rpi_simulate_inter_chroma(HEVCContext *s,uint32_t *p)
+static void rpi_simulate_inter_chroma(HEVCContext * const s,const uint32_t *p)
 {
   uint32_t next_kernel;
   uint32_t x0;
@@ -3351,6 +3351,10 @@ static void rpi_simulate_inter_chroma(HEVCContext *s,uint32_t *p)
     next_kernel = p[0-12];
     x0 = p[1-12];
     y0 = p[2-12];
+//    printf("next_kernel=%#x\n", next_kernel);
+//    printf("s->mc_filter_uv=%#x, s->mc_filter_uv_b0=%#x, s->mc_filter_uv_b=%#x\n",
+//        s->mc_filter_uv, s->mc_filter_uv_b0, s->mc_filter_uv_b);
+
     if (next_kernel==s->mc_filter_uv || next_kernel==s->mc_filter_uv_b0 || next_kernel==s->mc_filter_uv_b) {
       int x,y;
       uint32_t width_height = p[5];
@@ -3459,18 +3463,18 @@ static void rpi_simulate_inter_luma(HEVCContext *s,uint32_t *p,int chan)
   }
 }
 
-static void rpi_simulate_inter_qpu(HEVCContext *s)
+static void rpi_simulate_inter_qpu(HEVCContext *s, const int job)
 {
   // First run the transform as normal
   int i;
   rpi_execute_transform(s);
-  for(i=0;i<8;i++)
+  for(i=0;i<QPU_N_CHROMA;i++)
   {
-    rpi_simulate_inter_chroma(s,s->mvs_base[i]);
+    rpi_simulate_inter_chroma(s,s->mvs_base[job][i]);
   }
   for(i=0;i<12;i++)
   {
-    rpi_simulate_inter_luma(s,s->y_mvs_base[i],i);
+    rpi_simulate_inter_luma(s,s->y_mvs_base[job][i],i);
   }
 }
 
@@ -3513,7 +3517,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #endif
 
 #ifdef RPI_SIMULATE_QPUS
-    rpi_simulate_inter_qpu(s);
+    rpi_simulate_inter_qpu(s, job);
     return;
 #endif
 
@@ -3562,6 +3566,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
     for(i=0;i<4;i++)
         s->num_coeffs[job][i] = 0;
 #else
+#error QPU_N_CHROMA
     qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
       (uint32_t)(unif_vc+(s->mvs_base[job][0 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
       (uint32_t)(unif_vc+(s->mvs_base[job][1 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
@@ -4682,15 +4687,15 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         uint32_t *p;
 		for(job=0;job<RPI_MAX_JOBS;job++) {
 #ifdef RPI_CACHE_UNIF_MVS
-          gpu_malloc_cached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
+          gpu_malloc_cached( QPU_N_CHROMA * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #else
-          gpu_malloc_uncached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
+          gpu_malloc_uncached( QPU_N_CHROMA * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #endif
           s->unif_mvs[job] = (uint32_t *) s->unif_mvs_ptr[job].arm;
 
           // Set up initial locations for uniform streams
           p = s->unif_mvs[job];
-          for(i = 0; i < 8; i++) {
+          for(i = 0; i < QPU_N_CHROMA; i++) {
             s->mvs_base[job][i] = p;
             p += uv_commands_per_qpu;
           }

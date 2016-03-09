@@ -101,14 +101,14 @@ nop
 sub ra_u2v_ref_offset, unif, ra_frame_base # Store offset to add to move from u to v in reference frame
 
 # Read image dimensions
-sub rb25,unif,1
-sub rb30,unif,1
+sub rb25,unif,1  # unif: frame_width
+sub rb30,unif,1  # unif: frame_height
 
 # get source pitch
-mov rb16, unif
+mov rb16, unif   # unif: pitch
 
 # get destination pitch
-mov r0, unif
+mov r0, unif     # unif: dst_pitch
 mov r1, vdw_setup_1(0)
 add rb24, r1, r0
 
@@ -149,19 +149,19 @@ add t0s, r0, r1 ; mov ra_frame_base, r2
 add t1s, r2, r1
 
 mov r2,8
-shl rb12,unif,r2 # offset before shift
+shl rb12,unif,r2  # offset before shift
 add rb13,unif,r2  # denominator
 
 # Compute part of VPM to use for DMA output
-mov r2, unif
-#shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
+mov r2, unif      # unif: vpm_id
+shl r2, r2, 1     # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
 and r2, r2, 15
 mov r1, r2
 asr r1, r1, 2
-shl r1, r1, 6
+shl r1, r1, 6     # t1 (r1) = (((unif * 2) & 15) >> 2) << 6 = ((unif >> 1) & 3) << 6
 mov r0, r2
 and r0, r0, 3
-add r0, r0, r1
+add r0, r0, r1    # t2 (r0) =  (((unif * 2) & 15) & 3) + t1 = ((unif & 1) << 1) + t1
 
 mov r1, vpm_setup(0, 4, h8p(0, 0))   # 4 is stride - stride acts on ADDR which is Y[5:0],B[1:0] for 8 bit
 add rb28, r0, r1  # VPM 8bit storage
@@ -659,6 +659,12 @@ mov -,sacq(0) # 4
 mov -,sacq(0) # 5
 mov -,sacq(0) # 6
 mov -,sacq(0) # 7
+
+mov -,sacq(0) # 4
+mov -,sacq(0) # 5
+mov -,sacq(0) # 6
+mov -,sacq(0) # 7
+
 
 nop        ; nop ; thrend
 mov interrupt, 1; nop # delay slot 1

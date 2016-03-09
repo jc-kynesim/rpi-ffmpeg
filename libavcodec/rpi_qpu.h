@@ -2,7 +2,7 @@
 #define RPI_QPU_H
 
 
-#define QPU_N_CHROMA 4
+#define QPU_N_CHROMA 12
 
 
 // Define RPI_FAST_CACHEFLUSH to use the VCSM cache flush code
