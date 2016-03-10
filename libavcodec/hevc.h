@@ -56,7 +56,7 @@
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-  #define RPI_DEBLOCK_VPU
+//  #define RPI_DEBLOCK_VPU
 
 #endif
 
@@ -947,7 +947,6 @@ typedef struct HEVCContext {
     int num_pred_cmds[RPI_MAX_JOBS];
     int num_dblk_cmds[RPI_MAX_JOBS];
     int vpu_id;
-    GPU_MEM_PTR_T qpu_mail;
     int pass0_job; // Pass0 does coefficient decode
     int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far

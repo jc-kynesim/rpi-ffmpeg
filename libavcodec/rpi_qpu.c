@@ -395,34 +395,69 @@ static void post_code2_cb(void * v)
 // Returns an id which we can use to wait for completion
 int vpu_post_code2(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
 {
-  sem_t sync0;
-  struct gpu_job_s j[1];
+  struct gpu_job_s j[1] = {
+    {
+      .command = EXECUTE_VPU,
+      .u.v.q = {code, r0, r1, r2, r3, r4, r5},
+      .callback.func = post_code2_cb
+    }
+  };
   uint32_t id;
 
-//  sem_init(&sync0, 0, 0);
+  j[0].callback.cookie = (void *)(id = ++post_qed);
+
+  av_assert0(vc_gpuserv_execute_code(1, j) == 0);
+
+  return id;
+}
+
+int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
+    int qpu0_n, const uint32_t * qpu0_mail,
+    int qpu1_n, const uint32_t * qpu1_mail)
+{
+#if 1
+  sem_t sync0;
+  struct gpu_job_s j[4];
+
+  sem_init(&sync0, 0, 0);
 
   j[0].command = EXECUTE_VPU;
-  j[0].u.v.q[0] = code;
+  j[0].u.v.q[0] = vpu_code;
   j[0].u.v.q[1] = r0;
   j[0].u.v.q[2] = r1;
   j[0].u.v.q[3] = r2;
   j[0].u.v.q[4] = r3;
   j[0].u.v.q[5] = r4;
   j[0].u.v.q[6] = r5;
-  j[0].callback.func = post_code2_cb;
-  j[0].callback.cookie = (void *)(id = ++post_qed);
+  j[0].callback.func = 0;
+  j[0].callback.cookie = NULL;
 
-  av_assert0(vc_gpuserv_execute_code(1, j) == 0);
+  j[1].command = EXECUTE_QPU;
+  j[1].u.q.jobs = qpu1_n;
+  memcpy(j[1].u.q.control, qpu1_mail, qpu1_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
+  j[1].u.q.noflush = FLAGS_FOR_PROFILING;
+  j[1].u.q.timeout = 5000;
+  j[1].callback.func = 0;
+  j[1].callback.cookie = NULL;
 
-//  sem_wait(&sync0);
+  j[2].command = EXECUTE_QPU;
+  j[2].u.q.jobs = qpu0_n;
+  memcpy(j[2].u.q.control, qpu0_mail, qpu0_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
+  j[2].u.q.noflush = 1;
+  j[2].u.q.timeout = 5000;
+  j[2].callback.func = 0;
+  j[2].callback.cookie = NULL;
 
-  return id;
-}
+  j[3].command = EXECUTE_SYNC;
+  j[3].u.s.mask = 3;
+  j[3].callback.func = callback;
+  j[3].callback.cookie = (void *)&sync0;
 
-int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
-    int qpu0_n, uint32_t qpu0_mail_vc,
-    int qpu1_n, uint32_t qpu1_mail_vc)
-{
+  av_assert0(vc_gpuserv_execute_code(4, j) == 0);
+
+  sem_wait(&sync0);
+#else
+
   sem_t sync0, sync2;
   struct gpu_job_s j[3];
 
@@ -442,7 +477,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 
   j[1].command = EXECUTE_QPU;
   j[1].u.q.jobs = qpu1_n;
-  j[1].u.q.control = qpu1_mail_vc;
+  memcpy(j[1].u.q.control, qpu1_mail, qpu1_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
   j[1].u.q.noflush = FLAGS_FOR_PROFILING;
   j[1].u.q.timeout = 5000;
   j[1].callback.func = 0;
@@ -450,7 +485,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 
   j[2].command = EXECUTE_QPU;
   j[2].u.q.jobs = qpu0_n;
-  j[2].u.q.control = qpu0_mail_vc;
+  memcpy(j[2].u.q.control, qpu0_mail, qpu0_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
   j[2].u.q.noflush = 1;
   j[2].u.q.timeout = 5000;
   j[2].callback.func = callback;
@@ -460,6 +495,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 
   sem_wait(&sync0);
   sem_wait(&sync2);
+#endif
 
   return 0;
 }
@@ -469,7 +505,24 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 void vpu_wait(int id)
 {
   if (id == 0) {
-    return;
+#if 0
+    sem_t sync0;
+    struct gpu_job_s j[1] =
+    {
+      {
+        .command = EXECUTE_SYNC,
+        .u.s.mask = 3,
+        .callback.func = callback,
+        .callback.cookie = (void *)&sync0
+      }
+    };
+
+    sem_init(&sync0, 0, 0);
+
+    av_assert0(vc_gpuserv_execute_code(1, j) == 0);
+
+    sem_wait(&sync0);
+#endif
   }
   else {
     while ((int32_t)(post_done - (uint32_t)id) < 0) {

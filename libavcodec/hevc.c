@@ -3518,17 +3518,18 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #if 1
     {
         unsigned int i;
-        uint32_t * p = (uint32_t *)(s->qpu_mail.arm);
+        uint32_t * p;
         uint32_t code = qpu_get_fn(QPU_MC_SETUP_UV);
+        uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
+        uint32_t mail_y[QPU_N_Y * QPU_MAIL_EL_VALS];
 
-        for (i = 0; i != QPU_N_UV; ++i) {
+        for (p = mail_uv, i = 0; i != QPU_N_UV; ++i) {
             *p++ = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
             *p++ = code;
         }
 
-        p = (uint32_t *)(s->qpu_mail.arm + QPU_MAIL_SIZE);
         code = qpu_get_fn(QPU_MC_SETUP);
-        for (i = 0; i != QPU_N_Y; ++i) {
+        for (p = mail_y, i = 0; i != QPU_N_Y; ++i) {
             *p++ = (uint32_t)(y_unif_vc + (s->y_mvs_base[job][i] - (uint32_t*)s->y_unif_mvs_ptr[job].arm));
             *p++ = code;
         }
@@ -3542,10 +3543,10 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
             0,
             // QPU job 1
             QPU_N_UV,
-            s->qpu_mail.vc,
+            mail_uv,
             // QPU job 2
             QPU_N_Y,
-            s->qpu_mail.vc + QPU_MAIL_SIZE
+            mail_y
             );
     }
 
@@ -4724,10 +4725,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         s->mc_filter_uv_b0 = qpu_get_fn(QPU_MC_FILTER_UV_B0);
         s->mc_filter_uv_b = qpu_get_fn(QPU_MC_FILTER_UV_B);
     }
-
-    // ???Jobs???
-    // Allocate 2 mailbox entries
-    gpu_malloc_uncached(QPU_MAIL_SIZE * 2, &s->qpu_mail);
 
 #endif
 #ifdef RPI_LUMA_QPU

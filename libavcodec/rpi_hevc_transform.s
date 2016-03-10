@@ -357,7 +357,6 @@ loop:
 #   has 32 bytes per 16x16 block
 # hevc_deblock_16x16(uint8_t *img (r0), int stride (r1), int num16w (r2), uint8_t setup[num16][2][2][2][4](r3),int num16h(r4))
 hevc_deblock_16x16:
-  b lr # ******************************************************
   push r6-r15, lr
   mov r9,r4
   mov r4,r3
@@ -719,12 +718,10 @@ filtering_done:
 
 
 hevc_uv_deblock_16x16:
-  b lr # ******************************************************
   push r6-r15, lr
   mov r14,0
   b hevc_uv_start
 hevc_uv_deblock_16x16_with_clear:
-  b lr # ******************************************************
   push r6-r15, lr
   mov r14,1
   b hevc_uv_start
