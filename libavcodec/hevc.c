@@ -2991,7 +2991,7 @@ static void rpi_execute_transform(HEVCContext *s)
     }*/
 
     gpu_cache_flush(&s->coeffs_buf_accelerated[job]);
-    s->vpu_id = vpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2],
+    s->vpu_id = vpu_post_code2( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2],
                                s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
                                s->num_coeffs[job][3] >> 10, 0, &s->coeffs_buf_accelerated[job]);
     //vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
@@ -3486,6 +3486,42 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #else
     flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],NULL,NULL, job);
 #endif
+
+#if 1
+    {
+        unsigned int i;
+        uint32_t * p = (uint32_t *)(s->qpu_mail.arm);
+        uint32_t code = qpu_get_fn(QPU_MC_SETUP_UV);
+
+        for (i = 0; i != QPU_N_UV; ++i) {
+            *p++ = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
+            *p++ = code;
+        }
+
+        p = (uint32_t *)(s->qpu_mail.arm + QPU_MAIL_SIZE);
+        code = qpu_get_fn(QPU_MC_SETUP);
+        for (i = 0; i != QPU_N_Y; ++i) {
+            *p++ = (uint32_t)(y_unif_vc + (s->y_mvs_base[job][i] - (uint32_t*)s->y_unif_mvs_ptr[job].arm));
+            *p++ = code;
+        }
+
+        s->vpu_id = vpu_qpu_post_code2(vpu_get_fn(),
+            vpu_get_constants(),
+            s->coeffs_buf_vc[job][2],
+            s->num_coeffs[job][2] >> 8,
+            s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
+            s->num_coeffs[job][3] >> 10,
+            0,
+            // QPU job 1
+            QPU_N_UV,
+            s->qpu_mail.vc,
+            // QPU job 2
+            QPU_N_Y,
+            s->qpu_mail.vc + QPU_MAIL_SIZE
+            );
+    }
+
+#else
     s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8,
                                                                       s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3], s->num_coeffs[job][3] >> 10, 0,
                                    qpu_get_fn(QPU_MC_SETUP_UV),
@@ -3518,6 +3554,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
                                    0,0,0,0
 #endif
                                  );
+#endif
     for(i=0;i<4;i++)
         s->num_coeffs[job][i] = 0;
 #else
@@ -4657,8 +4694,12 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         s->mc_filter_uv = qpu_get_fn(QPU_MC_FILTER_UV);
         s->mc_filter_uv_b0 = qpu_get_fn(QPU_MC_FILTER_UV_B0);
         s->mc_filter_uv_b = qpu_get_fn(QPU_MC_FILTER_UV_B);
-
     }
+
+    // ???Jobs???
+    // Allocate 2 mailbox entries
+    gpu_malloc_uncached(QPU_MAIL_SIZE * 2, &s->qpu_mail);
+
 #endif
 #ifdef RPI_LUMA_QPU
     for(job=0;job<RPI_MAX_JOBS;job++)

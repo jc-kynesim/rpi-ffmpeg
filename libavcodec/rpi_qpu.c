@@ -1,4 +1,7 @@
 #ifdef RPI
+// Use vchiq service for submitting jobs
+#define GPUSERVICE
+
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 // define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
 //#define RPI_TIME_TOTAL_QPU
@@ -28,6 +31,9 @@
 #include "rpi_hevc_transform.h"
 
 #include "rpi_user_vcsm.h"
+#ifdef GPUSERVICE
+#include "interface/vmcs_host/vc_vchi_gpuserv.h"
+#endif
 
 // On Pi2 there is no way to access the VPU L2 cache
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
@@ -388,6 +394,13 @@ unsigned int vpu_get_constants(void) {
 
 #ifdef RPI_ASYNC
 
+#ifdef GPUSERVICE
+static void callback(void *cookie)
+{
+  sem_post((sem_t *)cookie);
+}
+#endif
+
 static void *vpu_start(void *arg) {
 #ifdef RPI_TIME_TOTAL_POSTED
   int last_time=0;
@@ -510,7 +523,28 @@ static void *vpu_start(void *arg) {
 #else
 
     if (!qpu_code) {
+#ifdef GPUSERVICE
+  sem_t sync;
+  sem_init(&sync, 0, 0);
+
+  struct gpu_job_s j;
+  j.command = EXECUTE_VPU;
+  j.u.v.q[0] = p[0];
+  j.u.v.q[1] = p[1];
+  j.u.v.q[2] = p[2];
+  j.u.v.q[3] = p[3];
+  j.u.v.q[4] = p[4];
+  j.u.v.q[5] = p[5];
+  j.u.v.q[6] = p[6];
+  j.callback.func = callback;
+  j.callback.cookie = (void *)&sync;
+  int32_t s = vc_gpuserv_execute_code(1, &j);
+  assert(s == 0);
+  sem_wait(&sync);
+
+#else
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+#endif
     } else {
       for(i=0;i<8;i++) {
         gpu->mail[i*2] = p[8+i];
@@ -524,11 +558,56 @@ static void *vpu_start(void *arg) {
       vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
       execute_qpu(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */);
 #else
+
+#ifdef GPUSERVICE
+  sem_t sync0, sync1, sync2;
+  sem_init(&sync0, 0, 0);
+  sem_init(&sync1, 0, 0);
+  sem_init(&sync2, 0, 0);
+
+  struct gpu_job_s j[3];
+  j[0].command = EXECUTE_VPU;
+  j[0].u.v.q[0] = p[0];
+  j[0].u.v.q[1] = p[1];
+  j[0].u.v.q[2] = p[2];
+  j[0].u.v.q[3] = p[3];
+  j[0].u.v.q[4] = p[4];
+  j[0].u.v.q[5] = p[5];
+  j[0].u.v.q[6] = p[6];
+  j[0].callback.func = callback;
+  j[0].callback.cookie = (void *)&sync0;
+
+  j[1].command = EXECUTE_QPU;
+  j[1].u.q.jobs = 12;
+  j[1].u.q.control = gpu->vc + offsetof(struct GPU, mail2);
+  j[1].u.q.noflush = FLAGS_FOR_PROFILING;
+  j[1].u.q.timeout = 5000;
+  j[1].callback.func = callback;
+  j[1].callback.cookie = (void *)&sync1;
+
+  j[2].command = EXECUTE_QPU;
+  j[2].u.q.jobs = 8;
+  j[2].u.q.control = gpu->vc + offsetof(struct GPU, mail);
+  j[2].u.q.noflush = 1;
+  j[2].u.q.timeout = 5000;
+  j[2].callback.func = callback;
+  j[2].callback.cookie = (void *)&sync2;
+
+  int32_t s = vc_gpuserv_execute_code(3, &j);
+  assert(s == 0);
+
+  sem_wait(&sync0);
+  sem_wait(&sync1);
+  sem_wait(&sync2);
+
+#else
       execute_multi(gpu->mb,
                               12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING , 5000,
                               8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
                               p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
                               0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
+
+#endif
 #endif
     }
 #endif
@@ -570,6 +649,35 @@ job_done_early:
   return NULL;
 }
 
+
+int vpu_post_code2(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
+{
+  sem_t sync0;
+  struct gpu_job_s j[1];
+
+//  sem_init(&sync0, 0, 0);
+
+  j[0].command = EXECUTE_VPU;
+  j[0].u.v.q[0] = code;
+  j[0].u.v.q[1] = r0;
+  j[0].u.v.q[2] = r1;
+  j[0].u.v.q[3] = r2;
+  j[0].u.v.q[4] = r3;
+  j[0].u.v.q[5] = r4;
+  j[0].u.v.q[6] = r5;
+//  j[0].callback.func = callback;
+//  j[0].callback.cookie = (void *)&sync0;
+  j[0].callback.func = 0;
+  j[0].callback.cookie = NULL;
+
+  av_assert0(vc_gpuserv_execute_code(1, &j) == 0);
+
+//  sem_wait(&sync0);
+
+  return 1;
+}
+
+
 // Post a command to the queue
 // Returns an id which we can use to wait for completion
 int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
@@ -605,12 +713,57 @@ int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned
   }
 }
 
+int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
+    int qpu0_n, uint32_t qpu0_mail_vc,
+    int qpu1_n, uint32_t qpu1_mail_vc)
+{
+  sem_t sync0, sync2;
+  struct gpu_job_s j[3];
+
+  sem_init(&sync0, 0, 0);
+  sem_init(&sync2, 0, 0);
+
+  j[0].command = EXECUTE_VPU;
+  j[0].u.v.q[0] = vpu_code;
+  j[0].u.v.q[1] = r0;
+  j[0].u.v.q[2] = r1;
+  j[0].u.v.q[3] = r2;
+  j[0].u.v.q[4] = r3;
+  j[0].u.v.q[5] = r4;
+  j[0].u.v.q[6] = r5;
+  j[0].callback.func = callback;
+  j[0].callback.cookie = (void *)&sync0;
+
+  j[1].command = EXECUTE_QPU;
+  j[1].u.q.jobs = qpu1_n;
+  j[1].u.q.control = qpu1_mail_vc;
+  j[1].u.q.noflush = FLAGS_FOR_PROFILING;
+  j[1].u.q.timeout = 5000;
+  j[1].callback.func = 0;
+  j[1].callback.cookie = NULL;
+
+  j[2].command = EXECUTE_QPU;
+  j[2].u.q.jobs = qpu0_n;
+  j[2].u.q.control = qpu0_mail_vc;
+  j[2].u.q.noflush = 1;
+  j[2].u.q.timeout = 5000;
+  j[2].callback.func = callback;
+  j[2].callback.cookie = (void *)&sync2;
+
+  av_assert0(vc_gpuserv_execute_code(3, &j) == 0);
+
+  sem_wait(&sync0);
+  sem_wait(&sync2);
+
+  return 0;
+}
+
+
 int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
                       int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8,
                       int qpu_codeb, int unifs1b, int unifs2b, int unifs3b, int unifs4b, int unifs5b, int unifs6b, int unifs7b, int unifs8b, int unifs9b, int unifs10b, int unifs11b, int unifs12b
                       )
 {
-
   pthread_mutex_lock(&post_mutex);
   {
     int id = vpu_async_tail++;
@@ -661,6 +814,26 @@ int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, 
 // Wait for completion of the given command
 void vpu_wait(int id)
 {
+  if (id == 0) {
+    return;
+  }
+  else if (id == 1) {
+    sem_t sync0;
+    struct gpu_job_s j[1] = {{0}};
+
+    sem_init(&sync0, 0, 0);
+
+    j[0].command = EXECUTE_VPU;
+    j[0].callback.func = callback;
+    j[0].callback.cookie = (void *)&sync0;
+
+    av_assert0(vc_gpuserv_execute_code(1, &j) == 0);
+    sem_wait(&sync0);
+    return;
+  }
+
+  av_assert0(0);
+
   pthread_mutex_lock(&post_mutex);
   while( id + 1 - vpu_async_head > 0)
   {
