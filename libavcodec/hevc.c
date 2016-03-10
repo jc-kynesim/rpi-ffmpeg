@@ -3558,6 +3558,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
     for(i=0;i<4;i++)
         s->num_coeffs[job][i] = 0;
 #else
+#error Code rotted here
     qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
       (uint32_t)(unif_vc+(s->mvs_base[job][0 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
       (uint32_t)(unif_vc+(s->mvs_base[job][1 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
