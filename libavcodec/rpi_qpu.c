@@ -453,7 +453,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   j[3].callback.func = callback;
   j[3].callback.cookie = (void *)&sync0;
 
-  av_assert0(vc_gpuserv_execute_code(4, j) == 0);
+  av_assert0(vc_gpuserv_execute_code(3, j) == 0);
 
   sem_wait(&sync0);
 #else
@@ -504,8 +504,8 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 // Wait for completion of the given command
 void vpu_wait(int id)
 {
-  if (id == 0) {
-#if 0
+//  if (id == 0) {
+#if 1
     sem_t sync0;
     struct gpu_job_s j[1] =
     {
@@ -522,13 +522,14 @@ void vpu_wait(int id)
     av_assert0(vc_gpuserv_execute_code(1, j) == 0);
 
     sem_wait(&sync0);
-#endif
+#else
   }
   else {
     while ((int32_t)(post_done - (uint32_t)id) < 0) {
       usleep(1000);
     }
   }
+#endif
 }
 
 
