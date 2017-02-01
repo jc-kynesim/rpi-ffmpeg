@@ -75,6 +75,9 @@
 # include "libavfilter/buffersink.h"
 
 #ifdef RPI_DISPLAY
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
 #include <bcm_host.h>
 #include <interface/mmal/mmal.h>
 #include <interface/mmal/mmal_parameters_camera.h>
@@ -86,6 +89,7 @@
 #ifdef RPI_ZERO_COPY
 #include "libavcodec/rpi_qpu.h"
 #endif
+#pragma GCC diagnostic pop
 #endif
 
 #if HAVE_SYS_RESOURCE_H
@@ -209,7 +213,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
     for (i = 0; i < NUM_BUFFERS; ++i)
     {
        MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
-       void* bufPtr = buffer->data;
+       uint8_t * bufPtr = buffer->data;
        memset(bufPtr, i*30, w*h);
        memset(bufPtr+w*h, 128, (w*h)/2);
     }
@@ -241,15 +245,17 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 
     mmal_port_parameter_set(display->input[0], &region.hdr);
 
-    MMAL_ES_FORMAT_T* format = display->input[0]->format;
-    format->encoding = MMAL_ENCODING_I420;
-    format->es->video.width = w2;
-    format->es->video.height = h2;
-    format->es->video.crop.x = 0;
-    format->es->video.crop.y = 0;
-    format->es->video.crop.width = w;
-    format->es->video.crop.height = h;
-    mmal_port_format_commit(display->input[0]);
+    {
+        MMAL_ES_FORMAT_T* format = display->input[0]->format;
+        format->encoding = MMAL_ENCODING_I420;
+        format->es->video.width = w2;
+        format->es->video.height = h2;
+        format->es->video.crop.x = 0;
+        format->es->video.crop.y = 0;
+        format->es->video.crop.width = w;
+        format->es->video.crop.height = h;
+        mmal_port_format_commit(display->input[0]);
+    }
 
     mmal_component_enable(display);
 
@@ -269,9 +275,12 @@ static void display_frame(MMAL_COMPONENT_T* display,AVFrame* fr)
     int h = fr->height;
     int w2 = (w+31)&~31;
     int h2 = (h+15)&~15;
+    MMAL_BUFFER_HEADER_T* buf;
+
     if (!display || !rpi_pool)
         return;
-    MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
+
+    buf = mmal_queue_get(rpi_pool->queue);
     if (!buf) {
       // Running too fast so drop the frame
       return;

@@ -29,7 +29,11 @@
 
 #include "rpi_user_vcsm.h"
 #ifdef GPUSERVICE
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
 #include "interface/vmcs_host/vc_vchi_gpuserv.h"
+#pragma GCC diagnostic pop
 #endif
 
 // QPU profile flags
