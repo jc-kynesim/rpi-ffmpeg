@@ -29,7 +29,11 @@
 
 #include "rpi_user_vcsm.h"
 #ifdef GPUSERVICE
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
 #include "interface/vmcs_host/vc_vchi_gpuserv.h"
+#pragma GCC diagnostic pop
 #endif
 
 // QPU profile flags
@@ -453,7 +457,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   j[3].callback.func = callback;
   j[3].callback.cookie = (void *)&sync0;
 
-  av_assert0(vc_gpuserv_execute_code(3, j) == 0);
+  av_assert0(vc_gpuserv_execute_code(4, j) == 0);
 
   sem_wait(&sync0);
 #else
