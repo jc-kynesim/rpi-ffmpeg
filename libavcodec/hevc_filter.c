@@ -570,7 +570,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     int num16 = (y>>4)*s->setup_width + (x>>4);
                     int a = ((y>>3) & 1) << 1;
                     int b = (x>>3) & 1;
-                    setup = s->y_setup_arm[num16];
+                    setup = s->dvq->y_setup_arm[num16];
                     setup[0][b][0][a] = beta;
                     setup[0][b][0][a + 1] = beta;
                     setup[0][b][1][a] = tc[0];
@@ -615,7 +615,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     int num16 = (y>>4)*s->setup_width + (x>>4);
                     int a = ((x>>3) & 1) << 1;
                     int b = (y>>3) & 1;
-                    setup = s->y_setup_arm[num16];
+                    setup = s->dvq->y_setup_arm[num16];
                     setup[1][b][0][a] = beta;
                     setup[1][b][0][a + 1] = beta;
                     setup[1][b][1][a] = tc[0];
@@ -664,7 +664,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
                             int a = ((yc>>3) & 1) << 1;
                             int b = (xc>>3) & 1;
-                            setup = s->uv_setup_arm[num16];
+                            setup = s->dvq->uv_setup_arm[num16];
                             setup[0][b][0][a] = c_tc[0];
                             setup[0][b][0][a + 1] = c_tc[1];
                         } else
@@ -711,7 +711,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
                             int a = ((xc>>3) & 1) << 1;
                             int b = (yc>>3) & 1;
-                            setup = s->uv_setup_arm[num16];
+                            setup = s->dvq->uv_setup_arm[num16];
                             setup[1][b][0][a] = c_tc[0];
                             setup[1][b][0][a + 1] = c_tc[1];
                         } else
@@ -878,7 +878,7 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CB
 #undef CR
 
-#ifdef RPI_INTER_QPU
+#if defined(RPI_INTER_QPU) || defined(RPI_DEBLOCK_VPU)
 static void flush_buffer(AVBufferRef *bref) {
     GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
     gpu_cache_flush(p);
@@ -889,7 +889,9 @@ static uint32_t get_vc_address(AVBufferRef *bref) {
   GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
   return p->vc;
 }
+#endif
 
+#ifdef RPI_DEBLOCK_VPU
 // ff_hevc_flush_buffer_lines
 // flushes and invalidates all pixel rows in [start,end-1]
 static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
@@ -938,8 +940,9 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
         }
 #endif
 }
+#endif
 
-
+#ifdef RPI_INTER_QPU
 void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && s->used_for_ref) {
@@ -1000,29 +1003,39 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   // TODO flush buffer of beta/tc setup when it becomes cached
 
   // Prepare three commands at once to avoid calling overhead
-  s->vpu_cmds_arm[0][0] = get_vc_address(s->frame->buf[0]) + s->frame->linesize[0] * y;
-  s->vpu_cmds_arm[0][1] = s->frame->linesize[0];
-  s->vpu_cmds_arm[0][2] = s->setup_width;
-  s->vpu_cmds_arm[0][3] = (int) ( s->y_setup_vc + s->setup_width * (y>>4) );
-  s->vpu_cmds_arm[0][4] = ctb_size>>4;
-  s->vpu_cmds_arm[0][5] = 2;
+  s->dvq->vpu_cmds_arm[0][0] = get_vc_address(s->frame->buf[0]) + s->frame->linesize[0] * y;
+  s->dvq->vpu_cmds_arm[0][1] = s->frame->linesize[0];
+  s->dvq->vpu_cmds_arm[0][2] = s->setup_width;
+  s->dvq->vpu_cmds_arm[0][3] = (int) ( s->dvq->y_setup_vc + s->setup_width * (y>>4) );
+  s->dvq->vpu_cmds_arm[0][4] = ctb_size>>4;
+  s->dvq->vpu_cmds_arm[0][5] = 2;
 
-  s->vpu_cmds_arm[1][0] = get_vc_address(s->frame->buf[1]) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
-  s->vpu_cmds_arm[1][1] = s->frame->linesize[1];
-  s->vpu_cmds_arm[1][2] = s->uv_setup_width;
-  s->vpu_cmds_arm[1][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
-  s->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
-  s->vpu_cmds_arm[1][5] = 3;
+  s->dvq->vpu_cmds_arm[1][0] = get_vc_address(s->frame->buf[1]) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
+  s->dvq->vpu_cmds_arm[1][1] = s->frame->linesize[1];
+  s->dvq->vpu_cmds_arm[1][2] = s->uv_setup_width;
+  s->dvq->vpu_cmds_arm[1][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
+  s->dvq->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
+  s->dvq->vpu_cmds_arm[1][5] = 3;
 
-  s->vpu_cmds_arm[2][0] = get_vc_address(s->frame->buf[2]) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
-  s->vpu_cmds_arm[2][1] = s->frame->linesize[2];
-  s->vpu_cmds_arm[2][2] = s->uv_setup_width;
-  s->vpu_cmds_arm[2][3] = (int) ( s->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
-  s->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
-  s->vpu_cmds_arm[2][5] = 4;
-
+  s->dvq->vpu_cmds_arm[2][0] = get_vc_address(s->frame->buf[2]) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
+  s->dvq->vpu_cmds_arm[2][1] = s->frame->linesize[2];
+  s->dvq->vpu_cmds_arm[2][2] = s->uv_setup_width;
+  s->dvq->vpu_cmds_arm[2][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
+  s->dvq->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
+  s->dvq->vpu_cmds_arm[2][5] = 4;
+#if RPI_VPU_DEBLOCK_CACHED
+  gpu_cache_flush(&s->dvq->deblock_vpu_gmem);
+#endif
   // Call VPU
-  vpu_wait(vpu_post_code( vpu_get_fn(), s->vpu_cmds_vc, 3, 0, 0, 0, 5, 0)); // 5 means to do all the commands
+  s->dvq->cmd_id = vpu_post_code2( vpu_get_fn(), s->dvq->vpu_cmds_vc, 3, 0, 0, 0, 5, 0); // 5 means to do all the commands
+
+  s->dvq_n = (s->dvq_n + 1) & (RPI_DEBLOCK_VPU_Q_COUNT - 1);
+  s->dvq = s->dvq_ents + s->dvq_n;
+
+  if (s->dvq->cmd_id != -1) {
+      vpu_wait(s->dvq->cmd_id);
+      s->dvq->cmd_id = -1;
+  }
 }
 
 #endif

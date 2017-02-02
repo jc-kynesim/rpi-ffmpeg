@@ -1,4 +1,7 @@
 #ifdef RPI
+// Use vchiq service for submitting jobs
+#define GPUSERVICE
+
 // This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
 // define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
 //#define RPI_TIME_TOTAL_QPU
@@ -6,15 +9,12 @@
 //#define RPI_TIME_TOTAL_VPU
 // define RPI_TIME_TOTAL_POSTED to print out how much time is spent in the multi execute QPU/VPU combined
 #define RPI_TIME_TOTAL_POSTED
-// define RPI_ASYNC to run the VPU in a separate thread, need to make a separate call to check for completion
-#define RPI_ASYNC
-// Define RPI_COMBINE_JOBS to find jobs that can be executed in parallel
-//#define RPI_COMBINE_JOBS
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "libavutil/avassert.h"
 
 #include "config.h"
@@ -28,6 +28,21 @@
 #include "rpi_hevc_transform.h"
 
 #include "rpi_user_vcsm.h"
+#ifdef GPUSERVICE
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+#include "interface/vmcs_host/vc_vchi_gpuserv.h"
+#pragma GCC diagnostic pop
+#endif
+
+// QPU profile flags
+#define NO_FLUSH 1
+#define CLEAR_PROFILE 2
+#define OUTPUT_COUNTS 4
+
+#define FLAGS_FOR_PROFILING (NO_FLUSH)
+
 
 // On Pi2 there is no way to access the VPU L2 cache
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
@@ -38,12 +53,6 @@
 #define GPU_MEM_MAP 0x0
 
 #define vcos_verify(x) ((x)>=0)
-
-typedef unsigned char uint8_t;
-typedef signed char int8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef int int32_t;
 
 /*static const unsigned code[] =
 {
@@ -117,20 +126,6 @@ static unsigned int Microseconds(void) {
     if (base==0) base=x;
     return x-base;
 }
-#endif
-
-#ifdef RPI_ASYNC
-pthread_t vpu_thread;
-static void *vpu_start(void *arg);
-
-#define MAXCMDS 128
-static pthread_cond_t post_cond_head = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t post_cond_tail = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t post_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static int vpu_cmds[MAXCMDS][32];
-static volatile int vpu_async_tail=0; // Contains the number of posted jobs
-static volatile int vpu_async_head=0;
 #endif
 
 static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb);
@@ -330,15 +325,9 @@ static void gpu_term(void)
     return;
   mb = gpu->mb;
 
-#ifdef RPI_ASYNC
-  {
-    void *res;
-    vpu_post_code(0, 0, 0, 0, 0, 0, -1, NULL);
-    pthread_join(vpu_thread, &res);
-  }
-#else
+  // ??? Tear down anything needed for gpuexecute
+
   qpu_enable(mb, 0);
-#endif
   gpu_free_internal(&gpu_mem_ptr);
 
   vcsm_exit();
@@ -386,432 +375,166 @@ unsigned int vpu_get_constants(void) {
   return gpu->vc + offsetof(struct GPU,transMatrix2even);
 }
 
-#ifdef RPI_ASYNC
-
-static void *vpu_start(void *arg) {
-#ifdef RPI_TIME_TOTAL_POSTED
-  int last_time=0;
-  long long on_time=0;
-  long long on_time_deblock=0;
-  long long off_time=0;
-  int start_time;
-  int end_time;
-  int count=0;
-  int count_deblock=0;
-  int count_qpu=0;
-#endif
-  int qpu_started = 0;
-  while(1) {
-    int i;
-    int *p; // Pointer for a QPU/VPU job
-#ifdef RPI_COMBINE_JOBS
-    int *q = NULL; // Pointer for a VPU only job
-    int have_qpu = 0;
-    int have_vpu = 0;
-#endif
-    int qpu_code;
-    int qpu_codeb;
-    int num_jobs; // Number of jobs available
-    pthread_mutex_lock(&post_mutex);
-    while( vpu_async_tail - vpu_async_head <= 0)
-    {
-      //printf("Checking number %d %d\n",vpu_async_head,vpu_async_tail);
-      pthread_cond_wait(&post_cond_tail, &post_mutex);
-    }
-    p = vpu_cmds[vpu_async_head%MAXCMDS];
-    num_jobs = vpu_async_tail - vpu_async_head;
-    pthread_mutex_unlock(&post_mutex);
-
-    if (p[6] == -1) {
-      break; // Last job
-    }
-    if (p[7] == 0 && p[0] == 0 && p[16]==0)
-      goto job_done_early;
-
-    if (!qpu_started) {
-      int result = qpu_enable(gpu->mb, 1);
-      av_assert0(result==0);
-      qpu_started = 1;
-    }
-
-#ifdef RPI_COMBINE_JOBS
-    // First scan for a qpu job
-    for (int x=0;x<num_jobs;x++) {
-      p = vpu_cmds[(vpu_async_head+x)%MAXCMDS];
-      if (p[7]) {
-        have_qpu = 1;
-        break;
-      }
-    }
-    // Now scan for a non-qpu job
-    for (int x=0;x<num_jobs;x++) {
-      q = vpu_cmds[(vpu_async_head+x)%MAXCMDS];
-      if (!q[7]) {
-        have_vpu = 1;
-        break;
-      }
-    }
-    //printf("Have_qpu = %d, have_vpu=%d\n",have_qpu,have_vpu);
-#endif
-    qpu_code = p[7];
-    qpu_codeb = p[16];
-
-
-    //if (p[7]) {
-        //GPU_MEM_PTR_T *buf = (GPU_MEM_PTR_T *)p[7];
-        //gpu_cache_flush(buf);
-    //}
-
-#ifdef RPI_TIME_TOTAL_POSTED
-    start_time = Microseconds();
-    if (last_time==0)
-      last_time = start_time;
-    off_time += start_time-last_time;
-#endif
-
-#define NO_FLUSH 1
-#define CLEAR_PROFILE 2
-#define OUTPUT_COUNTS 4
-
-#define FLAGS_FOR_PROFILING (NO_FLUSH)
-
-#ifdef RPI_COMBINE_JOBS
-    if (have_qpu) {
-      for(i=0;i<8;i++) {
-        gpu->mail[i*2] = p[8+i];
-        gpu->mail[i*2 + 1] = qpu_code;
-      }
-      for(i=0;i<12;i++) {
-        gpu->mail2[i*2] = p[17+i];
-        gpu->mail2[i*2 + 1] = qpu_codeb;
-      }
-      if (have_vpu) {
-        execute_multi(gpu->mb,
-                              12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING, 5000,
-                              8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
-                              p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
-                              q[0], q[1], q[2], q[3], q[4], q[5], q[6]); // VPU1
-        q[0] = 0;
-      } else {
-        execute_multi(gpu->mb,
-                              12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING, 5000,
-                              8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
-                              p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
-                              0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
-      }
-      p[0] = 0;
-      p[7] = 0;
-      p[16] = 0;
-    } else {
-        av_assert0(have_vpu);
-        vpu_execute_code(q[0], q[1], q[2], q[3], q[4], q[5], q[6]);
-        q[0] = 0;
-    }
-#else
-
-    if (!qpu_code) {
-      vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
-    } else {
-      for(i=0;i<8;i++) {
-        gpu->mail[i*2] = p[8+i];
-        gpu->mail[i*2 + 1] = qpu_code;
-      }
-      for(i=0;i<12;i++) {
-        gpu->mail2[i*2] = p[17+i];
-        gpu->mail2[i*2 + 1] = qpu_codeb;
-      }
-#if (0)
-      vpu_execute_code(p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
-      execute_qpu(gpu->mb,8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */);
-#else
-      execute_multi(gpu->mb,
-                              12,gpu->vc + offsetof(struct GPU, mail2), FLAGS_FOR_PROFILING , 5000,
-                              8,gpu->vc + offsetof(struct GPU, mail), 1 /* no flush */, 5000 /* timeout ms */,
-                              p[0], p[1], p[2], p[3], p[4], p[5], p[6], // VPU0
-                              0,    0   , 0   , 0   , 0   , 0   , 0); // VPU1
-#endif
-    }
-#endif
-
-#ifdef RPI_TIME_TOTAL_POSTED
-    end_time = Microseconds();
-    last_time = end_time;
-#ifdef RPI_COMBINE_JOBS
-    // There are three cases we may wish to distinguish of VPU/QPU activity
-    on_time += end_time - start_time;
-#else
-    if (p[6]>1) {
-      count_deblock++;
-      on_time_deblock += end_time - start_time;
-    } else {
-      on_time += end_time - start_time;
-      count_qpu++;
-    }
-#endif
-    count++;
-    if ((count&0x7f)==0)
-#ifdef RPI_COMBINE_JOBS
-      printf("Posted %d On=%dms, Off=%dms\n",count,(int)(on_time/1000),(int)(off_time/1000));
-#else
-      printf("Posted %d On=%dms (%d calls), On_deblock=%dms (%d calls), Off=%dms\n",count,(int)(on_time/1000),count_qpu,(int)(on_time_deblock/1000),count_deblock,(int)(off_time/1000));
-#endif
-#endif
-job_done_early:
-    pthread_mutex_lock(&post_mutex);
-    vpu_async_head++;
-    pthread_cond_broadcast(&post_cond_head);
-    pthread_mutex_unlock(&post_mutex);
-  }
-
-  if (qpu_started) {
-    qpu_enable(gpu->mb, 0);
-  }
-
-  return NULL;
+#ifdef GPUSERVICE
+static void callback(void *cookie)
+{
+  sem_post((sem_t *)cookie);
 }
+#endif
+
+
+static volatile uint32_t post_done = 0;
+static volatile uint32_t post_qed = 0;
+
+static void post_code2_cb(void * v)
+{
+  uint32_t n = (uint32_t)v;
+  if ((int32_t)(n - post_done) > 0) {
+    post_done = n;
+  }
+}
+
 
 // Post a command to the queue
 // Returns an id which we can use to wait for completion
-int vpu_post_code(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
+int vpu_post_code2(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
 {
-  // If the gpu is idle then just run the command immediately
-  // This works, but doesn't seem to give any benefit
-  // if (gpu_idle()) {
-  //   vpu_execute_code( code,  r0,  r1,  r2,  r3,  r4,  r5);
-  //   return -1; // TODO perhaps a wraparound bug here?
-  // }
-
-  pthread_mutex_lock(&post_mutex);
-  {
-    int id = vpu_async_tail++;
-    int *p = vpu_cmds[id%MAXCMDS];
-    int num = vpu_async_tail - vpu_async_head;
-    if (num>MAXCMDS) {
-      printf("Too many commands submitted\n");
-      exit(-1);
+  struct gpu_job_s j[1] = {
+    {
+      .command = EXECUTE_VPU,
+      .u.v.q = {code, r0, r1, r2, r3, r4, r5},
+      .callback.func = post_code2_cb
     }
-    p[0] = code;
-    p[1] = r0;
-    p[2] = r1;
-    p[3] = r2;
-    p[4] = r3;
-    p[5] = r4;
-    p[6] = r5;
-    p[7] = 0;
-    if (num<=1)
-      pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake
-    pthread_mutex_unlock(&post_mutex);
-    return id;
-  }
+  };
+  uint32_t id;
+
+  j[0].callback.cookie = (void *)(id = ++post_qed);
+
+  av_assert0(vc_gpuserv_execute_code(1, j) == 0);
+
+  return id;
 }
 
-int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
-                      int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8,
-                      int qpu_codeb, int unifs1b, int unifs2b, int unifs3b, int unifs4b, int unifs5b, int unifs6b, int unifs7b, int unifs8b, int unifs9b, int unifs10b, int unifs11b, int unifs12b
-                      )
+int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
+    int qpu0_n, const uint32_t * qpu0_mail,
+    int qpu1_n, const uint32_t * qpu1_mail)
 {
+#if 1
+  sem_t sync0;
+  struct gpu_job_s j[4];
 
-  pthread_mutex_lock(&post_mutex);
-  {
-    int id = vpu_async_tail++;
-    int *p = vpu_cmds[id%MAXCMDS];
-    int num = vpu_async_tail - vpu_async_head;
-    if (num>MAXCMDS) {
-      printf("Too many commands submitted\n");
-      exit(-1);
-    }
-    p[0] = vpu_code;
-    p[1] = r0;
-    p[2] = r1;
-    p[3] = r2;
-    p[4] = r3;
-    p[5] = r4;
-    p[6] = r5;
-    p[7] = qpu_code;
-    p[8 ] = unifs1;
-    p[9 ] = unifs2;
-    p[10] = unifs3;
-    p[11] = unifs4;
-    p[12] = unifs5;
-    p[13] = unifs6;
-    p[14] = unifs7;
-    p[15] = unifs8;
+  sem_init(&sync0, 0, 0);
 
-    p[16] = qpu_codeb;
-    p[17] = unifs1b;
-    p[18] = unifs2b;
-    p[19] = unifs3b;
-    p[20] = unifs4b;
-    p[21] = unifs5b;
-    p[22] = unifs6b;
-    p[23] = unifs7b;
-    p[24] = unifs8b;
-    p[25] = unifs9b;
-    p[26] = unifs10b;
-    p[27] = unifs11b;
-    p[28] = unifs12b;
+  j[0].command = EXECUTE_VPU;
+  j[0].u.v.q[0] = vpu_code;
+  j[0].u.v.q[1] = r0;
+  j[0].u.v.q[2] = r1;
+  j[0].u.v.q[3] = r2;
+  j[0].u.v.q[4] = r3;
+  j[0].u.v.q[5] = r4;
+  j[0].u.v.q[6] = r5;
+  j[0].callback.func = 0;
+  j[0].callback.cookie = NULL;
 
-    if (num<=1)
-      pthread_cond_broadcast(&post_cond_tail); // Otherwise the vpu thread must already be awake
-    pthread_mutex_unlock(&post_mutex);
-    return id;
-  }
+  j[1].command = EXECUTE_QPU;
+  j[1].u.q.jobs = qpu1_n;
+  memcpy(j[1].u.q.control, qpu1_mail, qpu1_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
+  j[1].u.q.noflush = FLAGS_FOR_PROFILING;
+  j[1].u.q.timeout = 5000;
+  j[1].callback.func = 0;
+  j[1].callback.cookie = NULL;
+
+  j[2].command = EXECUTE_QPU;
+  j[2].u.q.jobs = qpu0_n;
+  memcpy(j[2].u.q.control, qpu0_mail, qpu0_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
+  j[2].u.q.noflush = 1;
+  j[2].u.q.timeout = 5000;
+  j[2].callback.func = 0;
+  j[2].callback.cookie = NULL;
+
+  j[3].command = EXECUTE_SYNC;
+  j[3].u.s.mask = 3;
+  j[3].callback.func = callback;
+  j[3].callback.cookie = (void *)&sync0;
+
+  av_assert0(vc_gpuserv_execute_code(4, j) == 0);
+
+  sem_wait(&sync0);
+#else
+
+  sem_t sync0, sync2;
+  struct gpu_job_s j[3];
+
+  sem_init(&sync0, 0, 0);
+  sem_init(&sync2, 0, 0);
+
+  j[0].command = EXECUTE_VPU;
+  j[0].u.v.q[0] = vpu_code;
+  j[0].u.v.q[1] = r0;
+  j[0].u.v.q[2] = r1;
+  j[0].u.v.q[3] = r2;
+  j[0].u.v.q[4] = r3;
+  j[0].u.v.q[5] = r4;
+  j[0].u.v.q[6] = r5;
+  j[0].callback.func = callback;
+  j[0].callback.cookie = (void *)&sync0;
+
+  j[1].command = EXECUTE_QPU;
+  j[1].u.q.jobs = qpu1_n;
+  memcpy(j[1].u.q.control, qpu1_mail, qpu1_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
+  j[1].u.q.noflush = FLAGS_FOR_PROFILING;
+  j[1].u.q.timeout = 5000;
+  j[1].callback.func = 0;
+  j[1].callback.cookie = NULL;
+
+  j[2].command = EXECUTE_QPU;
+  j[2].u.q.jobs = qpu0_n;
+  memcpy(j[2].u.q.control, qpu0_mail, qpu0_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
+  j[2].u.q.noflush = 1;
+  j[2].u.q.timeout = 5000;
+  j[2].callback.func = callback;
+  j[2].callback.cookie = (void *)&sync2;
+
+  av_assert0(vc_gpuserv_execute_code(3, j) == 0);
+
+  sem_wait(&sync0);
+  sem_wait(&sync2);
+#endif
+
+  return 0;
 }
+
 
 // Wait for completion of the given command
 void vpu_wait(int id)
 {
-  pthread_mutex_lock(&post_mutex);
-  while( id + 1 - vpu_async_head > 0)
-  {
-    pthread_cond_wait(&post_cond_head, &post_mutex);
+  if (id == 0) {
+#if 0
+    sem_t sync0;
+    struct gpu_job_s j[1] =
+    {
+      {
+        .command = EXECUTE_SYNC,
+        .u.s.mask = 3,
+        .callback.func = callback,
+        .callback.cookie = (void *)&sync0
+      }
+    };
+
+    sem_init(&sync0, 0, 0);
+
+    av_assert0(vc_gpuserv_execute_code(1, j) == 0);
+
+    sem_wait(&sync0);
+#endif
   }
-  pthread_mutex_unlock(&post_mutex);
+  else {
+    while ((int32_t)(post_done - (uint32_t)id) < 0) {
+      usleep(1000);
+    }
+  }
 }
 
-#endif
-
-
-unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5)
-{
-  unsigned r;
-#ifdef RPI_TIME_TOTAL_VPU
-  static int last_time=0;
-  static long long on_time=0;
-  static long long off_time=0;
-  int start_time;
-  int end_time;
-  static int count=0;
-  static long long countr2=0;
-#endif
-#ifndef RPI_ASYNC
-  gpu_lock();
-#endif
-#ifdef RPI_TIME_TOTAL_VPU
-  start_time = Microseconds();
-  if (last_time==0)
-    last_time = start_time;
-  off_time += start_time-last_time;
-#endif
-  r = execute_code(gpu->mb, code, r0, r1, r2, r3, r4, r5);
-#ifdef RPI_TIME_TOTAL_VPU
-  end_time = Microseconds();
-  last_time = end_time;
-  on_time += end_time - start_time;
-  count++;
-  countr2 += r2;
-  if ((count&0x7f)==0)
-    printf("VPU %d %lld On=%dms, Off=%dms\n",count,countr2,(int)(on_time/1000),(int)(off_time/1000));
-#endif
-#ifndef RPI_ASYNC
-  gpu_unlock();
-#endif
-  return r;
-}
-
-// Run a program on a QPU with the given code and uniform stream (given in GPU addresses)
-// The first num QPUs will start at code, the next num2 QPUs will start at code2
-void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8, int unifs9, int unifs10, int unifs11, int unifs12)
-{
-  int i;
-#ifdef RPI_TIME_TOTAL_QPU
-  static int last_time=0;
-  static long long on_time=0;
-  static long long off_time=0;
-  int start_time;
-  int end_time;
-  static int count=0;
-#endif
-
-  gpu_lock();
-#ifdef RPI_TIME_TOTAL_QPU
-  start_time = Microseconds();
-  if (last_time==0)
-    last_time = start_time;
-  off_time += start_time-last_time;
-#endif
-  for(i=0;i<num;i++) {
-    gpu->mail2[i*2 + 1] = code;
-  }
-  for(;i<num+num2;i++) {
-    gpu->mail2[i*2 + 1] = code2;
-  }
-  gpu->mail2[0 ] = unifs1;
-  gpu->mail2[2 ] = unifs2;
-  gpu->mail2[4 ] = unifs3;
-  gpu->mail2[6 ] = unifs4;
-  gpu->mail2[8 ] = unifs5;
-  gpu->mail2[10] = unifs6;
-	gpu->mail2[12] = unifs7;
-	gpu->mail2[14] = unifs8;
-	gpu->mail2[16] = unifs9;
-	gpu->mail2[18] = unifs10;
-	gpu->mail2[20] = unifs11;
-	gpu->mail2[22] = unifs12;
-	execute_qpu(
-		gpu->mb,
-		12 /* Number of QPUs */,
-		gpu->vc + offsetof(struct GPU, mail2),
-		1 /* no flush */,  // Don't flush VPU L1 cache
-		5000 /* timeout ms */);
-#ifdef RPI_TIME_TOTAL_QPU
-  end_time = Microseconds();
-  last_time = end_time;
-  on_time += end_time - start_time;
-  count++;
-  if ((count&0x7f)==0)
-    printf("On=%dms, Off=%dms\n",(int)(on_time/1000),(int)(off_time/1000));
-#endif
-  gpu_unlock();
-}
-
-// Run a program on 8 QPUs with the given code and uniform stream (given in GPU addresses)
-void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8)
-{
-  int i;
-#ifdef RPI_TIME_TOTAL_QPU
-  static int last_time=0;
-  static long long on_time=0;
-  static long long off_time=0;
-  int start_time;
-  int end_time;
-  static int count=0;
-#endif
-
-  gpu_lock();
-#ifdef RPI_TIME_TOTAL_QPU
-  start_time = Microseconds();
-  if (last_time==0)
-    last_time = start_time;
-  off_time += start_time-last_time;
-#endif
-  for(i=0;i<8;i++) {
-    gpu->mail[i*2 + 1] = code;
-  }
-  gpu->mail[0 ] = unifs1;
-  gpu->mail[2 ] = unifs2;
-  gpu->mail[4 ] = unifs3;
-  gpu->mail[6 ] = unifs4;
-  gpu->mail[8 ] = unifs5;
-  gpu->mail[10] = unifs6;
-	gpu->mail[12] = unifs7;
-	gpu->mail[14] = unifs8;
-	execute_qpu(
-		gpu->mb,
-		8 /* Number of QPUs */,
-		gpu->vc + offsetof(struct GPU, mail),
-		1 /* no flush */,  // Don't flush VPU L1 cache
-		5000 /* timeout ms */);
-#ifdef RPI_TIME_TOTAL_QPU
-  end_time = Microseconds();
-  last_time = end_time;
-  on_time += end_time - start_time;
-  count++;
-  if ((count&0x7f)==0)
-    printf("On=%dms, Off=%dms\n",(int)(on_time/1000),(int)(off_time/1000));
-#endif
-  gpu_unlock();
-}
 
 unsigned int qpu_get_fn(int num) {
     // Make sure that the gpu is initialized
