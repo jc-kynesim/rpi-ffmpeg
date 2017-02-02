@@ -229,6 +229,8 @@ static void *worker_start(void *arg)
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCContext *s)
 {
+    int i;
+
 #ifdef RPI
     int job;
     for(job=0;job<RPI_MAX_JOBS;job++) {
@@ -243,17 +245,13 @@ static void pic_arrays_free(HEVCContext *s)
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
-    if (s->y_setup_arm) {
-      gpu_free(&s->y_setup_ptr);
-      s->y_setup_arm = 0;
-    }
-    if (s->uv_setup_arm) {
-      gpu_free(&s->uv_setup_ptr);
-      s->uv_setup_arm = 0;
-    }
-    if (s->vpu_cmds_arm) {
-      gpu_free(&s->vpu_cmds_ptr);
-      s->vpu_cmds_arm = 0;
+    for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i) {
+        struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
+
+        if (dvq->vpu_cmds_arm) {
+            gpu_free(&dvq->deblock_vpu_gmem);
+          dvq->vpu_cmds_arm = 0;
+        }
     }
 #endif
     av_freep(&s->sao);
@@ -298,6 +296,8 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
     int coefs_per_row = coefs_per_luma + coefs_per_chroma;
     int job;
+    int i;
+
     av_assert0(sps);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
     s->ctu_per_y_chan = s->max_ctu_count / 12;
@@ -320,26 +320,54 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
+
     s->enable_rpi_deblock = !sps->sao_enabled;
     s->setup_width = (sps->width+15) / 16;
     s->setup_height = (sps->height+15) / 16;
-    gpu_malloc_uncached(sizeof(*s->y_setup_arm) * s->setup_width * s->setup_height, &s->y_setup_ptr); // TODO make this cached
-    s->y_setup_arm = (void*)s->y_setup_ptr.arm;
-    s->y_setup_vc = (void*)s->y_setup_ptr.vc;
-    memset(s->y_setup_arm, 0, s->y_setup_ptr.numbytes);
-    printf("Setup %d by %d by %d\n",s->setup_width,s->setup_height,sizeof(*s->y_setup_arm));
-
     s->uv_setup_width = ( (sps->width >> sps->hshift[1]) + 15) / 16;
     s->uv_setup_height = ( (sps->height >> sps->vshift[1]) + 15) / 16;
-    gpu_malloc_uncached(sizeof(*s->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height, &s->uv_setup_ptr); // TODO make this cached
-    s->uv_setup_arm = (void*)s->uv_setup_ptr.arm;
-    s->uv_setup_vc = (void*)s->uv_setup_ptr.vc;
-    memset(s->uv_setup_arm, 0, s->uv_setup_ptr.numbytes);
-    printf("Setup uv %d by %d by %d\n",s->uv_setup_width,s->uv_setup_height,sizeof(*s->uv_setup_arm));
 
-    gpu_malloc_uncached(sizeof(*s->vpu_cmds_arm) * 3,&s->vpu_cmds_ptr);
-    s->vpu_cmds_arm = (void*) s->vpu_cmds_ptr.arm;
-    s->vpu_cmds_vc = s->vpu_cmds_ptr.vc;
+    for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i)
+    {
+        struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
+        const unsigned int cmd_size = (sizeof(*dvq->vpu_cmds_arm) * 3 + 15) & ~15;
+        const unsigned int y_size = (sizeof(*dvq->y_setup_arm) * s->setup_width * s->setup_height + 15) & ~15;
+        const unsigned int uv_size = (sizeof(*dvq->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
+        const unsigned int total_size =- cmd_size + y_size + uv_size;
+        int p_vc;
+        uint8_t * p_arm;
+#if RPI_VPU_DEBLOCK_CACHED
+        gpu_malloc_cached(total_size, &dvq->deblock_vpu_gmem);
+#else
+        gpu_malloc_uncached(total_size, &dvq->deblock_vpu_gmem);
+#endif
+        p_vc = dvq->deblock_vpu_gmem.vc;
+        p_arm = dvq->deblock_vpu_gmem.arm;
+
+        // Zap all
+        memset(p_arm, 0, dvq->deblock_vpu_gmem.numbytes);
+
+        // Subdivide
+        dvq->vpu_cmds_arm = (void*)p_arm;
+        dvq->vpu_cmds_vc = p_vc;
+
+        p_arm += cmd_size;
+        p_vc += cmd_size;
+
+        dvq->y_setup_arm = (void*)p_arm;
+        dvq->y_setup_vc = (void*)p_vc;
+
+        p_arm += y_size;
+        p_vc += y_size;
+
+        dvq->uv_setup_arm = (void*)p_arm;
+        dvq->uv_setup_vc = (void*)p_vc;
+
+        dvq->cmd_id = -1;
+    }
+
+    s->dvq_n = 0;
+    s->dvq = s->dvq_ents + s->dvq_n;
 #endif
 
     s->bs_width  = (width  >> 2) + 1;
@@ -3000,7 +3028,7 @@ static void rpi_execute_transform(HEVCContext *s)
     }*/
 
     gpu_cache_flush(&s->coeffs_buf_accelerated[job]);
-    s->vpu_id = vpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2],
+    s->vpu_id = vpu_post_code2( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2],
                                s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
                                s->num_coeffs[job][3] >> 10, 0, &s->coeffs_buf_accelerated[job]);
     //vpu_execute_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[2], s->num_coeffs[2] >> 8, s->coeffs_buf_vc[3], s->num_coeffs[3] >> 10, 0);
@@ -3496,6 +3524,43 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #else
     flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],NULL,NULL, job);
 #endif
+
+#if 1
+    {
+        unsigned int i;
+        uint32_t * p;
+        uint32_t code = qpu_get_fn(QPU_MC_SETUP_UV);
+        uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
+        uint32_t mail_y[QPU_N_Y * QPU_MAIL_EL_VALS];
+
+        for (p = mail_uv, i = 0; i != QPU_N_UV; ++i) {
+            *p++ = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
+            *p++ = code;
+        }
+
+        code = qpu_get_fn(QPU_MC_SETUP);
+        for (p = mail_y, i = 0; i != QPU_N_Y; ++i) {
+            *p++ = (uint32_t)(y_unif_vc + (s->y_mvs_base[job][i] - (uint32_t*)s->y_unif_mvs_ptr[job].arm));
+            *p++ = code;
+        }
+
+        s->vpu_id = vpu_qpu_post_code2(vpu_get_fn(),
+            vpu_get_constants(),
+            s->coeffs_buf_vc[job][2],
+            s->num_coeffs[job][2] >> 8,
+            s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
+            s->num_coeffs[job][3] >> 10,
+            0,
+            // QPU job 1
+            QPU_N_UV,
+            mail_uv,
+            // QPU job 2
+            QPU_N_Y,
+            mail_y
+            );
+    }
+
+#else
     s->vpu_id = vpu_qpu_post_code( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2], s->num_coeffs[job][2] >> 8,
                                                                       s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3], s->num_coeffs[job][3] >> 10, 0,
                                    qpu_get_fn(QPU_MC_SETUP_UV),
@@ -3528,9 +3593,11 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
                                    0,0,0,0
 #endif
                                  );
+#endif
     for(i=0;i<4;i++)
         s->num_coeffs[job][i] = 0;
 #else
+#error Code rotted here
     qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
       (uint32_t)(unif_vc+(s->mvs_base[job][0 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
       (uint32_t)(unif_vc+(s->mvs_base[job][1 ] - (uint32_t*)s->unif_mvs_ptr[job].arm)),
@@ -4727,8 +4794,8 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         s->mc_filter_uv = qpu_get_fn(QPU_MC_FILTER_UV);
         s->mc_filter_uv_b0 = qpu_get_fn(QPU_MC_FILTER_UV_B0);
         s->mc_filter_uv_b = qpu_get_fn(QPU_MC_FILTER_UV_B);
-
     }
+
 #endif
 #ifdef RPI_LUMA_QPU
     for(job=0;job<RPI_MAX_JOBS;job++)

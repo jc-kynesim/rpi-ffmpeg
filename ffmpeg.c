@@ -72,6 +72,9 @@
 # include "libavfilter/buffersink.h"
 
 #ifdef RPI_DISPLAY
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
 #include <bcm_host.h>
 #include <interface/mmal/mmal.h>
 #include <interface/mmal/mmal_parameters_camera.h>
@@ -80,7 +83,11 @@
 #include <interface/mmal/util/mmal_default_components.h>
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_util_params.h>
+#pragma GCC diagnostic pop
 #include "libavcodec/rpi_zc.h"
+#ifdef RPI_ZERO_COPY
+#include "libavcodec/rpi_qpu.h"
+#endif
 #endif
 
 #if HAVE_SYS_RESOURCE_H
@@ -238,15 +245,17 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 
     mmal_port_parameter_set(display->input[0], &region.hdr);
 
-    MMAL_ES_FORMAT_T* format = display->input[0]->format;
-    format->encoding = MMAL_ENCODING_I420;
-    format->es->video.width = geo.stride_y;
-    format->es->video.height = geo.height_y;
-    format->es->video.crop.x = 0;
-    format->es->video.crop.y = 0;
-    format->es->video.crop.width = w;
-    format->es->video.crop.height = h;
-    mmal_port_format_commit(display->input[0]);
+    {
+        MMAL_ES_FORMAT_T* format = display->input[0]->format;
+        format->encoding = MMAL_ENCODING_I420;
+        format->es->video.width = geo.stride_y;
+        format->es->video.height = geo.height_y;
+        format->es->video.crop.x = 0;
+        format->es->video.crop.y = 0;
+        format->es->video.crop.width = w;
+        format->es->video.crop.height = h;
+        mmal_port_format_commit(display->input[0]);
+    }
 
     mmal_component_enable(display);
 
@@ -262,6 +271,8 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 
 static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* const display, const AVFrame* const fr)
 {
+    MMAL_BUFFER_HEADER_T * buf;
+
     if (!display || !rpi_pool)
         return;
 
@@ -270,7 +281,7 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
         return;
     }
 
-    MMAL_BUFFER_HEADER_T* buf = mmal_queue_get(rpi_pool->queue);
+    buf = mmal_queue_get(rpi_pool->queue);
     if (!buf) {
         // Running too fast so drop the frame
         printf("Q alloc failure\n");

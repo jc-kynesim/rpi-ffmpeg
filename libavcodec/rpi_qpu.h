@@ -127,8 +127,6 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
 
 
 // QPU specific functions
-extern void qpu_run_shader8(int code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8);
-extern void qpu_run_shader12(int code, int num, int code2, int num2, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8, int unifs9, int unifs10, int unifs11, int unifs12);
 extern void rpi_test_qpu(void);
 
 enum {
@@ -147,15 +145,24 @@ enum {
   };
 extern unsigned int qpu_get_fn(int num);
 
+#define QPU_N_UV   8
+#define QPU_N_Y    12
+#define QPU_N_MAX  16
+
+#define QPU_MAIL_EL_VALS  2
+#define QPU_MAIL_EL_SIZE  (QPU_MAIL_EL_VALS * sizeof(uint32_t))
+#define QPU_MAIL_VALS_MAX (QPU_N_MAX * QPU_MAIL_EL_VALS)
+#define QPU_MAIL_SIZE (QPU_MAIL_VALS_MAX * sizeof(uint32_t))
+
 // VPU specific functions
 extern unsigned int vpu_get_fn(void);
 extern unsigned int vpu_get_constants(void);
-extern unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5);
-extern int vpu_post_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf);
-int vpu_qpu_post_code(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
-                      int qpu_code, int unifs1, int unifs2, int unifs3, int unifs4, int unifs5, int unifs6, int unifs7, int unifs8,
-                      int qpu_codeb, int unifs1b, int unifs2b, int unifs3b, int unifs4b, int unifs5b, int unifs6b, int unifs7b, int unifs8b, int unifs9b, int unifs10b, int unifs11b, int unifs12b
-                      );
+//extern unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5);
+extern int vpu_post_code2( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf);
+int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
+    int qpu0_n, const uint32_t * qpu0_mail,
+    int qpu1_n, const uint32_t * qpu1_mail);
+
 extern void vpu_wait( int id);
 
 // Simple test of shader code
