@@ -998,7 +998,6 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
         //memcpy(s->dummy.arm,s->frame->data[2],1024*32);
     }
 }
-#endif
 
 #ifdef RPI_DEBLOCK_VPU
 #error XXX
