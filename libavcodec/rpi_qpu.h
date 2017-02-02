@@ -2,7 +2,10 @@
 #define RPI_QPU_H
 
 // Define RPI_FAST_CACHEFLUSH to use the VCSM cache flush code
+// *** N.B. Code has rotted & crashes if this is unset (before this set of changes)
 #define RPI_FAST_CACHEFLUSH
+
+#define RPI_ONE_BUF 1
 
 typedef struct gpu_mem_ptr_s {
   unsigned char *arm; // Pointer to memory mapped on ARM side
@@ -16,8 +19,112 @@ typedef struct gpu_mem_ptr_s {
 extern int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p);
 extern int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p);
 extern void gpu_free(GPU_MEM_PTR_T *p);
-extern void gpu_cache_flush(GPU_MEM_PTR_T *p);
+extern void gpu_cache_flush(const GPU_MEM_PTR_T * const p);
 extern void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2);
+
+#include "libavutil/frame.h"
+#if !RPI_ONE_BUF
+static inline uint32_t get_vc_address_y(const AVFrame * const frame) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[0]);
+    return p->vc;
+}
+
+static inline uint32_t get_vc_address_u(const AVFrame * const frame) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[1]);
+    return p->vc;
+}
+
+static inline uint32_t get_vc_address_v(const AVFrame * const frame) {
+    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(frame->buf[2]);
+    return p->vc;
+}
+
+static inline GPU_MEM_PTR_T get_gpu_mem_ptr_y(const AVFrame * const frame) {
+    return *(GPU_MEM_PTR_T *)av_buffer_pool_opaque(frame->buf[0]);
+}
+
+static inline GPU_MEM_PTR_T get_gpu_mem_ptr_u(const AVFrame * const frame) {
+    return *(GPU_MEM_PTR_T *)av_buffer_pool_opaque(frame->buf[1]);
+}
+
+static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
+    return *(GPU_MEM_PTR_T *)av_buffer_pool_opaque(frame->buf[2]);
+}
+
+#else
+
+static inline int gpu_is_buf1(const AVFrame * const frame)
+{
+    return frame->buf[1] == NULL;
+}
+
+static inline GPU_MEM_PTR_T * gpu_buf1_gmem(const AVFrame * const frame)
+{
+    return av_buffer_get_opaque(frame->buf[0]);
+}
+
+static inline GPU_MEM_PTR_T * gpu_buf3_gmem(const AVFrame * const frame, const int n)
+{
+    return av_buffer_pool_opaque(frame->buf[n]);
+}
+
+
+static inline uint32_t get_vc_address_y(const AVFrame * const frame) {
+    return gpu_is_buf1(frame) ? gpu_buf1_gmem(frame)->vc : gpu_buf3_gmem(frame, 0)->vc;
+}
+
+static inline uint32_t get_vc_address_u(const AVFrame * const frame) {
+    return gpu_is_buf1(frame) ?
+        gpu_buf1_gmem(frame)->vc + frame->data[1] - frame->data[0] :
+        gpu_buf3_gmem(frame, 1)->vc;
+}
+
+static inline uint32_t get_vc_address_v(const AVFrame * const frame) {
+    return gpu_is_buf1(frame) ?
+        gpu_buf1_gmem(frame)->vc + frame->data[2] - frame->data[0] :
+        gpu_buf3_gmem(frame, 2)->vc;
+}
+
+
+static inline GPU_MEM_PTR_T get_gpu_mem_ptr_y(const AVFrame * const frame) {
+    if (gpu_is_buf1(frame))
+    {
+        GPU_MEM_PTR_T g = *gpu_buf1_gmem(frame);
+        g.numbytes = frame->data[1] - frame->data[0];
+        return g;
+    }
+    else
+        return *gpu_buf3_gmem(frame, 0);
+}
+
+static inline GPU_MEM_PTR_T get_gpu_mem_ptr_u(const AVFrame * const frame) {
+    if (gpu_is_buf1(frame))
+    {
+        GPU_MEM_PTR_T g = *gpu_buf1_gmem(frame);
+        g.arm += frame->data[1] - frame->data[0];
+        g.vc += frame->data[1] - frame->data[0];
+        g.numbytes = frame->data[2] - frame->data[1];  // chroma size
+        return g;
+    }
+    else
+        return *gpu_buf3_gmem(frame, 1);
+}
+
+static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
+    if (gpu_is_buf1(frame))
+    {
+        GPU_MEM_PTR_T g = *gpu_buf1_gmem(frame);
+        g.arm += frame->data[2] - frame->data[0];
+        g.vc += frame->data[2] - frame->data[0];
+        g.numbytes = frame->data[2] - frame->data[1];  // chroma size
+        return g;
+    }
+    else
+        return *gpu_buf3_gmem(frame, 2);
+}
+
+#endif
+
 
 // QPU specific functions
 extern void rpi_test_qpu(void);
