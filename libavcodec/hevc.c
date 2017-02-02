@@ -3534,7 +3534,6 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
             *p++ = code;
         }
 
-        printf("Pre post_code2\n");
         s->vpu_id = vpu_qpu_post_code2(vpu_get_fn(),
             vpu_get_constants(),
             s->coeffs_buf_vc[job][2],
@@ -3549,7 +3548,6 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
             QPU_N_Y,
             mail_y
             );
-        printf("Post post_code2\n");
     }
 
 #else
