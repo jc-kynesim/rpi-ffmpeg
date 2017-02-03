@@ -1,7 +1,8 @@
 echo "Configure for Pi2/3"
 
-RPI_ROOTFS=`pwd`/build/linux/raspian_jessie_pi1-sysroot
-RPI_TOOLROOT=/home/jc/rpi/tools/arm-bcm2708/arm-rpi-4.9.3-linux-gnueabihf
+RPI_BUILDROOT=`pwd`/build
+RPI_ROOTFS=$RPI_BUILDROOT/linux/raspian_jessie_pi1-sysroot
+RPI_TOOLROOT=$RPI_BUILDROOT/tools/arm-bcm2708/arm-rpi-4.9.3-linux-gnueabihf
 RPI_OPT_VC=$RPI_ROOTFS/opt/vc
 #RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_ROOTFS/usr/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
 RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"

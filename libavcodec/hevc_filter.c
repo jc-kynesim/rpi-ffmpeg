@@ -520,7 +520,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #endif
     if (!s->used_for_ref && s->avctx->skip_loop_filter >= AVDISCARD_NONREF)
         return;
-
     if (x0) {
         left_tc_offset   = s->deblock[ctb - 1].tc_offset;
         left_beta_offset = s->deblock[ctb - 1].beta_offset;
@@ -878,22 +877,24 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CB
 #undef CR
 
-#ifdef RPI_INTER_QPU
+#if !defined(RPI_FAST_CACHEFLUSH)
+#if defined(RPI_LUMA_QPU) || defined(RPI_DEBLOCK_VPU)
 static void flush_buffer_y(const AVFrame * const frame) {
     GPU_MEM_PTR_T p = get_gpu_mem_ptr_y(frame);
     gpu_cache_flush(&p);
 }
+#endif
 
 static void flush_buffer_u(const AVFrame * const frame) {
     GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(frame);
     gpu_cache_flush(&p);
 }
-#endif
 
 static void flush_buffer_v(const AVFrame * const frame) {
     GPU_MEM_PTR_T p = get_gpu_mem_ptr_v(frame);
     gpu_cache_flush(&p);
 }
+#endif
 
 
 #ifdef RPI_DEBLOCK_VPU

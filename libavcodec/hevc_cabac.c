@@ -602,13 +602,13 @@ static inline unsigned int hevc_clz32(unsigned int x)
 #define bypass_finish(s) get_cabac_by22_finish(&s->HEVClc->cc)
 
 // BY22 notes that bypass is simply a divide into the bitstream and so we
-// can peek out large quantities of bits at one and treat the result as if
+// can peek out large quantities of bits at once and treat the result as if
 // it was VLC.  In many cases this will lead to O(1) processing rather than
 // O(n) though the setup and teardown is sufficiently expensive that it is
 // only worth using if we expect to be dealing with more than a few bits
 // The definition of "a few bits" will vary from platform to platform but
 // tests on ARM show that it probably isn't worth it for a single coded
-// residual, but is for >1 - this is probaly reinforced that if there are
+// residual, but is for >1 - it also seems likely that if there are
 // more residuals then they are likely to be bigger and this will make the
 // O(1) nature of the code more worthwhile.
 
@@ -1909,7 +1909,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             const uint8_t * const blk_scale = scale_matrix +
                 (((x_cg + (y_cg << 3)) << (5 - log2_trafo_size)));
 
-            // * THe following code block doesn't deal with these flags:
+            // * The following code block doesn't deal with these flags:
             //   (nor did the one it replaces)
             //
             // cabac_bypass_alignment_enabled_flag
@@ -2047,7 +2047,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                     }
 
 #if !USE_N_END_1
-                    // If N_END_! set then m was at least 1 initially
+                    // If N_END_1 set then m was at least 1 initially
                     if (m >= 0)
 #endif
                     {

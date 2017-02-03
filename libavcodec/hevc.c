@@ -229,8 +229,6 @@ static void *worker_start(void *arg)
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCContext *s)
 {
-    int i;
-
 #ifdef RPI
     int job;
     for(job=0;job<RPI_MAX_JOBS;job++) {
@@ -245,12 +243,15 @@ static void pic_arrays_free(HEVCContext *s)
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
-    for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i) {
-        struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
+    {
+        int i;
+        for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i) {
+            struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
 
-        if (dvq->vpu_cmds_arm) {
-            gpu_free(&dvq->deblock_vpu_gmem);
-          dvq->vpu_cmds_arm = 0;
+            if (dvq->vpu_cmds_arm) {
+                gpu_free(&dvq->deblock_vpu_gmem);
+              dvq->vpu_cmds_arm = 0;
+            }
         }
     }
 #endif
@@ -296,7 +297,9 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
     int coefs_per_row = coefs_per_luma + coefs_per_chroma;
     int job;
+#ifdef RPI_DEBLOCK_VPU
     int i;
+#endif
 
     av_assert0(sps);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
