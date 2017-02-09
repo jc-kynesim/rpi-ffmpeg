@@ -888,12 +888,12 @@ static void flush_buffer_u(const AVFrame * const frame) {
     GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(frame);
     gpu_cache_flush(&p);
 }
-#endif
 
 static void flush_buffer_v(const AVFrame * const frame) {
     GPU_MEM_PTR_T p = get_gpu_mem_ptr_v(frame);
     gpu_cache_flush(&p);
 }
+#endif
 
 
 #ifdef RPI_DEBLOCK_VPU
@@ -949,6 +949,7 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
 }
 #endif
 
+#ifdef RPI_INTER_QPU
 void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && s->used_for_ref) {
@@ -998,6 +999,7 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
         //memcpy(s->dummy.arm,s->frame->data[2],1024*32);
     }
 }
+#endif
 
 #ifdef RPI_DEBLOCK_VPU
 #error XXX

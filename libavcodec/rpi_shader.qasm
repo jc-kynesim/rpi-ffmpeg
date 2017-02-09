@@ -245,7 +245,8 @@ mov r0, unif # V offset/weight
 asr.ifnz rb15, r0, r2
 shl r0, r0, r2
 asr.ifnz r3, r0, r2
-shl rb14,r3,8 # Scale up weights so we can use mul24 in signed fashion
+#shl rb14,r3,8 # Scale up weights so we can use mul24 in signed fashion
+mov rb14,r3
 
 # r2 is elem_num
 # r3 is loop counter
@@ -301,6 +302,7 @@ add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
 asr r1, r1, 14
 nop                     ; mul24 r1, r1, rb14
+shl r1, r1, 8
 add r1, r1, rb12
 asr r1, r1, rb13
 brr.anyn -, r:uvloop

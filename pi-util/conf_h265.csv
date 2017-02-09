@@ -34,7 +34,7 @@
 1,DSLICE_A_HHI_5,DSLICE_A_HHI_5.bin,DSLICE_A_HHI_5.md5
 1,DSLICE_B_HHI_5,DSLICE_B_HHI_5.bin,DSLICE_B_HHI_5.md5
 1,DSLICE_C_HHI_5,DSLICE_C_HHI_5.bin,DSLICE_C_HHI_5.md5
-2,ENTP_A_QUALCOMM_1,ENTP_A_Qualcomm_1.bit,ENTP_A_Qualcomm_1.md5
+1,ENTP_A_QUALCOMM_1,ENTP_A_Qualcomm_1.bit,ENTP_A_Qualcomm_1.md5
 1,ENTP_B_Qualcomm_1,ENTP_B_Qualcomm_1.bit,ENTP_B_Qualcomm_1.md5
 1,ENTP_C_Qualcomm_1,ENTP_C_Qualcomm_1.bit,ENTP_C_Qualcomm_1.md5
 1,EXT_A_ericsson_4,EXT_A_ericsson_4.bit,EXT_A_ericsson_4.md5
@@ -69,7 +69,7 @@
 1,NoOutPrior_A_Qualcomm_1,NoOutPrior_A_Qualcomm_1.bit,NoOutPrior_A_Qualcomm_1.md5
 1,NoOutPrior_B_Qualcomm_1,NoOutPrior_B_Qualcomm_1.bit,NoOutPrior_B_Qualcomm_1.md5
 2,NUT_A_ericsson_5,NUT_A_ericsson_5.bit,NUT_A_ericsson_5.md5
-2,OPFLAG_A_Qualcomm_1,OPFLAG_A_Qualcomm_1.bit,OPFLAG_A_Qualcomm_1.md5
+1,OPFLAG_A_Qualcomm_1,OPFLAG_A_Qualcomm_1.bit,OPFLAG_A_Qualcomm_1.md5
 1,OPFLAG_B_Qualcomm_1,OPFLAG_B_Qualcomm_1.bit,OPFLAG_B_Qualcomm_1.md5
 1,OPFLAG_C_Qualcomm_1,OPFLAG_C_Qualcomm_1.bit,OPFLAG_C_Qualcomm_1.md5
 1,PICSIZE_A_Bossen_1,PICSIZE_A_Bossen_1.bin,PICSIZE_A_Bossen_1.md5
@@ -131,7 +131,7 @@
 1,WP_B_Toshiba_3,WP_B_Toshiba_3.bit,WP_B_Toshiba_3_yuv.md5
 1,WP_MAIN10_B_Toshiba_3,WP_MAIN10_B_Toshiba_3.bit,WP_MAIN10_B_Toshiba_3_yuv.md5
 1,WPP_A_ericsson_MAIN10_2,WPP_A_ericsson_MAIN10_2.bit,WPP_A_ericsson_MAIN10_yuv.md5
-2,WPP_A_ericsson_MAIN_2,WPP_A_ericsson_MAIN_2.bit,WPP_A_ericsson_MAIN_2_yuv.md5
+1,WPP_A_ericsson_MAIN_2,WPP_A_ericsson_MAIN_2.bit,WPP_A_ericsson_MAIN_2_yuv.md5
 1,WPP_B_ericsson_MAIN10_2,WPP_B_ericsson_MAIN10_2.bit,WPP_B_ericsson_MAIN10_yuv.md5
 1,WPP_B_ericsson_MAIN_2,WPP_B_ericsson_MAIN_2.bit,WPP_B_ericsson_MAIN_2_yuv.md5
 1,WPP_C_ericsson_MAIN10_2,WPP_C_ericsson_MAIN10_2.bit,WPP_C_ericsson_MAIN10_yuv.md5

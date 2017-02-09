@@ -90,19 +90,20 @@ def doconf(csva, tests):
     failures = []
     unx_success = []
     for a in csva:
-        if (a[0] and runtest(a[1], tests)):
+        exp_test = int(a[0])
+        if (exp_test and runtest(a[1], tests)):
             name = a[1]
             print "==== ", name,
             sys.stdout.flush()
 
             if (not testone(os.path.join(conf_root, name), name, a[2], a[3])) :
-                if a[0] == 1:
+                if exp_test == 1:
                     failures.append(name)
                     print ": * FAIL *"
                 else:
                     print ": fail"
             else:
-                if a[0] == 2:
+                if exp_test == 2:
                     print ": * OK *"
                     unx_success.append(name)
                 else:
