@@ -55,7 +55,7 @@
   // Define RPI_CACHE_UNIF_MVS to write motion vector uniform stream to cached memory
   // RPI_CACHE_UNIF_MVS doesn't seem to make much difference, so left undefined.
 
-  // Define RPI_SIMULATE_QPUS for debugging to run QPU code on the ARMs
+  // Define RPI_SIMULATE_QPUS for debugging to run QPU code on the ARMs (*rotted*)
   //#define RPI_SIMULATE_QPUS
   #ifdef RPI_WORKER
     #include "pthread.h"
@@ -297,9 +297,6 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
     int coefs_per_row = coefs_per_luma + coefs_per_chroma;
     int job;
-#ifdef RPI_DEBLOCK_VPU
-    int i;
-#endif
 
     av_assert0(sps);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
@@ -323,54 +320,56 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
-
-    s->enable_rpi_deblock = !sps->sao_enabled;
-    s->setup_width = (sps->width+15) / 16;
-    s->setup_height = (sps->height+15) / 16;
-    s->uv_setup_width = ( (sps->width >> sps->hshift[1]) + 15) / 16;
-    s->uv_setup_height = ( (sps->height >> sps->vshift[1]) + 15) / 16;
-
-    for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i)
     {
-        struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
-        const unsigned int cmd_size = (sizeof(*dvq->vpu_cmds_arm) * 3 + 15) & ~15;
-        const unsigned int y_size = (sizeof(*dvq->y_setup_arm) * s->setup_width * s->setup_height + 15) & ~15;
-        const unsigned int uv_size = (sizeof(*dvq->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
-        const unsigned int total_size =- cmd_size + y_size + uv_size;
-        int p_vc;
-        uint8_t * p_arm;
-#if RPI_VPU_DEBLOCK_CACHED
-        gpu_malloc_cached(total_size, &dvq->deblock_vpu_gmem);
-#else
-        gpu_malloc_uncached(total_size, &dvq->deblock_vpu_gmem);
-#endif
-        p_vc = dvq->deblock_vpu_gmem.vc;
-        p_arm = dvq->deblock_vpu_gmem.arm;
+        int i;
+        s->enable_rpi_deblock = !sps->sao_enabled;
+        s->setup_width = (sps->width+15) / 16;
+        s->setup_height = (sps->height+15) / 16;
+        s->uv_setup_width = ( (sps->width >> sps->hshift[1]) + 15) / 16;
+        s->uv_setup_height = ( (sps->height >> sps->vshift[1]) + 15) / 16;
 
-        // Zap all
-        memset(p_arm, 0, dvq->deblock_vpu_gmem.numbytes);
+        for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i)
+        {
+            struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
+            const unsigned int cmd_size = (sizeof(*dvq->vpu_cmds_arm) * 3 + 15) & ~15;
+            const unsigned int y_size = (sizeof(*dvq->y_setup_arm) * s->setup_width * s->setup_height + 15) & ~15;
+            const unsigned int uv_size = (sizeof(*dvq->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
+            const unsigned int total_size =- cmd_size + y_size + uv_size;
+            int p_vc;
+            uint8_t * p_arm;
+ #if RPI_VPU_DEBLOCK_CACHED
+            gpu_malloc_cached(total_size, &dvq->deblock_vpu_gmem);
+ #else
+            gpu_malloc_uncached(total_size, &dvq->deblock_vpu_gmem);
+ #endif
+            p_vc = dvq->deblock_vpu_gmem.vc;
+            p_arm = dvq->deblock_vpu_gmem.arm;
 
-        // Subdivide
-        dvq->vpu_cmds_arm = (void*)p_arm;
-        dvq->vpu_cmds_vc = p_vc;
+            // Zap all
+            memset(p_arm, 0, dvq->deblock_vpu_gmem.numbytes);
 
-        p_arm += cmd_size;
-        p_vc += cmd_size;
+            // Subdivide
+            dvq->vpu_cmds_arm = (void*)p_arm;
+            dvq->vpu_cmds_vc = p_vc;
 
-        dvq->y_setup_arm = (void*)p_arm;
-        dvq->y_setup_vc = (void*)p_vc;
+            p_arm += cmd_size;
+            p_vc += cmd_size;
 
-        p_arm += y_size;
-        p_vc += y_size;
+            dvq->y_setup_arm = (void*)p_arm;
+            dvq->y_setup_vc = (void*)p_vc;
 
-        dvq->uv_setup_arm = (void*)p_arm;
-        dvq->uv_setup_vc = (void*)p_vc;
+            p_arm += y_size;
+            p_vc += y_size;
 
-        dvq->cmd_id = -1;
+            dvq->uv_setup_arm = (void*)p_arm;
+            dvq->uv_setup_vc = (void*)p_vc;
+
+            dvq->cmd_id = -1;
+        }
+
+        s->dvq_n = 0;
+        s->dvq = s->dvq_ents + s->dvq_n;
     }
-
-    s->dvq_n = 0;
-    s->dvq = s->dvq_ents + s->dvq_n;
 #endif
 
     s->bs_width  = (width  >> 2) + 1;
@@ -2208,8 +2207,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
 #ifdef RPI_LUMA_QPU
         if (s->enable_rpi) {
-            int reflist = 0;
-            const Mv *mv         = &current_mv.mv[reflist];
+            const Mv *mv         = &current_mv.mv[0];
             int mx          = mv->x & 3;
             int my          = mv->y & 3;
             int my_mx = (my<<8) + mx;
@@ -2230,7 +2228,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
                   if (weight_flag) {
-                      *y++ = (s->sh.luma_offset_l0[current_mv.ref_idx[reflist]] << 16) + (s->sh.luma_weight_l0[current_mv.ref_idx[reflist]] & 0xffff);
+                      *y++ = (s->sh.luma_offset_l0[current_mv.ref_idx[0]] << 16) + (s->sh.luma_weight_l0[current_mv.ref_idx[0]] & 0xffff);
                   } else {
                       *y++ = 1; // Weight of 1 and offset of 0
                   }
@@ -2250,11 +2248,10 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
         if (s->ps.sps->chroma_format_idc) {
 #ifdef RPI_INTER_QPU
-            if (s->enable_rpi) {
-                int reflist = 0;
+          if (s->enable_rpi) {
                 int hshift           = s->ps.sps->hshift[1];
                 int vshift           = s->ps.sps->vshift[1];
-                const Mv *mv         = &current_mv.mv[reflist];
+                const Mv *mv         = &current_mv.mv[0];
                 intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
                 intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
                 intptr_t _mx         = mx << (1 - hshift);
@@ -3302,8 +3299,8 @@ static uint8_t *test_frame(HEVCContext *s,uint32_t p, AVFrame *frame, const int 
   //int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[cIdx];
   int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[cIdx];
   int pitch = frame->linesize[cIdx];
-  uint32_t base = c_idx == 0 ? get_vc_address_y(frame);
-    c_idx == 1 ? get_vc_address_u(frame) : get_vc_address_v(frame);
+  uint32_t base = cIdx == 0 ? get_vc_address_y(frame) :
+    cIdx == 1 ? get_vc_address_u(frame) : get_vc_address_v(frame);
   if (p>=base && p<base+pitch*pic_height) {
     return frame->data[cIdx] + (p-base);
   }
@@ -3754,6 +3751,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI_INTER_QPU
     s->enable_rpi = s->ps.sps->bit_depth == 8
                     && !s->ps.pps->cross_component_prediction_enabled_flag
+//                    && !(s->ps.pps->weighted_pred_flag && s->sh.slice_type == P_SLICE)  // *** Notionally supported but Seems bust
                     && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
 #else
     s->enable_rpi = s->ps.sps->bit_depth == 8
