@@ -418,6 +418,29 @@ fail:
     return AVERROR(ENOMEM);
 }
 
+static void default_pred_weight_table(HEVCContext * const s)
+{
+  unsigned int i;
+  s->sh.luma_log2_weight_denom = 0;
+  s->sh.chroma_log2_weight_denom = 0;
+  for (i = 0; i < s->sh.nb_refs[L0]; i++) {
+      s->sh.luma_weight_l0[i] = 1;
+      s->sh.luma_offset_l0[i] = 0;
+      s->sh.chroma_weight_l0[i][0] = 1;
+      s->sh.chroma_offset_l0[i][0] = 0;
+      s->sh.chroma_weight_l0[i][1] = 1;
+      s->sh.chroma_offset_l0[i][1] = 0;
+  }
+  for (i = 0; i < s->sh.nb_refs[L1]; i++) {
+      s->sh.luma_weight_l1[i] = 1;
+      s->sh.luma_offset_l1[i] = 0;
+      s->sh.chroma_weight_l1[i][0] = 1;
+      s->sh.chroma_offset_l1[i][0] = 0;
+      s->sh.chroma_weight_l1[i][1] = 1;
+      s->sh.chroma_offset_l1[i][1] = 0;
+  }
+}
+
 static void pred_weight_table(HEVCContext *s, GetBitContext *gb)
 {
     int i = 0;
@@ -954,6 +977,11 @@ static int hls_slice_header(HEVCContext *s)
             if ((s->ps.pps->weighted_pred_flag   && sh->slice_type == P_SLICE) ||
                 (s->ps.pps->weighted_bipred_flag && sh->slice_type == B_SLICE)) {
                 pred_weight_table(s, gb);
+            }
+            else
+            {
+              // Give us unit weights
+              default_pred_weight_table(s);
             }
 
             sh->max_num_merge_cand = 5 - get_ue_golomb_long(gb);
@@ -2228,12 +2256,11 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
-                  if (weight_flag) {
-                      *y++ = (s->sh.luma_offset_l0[current_mv.ref_idx[0]] << 16) + (s->sh.luma_weight_l0[current_mv.ref_idx[0]] & 0xffff);
-                  } else {
-                      *y++ = 1; // Weight of 1 and offset of 0
+                  *y++ = s->sh.luma_weight_l0[current_mv.ref_idx[0]];
+                  *y++ = s->sh.luma_offset_l0[current_mv.ref_idx[0]] * 2 + 1;
+                  if (!weight_flag && (y[-1] != 1 || y[-2] != 1)) {
+                    printf("**** unexpected weight/offset L0\n");
                   }
-                  *y++ = 0;
                   *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
@@ -2305,7 +2332,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
 #ifdef RPI_LUMA_QPU
         if (s->enable_rpi) {
-            int reflist = 1;
+            const int reflist = 1;
             const Mv *mv    = &current_mv.mv[reflist];
             int mx          = mv->x & 3;
             int my          = mv->y & 3;
@@ -2324,12 +2351,11 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
-                  if (weight_flag) {
-                      *y++ = (s->sh.luma_offset_l0[current_mv.ref_idx[reflist]] << 16) + (s->sh.luma_weight_l0[current_mv.ref_idx[reflist]] & 0xffff);
-                  } else {
-                      *y++ = 1; // Weight of 1 and offset of 0
+                  *y++ = s->sh.luma_weight_l1[current_mv.ref_idx[reflist]];
+                  *y++ = s->sh.luma_offset_l1[current_mv.ref_idx[reflist]] * 2 + 1;
+                  if (!weight_flag && (y[-1] != 1 || y[-2] != 1)) {
+                    printf("**** unexpected weight/offset");
                   }
-                  *y++ = 0;
                   *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
@@ -2431,8 +2457,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
                   *y++ = ( (bw<8 ? bw : 8) << 16 ) + (bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
-                  *y++ = 1; // B frame weighted prediction not supported
-                  *y++ = 0;
+                  *y++ = (1 << 16) | 1; // B frame weighted prediction not supported
+                  *y++ = 1;
                   *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter_b;
                 }
@@ -3210,15 +3236,7 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = (s->ps.sps->width << 16) + s->ps.sps->height;
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst_pitch
-        if (weight_flag) {
-            int offset = 1 << (s->sh.luma_log2_weight_denom + 6 - 1);
-            int shift = s->sh.luma_log2_weight_denom + 6;
-            *s->y_mvs[job][i]++ = (offset << 16) + shift;
-        } else {
-            int offset = 1 << 5;
-            int shift = 6;
-            *s->y_mvs[job][i]++ = (offset << 16) + shift;
-        }
+        *s->y_mvs[job][i]++ = s->sh.luma_log2_weight_denom + 6;  // weight demon + 6
         *s->y_mvs[job][i]++ = 0; // TBD
         *s->y_mvs[job][i]++ = 0; // Next kernel
     }

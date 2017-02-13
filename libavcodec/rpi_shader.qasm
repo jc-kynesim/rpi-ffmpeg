@@ -740,15 +740,9 @@ nop        ; nop # delay slot 2
   add rb27, r0, r1  # Command for dma output
 
 # Weighted prediction denom
+  add rb13, unif, 8  # unif = weight denom + 6
 
-  mov r1, unif # offset_shift
-  shl r0,r1,r3 ; mov r2,8
-  asr rb13,r0,r3 # shift
-  asr rb12,r1,r3 # offset
-  add rb13,rb13,r2    # mul24 is unsigned so scale up into high bits
-  shl rb12, rb12, r2 # Account for larger shift
-
-  mov -, unif # TBD
+  mov -, unif # Unused
 
 # submit texture requests for second line
   max r1, ra_y, 0
@@ -875,13 +869,24 @@ nop        ; nop # delay slot 2
   asr rb11, r0, rb23
 
 # Extract weighted prediction information
-  mov r0, unif      # offset/weight  TODO move up
-  mov -, unif # TBD
-  asr rb15, r0, r3  # Compute offset from MSBs
+# r3 = 16
+# rb13 = weight denom + 6 + 8
+
+  mov r0, unif      # weight L1 (hi16)/weight L0 (lo16)  TODO move up
+  shl r1, unif, rb13 # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1)
+  asr rb15, r0, r3
   bra -, ra31
-  shl r0, r0, r3    #                                                            Delay 1
-  asr r0, r0, r3 ; mov r3, 0 # Compute weight from LSBs and reset loop counter   Delay 2
-  shl rb14, r0, 8 # Use a larger shift to avoid unsigned multiply problem        Delay 3
+  shl r0, r0, r3
+  asr rb14, r0, r3 ; mov r3, 0
+  asr rb12, r1, 1
+# >>> branch ra31
+#
+# r3 = 0
+# rb15 = weight L1
+# rb14 - weight L0
+# rb13 = weight denom + 6 + 8
+# rb12 = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
+
 
 ################################################################################
 # mc_filter(y_x, frame_base, y2_x2, frame_base2, width_height, my2_mx2_my_mx, offsetweight0, this_dst, next_kernel)
@@ -889,10 +894,8 @@ nop        ; nop # delay slot 2
 # At this point we have already issued two pairs of texture requests for the current block
 
 ::mc_filter
-  add r1, rb15, rb15
-  add r1, r1, 1
-  shl r1, r1, rb13
-  asr rb12, r1, 1
+
+# r3 = 0
 
 :yloop
 # retrieve texture results and pick out bytes
@@ -963,16 +966,22 @@ nop        ; nop # delay slot 2
   add r1, r1, r0          ; mul24 r0, ra11, rb7
 
   add r1, r1, r0          ; mov -, vw_wait
-  sub.setf -, r3, rb18    ; mul24 r1, r1, ra22  # x256 - sign extend?
+# At this point r1 is a 22-bit signed quantity: 8 (original sample),
+#  +6, +6 (each pass), +1 (the passes can overflow slightly), +1 (sign)
+# The top 8 bits have rubbish in them as mul24 is unsigned
+# The low 6 bits need discard before weighting
+  sub.setf -, r3, rb18    ; mul24 r1, r1, ra22  # x256 - sign extend & discard rubbish
   asr r1, r1, 14
   nop                     ; mul24 r1, r1, rb14
+  shl r1, r1, 8
+
   add r1, r1, rb12
-  asr r1, r1, rb13
   brr.anyn -, r:yloop
-#  add r1, r1, rb15       # Delay 1
-  nop     # Delay 1
-  min r1, r1, rb22       # Delay 2
+  asr r1, r1, rb13
+# We have a saturating pack unit - I can't help feeling it should be useful here
+  min r1, r1, rb22       # Delay 2  rb22 = 255
   max vpm, r1, 0         # Delay 3
+# >>> branch.anyn yloop
 
 # DMA out
 
@@ -1063,6 +1072,7 @@ nop        ; nop # delay slot 2
   add r1, r1, r0          ; mul24 r0, ra10, rb6
   add r1, r1, r0          ; mul24 r0, ra11, rb7
 
+  # ra22 = 265
   add r1, r1, r0          ; mov -, vw_wait
   sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
   asr r0, r1, 14
