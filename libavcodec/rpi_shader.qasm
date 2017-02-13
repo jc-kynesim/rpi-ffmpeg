@@ -643,7 +643,7 @@ nop        ; nop # delay slot 2
 # For P frames we make the second x,y coordinates offset by +8
 
 ################################################################################
-# mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, next_kernel)
+# mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, tbd, next_kernel)
 ::mc_setup
   mov r3, 16
 
@@ -747,6 +747,8 @@ nop        ; nop # delay slot 2
   asr rb12,r1,r3 # offset
   add rb13,rb13,r2    # mul24 is unsigned so scale up into high bits
   shl rb12, rb12, r2 # Account for larger shift
+
+  mov -, unif # TBD
 
 # submit texture requests for second line
   max r1, ra_y, 0
@@ -874,6 +876,7 @@ nop        ; nop # delay slot 2
 
 # Extract weighted prediction information
   mov r0, unif      # offset/weight  TODO move up
+  mov -, unif # TBD
   asr rb15, r0, r3  # Compute offset from MSBs
   bra -, ra31
   shl r0, r0, r3    #                                                            Delay 1
@@ -886,6 +889,10 @@ nop        ; nop # delay slot 2
 # At this point we have already issued two pairs of texture requests for the current block
 
 ::mc_filter
+  add r1, rb15, rb15
+  add r1, r1, 1
+  shl r1, r1, rb13
+  asr rb12, r1, 1
 
 :yloop
 # retrieve texture results and pick out bytes
@@ -956,13 +963,14 @@ nop        ; nop # delay slot 2
   add r1, r1, r0          ; mul24 r0, ra11, rb7
 
   add r1, r1, r0          ; mov -, vw_wait
-  sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
+  sub.setf -, r3, rb18    ; mul24 r1, r1, ra22  # x256 - sign extend?
   asr r1, r1, 14
   nop                     ; mul24 r1, r1, rb14
   add r1, r1, rb12
   asr r1, r1, rb13
   brr.anyn -, r:yloop
-  add r1, r1, rb15       # Delay 1
+#  add r1, r1, rb15       # Delay 1
+  nop     # Delay 1
   min r1, r1, rb22       # Delay 2
   max vpm, r1, 0         # Delay 3
 

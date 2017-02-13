@@ -8,7 +8,7 @@ import sys
 import csv
 from stat import *
 
-conf_root = "/net/kennel-data/conform/h265"
+conf_root = "/opt/conform/h265"
 ffmpeg_exec = "./ffmpeg"
 
 def testone(fileroot, name, es_file, md5_file):

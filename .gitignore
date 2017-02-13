@@ -23,7 +23,7 @@
 .\#*
 /.config
 /.version
-/build
+/build/
 /ffmpeg
 /ffplay
 /ffprobe
