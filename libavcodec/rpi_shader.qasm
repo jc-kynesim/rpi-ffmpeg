@@ -21,7 +21,7 @@
 #
 # ra16                                          clipped(row start address+elem_num)&~3
 # ra17                                          per-channel shifts
-# ra18                                          0x4000
+# ra18 -####
 # ra19                                          next ra17
 #
 # rb16                                          pitch
@@ -31,7 +31,7 @@
 #
 # ra20                                          1
 # ra21                                          ra_21
-# ra22                                          256
+# ra22 ra_k256                                  256
 # ra23                                          rx_shift2_next
 #
 # rb20                                          0xffffff00
@@ -85,6 +85,8 @@
 .set ra_y_next,                    ra28
 .set ra_y,                         ra29
 
+.set rb_k255,                      rb22
+.set ra_k256,                      ra22
 
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
@@ -115,11 +117,11 @@ add rb24, r1, r0
 # load constants
 
 mov ra20, 1
-mov ra22, 256
+mov ra_k256, 256
 mov ra30, 64
 
 mov rb20, 0xffffff00
-mov rb22, 255
+mov rb_k255, 255
 mov rb23, 24
 
 # touch vertical context to keep simulator happy
@@ -215,7 +217,7 @@ mov r2, 16
 mov r0, unif
 shr r1, r0, r2 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-and r0, r0, rb22 # Extract height
+and r0, r0, rb_k255 # Extract height
 add rb17, r0, 1
 add rb18, r0, 3
 shl r0, r0, 7
@@ -226,13 +228,13 @@ add rb26, r0, rb27
 # get filter coefficients
 
 mov r0, unif
-asr ra3, r0, rb23;      mul24 r0, r0, ra22
-asr ra2, r0, rb23;      mul24 r0, r0, ra22
-asr ra1, r0, rb23;      mul24 r0, r0, ra22
+asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra0, r0, rb23;      mov r0, unif
-asr rb11, r0, rb23;     mul24 r0, r0, ra22
-asr rb10, r0, rb23;     mul24 r0, r0, ra22
-asr rb9, r0, rb23;      mul24 r0, r0, ra22
+asr rb11, r0, rb23;     mul24 r0, r0, ra_k256
+asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
+asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
 asr rb8, r0, rb23
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
@@ -299,7 +301,7 @@ nop                     ; mul24 r0, ra13, rb9
 add r1, r1, r0          ; mul24 r0, ra12, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb11
 add r1, r1, r0          ; mov -, vw_wait
-sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
+sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14
 nop                     ; mul24 r1, r1, rb14
 shl r1, r1, 8
@@ -307,7 +309,7 @@ add r1, r1, rb12
 asr r1, r1, rb13
 brr.anyn -, r:uvloop
 add r1, r1, rb15       # Delay 1
-min r1, r1, rb22       # Delay 2
+min r1, r1, rb_k255       # Delay 2
 max vpm, r1, 0         # Delay 3
 
 # DMA out for U
@@ -360,7 +362,7 @@ mov r2, 16
 mov r0, unif
 shr r1, r0, r2 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-and r0, r0, rb22 # Extract height
+and r0, r0, rb_k255 # Extract height
 add rb17, r0, 1
 add rb18, r0, 3
 shl r0, r0, 7
@@ -371,13 +373,13 @@ add rb26, r0, rb27
 # get filter coefficients
 
 mov r0, unif
-asr ra3, r0, rb23;      mul24 r0, r0, ra22
-asr ra2, r0, rb23;      mul24 r0, r0, ra22
-asr ra1, r0, rb23;      mul24 r0, r0, ra22
+asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra0, r0, rb23;      mov r0, unif
-asr rb11, r0, rb23;     mul24 r0, r0, ra22
-asr rb10, r0, rb23;     mul24 r0, r0, ra22
-asr rb9, r0, rb23;      mul24 r0, r0, ra22
+asr rb11, r0, rb23;     mul24 r0, r0, ra_k256
+asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
+asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
 asr rb8, r0, rb23
 
 mov r0, unif # U offset/weight
@@ -480,7 +482,7 @@ mov r2, 16
 mov r0, unif
 shr r1, r0, r2 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-and r0, r0, rb22 # Extract height
+and r0, r0, rb_k255 # Extract height
 add rb17, r0, 1
 add rb18, r0, 3
 shl r0, r0, 7
@@ -501,13 +503,13 @@ add vr_setup, r3, rb21
 # get filter coefficients
 
 mov r0, unif
-asr ra3, r0, rb23;      mul24 r0, r0, ra22
-asr ra2, r0, rb23;      mul24 r0, r0, ra22
-asr ra1, r0, rb23;      mul24 r0, r0, ra22
+asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra0, r0, rb23;      mov r0, unif
-asr rb11, r0, rb23;     mul24 r0, r0, ra22
-asr rb10, r0, rb23;     mul24 r0, r0, ra22
-asr rb9, r0, rb23;      mul24 r0, r0, ra22
+asr rb11, r0, rb23;     mul24 r0, r0, ra_k256
+asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
+asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
 asr rb8, r0, rb23
 
 mov r0, unif # U offset/weight
@@ -567,13 +569,13 @@ nop                     ; mul24 r0, ra13, rb9
 add r1, r1, r0          ; mul24 r0, ra12, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb11
 add r1, r1, r0          ; mov -, vw_wait
-sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
+sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14          # shift2=6
 add r1, r1, vpm         # Blend in previous VPM contents at this location
 add r1, r1, ra30
 brr.anyn -, r:uvloop_b
 asr r1, r1, 7           # Delay 1
-min r1, r1, rb22        # Delay 2
+min r1, r1, rb_k255        # Delay 2
 max vpm, r1, 0          # Delay 3
 
 
@@ -706,11 +708,11 @@ nop        ; nop # delay slot 2
 # load constants
 
   mov ra20, 1
-  mov ra22, 256
+  mov ra_k256, 256
   mov ra30, 64
 
   mov rb20, 0xffffff00
-  mov rb22, 255
+  mov rb_k255, 255
   mov rb23, 24
 
 # touch vertical context to keep simulator happy
@@ -723,7 +725,6 @@ nop        ; nop # delay slot 2
   mov ra13, 0
   mov ra14, 0
   mov ra15, 0
-  mov ra18, 0x4000
 
 # Compute part of VPM to use
   mov r2, qpu_num
@@ -801,7 +802,7 @@ nop        ; nop # delay slot 2
   mov r0, unif
   shr r1, r0, r3 # Extract width
   sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-  and r0, r0, rb22 # Extract height
+  and r0, r0, rb_k255 # Extract height
   add rb17, r0, 5
   add rb18, r0, 7
   shl r0, r0, 7
@@ -811,9 +812,9 @@ nop        ; nop # delay slot 2
 
 # get filter coefficients and discard unused B frame values
   mov r0, unif ; mov r1,1  # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
-  asr ra9, r0, rb23;      mul24 r0, r0, ra22 # my2
-  asr ra8, r0, rb23;      mul24 r0, r0, ra22 # mx2
-  asr.ifz ra9, r0, rb23;  mul24 r0, r0, ra22 # my:my2
+  asr ra9, r0, rb23;      mul24 r0, r0, ra_k256 # my2
+  asr ra8, r0, rb23;      mul24 r0, r0, ra_k256 # mx2
+  asr.ifz ra9, r0, rb23;  mul24 r0, r0, ra_k256 # my:my2
   asr.ifz ra8, r0, rb23                      # mx:mx2
   sub ra9,3,ra9
   sub ra8,3,ra8
@@ -874,7 +875,7 @@ nop        ; nop # delay slot 2
 
   mov r0, unif      # weight L1 (hi16)/weight L0 (lo16)  TODO move up
   shl r1, unif, rb13 # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1)
-  asr rb15, r0, r3
+  asr ra18, r0, r3
   bra -, ra31
   shl r0, r0, r3
   asr rb14, r0, r3 ; mov r3, 0
@@ -882,7 +883,7 @@ nop        ; nop # delay slot 2
 # >>> branch ra31
 #
 # r3 = 0
-# rb15 = weight L1
+# ra18 = weight L1
 # rb14 - weight L0
 # rb13 = weight denom + 6 + 8
 # rb12 = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
@@ -970,7 +971,7 @@ nop        ; nop # delay slot 2
 #  +6, +6 (each pass), +1 (the passes can overflow slightly), +1 (sign)
 # The top 8 bits have rubbish in them as mul24 is unsigned
 # The low 6 bits need discard before weighting
-  sub.setf -, r3, rb18    ; mul24 r1, r1, ra22  # x256 - sign extend & discard rubbish
+  sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256  # x256 - sign extend & discard rubbish
   asr r1, r1, 14
   nop                     ; mul24 r1, r1, rb14
   shl r1, r1, 8
@@ -979,7 +980,7 @@ nop        ; nop # delay slot 2
   brr.anyn -, r:yloop
   asr r1, r1, rb13
 # We have a saturating pack unit - I can't help feeling it should be useful here
-  min r1, r1, rb22       # Delay 2  rb22 = 255
+  min r1, r1, rb_k255       # Delay 2  rb_k255 = 255
   max vpm, r1, 0         # Delay 3
 # >>> branch.anyn yloop
 
@@ -1072,17 +1073,35 @@ nop        ; nop # delay slot 2
   add r1, r1, r0          ; mul24 r0, ra10, rb6
   add r1, r1, r0          ; mul24 r0, ra11, rb7
 
-  # ra22 = 265
   add r1, r1, r0          ; mov -, vw_wait
-  sub.setf -, r3, rb18    ; mul24 r1, r1, ra22
-  asr r0, r1, 14
-  asr r1, r1, 6           # Wait state so we can use the rotate instruction
-  nop                     ; mul24 r0, r0 << 8, ra22 << 8 # Rotate to align left and right halves
-  add r1, r1, ra18
-  add r1, r1, r0
+# As with P-pred r1 is a 22-bit signed quantity in 32-bits
+# Top 8 bits are bad - low 6 bits should be discarded
+  sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
+
+#  asr r0, r1, 14
+#  asr r1, r1, 6           # Wait state so we can use the rotate instruction
+#  nop                     ; mul24 r0, r0 << 8, ra_k256 << 8 # Rotate to align left and right halves
+
+#  add r1, r1, ra_k0x4000
+#  add r1, r1, r0
+#  brr.anyn -, r:yloopb
+#  asr r1, r1, 15         # Delay 1
+#  min r1, r1, rb_k255       # Delay 2
+#  max vpm, r1, 0         # Delay 3
+
+  asr r1, r1, 14
+  nop                     ; mul24 r0, r1, rb14
+  nop                     ; mul24 r1, r1 << 8, ra18 << 8
+
+  add r0, r0, r1
+  shl r0, r0, 8
+
+  asr r0, r0, 1
+  add r1, r0, rb12
+
   brr.anyn -, r:yloopb
-  asr r1, r1, 15         # Delay 1
-  min r1, r1, rb22       # Delay 2
+  asr r1, r1, rb13         # Delay 1
+  min r1, r1, rb_k255       # Delay 2
   max vpm, r1, 0         # Delay 3
 
 # DMA out

@@ -74,6 +74,8 @@
 
 // #define DISABLE_MC
 
+#define PACK2(hi,lo) (((hi) << 16) | ((lo) & 0xffff))
+
 #ifndef av_mod_uintp2
 static av_always_inline av_const unsigned av_mod_uintp2_c(unsigned a, unsigned p)
 {
@@ -2455,10 +2457,14 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
                   y++[-RPI_LUMA_COMMAND_WORDS] = ((y2 - 3 + start_y) << 16) + ( (x2 - 3 + start_x) & 0xffff); // Second fetch is for ref1
                   y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
-                  *y++ = ( (bw<8 ? bw : 8) << 16 ) + (bh<16 ? bh : 16);
+                  *y++ = PACK2(bw<8 ? bw : 8, bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
-                  *y++ = (1 << 16) | 1; // B frame weighted prediction not supported
-                  *y++ = 1;
+
+                  *y++ = PACK2(s->sh.luma_weight_l1[current_mv.ref_idx[1]],
+                               s->sh.luma_weight_l0[current_mv.ref_idx[0]]);
+                  *y++ = s->sh.luma_offset_l0[current_mv.ref_idx[0]] +
+                         s->sh.luma_offset_l1[current_mv.ref_idx[1]] + 1;
+
                   *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter_b;
                 }
@@ -2474,7 +2480,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
         if (s->ps.sps->chroma_format_idc) {
 #ifdef RPI_INTER_QPU
-            if (s->enable_rpi) {
+          if (s->enable_rpi && !weight_flag) {
                 int hshift           = s->ps.sps->hshift[1];
                 int vshift           = s->ps.sps->vshift[1];
                 const Mv *mv         = &current_mv.mv[0];
@@ -3237,7 +3243,7 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst_pitch
         *s->y_mvs[job][i]++ = s->sh.luma_log2_weight_denom + 6;  // weight demon + 6
-        *s->y_mvs[job][i]++ = 0; // TBD
+        *s->y_mvs[job][i]++ = 0; // Unused - alignment with per-block
         *s->y_mvs[job][i]++ = 0; // Next kernel
     }
     s->curr_y_mvs = s->y_mvs[job][0];
@@ -3789,9 +3795,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #ifdef RPI
 #ifdef RPI_INTER_QPU
     s->enable_rpi = s->ps.sps->bit_depth == 8
-                    && !s->ps.pps->cross_component_prediction_enabled_flag
+                    && !s->ps.pps->cross_component_prediction_enabled_flag;
 //                    && !(s->ps.pps->weighted_pred_flag && s->sh.slice_type == P_SLICE)  // *** Notionally supported but Seems bust
-                    && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
+//                    && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
 #else
     s->enable_rpi = s->ps.sps->bit_depth == 8
                     && !s->ps.pps->cross_component_prediction_enabled_flag;
