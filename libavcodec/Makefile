@@ -1093,3 +1093,5 @@ $(SUBDIR)rpi_shader.c: $(SUBDIR)rpi_shader.qasm
 
 $(SUBDIR)rpi_shader.h: $(SUBDIR)rpi_shader.qasm
 	python $(SUBDIR)../pi-util/qasm.py -mc_h:rpi_shader,rpi_shader,rpi_shader $< > $@
+
+$(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_shader.h

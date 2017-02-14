@@ -2304,13 +2304,10 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
-                      if (weight_flag) {
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0] << 16) + (s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0] & 0xffff);
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[0]][1] << 16) + (s->sh.chroma_weight_l0[current_mv.ref_idx[0]][1] & 0xffff);
-                      } else {
-                          *u++ = 1; // Weight of 1 and offset of 0
-                          *u++ = 1;
-                      }
+                      *u++ = PACK2(s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0] * 2 + 1,
+                                   s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0]);
+                      *u++ = PACK2(s->sh.chroma_offset_l0[current_mv.ref_idx[0]][1] * 2 + 1,
+                                   s->sh.chroma_weight_l0[current_mv.ref_idx[0]][1]);
                       *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
                       *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
@@ -2355,9 +2352,6 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                   *y++ = my2_mx2_my_mx;
                   *y++ = s->sh.luma_weight_l1[current_mv.ref_idx[reflist]];
                   *y++ = s->sh.luma_offset_l1[current_mv.ref_idx[reflist]] * 2 + 1;
-                  if (!weight_flag && (y[-1] != 1 || y[-2] != 1)) {
-                    printf("**** unexpected weight/offset");
-                  }
                   *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
                 }
@@ -2404,13 +2398,10 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       // TODO chroma weight and offset... s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
-                      if (weight_flag) {
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[reflist]][0] << 16) + (s->sh.chroma_weight_l0[current_mv.ref_idx[reflist]][0] & 0xffff);
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[reflist]][1] << 16) + (s->sh.chroma_weight_l0[current_mv.ref_idx[reflist]][1] & 0xffff);
-                      } else {
-                          *u++ = 1; // Weight of 1 and offset of 0
-                          *u++ = 1;
-                      }
+                      *u++ = PACK2(s->sh.chroma_offset_l1[current_mv.ref_idx[reflist]][0] * 2 + 1,
+                                   s->sh.chroma_weight_l1[current_mv.ref_idx[reflist]][0]);
+                      *u++ = PACK2(s->sh.chroma_offset_l1[current_mv.ref_idx[reflist]][1] * 2 + 1,
+                                   s->sh.chroma_weight_l1[current_mv.ref_idx[reflist]][1]);
                       *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
                       *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
@@ -3217,13 +3208,8 @@ static void rpi_begin(HEVCContext *s)
         *s->u_mvs[job][i]++ = pic_height;
         *s->u_mvs[job][i]++ = s->frame->linesize[1];
         *s->u_mvs[job][i]++ = s->frame->linesize[2];
-        if (weight_flag) {
-            *s->u_mvs[job][i]++ = 1 << (s->sh.chroma_log2_weight_denom + 6 - 1);
-            *s->u_mvs[job][i]++ = s->sh.chroma_log2_weight_denom + 6;
-        } else {
-            *s->u_mvs[job][i]++ = 1 << 5;
-            *s->u_mvs[job][i]++ = 6;
-        }
+        *s->u_mvs[job][i]++ = s->sh.chroma_log2_weight_denom + 6;
+        *s->u_mvs[job][i]++ = 0;
         *s->u_mvs[job][i]++ = i;  // Select section of VPM (avoid collisions with 3d unit)
     }
     s->curr_u_mvs = s->u_mvs[job][0];

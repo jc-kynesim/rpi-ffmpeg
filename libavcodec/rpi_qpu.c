@@ -52,7 +52,7 @@
 // GPU_MEM_MAP is meaningless on the Pi2 and should be left at 0  (On Pi1 it allows ARM to access VPU L2 cache)
 #define GPU_MEM_MAP 0x0
 
-#define vcos_verify(x) ((x)>=0)
+#define vcos_verify_ge0(x) ((x)>=0)
 
 /*static const unsigned code[] =
 {
@@ -796,17 +796,17 @@ int rpi_test_shader(void)
    mc_filter = code[1] + gpu->vc;
    mc_exit = code[2] + gpu->vc;
 
-   if (!vcos_verify(gpu_malloc_uncached(4*64,&unifs_ptr))) {
+   if (!vcos_verify_ge0(gpu_malloc_uncached(4*64,&unifs_ptr))) {
       return -2;
    }
    unifs = (uint32_t*)unifs_ptr.arm;
 
-   if (!vcos_verify(gpu_malloc_uncached(64*23,&in_buffer_ptr))) {
+   if (!vcos_verify_ge0(gpu_malloc_uncached(64*23,&in_buffer_ptr))) {
       return -3;
    }
    in_buffer = (uint8_t*)in_buffer_ptr.arm;
 
-   if (!vcos_verify(gpu_malloc_uncached(16*pitch,&out_buffer_ptr[0])) || !vcos_verify(gpu_malloc_uncached(16*pitch,&out_buffer_ptr[1]))) {
+   if (!vcos_verify_ge0(gpu_malloc_uncached(16*pitch,&out_buffer_ptr[0])) || !vcos_verify_ge0(gpu_malloc_uncached(16*pitch,&out_buffer_ptr[1]))) {
       return -4;
    }
    out_buffer[0] = (uint8_t*)out_buffer_ptr[0].arm;
@@ -940,7 +940,7 @@ void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, i
    mc_filter = code[1] + gpu->vc;
    mc_exit = code[2] + gpu->vc;
 
-   if (!vcos_verify(gpu_malloc_uncached(4*64,&unifs_ptr))) {
+   if (!vcos_verify_ge0(gpu_malloc_uncached(4*64,&unifs_ptr))) {
       return;
    }
    //gpu_malloc_uncached(16*dst_pitch,&out_buffer_ptr);
