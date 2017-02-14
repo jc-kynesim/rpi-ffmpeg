@@ -398,14 +398,16 @@ asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
 asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
 asr rb8, r0, rb23
 
-mov r0, unif # U offset/weight
-mov r0, unif # V offset/weight
-
 # r2 is elem_num
 # r3 is loop counter
 
 mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+
+mov rb14, unif # U weight L0
+mov r0, unif   # V weight L0
+mov.ifnz rb14, r0
+# rb14 unused in b0 but will hang around till the second pass
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -528,14 +530,22 @@ asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
 asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
 asr rb8, r0, rb23
 
-mov r0, unif # U offset/weight
-mov r0, unif # V offset/weight
-
-# r2 is elem_num
 # r3 is loop counter
 
 mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+
+# r2 = 16
+mov r0, unif # U offset/weight
+mov r1, unif # V offset/weight
+mov.ifnz r0, r1  # ??? Can I conditionalize the mov r1, unif?
+
+asr r1, r0, r2  # Offset
+shl r1, r1, rb13
+asr rb12, r1, 1
+
+shl r0, r0, r2 # Weight
+asr ra18, r0, r2
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -591,14 +601,19 @@ asr r1, r1, 14          # shift2=6
 # Beware: vpm read gets unsigned 16-bit value, so we should sign extend it
 mov r2, 16
 shl r0, vpm, r2
-asr r0, r0, r2
+asr r0, r0, r2          ; mul24 r1, r1, ra18
+nop                     ; mul24 r0, r0, rb14
 
-add r1, r1, r0         # Blend in previous VPM contents at this location
-add r1, r1, ra30
-brr.anyn -, r:uvloop_b
-asr r1, r1, 7           # Delay 1
-min r1, r1, rb_k255        # Delay 2
-max vpm, r1, 0          # Delay 3
+  add r0, r0, r1
+  shl r0, r0, 8
+
+  asr r0, r0, 1
+  add r1, r0, rb12
+
+  brr.anyn -, r:uvloop_b
+  asr r1, r1, rb13         # Delay 1
+  min r1, r1, rb_k255       # Delay 2
+  max vpm, r1, 0         # Delay 3
 
 
 # DMA out for U

@@ -2381,8 +2381,6 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
                 int x1_c = x0_c + (mv->x >> (2 + hshift));
                 int y1_c = y0_c + (mv->y >> (2 + hshift));
-                int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
-                                       (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
 
                 uint32_t *u = s->curr_u_mvs;
                 for(int start_y=0;start_y < nPbH_c;start_y+=16) {
@@ -2471,7 +2469,7 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
 
         if (s->ps.sps->chroma_format_idc) {
 #ifdef RPI_INTER_QPU
-          if (s->enable_rpi && !weight_flag) {
+          if (s->enable_rpi) {
                 int hshift           = s->ps.sps->hshift[1];
                 int vshift           = s->ps.sps->vshift[1];
                 const Mv *mv         = &current_mv.mv[0];
@@ -2505,15 +2503,8 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx][0];
                       *u++ = rpi_filter_coefs[_my][0];
-                      if (weight_flag) {
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0] << 16) |
-                                 (s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0] & 0xffff);
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[0]][1] << 16) |
-                                 (s->sh.chroma_weight_l0[current_mv.ref_idx[0]][1] & 0xffff);
-                      } else {
-                          *u++ = 1; // Weight of 1 and offset of 0
-                          *u++ = 1;
-                      }
+                      *u++ = s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0]; // Weight L0 U
+                      *u++ = s->sh.chroma_weight_l0[current_mv.ref_idx[0]][1]; // Weight L0 V
                       *u++ = 0;  // Intermediate results are not written back in first pass of B filtering
                       *u++ = 0;
 
@@ -2525,15 +2516,12 @@ static void hls_prediction_unit(HEVCContext *s, int x0, int y0,
                       *u++ = ( (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH) << 16 ) + (bh<16 ? bh : 16);
                       *u++ = rpi_filter_coefs[_mx2][0];
                       *u++ = rpi_filter_coefs[_my2][0];
-                      if (weight_flag) {
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[1]][0] << 16) |
-                                 (s->sh.chroma_weight_l0[current_mv.ref_idx[1]][0] & 0xffff);
-                          *u++ = (s->sh.chroma_offset_l0[current_mv.ref_idx[1]][1] << 16) |
-                                 (s->sh.chroma_weight_l0[current_mv.ref_idx[1]][1] & 0xffff);
-                      } else {
-                          *u++ = 1; // Weight of 1 and offset of 0
-                          *u++ = 1;
-                      }
+                      *u++ = PACK2(s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0] +
+                                     s->sh.chroma_offset_l1[current_mv.ref_idx[1]][0] + 1,
+                                   s->sh.chroma_weight_l1[current_mv.ref_idx[1]][0]);
+                      *u++ = PACK2(s->sh.chroma_offset_l0[current_mv.ref_idx[0]][1] +
+                                     s->sh.chroma_offset_l1[current_mv.ref_idx[1]][1] + 1,
+                                   s->sh.chroma_weight_l1[current_mv.ref_idx[1]][1]);
                       *u++ = (get_vc_address_u(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[1]);
                       *u++ = (get_vc_address_v(s->frame) + x0_c + start_x + (start_y + y0_c) * s->frame->linesize[2]);
                     }
@@ -3194,8 +3182,6 @@ static void rpi_begin(HEVCContext *s)
 #ifdef RPI_INTER_QPU
     int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
     int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
-    int weight_flag      = (s->sh.slice_type == P_SLICE && s->ps.pps->weighted_pred_flag) ||
-                           (s->sh.slice_type == B_SLICE && s->ps.pps->weighted_bipred_flag);
 
     for(i=0;i<8;i++) {
         s->u_mvs[job][i] = s->mvs_base[job][i];
@@ -3779,21 +3765,12 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
-#ifdef RPI_INTER_QPU
     s->enable_rpi = s->ps.sps->bit_depth == 8
                     && !s->ps.pps->cross_component_prediction_enabled_flag;
-//                    && !(s->ps.pps->weighted_pred_flag && s->sh.slice_type == P_SLICE)  // *** Notionally supported but Seems bust
-//                    && !(s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE);
-#else
-    s->enable_rpi = s->ps.sps->bit_depth == 8
-                    && !s->ps.pps->cross_component_prediction_enabled_flag;
-#endif
 
     if (!s->enable_rpi) {
       if (s->ps.pps->cross_component_prediction_enabled_flag)
         printf("Cross component\n");
-      if (s->ps.pps->weighted_bipred_flag && s->sh.slice_type == B_SLICE)
-        printf("Weighted B slice\n");
     }
 #endif
     //printf("L0=%d L1=%d\n",s->sh.nb_refs[L1],s->sh.nb_refs[L1]);
