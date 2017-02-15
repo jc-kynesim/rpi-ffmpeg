@@ -202,38 +202,34 @@ mov ra31, unif
 
 # per-channel shifts were calculated on the *previous* invocation
 
-mov ra_xshift, ra_xshift_next
-
 # get base addresses and per-channel shifts for *next* invocation
 add r0, unif, elem_num    # x
-max r0, r0, 0; mov r1, unif # y
+max r0, r0, 0         ; mov r1, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
+# compute offset from frame base u to frame base v
+sub r2, unif, r3      ; mov ra_xshift, ra_xshift_next
 shl ra_xshift_next, r0, 3
-sub r2, unif, r3 # compute offset from frame base u to frame base v
 add r0, r0, r3
 and rb_x_next, r0, ~3
 mov ra_y_next, r1
 add ra_frame_base_next, rb_x_next, r2
 
 # set up VPM write
-mov vw_setup, rb28
-
 # get width,height of block
-mov r2, 16
-mov r0, unif
-shr r1, r0, r2 # Extract width
+mov vw_setup, rb28    ; mov r0, unif
+shr r1, r0, i_shift16 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
 and r0, r0, rb_k255 # Extract height
 add rb17, r0, 1
 add rb18, r0, 3
 shl r0, r0, 7
 add r0, r0, r1 # Combine width and height of destination area
-shl r0, r0, r2 # Shift into bits 16 upwards of the vdw_setup0 register
+shl r0, r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27
 
 # get filter coefficients
 
-mov r0, unif
+mov r0, unif          ; mov r3, 0
 asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
@@ -245,40 +241,24 @@ asr rb8, r0, rb23
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-# r2 = 16
-mov r0, unif # U offset/weight
-mov r1, unif # V offset/weight
-mov.ifnz r0, r1  # ??? Can I conditionalize the mov r1, unif?
+mov r0,      unif # U offset/weight
+mov.ifnz r0, unif # V offset/weight
 
-asr r1, r0, r2  # Offset
+asr r1, r0, i_shift16 ; mul24 r0, r0, ra4  # a4 = 0x10000
 shl r1, r1, rb13
 asr rb12, r1, 1
-
-shl r0, r0, r2 # Weight
 asr rb14, r0, 15  # rb14 = weight*2
 
-# rb14 - weight L0
-# rb13 = weight denom + 6 + 8
+# rb14 - weight L0 * 2
+# rb13 = weight denom + 6 + 9
 # rb12 = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
-
-
-#asr rb15, r0, r2  # Compute offset from MSBs
-#shl r0, r0, r2
-#asr r3, r0, r2  # Compute weight from LSBs
-#mov r0, unif # V offset/weight
-#asr.ifnz rb15, r0, r2
-#shl r0, r0, r2
-#asr.ifnz r3, r0, r2
-##shl rb14,r3,8 # Scale up weights so we can use mul24 in signed fashion
-#mov rb14,r3
 
 # r2 is elem_num
 # r3 is loop counter
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-mov r3, 0
-
+# r3 = 0
 :uvloop
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -363,38 +343,33 @@ mov ra31, unif
 
 # per-channel shifts were calculated on the *previous* invocation
 
-mov ra_xshift, ra_xshift_next
-
 # get base addresses and per-channel shifts for *next* invocation
-add r0, unif, elem_num    # x
-max r0, r0, 0; mov r1, unif # y
+add r0, unif, elem_num       # x
+max r0, r0, 0                ; mov r1, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
+sub r2, unif, r3             ; mov ra_xshift, ra_xshift_next # compute offset from frame base u to frame base v ;
 shl ra_xshift_next, r0, 3
-sub r2, unif, r3 # compute offset from frame base u to frame base v
 add r0, r0, r3
 and rb_x_next, r0, ~3
 mov ra_y_next, r1
 add ra_frame_base_next, rb_x_next, r2
 
 # set up VPM write, we need to save 16bit precision
-mov vw_setup, rb21
-
 # get width,height of block
-mov r2, 16
-mov r0, unif
-shr r1, r0, r2 # Extract width
+mov vw_setup, rb21           ; mov r0, unif
+shr r1, r0, i_shift16 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
 and r0, r0, rb_k255 # Extract height
 add rb17, r0, 1
 add rb18, r0, 3
 shl r0, r0, 7
 add r0, r0, r1 # Combine width and height of destination area
-shl r0, r0, r2 # Shift into bits 16 upwards of the vdw_setup0 register
+shl r0, r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27
 
 # get filter coefficients
 
-mov r0, unif
+mov r0, unif          ; mov r3, 0
 asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
@@ -410,16 +385,14 @@ asr rb8, r0, rb23
 mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-mov rb14, unif # U weight L0
-mov r0, unif   # V weight L0
-mov.ifnz rb14, r0
+mov      rb14, unif   # U weight L0
+mov.ifnz rb14, unif   # V weight L0
 # rb14 unused in b0 but will hang around till the second pass
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-mov r3, 0
-
+# r3 = 0
 :uvloop_b0
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -502,9 +475,8 @@ add ra_frame_base_next, rb_x_next, r2
 mov vw_setup, rb28
 
 # get width,height of block
-mov r2, 16
 mov r0, unif
-shr r1, r0, r2 # Extract width
+shr r1, r0, i_shift16 # Extract width
 sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
 and r0, r0, rb_k255 # Extract height
 add rb17, r0, 1
@@ -518,7 +490,7 @@ shl r3, r3, 8 # Mask off top 8 bits
 shr r3, r3, 8
 
 add r0, r0, r1 # Combine width and height of destination area
-shl r0, r0, r2 # Shift into bits 16 upwards of the vdw_setup0 register
+shl r0, r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27
 
 # In a B frame, so also set up VPM read (reading back 16bit precision)
@@ -526,7 +498,7 @@ add vr_setup, r3, rb21
 
 # get filter coefficients
 
-mov r0, unif
+mov r0, unif          ; mov r3, 0               # r3 = 0 for loop counting later
 asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
 asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
@@ -536,20 +508,19 @@ asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
 asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
 asr rb8, r0, rb23
 
-# r3 is loop counter
-
 mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-# r2 = 16
-mov r0, unif # U offset/weight
-mov r1, unif # V offset/weight
-mov.ifnz r0, r1  # ??? Can I conditionalize the mov r1, unif?
+# Get offset & weight stuff
 
-asr r1, r0, r2  # Offset
+mov      r0, unif         # U offset/weight
+# The unif read occurs unconditionally, only the write is conditional
+mov.ifnz r0, unif         # V offset/weight
+
+asr r1, r0, i_shift16
 shl r1, r1, rb13
 asr rb12, r1, 1           ; mul24 r0, r0, ra4  # ra4 = 0x10000
-asr ra18, r0, r2          ; mov r3, 0
+asr ra18, r0, i_shift16
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
