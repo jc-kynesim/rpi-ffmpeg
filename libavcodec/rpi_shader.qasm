@@ -294,15 +294,14 @@ nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
 add r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop
-mov ra13, ra14       # Delay slot 1
-mov ra14, ra15       # Delay slot 2
-mov ra15, r0         # Delay slot 3
+mov ra13, ra14          ; mul24 r1, ra14, rb9
+mov ra14, ra15
+mov ra15, r0            ; mul24 r0, ra12, rb8
+# >>> .anyn uvloop
 
 # apply vertical filter and write to VPM
 
-nop                     ; mul24 r1, ra14, rb10
-nop                     ; mul24 r0, ra13, rb9
-add r1, r1, r0          ; mul24 r0, ra12, rb8
+add r1, r1, r0          ; mul24 r0, ra14, rb10
 add r1, r1, r0          ; mul24 r0, ra15, rb11
 add r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
@@ -553,7 +552,7 @@ add r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b
 mov ra13, ra14          ; mul24 r1, ra14, rb9
-mov ra14, ra15       # Delay slot 2
+mov ra14, ra15
 mov ra15, r0            ; mul24 r0, ra12, rb8
 # >>> .anyn uvloop_b
 
