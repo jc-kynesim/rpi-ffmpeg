@@ -314,9 +314,9 @@ unsigned int rpi_shader[] = {
 /* [0x000008d8] */ 0x0f9ce3c0, 0xd0020867, // asr r1, r1, 14
 /* [0x000008e0] */ 0x4f4901ce, 0xd0024821, // asr r0, r0, i_shift16   ; mul24 r1, r1, ra18
 /* [0x000008e8] */ 0x409ce007, 0x100049e0, // nop                     ; mul24 r0, r0, rb14
-/* [0x000008f0] */ 0x8c9f207f, 0x10020827, // add r0, r0, r1          ; mov -, vw_wait
-/* [0x000008f8] */ 0x119c81c0, 0xd0020827, // shl r0, r0, 8
-/* [0x00000900] */ 0x0c9cc1c0, 0x10020867, // add r1, r0, rb12
+/* [0x000008f0] */ 0x8c9f223f, 0x10020867, // add r1, r1, r0          ; mov -, vw_wait
+/* [0x000008f8] */ 0x119c83c0, 0xd0020867, // shl r1, r1, 8
+/* [0x00000900] */ 0x0c9cc3c0, 0x10020867, // add r1, r1, rb12
 /* [0x00000908] */ 0xfffffec8, 0xf06809e7, // brr.anyn -, r:uvloop_b
 /* [0x00000910] */ 0x0f9cd3c0, 0x10020867, // asr r1, r1, rb13
 /* [0x00000918] */ 0x129d63c0, 0x10020867, // min r1, r1, rb_k255

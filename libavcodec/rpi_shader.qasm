@@ -568,10 +568,10 @@ asr r1, r1, 14          # shift2=6
 asr r0, r0, i_shift16   ; mul24 r1, r1, ra18
 nop                     ; mul24 r0, r0, rb14
 
-add r0, r0, r1          ; mov -, vw_wait
-shl r0, r0, 8           # Lose bad top 8 bits & sign extend
+add r1, r1, r0          ; mov -, vw_wait
+shl r1, r1, 8           # Lose bad top 8 bits & sign extend
 
-add r1, r0, rb12        # rb12 = (offsetL0 + offsetL1 + 1) << (rb13 - 1)
+add r1, r1, rb12        # rb12 = (offsetL0 + offsetL1 + 1) << (rb13 - 1)
 
 brr.anyn -, r:uvloop_b
 asr r1, r1, rb13         # Delay 1
