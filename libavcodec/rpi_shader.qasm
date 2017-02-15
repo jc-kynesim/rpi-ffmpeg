@@ -17,7 +17,7 @@
 # ra4                                           y: Fiter, UV: 0x10000
 
 # rb12                                          offset to add before shift (round + weighting offsets)
-# rb13                                          shift Y:(denom + 6 + 8), UV:(denom + 6 + 9)
+# rb13                                          shift: denom + 6 + 9
 # rb14                                          L0 weight (U on left, V on right)
 # rb15                                          -- free --
 #
@@ -87,6 +87,7 @@
 .set ra_y_next,                    ra28
 .set ra_y,                         ra29
 
+.set ra_k1,                        ra20
 .set rb_k255,                      rb22
 .set ra_k256,                      ra22
 
@@ -122,7 +123,7 @@ add rb24, r1, r0
 # load constants
 
 mov ra4, 0x10000
-mov ra20, 1
+mov ra_k1, 1
 mov ra_k256, 256
 mov ra30, 64
 
@@ -263,7 +264,7 @@ asr rb14, r0, 15  # rb14 = weight*2
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                     ; ldtmu0     # loop counter increment
+sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
 mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
@@ -397,7 +398,7 @@ mov.ifnz rb14, unif   # V weight L0
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                     ; ldtmu0     # loop counter increment
+sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
 mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
@@ -530,7 +531,7 @@ asr ra18, r0, i_shift16
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-sub.setf -, r3, rb17      ; v8adds r3, r3, ra20           ; ldtmu0     # loop counter increment
+sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
 mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
@@ -715,7 +716,7 @@ nop        ; nop # delay slot 2
 
 # load constants
 
-  mov ra20, 1
+  mov ra_k1, 1
   mov ra_k256, 256
   mov ra30, 64
 
@@ -833,67 +834,68 @@ nop        ; nop # delay slot 2
   shl r0, r1, ra8
   asr ra0, r0, rb23
   shl r0, r1, ra9
-  asr rb4, r0, rb23
+  asr ra12, r0, rb23
 
   mov r1,0x1040400
   shl r0, r1, ra8
   asr ra1, r0, rb23
   shl r0, r1, ra9
-  asr rb5, r0, rb23
+  asr ra13, r0, rb23
 
   mov r1,0xfbf5f600
   shl r0, r1, ra8
   asr ra2, r0, rb23
   shl r0, r1, ra9
-  asr rb6, r0, rb23
+  asr ra14, r0, rb23
 
   mov r1,0x11283a40
   shl r0, r1, ra8
   asr ra3, r0, rb23
   shl r0, r1, ra9
-  asr rb7, r0, rb23
+  asr ra15, r0, rb23
+
+# ---
 
   mov r1,0x3a281100
   shl r0, r1, ra8
   asr ra4, r0, rb23
   shl r0, r1, ra9
-  asr rb8, r0, rb23
+  asr rb4, r0, rb23
 
   mov r1,0xf6f5fb00
   shl r0, r1, ra8
   asr ra5, r0, rb23
   shl r0, r1, ra9
-  asr rb9, r0, rb23
+  asr rb5, r0, rb23
 
   mov r1,0x4040100
   shl r0, r1, ra8
   asr ra6, r0, rb23
   shl r0, r1, ra9
-  asr rb10, r0, rb23
+  asr rb6, r0, rb23
 
   mov r1,0xffff0000
   shl r0, r1, ra8
   asr ra7, r0, rb23
   shl r0, r1, ra9
-  asr rb11, r0, rb23
+  asr rb7, r0, rb23
 
 # Extract weighted prediction information
-# r3 = 16
-# rb13 = weight denom + 6 + 8
+# rb13 = weight denom + 6 + 9
 
-  mov r0, unif      # weight L1 (hi16)/weight L0 (lo16)  TODO move up
+  mov r0, unif ; mov r3, 0     # weight L1 (hi16)/weight L0 (lo16)  TODO move up
   shl r1, unif, rb13 # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1)
-  asr ra18, r0, r3
   bra -, ra31
-  shl r0, r0, r3
-  asr rb14, r0, r3 ; mov r3, 0
-  asr rb12, r1, 1
+  asr ra18, r0, i_shift16
+  shl r0, r0, i_shift16
+  asr rb12, r1, 9
+
 # >>> branch ra31
 #
 # r3 = 0
 # ra18 = weight L1
-# rb14 - weight L0
-# rb13 = weight denom + 6 + 8
+# r0   = weight L0 << 16 (will be put into rb14 in filter preamble)
+# rb13 = weight denom + 6 + 9
 # rb12 = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
 
 
@@ -903,7 +905,8 @@ nop        ; nop # delay slot 2
 # At this point we have already issued two pairs of texture requests for the current block
 
 ::mc_filter
-  add rb14, rb14, rb14
+# r0 = weight << 16; We want weight * 2 in rb14
+  asr rb14, r0, 15
 
 # r3 = 0
 
@@ -914,7 +917,7 @@ nop        ; nop # delay slot 2
 # If we knew there was no clipping then this code would get simpler.
 # Perhaps we could add on the pitch and clip using larger values?
 
-  sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                            ; ldtmu0
+  sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
   shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
@@ -928,8 +931,8 @@ nop        ; nop # delay slot 2
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
-  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
-  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+  add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
+  add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -954,27 +957,25 @@ nop        ; nop # delay slot 2
   add r2, r2, r3       ; mul24    r3, ra7 << 7, r0 << 7
   nop                  ; mul24.ifnz r3, ra7 << 15, r1 << 15
   add r0, r2, r3       ; mov r3, rb31
-  sub.setf -, r3, 8    ; mov ra8, ra9
-  mov ra9, ra10
-  mov ra10, ra11
-  mov ra11, ra12
-  mov ra12, ra13
+
+  sub.setf -, r3, 8       ; mov r1,   ra8
+  mov ra8,  ra9           ; mov rb8,  rb9
   brr.anyn -, r:yloop
-  mov ra13, ra14       # Delay slot 1
-  mov ra14, ra15       # Delay slot 2
-  mov ra15, r0         # Delay slot 3
+  mov ra9,  ra10          ; mov rb9,  rb10
+  mov ra10, ra11          ; mov rb10, rb11
+  mov ra11, r0            ; mov rb11, r1
+  # >>> .anyn yloop
 
-# apply vertical filter and write to VPM
+  # apply vertical filter and write to VPM
 
-  nop                     ; mul24 r1, ra14, rb10
-  nop                     ; mul24 r0, ra13, rb9
-  add r1, r1, r0          ; mul24 r0, ra12, rb8
-  add r1, r1, r0          ; mul24 r0, ra15, rb11
-  add r1, r1, r0          ; mul24 r0, ra8, rb4
-  add r1, r1, r0          ; mul24 r0, ra9, rb5
+  nop                     ; mul24 r1, rb8,  ra12
+  nop                     ; mul24 r0, rb9,  ra13
+  add r1, r1, r0          ; mul24 r0, rb10, ra14
+  add r1, r1, r0          ; mul24 r0, rb11, ra15
+  add r1, r1, r0          ; mul24 r0, ra8,  rb4
+  add r1, r1, r0          ; mul24 r0, ra9,  rb5
   add r1, r1, r0          ; mul24 r0, ra10, rb6
   add r1, r1, r0          ; mul24 r0, ra11, rb7
-
   add r1, r1, r0          ; mov -, vw_wait
 # At this point r1 is a 22-bit signed quantity: 8 (original sample),
 #  +6, +6 (each pass), +1 (the passes can overflow slightly), +1 (sign)
@@ -983,9 +984,9 @@ nop        ; nop # delay slot 2
   sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256  # x256 - sign extend & discard rubbish
   asr r1, r1, 14
   nop                     ; mul24 r1, r1, rb14
-  shl r1, r1, 8
-
   add r1, r1, rb12
+
+  shl r1, r1, 8
   brr.anyn -, r:yloop
   asr r1, r1, rb13
 # We have a saturating pack unit - I can't help feeling it should be useful here
@@ -1013,7 +1014,10 @@ nop        ; nop # delay slot 2
 # Perhaps can unpack coefficients in a more efficient manner by doing H/V for a and b at the same time?
 # Or possibly by taking advantage of symmetry?
 # From 19->7 32bits per command.
+
 ::mc_filter_b
+  # r0 = weightL0 << 16, we want it in rb14
+  asr rb14, r0, i_shift16
 
 :yloopb
 # retrieve texture results and pick out bytes
@@ -1022,7 +1026,7 @@ nop        ; nop # delay slot 2
 # If we knew there was no clipping then this code would get simpler.
 # Perhaps we could add on the pitch and clip using larger values?
 
-  sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                            ; ldtmu0
+  sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
   shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
@@ -1036,8 +1040,8 @@ nop        ; nop # delay slot 2
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
-  add ra_y2, ra_y2, 1            ; mul24 r2, r2, r3
-  add t1s, ra_frame_base2, r2   ; v8subs r1, r1, rb20
+  add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
+  add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -1062,51 +1066,36 @@ nop        ; nop # delay slot 2
   add r2, r2, r3       ; mul24    r3, ra7 << 7, r0 << 7
   nop                  ; mul24.ifnz r3, ra7 << 15, r1 << 15
   add r0, r2, r3       ; mov r3, rb31
-  sub.setf -, r3, 8    ; mov ra8, ra9
-  mov ra9, ra10
-  mov ra10, ra11
-  mov ra11, ra12
-  mov ra12, ra13
+
+  sub.setf -, r3, 8       ; mov r1,   ra8
+  mov ra8,  ra9           ; mov rb8,  rb9
   brr.anyn -, r:yloopb
-  mov ra13, ra14       # Delay slot 1
-  mov ra14, ra15       # Delay slot 2
-  mov ra15, r0         # Delay slot 3
+  mov ra9,  ra10          ; mov rb9,  rb10
+  mov ra10, ra11          ; mov rb10, rb11
+  mov ra11, r0            ; mov rb11, r1
+  # >>> .anyn yloopb
 
   # apply vertical filter and write to VPM
 
-  nop                     ; mul24 r1, ra14, rb10
-  nop                     ; mul24 r0, ra13, rb9
-  add r1, r1, r0          ; mul24 r0, ra12, rb8
-  add r1, r1, r0          ; mul24 r0, ra15, rb11
-  add r1, r1, r0          ; mul24 r0, ra8, rb4
-  add r1, r1, r0          ; mul24 r0, ra9, rb5
+  nop                     ; mul24 r1, rb8,  ra12
+  nop                     ; mul24 r0, rb9,  ra13
+  add r1, r1, r0          ; mul24 r0, rb10, ra14
+  add r1, r1, r0          ; mul24 r0, rb11, ra15
+  add r1, r1, r0          ; mul24 r0, ra8,  rb4
+  add r1, r1, r0          ; mul24 r0, ra9,  rb5
   add r1, r1, r0          ; mul24 r0, ra10, rb6
   add r1, r1, r0          ; mul24 r0, ra11, rb7
-
-  add r1, r1, r0          ; mov -, vw_wait
+  add r1, r1, r0          ; mov r2, rb12
 # As with P-pred r1 is a 22-bit signed quantity in 32-bits
 # Top 8 bits are bad - low 6 bits should be discarded
   sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 
-#  asr r0, r1, 14
-#  asr r1, r1, 6           # Wait state so we can use the rotate instruction
-#  nop                     ; mul24 r0, r0 << 8, ra_k256 << 8 # Rotate to align left and right halves
-
-#  add r1, r1, ra_k0x4000
-#  add r1, r1, r0
-#  brr.anyn -, r:yloopb
-#  asr r1, r1, 15         # Delay 1
-#  min r1, r1, rb_k255       # Delay 2
-#  max vpm, r1, 0         # Delay 3
-
   asr r1, r1, 14
   nop                     ; mul24 r0, r1, rb14
-  nop                     ; mul24 r1, r1 << 8, ra18 << 8
+  add r0, r0, r2          ; mul24 r1, r1 << 8, ra18 << 8
 
-  add r1, r1, r0
+  add r1, r1, r0          ; mov -, vw_wait
   shl r1, r1, 8
-
-  add r1, r1, rb12
 
   brr.anyn -, r:yloopb
   asr r1, r1, rb13         # Delay 1
