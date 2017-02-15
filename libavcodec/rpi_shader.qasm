@@ -749,7 +749,7 @@ nop        ; nop # delay slot 2
   add rb27, r0, r1  # Command for dma output
 
 # Weighted prediction denom
-  add rb13, unif, 8  # unif = weight denom + 6
+  add rb13, unif, 9  # unif = weight denom + 6
 
   mov -, unif # Unused
 
@@ -903,6 +903,7 @@ nop        ; nop # delay slot 2
 # At this point we have already issued two pairs of texture requests for the current block
 
 ::mc_filter
+  add rb14, rb14, rb14
 
 # r3 = 0
 
@@ -1013,6 +1014,7 @@ nop        ; nop # delay slot 2
 # Or possibly by taking advantage of symmetry?
 # From 19->7 32bits per command.
 ::mc_filter_b
+
 :yloopb
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -1101,11 +1103,10 @@ nop        ; nop # delay slot 2
   nop                     ; mul24 r0, r1, rb14
   nop                     ; mul24 r1, r1 << 8, ra18 << 8
 
-  add r0, r0, r1
-  shl r0, r0, 8
+  add r1, r1, r0
+  shl r1, r1, 8
 
-  asr r0, r0, 1
-  add r1, r0, rb12
+  add r1, r1, rb12
 
   brr.anyn -, r:yloopb
   asr r1, r1, rb13         # Delay 1
