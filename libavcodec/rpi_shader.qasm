@@ -93,6 +93,7 @@
 
 # With shifts only the bottom 5 bits are considered so -16=16, -15=17 etc.
 .set i_shift16,                    -16
+.set i_shift21,                    -11
 
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
@@ -426,30 +427,28 @@ nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
 add r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b0
-mov ra13, ra14       # Delay slot 1
-mov ra14, ra15       # Delay slot 2
-mov ra15, r0         # Delay slot 3
+mov ra13, ra14          ; mul24 r1, ra14, rb9  # ra14 is about to be ra13
+mov ra14, ra15
+mov ra15, r0            ; mul24 r0, ra12, rb8
+# >>> .anyn uvloop_b0
 
 # apply vertical filter and write to VPM
 
-nop                     ; mul24 r1, ra14, rb10
-nop                     ; mul24 r0, ra13, rb9
-add r1, r1, r0          ; mul24 r0, ra12, rb8
-add r1, r1, r0          ; mul24 r0, ra15, rb11
-add r1, r1, r0          ; mov -, vw_wait
+add r1, r1, r0          ; mul24 r0, ra14, rb10
 sub.setf -, r3, rb18
 brr.anyn -, r:uvloop_b0
-asr vpm, r1, 6         # Delay 1 shifts down by shift2=6, but results are still in 16bit precision
-nop                    # Delay 2
-nop                    # Delay 3
+add r1, r1, r0          ; mul24 r0, ra15, rb11
+add r1, r1, r0          ; mov -, vw_wait
+asr vpm, r1, 6
+# >>> .anyn uvloop_b0
 
 # in pass0 we don't really need to save any results, but need to discard the uniforms
 # DMA out for U
 
 bra -, ra31
-mov r0, unif           # Delay 1
-mov r0, unif           # Delay 2
-nop                    # Delay 3
+mov -, unif           # Delay 1
+mov -, unif           # Delay 2
+nop                   # Delay 3
 
 
 ################################################################################
@@ -459,26 +458,21 @@ mov ra31, unif
 
 # per-channel shifts were calculated on the *previous* invocation
 
-mov ra_xshift, ra_xshift_next
+# set up VPM write
+mov ra_xshift, ra_xshift_next      ; mov vw_setup, rb28
 
 # get base addresses and per-channel shifts for *next* invocation
 add r0, unif, elem_num    # x
-max r0, r0, 0; mov r1, unif # y
+max r0, r0, 0                      ; mov ra_y_next, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
-shl ra_xshift_next, r0, 3
-sub r2, unif, r3 # compute offset from frame base u to frame base v
+# compute offset from frame base u to frame base v
+sub r2, unif, r3                   ; mul24 ra_xshift_next, r0, 8
 add r0, r0, r3
-and rb_x_next, r0, ~3
-mov ra_y_next, r1
+and rb_x_next, r0, ~3              ; mov r0, unif     # Width/Height
+shr r1, r0, i_shift16 # Extract width
 add ra_frame_base_next, rb_x_next, r2
 
-# set up VPM write
-mov vw_setup, rb28
-
-# get width,height of block
-mov r0, unif
-shr r1, r0, i_shift16 # Extract width
-sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
+sub rb29, rb24, r1  # Compute vdw_setup1(dst_pitch-width)
 and r0, r0, rb_k255 # Extract height
 add rb17, r0, 1
 add rb18, r0, 3
@@ -486,8 +480,7 @@ shl r0, r0, 7
 
 # r0 is currently height<<7
 # For vr_setup we want height<<20 (so 20-7=13 additional bits)
-shl r3, r0, 13
-shl r3, r3, 8 # Mask off top 8 bits
+shl r3, r0, i_shift21  # Shl 13 + Mask off top 8 bits
 shr r3, r3, 8
 
 add r0, r0, r1 # Combine width and height of destination area
@@ -559,15 +552,14 @@ nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
 add r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b
-mov ra13, ra14       # Delay slot 1
+mov ra13, ra14          ; mul24 r1, ra14, rb9
 mov ra14, ra15       # Delay slot 2
-mov ra15, r0         # Delay slot 3
+mov ra15, r0            ; mul24 r0, ra12, rb8
+# >>> .anyn uvloop_b
 
 # apply vertical filter and write to VPM
 
-nop                     ; mul24 r1, ra14, rb10
-nop                     ; mul24 r0, ra13, rb9
-add r1, r1, r0          ; mul24 r0, ra12, rb8
+add r1, r1, r0          ; mul24 r0, ra14, rb10
 add r1, r1, r0          ; mul24 r0, ra15, rb11
 # Beware: vpm read gets unsigned 16-bit value, so we must sign extend it
 add r1, r1, r0          ; mul24 r0, vpm, ra4  # ra4 = 0x10000
@@ -820,15 +812,13 @@ nop        ; nop # delay slot 2
   add rb26, r0, rb27
 
 # get filter coefficients and discard unused B frame values
-  mov r0, unif ; mov r1,1  # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
+  not r0, unif   # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
+  shl.ifz r0, r0, r3      # Pick half to use
   asr ra9, r0, rb23;      mul24 r0, r0, ra_k256 # my2
-  asr ra8, r0, rb23;      mul24 r0, r0, ra_k256 # mx2
-  asr.ifz ra9, r0, rb23;  mul24 r0, r0, ra_k256 # my:my2
-  asr.ifz ra8, r0, rb23                      # mx:mx2
-  sub ra9,3,ra9
-  sub ra8,3,ra8
+  asr ra8, r0, rb23
   shl ra9,ra9,3   # Scale up by 8
   shl ra8,ra8,3   # Scale up by 8
+
 # Now if we want aligned we have a mul of 1, so put 0 coefficients at the top
   mov r1,0xffff00
   shl r0, r1, ra8
