@@ -88,6 +88,9 @@
 .set rb_k255,                      rb22
 .set ra_k256,                      ra22
 
+# With shifts only the bottom 5 bits are considered so -16=16, -15=17 etc.
+.set i_shift16,                    -16
+
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_uv
@@ -599,10 +602,9 @@ sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14          # shift2=6
 
 # Beware: vpm read gets unsigned 16-bit value, so we should sign extend it
-mov r2, 16
-shl r0, vpm, r2
-asr r0, r0, r2          ; mul24 r1, r1, ra18
-nop                     ; mul24 r0, r0, rb14
+  shl r0, vpm, i_shift16
+  asr r0, r0,  i_shift16  ; mul24 r1, r1, ra18
+  nop                     ; mul24 r0, r0, rb14
 
   add r0, r0, r1
   shl r0, r0, 8
