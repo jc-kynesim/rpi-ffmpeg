@@ -14,8 +14,10 @@
 #
 # rb8...rb11                                    eight vertical filter coefficients
 
+# ra4                                           y: Fiter, UV: 0x10000
+
 # rb12                                          offset to add before shift (round + weighting offsets)
-# rb13                                          shift (denom + 6 + 8)
+# rb13                                          shift Y:(denom + 6 + 8), UV:(denom + 6 + 9)
 # rb14                                          L0 weight (U on left, V on right)
 # rb15                                          -- free --
 #
@@ -119,6 +121,7 @@ add rb24, r1, r0
 
 # load constants
 
+mov ra4, 0x10000
 mov ra20, 1
 mov ra_k256, 256
 mov ra30, 64
@@ -153,9 +156,9 @@ add r2, r2, r0 ; mul24 r1, r1, rb_pitch
 add t0s, r0, r1 ; mov ra_frame_base, r2
 add t1s, r2, r1
 
-mov r2,8
-add rb13,unif,r2  # denominator
-mov -, unif       # Unused
+mov r2, 9
+add rb13, r2, unif  # denominator
+mov -, unif         # Unused
 
 # Compute part of VPM to use for DMA output
 mov r2, unif
@@ -252,7 +255,7 @@ shl r1, r1, rb13
 asr rb12, r1, 1
 
 shl r0, r0, r2 # Weight
-asr rb14, r0, r2
+asr rb14, r0, 15  # rb14 = weight*2
 
 # rb14 - weight L0
 # rb13 = weight denom + 6 + 8
@@ -545,30 +548,27 @@ mov.ifnz r0, r1  # ??? Can I conditionalize the mov r1, unif?
 
 asr r1, r0, r2  # Offset
 shl r1, r1, rb13
-asr rb12, r1, 1
-
-shl r0, r0, r2 # Weight
-asr ra18, r0, r2
+asr rb12, r1, 1           ; mul24 r0, r0, ra4  # ra4 = 0x10000
+asr ra18, r0, r2          ; mov r3, 0
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-mov r3, 0
-
+# r3 = 0
 :uvloop_b
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-sub.setf -, r3, rb17      ; v8adds r3, r3, ra20                     ; ldtmu0     # loop counter increment
+sub.setf -, r3, rb17      ; v8adds r3, r3, ra20           ; ldtmu0     # loop counter increment
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
 mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-shr r1, r4, ra_xshift    ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
+shr r1, r4, ra_xshift     ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
 
 max r2, ra_y, 0  # y
 min r2, r2, rb_frame_height_minus_1
 add ra_y, ra_y, 1         ; mul24 r2, r2, r3
-add t0s, ra_x, r2    ; v8subs r1, r1, rb20
+add t0s, ra_x, r2         ; v8subs r1, r1, rb20
 add t1s, ra_frame_base, r2
 
 # generate seven shifted versions
@@ -597,25 +597,23 @@ nop                     ; mul24 r1, ra14, rb10
 nop                     ; mul24 r0, ra13, rb9
 add r1, r1, r0          ; mul24 r0, ra12, rb8
 add r1, r1, r0          ; mul24 r0, ra15, rb11
-add r1, r1, r0          ; mov -, vw_wait
+# Beware: vpm read gets unsigned 16-bit value, so we must sign extend it
+add r1, r1, r0          ; mul24 r0, vpm, ra4  # ra4 = 0x10000
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14          # shift2=6
 
-# Beware: vpm read gets unsigned 16-bit value, so we should sign extend it
-  shl r0, vpm, i_shift16
-  asr r0, r0,  i_shift16  ; mul24 r1, r1, ra18
-  nop                     ; mul24 r0, r0, rb14
+asr r0, r0, i_shift16   ; mul24 r1, r1, ra18
+nop                     ; mul24 r0, r0, rb14
 
-  add r0, r0, r1
-  shl r0, r0, 8
+add r0, r0, r1          ; mov -, vw_wait
+shl r0, r0, 8           # Lose bad top 8 bits & sign extend
 
-  asr r0, r0, 1
-  add r1, r0, rb12
+add r1, r0, rb12        # rb12 = (offsetL0 + offsetL1 + 1) << (rb13 - 1)
 
-  brr.anyn -, r:uvloop_b
-  asr r1, r1, rb13         # Delay 1
-  min r1, r1, rb_k255       # Delay 2
-  max vpm, r1, 0         # Delay 3
+brr.anyn -, r:uvloop_b
+asr r1, r1, rb13         # Delay 1
+min r1, r1, rb_k255       # Delay 2
+max vpm, r1, 0         # Delay 3
 
 
 # DMA out for U
