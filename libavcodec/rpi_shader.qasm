@@ -369,6 +369,9 @@ add rb26, r0, rb27
 
 # get filter coefficients
 
+### Need to have unsigned coeffs to so we can just unpack in the filter
+# chroma filter always goes -ve, +ve, +ve, -ve
+
 mov r0, unif          ; mov r3, 0
 #asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
 #asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
