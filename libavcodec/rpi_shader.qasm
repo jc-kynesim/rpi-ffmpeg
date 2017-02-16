@@ -3,11 +3,11 @@
 # ra0...ra7                                     eight horizontal filter coefficients
 #
 # rb0 rx_shift2
-# rb1 ra_y2_next
+# rb1 rb_y2_next
 #
 # rb4...rb7
 #
-# ra8...ra15                                    eight filtered rows of context (rb15 == most recent)
+# rb8..rb11, ra8...ra11                         Y: eight filtered rows of context (ra11 == most recent)
 #
 #                                               (ra15 isn't clamped to zero - this happens during the
 #                                                copy to ra14, and during its use in the vertical filter)
@@ -34,7 +34,7 @@
 # ra20                                          1
 # ra21                                          ra_21
 # ra22 ra_k256                                  256
-# ra23                                          rx_shift2_next
+# ra23 ra_y2_next                               ra_y2_next
 #
 # rb20                                          0xffffff00
 # rb21                                          vpm_setup for reading/writing 16bit results into VPM
@@ -65,7 +65,7 @@
 .set rb_pitch,                     rb16
 .set ra_x,                         ra16
 .set ra_y2,                        ra21
-.set ra_y2_next,                   rb1
+.set ra_y2_next,                   ra23
 
 .set rb_x_next,                    rb19
 .set rx_frame_base2_next,          rb19
@@ -79,9 +79,8 @@
 
 .set ra_xshift_next,               ra19
 .set rx_xshift2,                   rb0
-.set rx_xshift2_next,              ra23
+.set rx_xshift2_next,              rb1
 
-.set ra_x2shift_next,              ra27
 .set ra_u2v_dst_offset,            ra27
 
 .set ra_y_next,                    ra28
@@ -386,6 +385,7 @@ asr rb8, r0, rb23
 mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
+
 mov      rb14, unif   # U weight L0
 mov.ifnz rb14, unif   # V weight L0
 # rb14 unused in b0 but will hang around till the second pass
@@ -650,10 +650,10 @@ nop        ; nop # delay slot 2
   mov r3, 16
 
   # Need to save these because we need to know the frame dimensions before computing texture coordinates
-  mov ra8, unif
-  mov ra9, unif
-  mov ra10, unif
-  mov ra11, unif
+  mov ra8, unif  # y_x
+  mov ra9, unif  # ref_y_base
+  mov ra10, unif # y2_x2
+  mov ra11, unif # ref_y2_base
 
 # Read image dimensions
   mov r1, unif # width_height
@@ -664,10 +664,10 @@ nop        ; nop # delay slot 2
   sub rb_frame_height_minus_1,r0,1
 
 # get source pitch
-  mov rb_pitch, unif
+  mov rb_pitch, unif # src_pitch
 
 # get destination pitch
-  mov r0, unif
+  mov r0, unif       # dst_pitch
   mov r1, vdw_setup_1(0)
   add rb24, r1, r0
 
@@ -906,12 +906,15 @@ nop        ; nop # delay slot 2
 # If we knew there was no clipping then this code would get simpler.
 # Perhaps we could add on the pitch and clip using larger values?
 
+# N.B. Whilst y == y2 as far as this loop is concerned we will start
+# the grab for the next block before we finish with this block and that
+# might be B where y != y2 so we must do full processing on both y and y2
+
   sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
   shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-  shr r1, r4, rx_xshift2
-  mov.ifz ra_y2, ra_y2_next
+  shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
@@ -1019,8 +1022,7 @@ nop        ; nop # delay slot 2
   shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-  shr r1, r4, rx_xshift2
-  mov.ifz ra_y2, ra_y2_next
+  shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
