@@ -791,43 +791,15 @@ nop        ; nop # delay slot 2
   add r0, ra1.16a, r1 # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
-  shl rx_xshift2_next, r0, 3 # Compute shifts
+  shl rx_xshift2_next, r0, 3         # Compute shifts
   mov ra_y2_next, ra1.16b
-  and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
-  add rx_frame_base2_next, r2, r0  # r2 is address for frame1 (not including y offset)
-
-  mov r3, 16
-
-# mov r3, 16
-# mov r1, unif # y_x
-# shl r0,r1,r3 # r0 is x<<16
-# asr r1,r1,r3 # r1 is y
-# asr r0,r0,r3 # r0 is x
-# add r0, r0, elem_num # Load x
-# max r0, r0, 0
-# min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
-# shl ra_xshift_next, r0, 3 # Compute shifts
-# mov ra_y_next, r1
-# and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
-# add ra_frame_base_next, r2, r0 ; mov r1, unif # y2_x2
-#
-# shl r0,r1,r3 # r0 is x2<<16
-# asr r1,r1,r3 # r1 is y2
-# asr r0,r0,r3 # r0 is x2
-# add r0, r0, elem_num # Load x
-# max r0, r0, 0
-# min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
-# shl rx_xshift2_next, r0, 3 # Compute shifts
-# mov ra_y2_next, r1
-# and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
-# add rx_frame_base2_next, r2, r0  # r2 is address for frame1 (not including y offset)
-
-# get width,height of block
-  mov ra1, unif  # width_height
+  and r0, r0, ~3                     ; mov ra1, unif  # width_height ; r0 gives the clipped and aligned x coordinate
+  add rx_frame_base2_next, r2, r0    # r2 is address for frame1 (not including y offset)
 
 # set up VPM write
   mov vw_setup, rb28
 
+# get width,height of block (unif load above)
   sub rb29, rb24, ra1.16b # Compute vdw_setup1(dst_pitch-width)
   add rb17, ra1.16a, 5
   add rb18, ra1.16a, 7
@@ -836,20 +808,9 @@ nop        ; nop # delay slot 2
   shl r0,   r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
   add rb26, r0, rb27
 
-# mov r0, unif
-# shr r1, r0, r3 # Extract width
-# sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-# and r0, r0, rb_k255 # Extract height
-# add rb17, r0, 5
-# add rb18, r0, 7
-# shl r0, r0, 7
-# add r0, r0, r1 # Combine width and height of destination area
-# shl r0, r0, r3 # Shift into bits 16 upwards of the vdw_setup0 register
-# add rb26, r0, rb27
-#
 # get filter coefficients and discard unused B frame values
   not r0, unif   # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
-  shl.ifz r0, r0, r3      # Pick half to use
+  shl.ifz r0, r0, i_shift16      # Pick half to use
   asr ra9, r0, rb23;      mul24 r0, r0, ra_k256 # my2
   asr ra8, r0, rb23
   shl ra9,ra9,3   # Scale up by 8
