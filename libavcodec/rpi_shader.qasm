@@ -64,8 +64,8 @@
 .set rb_frame_height_minus_1,      rb30
 .set rb_pitch,                     rb16
 .set ra_x,                         ra16
-.set ra_y2,                        ra21
-.set ra_y2_next,                   ra23
+.set ra_y2,                        ra21.16a
+.set ra_y2_next,                   ra21.16b
 
 .set rb_x_next,                    rb19
 .set rx_frame_base2_next,          rb19
@@ -370,10 +370,17 @@ add rb26, r0, rb27
 # get filter coefficients
 
 mov r0, unif          ; mov r3, 0
-asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra0, r0, rb23;      mov r0, unif
+#asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
+#asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
+#asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
+#asr ra0, r0, rb23;      mov r0, unif
+
+asr ra1.16b, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra1.16a, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra0.16b, r0, rb23;      mul24 r0, r0, ra_k256
+asr ra0.16a, r0, rb23;      mov r0, unif
+
+
 asr rb11, r0, rb23;     mul24 r0, r0, ra_k256
 asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
 asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
@@ -384,7 +391,6 @@ asr rb8, r0, rb23
 
 mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-
 
 mov      rb14, unif   # U weight L0
 mov.ifnz rb14, unif   # V weight L0
@@ -415,14 +421,14 @@ add t1s, ra_frame_base, r2
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-nop                  ; mul24 r2, r0, ra0
-nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
-nop                  ; mul24      r3, ra1 << 1, r0 << 1
-nop                  ; mul24.ifnz r3, ra1 << 9, r1 << 9
-add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
-nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
-add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
-nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
+nop                  ; mul24 r2, r0, ra0.16a
+nop                  ; mul24.ifnz r2, ra0.16a << 8, r1 << 8
+nop                  ; mul24      r3, ra0.16b << 1, r0 << 1
+nop                  ; mul24.ifnz r3, ra0.16b << 9, r1 << 9
+add r2, r2, r3       ; mul24    r3, ra1.16a << 2, r0 << 2
+nop                  ; mul24.ifnz r3, ra1.16a << 10, r1 << 10
+add r2, r2, r3       ; mul24    r3, ra1.16b << 3, r0 << 3
+nop                  ; mul24.ifnz r3, ra1.16b << 11, r1 << 11
 add r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b0
@@ -766,50 +772,81 @@ nop        ; nop # delay slot 2
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov ra31, unif
 
+  mov ra1, unif  ; mov r1, elem_num  # y_x ; elem_num has implicit unpack??
+
 # per-channel shifts were calculated on the *previous* invocation
   mov ra_xshift, ra_xshift_next
   mov rx_xshift2, rx_xshift2_next
 
 # get base addresses and per-channel shifts for *next* invocation
-  mov r3, 16
-  mov r1, unif # y_x
-  shl r0,r1,r3 # r0 is x<<16
-  asr r1,r1,r3 # r1 is y
-  asr r0,r0,r3 # r0 is x
-  add r0, r0, elem_num # Load x
+
+  add r0, ra1.16a, r1 # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl ra_xshift_next, r0, 3 # Compute shifts
-  mov ra_y_next, r1
-  and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
-  add ra_frame_base_next, r2, r0 ; mov r1, unif # y2_x2
+  mov ra_y_next, ra1.16b
+  and r0, r0, ~3                     ; mov ra1, unif # y2_x2
+  add ra_frame_base_next, r2, r0
 
-  shl r0,r1,r3 # r0 is x2<<16
-  asr r1,r1,r3 # r1 is y2
-  asr r0,r0,r3 # r0 is x2
-  add r0, r0, elem_num # Load x
+  add r0, ra1.16a, r1 # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl rx_xshift2_next, r0, 3 # Compute shifts
-  mov ra_y2_next, r1
+  mov ra_y2_next, ra1.16b
   and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
   add rx_frame_base2_next, r2, r0  # r2 is address for frame1 (not including y offset)
+
+  mov r3, 16
+
+# mov r3, 16
+# mov r1, unif # y_x
+# shl r0,r1,r3 # r0 is x<<16
+# asr r1,r1,r3 # r1 is y
+# asr r0,r0,r3 # r0 is x
+# add r0, r0, elem_num # Load x
+# max r0, r0, 0
+# min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
+# shl ra_xshift_next, r0, 3 # Compute shifts
+# mov ra_y_next, r1
+# and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
+# add ra_frame_base_next, r2, r0 ; mov r1, unif # y2_x2
+#
+# shl r0,r1,r3 # r0 is x2<<16
+# asr r1,r1,r3 # r1 is y2
+# asr r0,r0,r3 # r0 is x2
+# add r0, r0, elem_num # Load x
+# max r0, r0, 0
+# min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
+# shl rx_xshift2_next, r0, 3 # Compute shifts
+# mov ra_y2_next, r1
+# and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
+# add rx_frame_base2_next, r2, r0  # r2 is address for frame1 (not including y offset)
+
+# get width,height of block
+  mov ra1, unif  # width_height
 
 # set up VPM write
   mov vw_setup, rb28
 
-# get width,height of block
-  mov r0, unif
-  shr r1, r0, r3 # Extract width
-  sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-  and r0, r0, rb_k255 # Extract height
-  add rb17, r0, 5
-  add rb18, r0, 7
-  shl r0, r0, 7
-  add r0, r0, r1 # Combine width and height of destination area
-  shl r0, r0, r3 # Shift into bits 16 upwards of the vdw_setup0 register
+  sub rb29, rb24, ra1.16b # Compute vdw_setup1(dst_pitch-width)
+  add rb17, ra1.16a, 5
+  add rb18, ra1.16a, 7
+  shl r0,   ra1.16a, 7
+  add r0,   r0, ra1.16b # Combine width and height of destination area
+  shl r0,   r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
   add rb26, r0, rb27
 
+# mov r0, unif
+# shr r1, r0, r3 # Extract width
+# sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
+# and r0, r0, rb_k255 # Extract height
+# add rb17, r0, 5
+# add rb18, r0, 7
+# shl r0, r0, 7
+# add r0, r0, r1 # Combine width and height of destination area
+# shl r0, r0, r3 # Shift into bits 16 upwards of the vdw_setup0 register
+# add rb26, r0, rb27
+#
 # get filter coefficients and discard unused B frame values
   not r0, unif   # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
   shl.ifz r0, r0, r3      # Pick half to use
