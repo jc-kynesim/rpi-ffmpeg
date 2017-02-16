@@ -815,42 +815,42 @@ nop        ; nop # delay slot 2
 # Pack the 1st 4 filter coefs for H & V tightly
 
   mov r1,0x00010100  # -ve
-  ror ra0.8a, r1, ra8.8c
   ror ra2.8a, r1, ra8.8d
+  ror ra0.8a, r1, ra8.8c
 
   mov r1,0x01040400
-  ror ra0.8b, r1, ra8.8c
   ror ra2.8b, r1, ra8.8d
+  ror ra0.8b, r1, ra8.8c
 
   mov r1,0x050b0a00  # -ve
-  ror ra0.8c, r1, ra8.8c
   ror ra2.8c, r1, ra8.8d
+  ror ra0.8c, r1, ra8.8c
 
   mov r1,0x11283a40
-  ror ra0.8d, r1, ra8.8c
   ror ra2.8d, r1, ra8.8d
+  ror ra0.8d, r1, ra8.8c
 
 # In the 2nd vertical half we use b registers due to
 # using a-side fifo regs. The easiest way to achieve this to pack it
 # and then unpack!
 
   mov r1,0x3a281100
-  ror ra1.8a, r1, ra8.8c
   ror ra3.8a, r1, ra8.8d
+  ror ra1.8a, r1, ra8.8c
 
   mov r1,0x0a0b0500  # -ve
-  ror ra1.8b, r1, ra8.8c
   ror ra3.8b, r1, ra8.8d
+  ror ra1.8b, r1, ra8.8c
 
   mov r1,0x04040100
-  ror ra1.8c, r1, ra8.8c
   ror ra3.8c, r1, ra8.8d
+  ror ra1.8c, r1, ra8.8c
 
 # Extract weighted prediction information in parallel
 
   mov r1,0x01010000  # -ve
-  ror ra1.8d, r1, ra8.8c    ; mov r0, unif      # ; weight L1 weight L1 (hi16)/weight L0 (lo16)
-  ror ra3.8d, r1, ra8.8d    ; mov r1, rb13      # ; rb13 = weight denom + 6 + 9
+  ror ra3.8d, r1, ra8.8d    ; mov r0, unif      # ; weight L1 weight L1 (hi16)/weight L0 (lo16)
+  ror ra1.8d, r1, ra8.8c    ; mov r1, rb13      # ; rb13 = weight denom + 6 + 9
 
 # r3 = 16 from (long way) above
   shl r1, unif, r1          ; mov rb4, ra3.8a   # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) ;
