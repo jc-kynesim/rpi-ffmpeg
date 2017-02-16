@@ -784,7 +784,7 @@ nop        ; nop # delay slot 2
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl ra_xshift_next, r0, 3 # Compute shifts
-  mov ra_y_next, ra1.16b
+  mov r3, 8                          ; mov ra_y_next, ra1.16b
   and r0, r0, ~3                     ; mov ra1, unif # y2_x2
   add ra_frame_base_next, r2, r0
 
@@ -792,7 +792,7 @@ nop        ; nop # delay slot 2
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl rx_xshift2_next, r0, 3         # Compute shifts
-  mov ra_y2_next, ra1.16b
+  add r3, r3, r3                     ; mov ra_y2_next, ra1.16b  # r3 = 16 ;
   and r0, r0, ~3                     ; mov ra1, unif  # width_height ; r0 gives the clipped and aligned x coordinate
   add rx_frame_base2_next, r2, r0    # r2 is address for frame1 (not including y offset)
 
@@ -812,56 +812,52 @@ nop        ; nop # delay slot 2
   shl.ifz r0, r0, i_shift16      # Pick half to use
   shl ra8, r0, 3
 
-#  *** We could save a lot of registers by packing coeffs into an a reg
-#     or we could save the extract stage here - but we will need to put the
-#     signs into the filter
-
-  mov r1,0x00000101  # -ve
-  ror ra0, r1, ra8.8c
-  ror ra12, r1, ra8.8d
-
-  mov r1,0x00010404
-  ror ra1, r1, ra8.8c
-  ror ra13, r1, ra8.8d
-
-  mov r1,0x00050b0a  # -ve
-  ror ra2, r1, ra8.8c
-  ror ra14, r1, ra8.8d
-
-  mov r1,0x4011283a
-  ror ra3, r1, ra8.8c
-  ror ra15, r1, ra8.8d
-
-# ---
-
-  mov r1,0x003a2811
-  ror ra4, r1, ra8.8c
-  ror r0, r1, ra8.8d
-  asr rb4, r0, rb23
-
-  mov r1,0x000a0b05  # -ve
-  ror ra5, r1, ra8.8c
-  ror r0, r1, ra8.8d
-  asr rb5, r0, rb23
-
-  mov r1,0x00040401
-  ror ra6, r1, ra8.8c
-  ror r0, r1, ra8.8d
-  asr rb6, r0, rb23
+# Pack the 1st 4 filter coefs for H & V tightly
 
   mov r1,0x00010100  # -ve
-  ror ra7, r1, ra8.8c
-  ror r0, r1, ra8.8d
-  asr rb7, r0, rb23
+  ror ra0.8a, r1, ra8.8c
+  ror ra2.8a, r1, ra8.8d
 
-# Extract weighted prediction information
-# rb13 = weight denom + 6 + 9
+  mov r1,0x01040400
+  ror ra0.8b, r1, ra8.8c
+  ror ra2.8b, r1, ra8.8d
 
-  mov r0, unif ; mov r3, 0     # weight L1 (hi16)/weight L0 (lo16)  TODO move up
-  shl r1, unif, rb13 # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1)
+  mov r1,0x050b0a00  # -ve
+  ror ra0.8c, r1, ra8.8c
+  ror ra2.8c, r1, ra8.8d
+
+  mov r1,0x11283a40
+  ror ra0.8d, r1, ra8.8c
+  ror ra2.8d, r1, ra8.8d
+
+# In the 2nd vertical half we use b registers due to
+# using a-side fifo regs. The easiest way to achieve this to pack it
+# and then unpack!
+
+  mov r1,0x3a281100
+  ror ra1.8a, r1, ra8.8c
+  ror ra3.8a, r1, ra8.8d
+
+  mov r1,0x0a0b0500  # -ve
+  ror ra1.8b, r1, ra8.8c
+  ror ra3.8b, r1, ra8.8d
+
+  mov r1,0x04040100
+  ror ra1.8c, r1, ra8.8c
+  ror ra3.8c, r1, ra8.8d
+
+# Extract weighted prediction information in parallel
+
+  mov r1,0x01010000  # -ve
+  ror ra1.8d, r1, ra8.8c    ; mov r0, unif      # ; weight L1 weight L1 (hi16)/weight L0 (lo16)
+  ror ra3.8d, r1, ra8.8d    ; mov r1, rb13      # ; rb13 = weight denom + 6 + 9
+
+# r3 = 16 from (long way) above
+  shl r1, unif, r1          ; mov rb4, ra3.8a   # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) ;
+  asr ra18, r0, r3          ; mov rb5, ra3.8b
   bra -, ra31
-  asr ra18, r0, i_shift16
-  shl r0, r0, i_shift16
+  shl r0, r0, r3            ; mov rb6, ra3.8c
+  mov r3, 0                 ; mov rb7, ra3.8d   # loop count ;
   asr rb12, r1, 9
 
 # >>> branch ra31
@@ -917,22 +913,22 @@ nop        ; nop # delay slot 2
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-  nop                  ; mul24      r3, ra0.8d,      r0
-  nop                  ; mul24.ifnz r3, ra0.8d << 8, r1 << 8
-  nop                  ; mul24      r2, ra1.8d << 1, r0 << 1
-  nop                  ; mul24.ifnz r2, ra1.8d << 9, r1 << 9
-  sub r2, r2, r3       ; mul24      r3, ra2.8d << 2, r0 << 2
-  nop                  ; mul24.ifnz r3, ra2.8d << 10, r1 << 10
-  sub r2, r2, r3       ; mul24      r3, ra3.8d << 3, r0 << 3
-  nop                  ; mul24.ifnz r3, ra3.8d << 11, r1 << 11
-  add r2, r2, r3       ; mul24      r3, ra4.8d << 4, r0 << 4
-  nop                  ; mul24.ifnz r3, ra4.8d << 12, r1 << 12
-  add r2, r2, r3       ; mul24      r3, ra5.8d << 5, r0 << 5
-  nop                  ; mul24.ifnz r3, ra5.8d << 13, r1 << 13
-  sub r2, r2, r3       ; mul24      r3, ra6.8d << 6, r0 << 6
-  nop                  ; mul24.ifnz r3, ra6.8d << 14, r1 << 14
-  add r2, r2, r3       ; mul24      r3, ra7.8d << 7, r0 << 7
-  nop                  ; mul24.ifnz r3, ra7.8d << 15, r1 << 15
+  nop                  ; mul24      r3, ra0.8a,      r0
+  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
+  nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
+  nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
+  sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
+  nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+  sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
+  nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+  add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
+  nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
+  add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
+  nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
+  sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
+  nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
+  add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
+  nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
   sub r0, r2, r3       ; mov r3, rb31
 
   sub.setf -, r3, 8       ; mov r1,   ra8
@@ -945,10 +941,10 @@ nop        ; nop # delay slot 2
 
   # apply vertical filter and write to VPM
 
-  nop                     ; mul24 r0, rb8,  ra12.8d
-  nop                     ; mul24 r1, rb9,  ra13.8d
-  sub r1, r1, r0          ; mul24 r0, rb10, ra14.8d
-  sub r1, r1, r0          ; mul24 r0, rb11, ra15.8d
+  nop                     ; mul24 r0, rb8,  ra2.8a
+  nop                     ; mul24 r1, rb9,  ra2.8b
+  sub r1, r1, r0          ; mul24 r0, rb10, ra2.8c
+  sub r1, r1, r0          ; mul24 r0, rb11, ra2.8d
   add r1, r1, r0          ; mul24 r0, ra8,  rb4
   add r1, r1, r0          ; mul24 r0, ra9,  rb5
   sub r1, r1, r0          ; mul24 r0, ra10, rb6
@@ -1025,22 +1021,22 @@ nop        ; nop # delay slot 2
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-  nop                  ; mul24      r3, ra0.8d,      r0
-  nop                  ; mul24.ifnz r3, ra0.8d << 8, r1 << 8
-  nop                  ; mul24      r2, ra1.8d << 1, r0 << 1
-  nop                  ; mul24.ifnz r2, ra1.8d << 9, r1 << 9
-  sub r2, r2, r3       ; mul24      r3, ra2.8d << 2, r0 << 2
-  nop                  ; mul24.ifnz r3, ra2.8d << 10, r1 << 10
-  sub r2, r2, r3       ; mul24      r3, ra3.8d << 3, r0 << 3
-  nop                  ; mul24.ifnz r3, ra3.8d << 11, r1 << 11
-  add r2, r2, r3       ; mul24      r3, ra4.8d << 4, r0 << 4
-  nop                  ; mul24.ifnz r3, ra4.8d << 12, r1 << 12
-  add r2, r2, r3       ; mul24      r3, ra5.8d << 5, r0 << 5
-  nop                  ; mul24.ifnz r3, ra5.8d << 13, r1 << 13
-  sub r2, r2, r3       ; mul24      r3, ra6.8d << 6, r0 << 6
-  nop                  ; mul24.ifnz r3, ra6.8d << 14, r1 << 14
-  add r2, r2, r3       ; mul24      r3, ra7.8d << 7, r0 << 7
-  nop                  ; mul24.ifnz r3, ra7.8d << 15, r1 << 15
+  nop                  ; mul24      r3, ra0.8a,      r0
+  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
+  nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
+  nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
+  sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
+  nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+  sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
+  nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+  add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
+  nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
+  add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
+  nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
+  sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
+  nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
+  add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
+  nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
   sub r0, r2, r3       ; mov r3, rb31
 
   sub.setf -, r3, 8       ; mov r1,   ra8
@@ -1053,10 +1049,10 @@ nop        ; nop # delay slot 2
 
   # apply vertical filter and write to VPM
 
-  nop                     ; mul24 r0, rb8,  ra12.8d
-  nop                     ; mul24 r1, rb9,  ra13.8d
-  sub r1, r1, r0          ; mul24 r0, rb10, ra14.8d
-  sub r1, r1, r0          ; mul24 r0, rb11, ra15.8d
+  nop                     ; mul24 r0, rb8,  ra2.8a
+  nop                     ; mul24 r1, rb9,  ra2.8b
+  sub r1, r1, r0          ; mul24 r0, rb10, ra2.8c
+  sub r1, r1, r0          ; mul24 r0, rb11, ra2.8d
   add r1, r1, r0          ; mul24 r0, ra8,  rb4
   add r1, r1, r0          ; mul24 r0, ra9,  rb5
   sub r1, r1, r0          ; mul24 r0, ra10, rb6
