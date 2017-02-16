@@ -809,62 +809,63 @@ nop        ; nop # delay slot 2
   add rb26, r0, rb27
 
 # get filter coefficients and discard unused B frame values
-  not r0, unif   # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
+  mov r0, unif   # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
   shl.ifz r0, r0, i_shift16      # Pick half to use
-  asr ra9, r0, rb23;      mul24 r0, r0, ra_k256 # my2
-  asr ra8, r0, rb23
-  shl ra9,ra9,3   # Scale up by 8
-  shl ra8,ra8,3   # Scale up by 8
 
-# Now if we want aligned we have a mul of 1, so put 0 coefficients at the top
-  mov r1,0xffff00
-  shl r0, r1, ra8
+  shl ra8, r0, 3
+
+#  *** We could save a lot of registers by packing coeffs into an a reg
+#     or we could save the extract stage here - but we will need to put the
+#     signs into the filter
+
+  mov r1,0x0000ffff
+  ror r0, r1, ra8.8c
   asr ra0, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr ra12, r0, rb23
 
-  mov r1,0x1040400
-  shl r0, r1, ra8
+  mov r1,0x00010404
+  ror r0, r1, ra8.8c
   asr ra1, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr ra13, r0, rb23
 
-  mov r1,0xfbf5f600
-  shl r0, r1, ra8
+  mov r1,0x00fbf5f6
+  ror r0, r1, ra8.8c
   asr ra2, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr ra14, r0, rb23
 
-  mov r1,0x11283a40
-  shl r0, r1, ra8
+  mov r1,0x4011283a
+  ror r0, r1, ra8.8c
   asr ra3, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr ra15, r0, rb23
 
 # ---
 
-  mov r1,0x3a281100
-  shl r0, r1, ra8
+  mov r1,0x003a2811
+  ror r0, r1, ra8.8c
   asr ra4, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr rb4, r0, rb23
 
-  mov r1,0xf6f5fb00
-  shl r0, r1, ra8
+  mov r1,0x00f6f5fb
+  ror r0, r1, ra8.8c
   asr ra5, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr rb5, r0, rb23
 
-  mov r1,0x4040100
-  shl r0, r1, ra8
+  mov r1,0x00040401
+  ror r0, r1, ra8.8c
   asr ra6, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr rb6, r0, rb23
 
-  mov r1,0xffff0000
-  shl r0, r1, ra8
+  mov r1,0x00ffff00
+  ror r0, r1, ra8.8c
   asr ra7, r0, rb23
-  shl r0, r1, ra9
+  ror r0, r1, ra8.8d
   asr rb7, r0, rb23
 
 # Extract weighted prediction information

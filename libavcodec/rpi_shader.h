@@ -10,10 +10,10 @@ extern unsigned int rpi_shader[];
 #define mc_exit (rpi_shader + 604)
 #define mc_interrupt_exit8 (rpi_shader + 622)
 #define mc_setup (rpi_shader + 652)
-#define mc_filter (rpi_shader + 976)
-#define mc_filter_b (rpi_shader + 1096)
-#define mc_interrupt_exit12 (rpi_shader + 1218)
-#define mc_exit1 (rpi_shader + 1256)
-#define mc_end (rpi_shader + 1272)
+#define mc_filter (rpi_shader + 970)
+#define mc_filter_b (rpi_shader + 1090)
+#define mc_interrupt_exit12 (rpi_shader + 1212)
+#define mc_exit1 (rpi_shader + 1250)
+#define mc_end (rpi_shader + 1266)
 
 #endif
