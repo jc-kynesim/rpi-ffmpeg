@@ -806,65 +806,51 @@ nop        ; nop # delay slot 2
   shl r0,   ra1.16a, 7
   add r0,   r0, ra1.16b # Combine width and height of destination area
   shl r0,   r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
-  add rb26, r0, rb27
+  add rb26, r0, rb27                 ; mov r0, unif   # Packed filter offsets
 
 # get filter coefficients and discard unused B frame values
-  mov r0, unif   # Packed filter offsets, unpack into ra8... (to be used for vertical context later)
   shl.ifz r0, r0, i_shift16      # Pick half to use
-
   shl ra8, r0, 3
 
 #  *** We could save a lot of registers by packing coeffs into an a reg
 #     or we could save the extract stage here - but we will need to put the
 #     signs into the filter
 
-  mov r1,0x0000ffff
-  ror r0, r1, ra8.8c
-  asr ra0, r0, rb23
-  ror r0, r1, ra8.8d
-  asr ra12, r0, rb23
+  mov r1,0x00000101  # -ve
+  ror ra0, r1, ra8.8c
+  ror ra12, r1, ra8.8d
 
   mov r1,0x00010404
-  ror r0, r1, ra8.8c
-  asr ra1, r0, rb23
-  ror r0, r1, ra8.8d
-  asr ra13, r0, rb23
+  ror ra1, r1, ra8.8c
+  ror ra13, r1, ra8.8d
 
-  mov r1,0x00fbf5f6
-  ror r0, r1, ra8.8c
-  asr ra2, r0, rb23
-  ror r0, r1, ra8.8d
-  asr ra14, r0, rb23
+  mov r1,0x00050b0a  # -ve
+  ror ra2, r1, ra8.8c
+  ror ra14, r1, ra8.8d
 
   mov r1,0x4011283a
-  ror r0, r1, ra8.8c
-  asr ra3, r0, rb23
-  ror r0, r1, ra8.8d
-  asr ra15, r0, rb23
+  ror ra3, r1, ra8.8c
+  ror ra15, r1, ra8.8d
 
 # ---
 
   mov r1,0x003a2811
-  ror r0, r1, ra8.8c
-  asr ra4, r0, rb23
+  ror ra4, r1, ra8.8c
   ror r0, r1, ra8.8d
   asr rb4, r0, rb23
 
-  mov r1,0x00f6f5fb
-  ror r0, r1, ra8.8c
-  asr ra5, r0, rb23
+  mov r1,0x000a0b05  # -ve
+  ror ra5, r1, ra8.8c
   ror r0, r1, ra8.8d
   asr rb5, r0, rb23
 
   mov r1,0x00040401
-  ror r0, r1, ra8.8c
-  asr ra6, r0, rb23
+  ror ra6, r1, ra8.8c
   ror r0, r1, ra8.8d
   asr rb6, r0, rb23
 
-  mov r1,0x00ffff00
-  ror r0, r1, ra8.8c
-  asr ra7, r0, rb23
+  mov r1,0x00010100  # -ve
+  ror ra7, r1, ra8.8c
   ror r0, r1, ra8.8d
   asr rb7, r0, rb23
 
@@ -931,23 +917,23 @@ nop        ; nop # delay slot 2
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-  nop                  ; mul24 r2, r0, ra0
-  nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
-  nop                  ; mul24      r3, ra1 << 1, r0 << 1
-  nop                  ; mul24.ifnz r3, ra1 << 9, r1 << 9
-  add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
-  nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
-  add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
-  nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-  add r2, r2, r3       ; mul24    r3, ra4 << 4, r0 << 4
-  nop                  ; mul24.ifnz r3, ra4 << 12, r1 << 12
-  add r2, r2, r3       ; mul24    r3, ra5 << 5, r0 << 5
-  nop                  ; mul24.ifnz r3, ra5 << 13, r1 << 13
-  add r2, r2, r3       ; mul24    r3, ra6 << 6, r0 << 6
-  nop                  ; mul24.ifnz r3, ra6 << 14, r1 << 14
-  add r2, r2, r3       ; mul24    r3, ra7 << 7, r0 << 7
-  nop                  ; mul24.ifnz r3, ra7 << 15, r1 << 15
-  add r0, r2, r3       ; mov r3, rb31
+  nop                  ; mul24      r3, ra0.8d,      r0
+  nop                  ; mul24.ifnz r3, ra0.8d << 8, r1 << 8
+  nop                  ; mul24      r2, ra1.8d << 1, r0 << 1
+  nop                  ; mul24.ifnz r2, ra1.8d << 9, r1 << 9
+  sub r2, r2, r3       ; mul24      r3, ra2.8d << 2, r0 << 2
+  nop                  ; mul24.ifnz r3, ra2.8d << 10, r1 << 10
+  sub r2, r2, r3       ; mul24      r3, ra3.8d << 3, r0 << 3
+  nop                  ; mul24.ifnz r3, ra3.8d << 11, r1 << 11
+  add r2, r2, r3       ; mul24      r3, ra4.8d << 4, r0 << 4
+  nop                  ; mul24.ifnz r3, ra4.8d << 12, r1 << 12
+  add r2, r2, r3       ; mul24      r3, ra5.8d << 5, r0 << 5
+  nop                  ; mul24.ifnz r3, ra5.8d << 13, r1 << 13
+  sub r2, r2, r3       ; mul24      r3, ra6.8d << 6, r0 << 6
+  nop                  ; mul24.ifnz r3, ra6.8d << 14, r1 << 14
+  add r2, r2, r3       ; mul24      r3, ra7.8d << 7, r0 << 7
+  nop                  ; mul24.ifnz r3, ra7.8d << 15, r1 << 15
+  sub r0, r2, r3       ; mov r3, rb31
 
   sub.setf -, r3, 8       ; mov r1,   ra8
   mov ra8,  ra9           ; mov rb8,  rb9
@@ -959,15 +945,15 @@ nop        ; nop # delay slot 2
 
   # apply vertical filter and write to VPM
 
-  nop                     ; mul24 r1, rb8,  ra12
-  nop                     ; mul24 r0, rb9,  ra13
-  add r1, r1, r0          ; mul24 r0, rb10, ra14
-  add r1, r1, r0          ; mul24 r0, rb11, ra15
+  nop                     ; mul24 r0, rb8,  ra12.8d
+  nop                     ; mul24 r1, rb9,  ra13.8d
+  sub r1, r1, r0          ; mul24 r0, rb10, ra14.8d
+  sub r1, r1, r0          ; mul24 r0, rb11, ra15.8d
   add r1, r1, r0          ; mul24 r0, ra8,  rb4
   add r1, r1, r0          ; mul24 r0, ra9,  rb5
-  add r1, r1, r0          ; mul24 r0, ra10, rb6
+  sub r1, r1, r0          ; mul24 r0, ra10, rb6
   add r1, r1, r0          ; mul24 r0, ra11, rb7
-  add r1, r1, r0          ; mov -, vw_wait
+  sub r1, r1, r0          ; mov -, vw_wait
 # At this point r1 is a 22-bit signed quantity: 8 (original sample),
 #  +6, +6 (each pass), +1 (the passes can overflow slightly), +1 (sign)
 # The top 8 bits have rubbish in them as mul24 is unsigned
@@ -1039,23 +1025,23 @@ nop        ; nop # delay slot 2
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-  nop                  ; mul24 r2, r0, ra0
-  nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
-  nop                  ; mul24      r3, ra1 << 1, r0 << 1
-  nop                  ; mul24.ifnz r3, ra1 << 9, r1 << 9
-  add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
-  nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
-  add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
-  nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-  add r2, r2, r3       ; mul24    r3, ra4 << 4, r0 << 4
-  nop                  ; mul24.ifnz r3, ra4 << 12, r1 << 12
-  add r2, r2, r3       ; mul24    r3, ra5 << 5, r0 << 5
-  nop                  ; mul24.ifnz r3, ra5 << 13, r1 << 13
-  add r2, r2, r3       ; mul24    r3, ra6 << 6, r0 << 6
-  nop                  ; mul24.ifnz r3, ra6 << 14, r1 << 14
-  add r2, r2, r3       ; mul24    r3, ra7 << 7, r0 << 7
-  nop                  ; mul24.ifnz r3, ra7 << 15, r1 << 15
-  add r0, r2, r3       ; mov r3, rb31
+  nop                  ; mul24      r3, ra0.8d,      r0
+  nop                  ; mul24.ifnz r3, ra0.8d << 8, r1 << 8
+  nop                  ; mul24      r2, ra1.8d << 1, r0 << 1
+  nop                  ; mul24.ifnz r2, ra1.8d << 9, r1 << 9
+  sub r2, r2, r3       ; mul24      r3, ra2.8d << 2, r0 << 2
+  nop                  ; mul24.ifnz r3, ra2.8d << 10, r1 << 10
+  sub r2, r2, r3       ; mul24      r3, ra3.8d << 3, r0 << 3
+  nop                  ; mul24.ifnz r3, ra3.8d << 11, r1 << 11
+  add r2, r2, r3       ; mul24      r3, ra4.8d << 4, r0 << 4
+  nop                  ; mul24.ifnz r3, ra4.8d << 12, r1 << 12
+  add r2, r2, r3       ; mul24      r3, ra5.8d << 5, r0 << 5
+  nop                  ; mul24.ifnz r3, ra5.8d << 13, r1 << 13
+  sub r2, r2, r3       ; mul24      r3, ra6.8d << 6, r0 << 6
+  nop                  ; mul24.ifnz r3, ra6.8d << 14, r1 << 14
+  add r2, r2, r3       ; mul24      r3, ra7.8d << 7, r0 << 7
+  nop                  ; mul24.ifnz r3, ra7.8d << 15, r1 << 15
+  sub r0, r2, r3       ; mov r3, rb31
 
   sub.setf -, r3, 8       ; mov r1,   ra8
   mov ra8,  ra9           ; mov rb8,  rb9
@@ -1067,15 +1053,15 @@ nop        ; nop # delay slot 2
 
   # apply vertical filter and write to VPM
 
-  nop                     ; mul24 r1, rb8,  ra12
-  nop                     ; mul24 r0, rb9,  ra13
-  add r1, r1, r0          ; mul24 r0, rb10, ra14
-  add r1, r1, r0          ; mul24 r0, rb11, ra15
+  nop                     ; mul24 r0, rb8,  ra12.8d
+  nop                     ; mul24 r1, rb9,  ra13.8d
+  sub r1, r1, r0          ; mul24 r0, rb10, ra14.8d
+  sub r1, r1, r0          ; mul24 r0, rb11, ra15.8d
   add r1, r1, r0          ; mul24 r0, ra8,  rb4
   add r1, r1, r0          ; mul24 r0, ra9,  rb5
-  add r1, r1, r0          ; mul24 r0, ra10, rb6
+  sub r1, r1, r0          ; mul24 r0, ra10, rb6
   add r1, r1, r0          ; mul24 r0, ra11, rb7
-  add r1, r1, r0          ; mov r2, rb12
+  sub r1, r1, r0          ; mov r2, rb12
 # As with P-pred r1 is a 22-bit signed quantity in 32-bits
 # Top 8 bits are bad - low 6 bits should be discarded
   sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
