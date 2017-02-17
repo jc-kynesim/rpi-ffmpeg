@@ -469,22 +469,20 @@ add rb26, r0, rb27
 
 # get filter coefficients
 
-mov rb8, ra3.8a
-mov rb9, ra3.8b
-mov rb10, ra3.8c
-
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # Get offset & weight stuff
 
 # The unif read occurs unconditionally, only the write is conditional
-mov rb11, ra3.8d          ; mov      ra1, unif    # ; U offset/weight
-mov r3, 0                 ; mov.ifnz ra1, unif    # Loop counter ; V offset/weight
+mov      ra1, unif  ; mov rb8,  ra3.8a    # U offset/weight ;
+mov.ifnz ra1, unif  ; mov rb9,  ra3.8b    # V offset/weight ;
+nop                 ; mov rb10, ra3.8c
+mov r3, 0           ; mov rb11, ra3.8d    # Loop counter ;
 
 shl r1, ra1.16b, rb13
 asr rb12, r1, 1
 
-# ra1.16b used directly in the loop
+# ra1.16a used directly in the loop
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
