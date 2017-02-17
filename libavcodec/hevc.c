@@ -105,15 +105,17 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 #define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
 // TODO Chroma only needs 4 taps
-static uint32_t rpi_filter_coefs[8][1] = {
+
+// Actual filter goes -ve, +ve, +ve, -ve using these values
+static const uint32_t rpi_filter_coefs[8][1] = {
         { ENCODE_COEFFS(   0,  64,   0,   0) },
-        { ENCODE_COEFFS(  -2,  58,  10,  -2) },
-        { ENCODE_COEFFS(  -4,  54,  16,  -2) },
-        { ENCODE_COEFFS(  -6,  46,  28,  -4) },
-        { ENCODE_COEFFS(  -4,  36,  36,  -4) },
-        { ENCODE_COEFFS(  -4,  28,  46,  -6) },
-        { ENCODE_COEFFS(  -2,  16,  54,  -4) },
-        { ENCODE_COEFFS(  -2,  10,  58,  -2) }
+        { ENCODE_COEFFS(  2,  58,  10,  2) },
+        { ENCODE_COEFFS(  4,  54,  16,  2) },
+        { ENCODE_COEFFS(  6,  46,  28,  4) },
+        { ENCODE_COEFFS(  4,  36,  36,  4) },
+        { ENCODE_COEFFS(  4,  28,  46,  6) },
+        { ENCODE_COEFFS(  2,  16,  54,  4) },
+        { ENCODE_COEFFS(  2,  10,  58,  2) }
 };
 
 #endif

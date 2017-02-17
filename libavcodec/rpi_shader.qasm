@@ -282,15 +282,15 @@ add t1s, ra_frame_base, r2
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-nop                  ; mul24 r2, r0, ra0
-nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
-nop                  ; mul24      r3, ra1 << 1, r0 << 1
-nop                  ; mul24.ifnz r3, ra1 << 9, r1 << 9
-add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
+nop                  ; mul24      r3, r0, ra0
+nop                  ; mul24.ifnz r3, ra0 << 8, r1 << 8
+nop                  ; mul24      r2, ra1 << 1, r0 << 1
+nop                  ; mul24.ifnz r2, ra1 << 9, r1 << 9
+sub r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
 nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
 add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
 nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-add r0, r2, r3       ; mov r3, rb31
+sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop
 mov ra13, ra14          ; mul24 r1, ra14, rb9
@@ -300,9 +300,9 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # apply vertical filter and write to VPM
 
-add r1, r1, r0          ; mul24 r0, ra14, rb10
+sub r1, r1, r0          ; mul24 r0, ra14, rb10
 add r1, r1, r0          ; mul24 r0, ra15, rb11
-add r1, r1, r0          ; mov -, vw_wait
+sub r1, r1, r0          ; mov -, vw_wait
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14
 nop                     ; mul24 r1, r1, rb14
@@ -349,45 +349,31 @@ max r0, r0, 0                ; mov r1, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
 sub r2, unif, r3             ; mov ra_xshift, ra_xshift_next # compute offset from frame base u to frame base v ;
 shl ra_xshift_next, r0, 3
-add r0, r0, r3
-and rb_x_next, r0, ~3
-mov ra_y_next, r1
+add r0, r0, r3  	     ; mov ra1, unif   # ; width_height
+and rb_x_next, r0, ~3        ; mov ra0, unif   # ; H filter coeffs
+mov ra_y_next, r1            ; mov vw_setup, rb21
+
 add ra_frame_base_next, rb_x_next, r2
+
+# Need to have unsigned coeffs to so we can just unpack in the filter
+# chroma filter always goes -ve, +ve, +ve, -ve. This is fixed in the
+# filter code. Unpack into b regs for V
 
 # set up VPM write, we need to save 16bit precision
 # get width,height of block
-mov vw_setup, rb21           ; mov r0, unif
-shr r1, r0, i_shift16 # Extract width
-sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-and r0, r0, rb_k255 # Extract height
-add rb17, r0, 1
-add rb18, r0, 3
-shl r0, r0, 7
-add r0, r0, r1 # Combine width and height of destination area
-shl r0, r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
+
+sub rb29, rb24, ra1.16b         # Compute vdw_setup1(dst_pitch-width)
+add rb17, ra1.16a, 1
+add rb18, ra1.16a, 3
+shl r0,   ra1.16a, 7
+add r0,   r0, ra1.16b           # Combine width and height of destination area
+shl r0,   r0, i_shift16      ; mov ra3, unif  # ; V filter coeffs
 add rb26, r0, rb27
 
-# get filter coefficients
-
-### Need to have unsigned coeffs to so we can just unpack in the filter
-# chroma filter always goes -ve, +ve, +ve, -ve
-
-mov r0, unif          ; mov r3, 0
-#asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
-#asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
-#asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
-#asr ra0, r0, rb23;      mov r0, unif
-
-asr ra1.16b, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra1.16a, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra0.16b, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra0.16a, r0, rb23;      mov r0, unif
-
-
-asr rb11, r0, rb23;     mul24 r0, r0, ra_k256
-asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
-asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
-asr rb8, r0, rb23
+mov rb8, ra3.8a
+mov rb9, ra3.8b
+mov rb10, ra3.8c
+mov rb11, ra3.8d
 
 # r2 is elem_num
 # r3 is loop counter
@@ -395,8 +381,8 @@ asr rb8, r0, rb23
 mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-mov      rb14, unif   # U weight L0
-mov.ifnz rb14, unif   # V weight L0
+mov      rb14, unif                 # U weight L0
+mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 # rb14 unused in b0 but will hang around till the second pass
 
 # retrieve texture results and pick out bytes
@@ -424,15 +410,15 @@ add t1s, ra_frame_base, r2
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-nop                  ; mul24 r2, r0, ra0.16a
-nop                  ; mul24.ifnz r2, ra0.16a << 8, r1 << 8
-nop                  ; mul24      r3, ra0.16b << 1, r0 << 1
-nop                  ; mul24.ifnz r3, ra0.16b << 9, r1 << 9
-add r2, r2, r3       ; mul24    r3, ra1.16a << 2, r0 << 2
-nop                  ; mul24.ifnz r3, ra1.16a << 10, r1 << 10
-add r2, r2, r3       ; mul24    r3, ra1.16b << 3, r0 << 3
-nop                  ; mul24.ifnz r3, ra1.16b << 11, r1 << 11
-add r0, r2, r3       ; mov r3, rb31
+nop                  ; mul24      r3, ra0.8a,       r0
+nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
+nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1
+nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
+sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2
+nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3
+nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b0
 mov ra13, ra14          ; mul24 r1, ra14, rb9  # ra14 is about to be ra13
@@ -442,11 +428,11 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # apply vertical filter and write to VPM
 
-add r1, r1, r0          ; mul24 r0, ra14, rb10
+sub r1, r1, r0          ; mul24 r0, ra14, rb10
 sub.setf -, r3, rb18
 brr.anyn -, r:uvloop_b0
 add r1, r1, r0          ; mul24 r0, ra15, rb11
-add r1, r1, r0          ; mov -, vw_wait
+sub r1, r1, r0          ; mov -, vw_wait
 asr vpm, r1, 6
 # >>> .anyn uvloop_b0
 
@@ -549,15 +535,15 @@ add t1s, ra_frame_base, r2
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-nop                  ; mul24 r2, r0, ra0
-nop                  ; mul24.ifnz r2, ra0 << 8, r1 << 8
-nop                  ; mul24      r3, ra1 << 1, r0 << 1
-nop                  ; mul24.ifnz r3, ra1 << 9, r1 << 9
-add r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
+nop                  ; mul24      r3, r0, ra0
+nop                  ; mul24.ifnz r3, ra0 << 8, r1 << 8
+nop                  ; mul24      r2, ra1 << 1, r0 << 1
+nop                  ; mul24.ifnz r2, ra1 << 9, r1 << 9
+sub r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
 nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
 add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
 nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
-add r0, r2, r3       ; mov r3, rb31
+sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b
 mov ra13, ra14          ; mul24 r1, ra14, rb9
@@ -567,10 +553,10 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # apply vertical filter and write to VPM
 
-add r1, r1, r0          ; mul24 r0, ra14, rb10
+sub r1, r1, r0          ; mul24 r0, ra14, rb10
 add r1, r1, r0          ; mul24 r0, ra15, rb11
 # Beware: vpm read gets unsigned 16-bit value, so we must sign extend it
-add r1, r1, r0          ; mul24 r0, vpm, ra4  # ra4 = 0x10000
+sub r1, r1, r0          ; mul24 r0, vpm, ra4  # ra4 = 0x10000
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14          # shift2=6
 
