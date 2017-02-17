@@ -210,52 +210,40 @@ min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
 # compute offset from frame base u to frame base v
 sub r2, unif, r3      ; mov ra_xshift, ra_xshift_next
 shl ra_xshift_next, r0, 3
-add r0, r0, r3
-and rb_x_next, r0, ~3
-mov ra_y_next, r1
+add r0, r0, r3        ; mov ra1, unif  # ; width_height
+and rb_x_next, r0, ~3 ; mov ra0, unif  # H filter coeffs
+mov ra_y_next, r1     ; mov vw_setup, rb28
 add ra_frame_base_next, rb_x_next, r2
 
 # set up VPM write
 # get width,height of block
-mov vw_setup, rb28    ; mov r0, unif
-shr r1, r0, i_shift16 # Extract width
-sub rb29, rb24, r1 # Compute vdw_setup1(dst_pitch-width)
-and r0, r0, rb_k255 # Extract height
-add rb17, r0, 1
-add rb18, r0, 3
-shl r0, r0, 7
-add r0, r0, r1 # Combine width and height of destination area
-shl r0, r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
-add rb26, r0, rb27
 
-# get filter coefficients
-
-mov r0, unif          ; mov r3, 0
-asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra0, r0, rb23;      mov r0, unif
-asr rb11, r0, rb23;     mul24 r0, r0, ra_k256
-asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
-asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
-asr rb8, r0, rb23
+sub rb29, rb24, ra1.16b  # Compute vdw_setup1(dst_pitch-width)
+add rb17, ra1.16a, 1
+add rb18, ra1.16a, 3
+shl r0,   ra1.16a, 7
+add r0,   r0, ra1.16b    # Combine width and height of destination area
+shl r0,   r0, i_shift16  # Shift into bits 16 upwards of the vdw_setup0 register
+add rb26, r0, rb27    ; mov ra3, unif  # ; V filter coeffs
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-mov r0,      unif # U offset/weight
-mov.ifnz r0, unif # V offset/weight
+# unpack filter coefficients
 
-asr r1, r0, i_shift16 ; mul24 r0, r0, ra4  # a4 = 0x10000
-shl r1, r1, rb13
+mov ra1, unif         ; mov rb8,  ra3.8a   # U offset/weight
+mov.ifnz ra1, unif    ; mov rb9,  ra3.8b   # V offset/weight
+nop                   ; mov rb10, ra3.8c
+mov r3, 0             ; mov rb11, ra3.8d   # Loop count
+
+shl r1, ra1.16b, rb13
 asr rb12, r1, 1
-asr rb14, r0, 15  # rb14 = weight*2
+shl rb14, ra1.16a, 1  # b14 = weight*2
 
 # rb14 - weight L0 * 2
 # rb13 = weight denom + 6 + 9
 # rb12 = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
 
 # r2 is elem_num
-# r3 is loop counter
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
@@ -282,14 +270,14 @@ add t1s, ra_frame_base, r2
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-nop                  ; mul24      r3, r0, ra0
-nop                  ; mul24.ifnz r3, ra0 << 8, r1 << 8
-nop                  ; mul24      r2, ra1 << 1, r0 << 1
-nop                  ; mul24.ifnz r2, ra1 << 9, r1 << 9
-sub r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
-nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
-add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
-nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
+nop                  ; mul24      r3, ra0.8a,       r0
+nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
+nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1
+nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
+sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2
+nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3
+nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
 sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop
@@ -360,7 +348,6 @@ add ra_frame_base_next, rb_x_next, r2
 # filter code. Unpack into b regs for V
 
 # set up VPM write, we need to save 16bit precision
-# get width,height of block
 
 sub rb29, rb24, ra1.16b         # Compute vdw_setup1(dst_pitch-width)
 add rb17, ra1.16a, 1
@@ -378,7 +365,6 @@ mov rb11, ra3.8d
 # r2 is elem_num
 # r3 is loop counter
 
-mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 mov      rb14, unif                 # U weight L0
@@ -458,57 +444,47 @@ mov ra_xshift, ra_xshift_next      ; mov vw_setup, rb28
 # get base addresses and per-channel shifts for *next* invocation
 add r0, unif, elem_num    # x
 max r0, r0, 0                      ; mov ra_y_next, unif # y
-min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
+min r0, r0, rb_frame_width_minus_1 ; mov r3, unif        # V frame_base
 # compute offset from frame base u to frame base v
-sub r2, unif, r3                   ; mul24 ra_xshift_next, r0, 8
-add r0, r0, r3
-and rb_x_next, r0, ~3              ; mov r0, unif     # Width/Height
-shr r1, r0, i_shift16 # Extract width
-add ra_frame_base_next, rb_x_next, r2
+sub r2, unif, r3                   ; mul24 ra_xshift_next, r0, 8 # U frame_base
+add r0, r0, r3                     ; mov ra1, unif       # width_height
+and rb_x_next, r0, ~3              ; mov ra0, unif       # H filter coeffs
 
-sub rb29, rb24, r1  # Compute vdw_setup1(dst_pitch-width)
-and r0, r0, rb_k255 # Extract height
-add rb17, r0, 1
-add rb18, r0, 3
-shl r0, r0, 7
+sub rb29, rb24, ra1.16b  # Compute vdw_setup1(dst_pitch-width)
+add rb17, ra1.16a, 1
+add rb18, ra1.16a, 3
+shl r0,   ra1.16a, 7
+
+add ra_frame_base_next, rb_x_next, r2
 
 # r0 is currently height<<7
 # For vr_setup we want height<<20 (so 20-7=13 additional bits)
-shl r3, r0, i_shift21  # Shl 13 + Mask off top 8 bits
+shl r3, r0, i_shift21     ; mov ra3, unif # Shl 13 + Mask off top 8 bits ; V filter coeffs
 shr r3, r3, 8
-
-add r0, r0, r1 # Combine width and height of destination area
-shl r0, r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
-add rb26, r0, rb27
-
-# In a B frame, so also set up VPM read (reading back 16bit precision)
 add vr_setup, r3, rb21
+
+add r0, r0, ra1.16b    # Combine width and height of destination area
+shl r0, r0, i_shift16  # Shift into bits 16 upwards of the vdw_setup0 register
+add rb26, r0, rb27
 
 # get filter coefficients
 
-mov r0, unif          ; mov r3, 0               # r3 = 0 for loop counting later
-asr ra3, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra2, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra1, r0, rb23;      mul24 r0, r0, ra_k256
-asr ra0, r0, rb23;      mov r0, unif
-asr rb11, r0, rb23;     mul24 r0, r0, ra_k256
-asr rb10, r0, rb23;     mul24 r0, r0, ra_k256
-asr rb9, r0, rb23;      mul24 r0, r0, ra_k256
-asr rb8, r0, rb23
+mov rb8, ra3.8a
+mov rb9, ra3.8b
+mov rb10, ra3.8c
 
-mov r5rep, -8
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # Get offset & weight stuff
 
-mov      r0, unif         # U offset/weight
 # The unif read occurs unconditionally, only the write is conditional
-mov.ifnz r0, unif         # V offset/weight
+mov rb11, ra3.8d          ; mov      ra1, unif    # ; U offset/weight
+mov r3, 0                 ; mov.ifnz ra1, unif    # Loop counter ; V offset/weight
 
-asr r1, r0, i_shift16
-shl r1, r1, rb13
-asr rb12, r1, 1           ; mul24 r0, r0, ra4  # ra4 = 0x10000
-asr ra18, r0, i_shift16
+shl r1, ra1.16b, rb13
+asr rb12, r1, 1
+
+# ra1.16b used directly in the loop
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -535,14 +511,14 @@ add t1s, ra_frame_base, r2
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-nop                  ; mul24      r3, r0, ra0
-nop                  ; mul24.ifnz r3, ra0 << 8, r1 << 8
-nop                  ; mul24      r2, ra1 << 1, r0 << 1
-nop                  ; mul24.ifnz r2, ra1 << 9, r1 << 9
-sub r2, r2, r3       ; mul24    r3, ra2 << 2, r0 << 2
-nop                  ; mul24.ifnz r3, ra2 << 10, r1 << 10
-add r2, r2, r3       ; mul24    r3, ra3 << 3, r0 << 3
-nop                  ; mul24.ifnz r3, ra3 << 11, r1 << 11
+nop                  ; mul24      r3, ra0.8a,       r0
+nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
+nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1
+nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
+sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2
+nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3
+nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
 sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b
@@ -560,7 +536,7 @@ sub r1, r1, r0          ; mul24 r0, vpm, ra4  # ra4 = 0x10000
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14          # shift2=6
 
-asr r0, r0, i_shift16   ; mul24 r1, r1, ra18
+asr r0, r0, i_shift16   ; mul24 r1, r1, ra1.16a
 nop                     ; mul24 r0, r0, rb14
 
 add r1, r1, r0          ; mov -, vw_wait
