@@ -41,16 +41,18 @@ def testone(fileroot, name, es_file, md5_file):
     except:
         pass
 
-    rv = False
     if  m1 and m2 and m1.group() == m2.group():
         print >> flog, "Match: " + m1.group()
-        rv = True
+        rv = 0
     elif not m1:
         print >> flog, "****** Cannot find m1"
+        rv = 3
     elif not m2:
         print >> flog, "****** Cannot find m2"
+        rv = 2
     else:
         print >> flog, "****** Mismatch: " + m1.group() + " != " + m2.group()
+        rv = 1
     flog.close()
     return rv
 
@@ -96,19 +98,25 @@ def doconf(csva, tests):
             print "==== ", name,
             sys.stdout.flush()
 
-            if (not testone(os.path.join(conf_root, name), name, a[2], a[3])) :
-                if exp_test == 1:
-                    failures.append(name)
-                    print ": * FAIL *"
-                else:
-                    print ": fail"
-            else:
+            rv = testone(os.path.join(conf_root, name), name, a[2], a[3])
+            if (rv == 0):
                 if exp_test == 2:
                     print ": * OK *"
                     unx_success.append(name)
                 else:
                     print ": ok"
-
+            elif exp_test > 1 and rv == 1:
+                print ": fail"
+            else:
+                failures.append(name)
+                if rv == 1:
+                    print ": * FAIL *"
+                elif (rv == 2) :
+                    print ": * CRASH *"
+                elif (rv == 3) :
+                    print ": * MD5 MISSING *"
+                else :
+                    print ": * BANG *"
 
     if failures or unx_success:
         print "Unexpected Failures:", failures
