@@ -813,10 +813,13 @@ nop        ; nop # delay slot 2
 
   mov r1,0x01010000  # -ve
   ror ra3.8d, r1, ra8.8d    ; mov r0, unif      # ; weight L1 weight L1 (hi16)/weight L0 (lo16)
-  ror ra1.8d, r1, ra8.8c    ; mov r1, rb13      # ; rb13 = weight denom + 6 + 9
+  ror ra1.8d, r1, ra8.8c    ; mov r2, rb13      # ; rb13 = weight denom + 6 + 9
 
 # r3 = 16 from (long way) above
-  shl r1, unif, r1          ; mov rb4, ra3.8a   # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) ;
+  mov r1, unif                                  # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) ;
+  shl.ifz r1, r1, r3
+  asr r1, r1, r3
+  shl r1, r1, r2          ; mov rb4, ra3.8a
   asr ra18, r0, r3          ; mov rb5, ra3.8b
   bra -, ra31
   shl r0, r0, r3            ; mov rb6, ra3.8c
@@ -839,7 +842,9 @@ nop        ; nop # delay slot 2
 
 ::mc_filter
 # r0 = weight << 16; We want weight * 2 in rb14
+  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   asr rb14, r0, 15
+  shl.ifnz rb14, ra18, 1
 
 # r3 = 0
 

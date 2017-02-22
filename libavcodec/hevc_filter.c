@@ -877,7 +877,7 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CB
 #undef CR
 
-#if !defined(RPI_FAST_CACHEFLUSH)
+#if !defined(RPI_FAST_CACHEFLUSH) && (defined(RPI_DEBLOCK_VPU) || defined(RPI_INTER_QPU))
 #if defined(RPI_LUMA_QPU) || defined(RPI_DEBLOCK_VPU)
 static void flush_buffer_y(const AVFrame * const frame) {
     GPU_MEM_PTR_T p = get_gpu_mem_ptr_y(frame);

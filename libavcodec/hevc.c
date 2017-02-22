@@ -2167,6 +2167,71 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
     }
 }
 
+
+static void
+rpi_pred_y(HEVCContext * const s, const int x0, const int y0,
+  const int nPbW, const int nPbH,
+  const Mv * const mv,
+  const int weight_mul,
+  const int weight_offset,
+  AVFrame * const src_frame)
+{
+  const unsigned int mx          = mv->x & 3;
+  const unsigned int my          = mv->y & 3;
+  const unsigned int my_mx       = (my<<8) | mx;
+  const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
+  const int x1_m3 = x0 + (mv->x >> 2) - 3;
+  const int y1_m3 = y0 + (mv->y >> 2) - 3;
+  const uint32_t src_vc_address_y = get_vc_address_y(src_frame);
+  uint32_t * y = s->curr_y_mvs;
+  uint32_t dst_base = get_vc_address_y(s->frame) + x0 + y0 * s->frame->linesize[0];
+  const uint32_t wt_m = PACK2(weight_mul, weight_mul);
+  const int wt_o1 = weight_offset * 2 + 1;
+  const uint32_t wt_o = PACK2(wt_o1, wt_o1);
+
+  for(int start_y=0; start_y < nPbH; start_y += 16, dst_base += s->frame->linesize[0] * 16)
+  {  // Potentially we could change the assembly code to support taller sizes in one go
+    const uint32_t src_yx_y = y1_m3 + start_y;
+    int start_x = 0;
+    const int bh = FFMIN(nPbH - start_y, 16);
+    uint32_t *const py = y - RPI_LUMA_COMMAND_WORDS;
+    uint32_t *const ppy = y - RPI_LUMA_COMMAND_WORDS * 2;
+
+    // In the init (1st) block w/h is pic width height so given
+    // that no pic will ever be 8 pixels wide the first test here
+    // should fail if this is the first pred (i.e. after that test
+    // ppy is valid)
+    if (py[4] == ((8 << 16) | bh) && py[8] + 8 == dst_base && ppy[9] == s->mc_filter) {
+      const int bw = FFMIN(nPbW, 8);
+
+      ppy[2] = PACK2(src_yx_y, x1_m3);
+      ppy[3] = src_vc_address_y;
+      py[4] += bw << 16;
+      py[5] = PACK2(my2_mx2_my_mx, py[5]);
+      py[6] = PACK2(wt_m, py[6]);
+      py[7] = PACK2(wt_o, py[7]);
+
+      start_x = bw;
+    }
+
+    for (; start_x < nPbW; start_x += 16) {
+        const int bw = FFMIN(nPbW - start_x, 16);;
+        y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(src_yx_y, x1_m3 + start_x);
+        y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
+        y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(src_yx_y, x1_m3 + 8 + start_x);
+        y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
+        *y++ = PACK2(bw, bh);
+        *y++ = my2_mx2_my_mx;
+        *y++ = wt_m;
+        *y++ = wt_o;
+        *y++ = dst_base + start_x;
+        y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
+    }
+  }
+  s->curr_y_mvs = y;
+}
+
+
 static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y0,
                                 const int nPbW, const int nPbH,
                                 const unsigned int log2_cb_size, const unsigned int partIdx, const unsigned int idx)
@@ -2238,35 +2303,9 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
 
 #ifdef RPI_LUMA_QPU
         if (s->enable_rpi) {
-            const Mv * const mv    = &current_mv.mv[0];
-            const unsigned int mx          = mv->x & 3;
-            const unsigned int my          = mv->y & 3;
-            const unsigned int my_mx       = (my<<8) | mx;
-            const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
-            const int x1_m3 = x0 + (mv->x >> 2) - 3;
-            const int y1_m3 = y0 + (mv->y >> 2) - 3;
-            const uint32_t src_vc_address_y = get_vc_address_y(ref0->frame);
-            uint32_t * y = s->curr_y_mvs;
-
-            for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
-              const uint32_t src_yx_hi = ((y1_m3 + start_y) << 16);
-
-              for(int start_x=0;start_x < nPbW;start_x+=16) {
-                  const int bw = nPbW-start_x;
-                  const int bh = nPbH-start_y;
-                  y++[-RPI_LUMA_COMMAND_WORDS] = src_yx_hi | ((x1_m3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
-                  y++[-RPI_LUMA_COMMAND_WORDS] = src_yx_hi | ((x1_m3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
-                  *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
-                  *y++ = my2_mx2_my_mx;
-                  *y++ = s->sh.luma_weight_l0[current_mv.ref_idx[0]];
-                  *y++ = s->sh.luma_offset_l0[current_mv.ref_idx[0]] * 2 + 1;
-                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
-                }
-            }
-            s->curr_y_mvs = y;
+            rpi_pred_y(s, x0, y0, nPbW, nPbH, current_mv.mv + 0,
+              s->sh.luma_weight_l0[current_mv.ref_idx[0]], s->sh.luma_offset_l0[current_mv.ref_idx[0]],
+              ref0->frame);
         } else
 #endif
         {
@@ -2330,32 +2369,9 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
 
 #ifdef RPI_LUMA_QPU
         if (s->enable_rpi) {
-            const int reflist = 1;
-            const Mv *mv    = &current_mv.mv[reflist];
-            int mx          = mv->x & 3;
-            int my          = mv->y & 3;
-            int my_mx = (my<<8) + mx;
-            int my2_mx2_my_mx = (my_mx << 16) + my_mx;
-            int x1 = x0 + (mv->x >> 2);
-            int y1 = y0 + (mv->y >> 2);
-            uint32_t *y = s->curr_y_mvs;
-            for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
-              for(int start_x=0;start_x < nPbW;start_x+=16) {
-                  int bw = nPbW-start_x;
-                  int bh = nPbH-start_y;
-                  y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + 8 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
-                  *y++ = ( (bw<16 ? bw : 16) << 16 ) + (bh<16 ? bh : 16);
-                  *y++ = my2_mx2_my_mx;
-                  *y++ = s->sh.luma_weight_l1[current_mv.ref_idx[reflist]];
-                  *y++ = s->sh.luma_offset_l1[current_mv.ref_idx[reflist]] * 2 + 1;
-                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter;
-                }
-            }
-            s->curr_y_mvs = y;
+            rpi_pred_y(s, x0, y0, nPbW, nPbH, current_mv.mv + 1,
+              s->sh.luma_weight_l1[current_mv.ref_idx[1]], s->sh.luma_offset_l1[current_mv.ref_idx[1]],
+              ref1->frame);
         } else
 #endif
 
@@ -2421,7 +2437,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
 #ifdef RPI_LUMA_QPU
-        if (s->enable_rpi && 0) {
+        if (s->enable_rpi) {
             const Mv *mv    = &current_mv.mv[0];
             int mx          = mv->x & 3;
             int my          = mv->y & 3;
@@ -2435,6 +2451,11 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
             int y1 = y0 + (mv->y >> 2);
             int x2 = x0 + (mv2->x >> 2);
             int y2 = y0 + (mv2->y >> 2);
+            const uint32_t wt_m = PACK2(s->sh.luma_weight_l1[current_mv.ref_idx[1]],
+                               s->sh.luma_weight_l0[current_mv.ref_idx[0]]);
+            const uint32_t wt_o1 = s->sh.luma_offset_l0[current_mv.ref_idx[0]] +
+                         s->sh.luma_offset_l1[current_mv.ref_idx[1]] + 1;
+            const uint32_t wt_o = PACK2(wt_o1, wt_o1);
             uint32_t *y = s->curr_y_mvs;
             for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
               for(int start_x=0;start_x < nPbW;start_x+=8) { // B blocks work 8 at a time
@@ -2447,10 +2468,8 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
                   *y++ = PACK2(bw<8 ? bw : 8, bh<16 ? bh : 16);
                   *y++ = my2_mx2_my_mx;
 
-                  *y++ = PACK2(s->sh.luma_weight_l1[current_mv.ref_idx[1]],
-                               s->sh.luma_weight_l0[current_mv.ref_idx[0]]);
-                  *y++ = s->sh.luma_offset_l0[current_mv.ref_idx[0]] +
-                         s->sh.luma_offset_l1[current_mv.ref_idx[1]] + 1;
+                  *y++ = wt_m;
+                  *y++ = wt_o;
 
                   *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
                   y++[-RPI_LUMA_COMMAND_WORDS] = s->mc_filter_b;
