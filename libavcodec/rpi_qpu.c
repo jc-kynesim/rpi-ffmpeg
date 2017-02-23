@@ -37,12 +37,9 @@
 #endif
 
 // QPU profile flags
-#define NO_FLUSH 1
-#define CLEAR_PROFILE 2
-#define OUTPUT_COUNTS 4
-
-#define FLAGS_FOR_PROFILING (NO_FLUSH)
-
+#define QPU_FLAGS_PROF_NO_FLUSH 1
+#define QPU_FLAGS_PROF_CLEAR_PROFILE 2
+#define QPU_FLAGS_PROF_OUTPUT_COUNTS 4
 
 // On Pi2 there is no way to access the VPU L2 cache
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
@@ -469,6 +466,18 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   sem_t sync0;
   struct gpu_job_s j[4];
 
+  uint32_t qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH;
+#if 0
+  static int z = 0;
+  if (z == 0) {
+    z = 1;
+    qpu_pflags = QPU_FLAGS_PROF_CLEAR_PROFILE;
+  }
+  else if ((z++ & 2047) == 0) {
+    qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH | QPU_FLAGS_PROF_OUTPUT_COUNTS;
+  }
+#endif
+
   sem_init(&sync0, 0, 0);
 
   j[0].command = EXECUTE_VPU;
@@ -485,7 +494,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   j[1].command = EXECUTE_QPU;
   j[1].u.q.jobs = qpu1_n;
   memcpy(j[1].u.q.control, qpu1_mail, qpu1_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
-  j[1].u.q.noflush = FLAGS_FOR_PROFILING;
+  j[1].u.q.noflush = qpu_pflags;
   j[1].u.q.timeout = 5000;
   j[1].callback.func = 0;
   j[1].callback.cookie = NULL;
@@ -493,11 +502,12 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   j[2].command = EXECUTE_QPU;
   j[2].u.q.jobs = qpu0_n;
   memcpy(j[2].u.q.control, qpu0_mail, qpu0_n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
-  j[2].u.q.noflush = 1;
+  j[2].u.q.noflush = QPU_FLAGS_PROF_NO_FLUSH;
   j[2].u.q.timeout = 5000;
   j[2].callback.func = 0;
   j[2].callback.cookie = NULL;
 
+  // If we want to mix QPU & ARM pred then we must sync here
   j[3].command = EXECUTE_SYNC;
   j[3].u.s.mask = 3;
   j[3].callback.func = callback;

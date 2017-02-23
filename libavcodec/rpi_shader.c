@@ -418,14 +418,14 @@ unsigned int rpi_shader[] = {
 /* [0x00000bf8] */ 0x139c01c0, 0xd0020827, // max r0, r0, 0
 /* [0x00000c00] */ 0x928191f6, 0x10024822, // min r0, r0, rb_frame_width_minus_1 ; mov r2, unif
 /* [0x00000c08] */ 0x119c31c0, 0xd00204e7, // shl ra_xshift_next, r0, 3
-/* [0x00000c10] */ 0x95048ff6, 0xd40258dc, // mov r3, 8                          ; mov ra_y_next, ra1.16b
+/* [0x00000c10] */ 0x15067d80, 0x14020727, // mov ra_y_next, ra1.16b
 /* [0x00000c18] */ 0x9481c1f6, 0xd0025801, // and r0, r0, ~3                     ; mov ra1, unif
 /* [0x00000c20] */ 0x0c9e7400, 0x100206a7, // add ra_frame_base_next, r2, r0
 /* [0x00000c28] */ 0x0c067c40, 0x12020827, // add r0, ra1.16a, r1
 /* [0x00000c30] */ 0x139c01c0, 0xd0020827, // max r0, r0, 0
 /* [0x00000c38] */ 0x928191f6, 0x10024822, // min r0, r0, rb_frame_width_minus_1 ; mov r2, unif
 /* [0x00000c40] */ 0x119c31c0, 0xd0021067, // shl rx_xshift2_next, r0, 3
-/* [0x00000c48] */ 0x8c0676f6, 0x142258d5, // add r3, r3, r3                     ; mov ra_y2_next, ra1.16b
+/* [0x00000c48] */ 0x15067d80, 0x14220567, // mov ra_y2_next, ra1.16b
 /* [0x00000c50] */ 0x9481c1f6, 0xd0025801, // and r0, r0, ~3                     ; mov ra1, unif
 /* [0x00000c58] */ 0x0c9e7400, 0x100214e7, // add rx_frame_base2_next, r2, r0
 /* [0x00000c60] */ 0x159dcfc0, 0x10021c67, // mov vw_setup, rb28
@@ -436,7 +436,7 @@ unsigned int rpi_shader[] = {
 /* [0x00000c88] */ 0x0c067180, 0x14020827, // add r0,   r0, ra1.16b
 /* [0x00000c90] */ 0x119d01c0, 0xd0020827, // shl r0,   r0, i_shift16
 /* [0x00000c98] */ 0x8c81b1f6, 0x100256a0, // add rb26, r0, rb27                 ; mov r0, unif
-/* [0x00000ca0] */ 0x119d01c0, 0xd0040827, // shl.ifz r0, r0, i_shift16
+/* [0x00000ca0] */ 0x918101f6, 0xd0045805, // shl.ifz r0, r0, i_shift16          ; mov ra5, unif
 /* [0x00000ca8] */ 0x119c31c0, 0xd0020227, // shl ra8, r0, 3
 /* [0x00000cb0] */ 0x00010100, 0xe0020867, // mov r1,0x00010100
 /* [0x00000cb8] */ 0x10227380, 0x1e4200a7, // ror ra2.8a, r1, ra8.8d
@@ -460,150 +460,150 @@ unsigned int rpi_shader[] = {
 /* [0x00000d48] */ 0x10227380, 0x1e6200e7, // ror ra3.8c, r1, ra8.8d
 /* [0x00000d50] */ 0x10227380, 0x1c620067, // ror ra1.8c, r1, ra8.8c
 /* [0x00000d58] */ 0x01010000, 0xe0020867, // mov r1,0x01010000
-/* [0x00000d60] */ 0x902203bf, 0x1e7240e0, // ror ra3.8d, r1, ra8.8d    ; mov r0, unif
-/* [0x00000d68] */ 0x9020d3bf, 0x1c724062, // ror ra1.8d, r1, ra8.8c    ; mov r2, rb13
-/* [0x00000d70] */ 0x15827d80, 0x10020867, // mov r1, unif
-/* [0x00000d78] */ 0x119e72c0, 0x10040867, // shl.ifz r1, r1, r3
-/* [0x00000d80] */ 0x0f9e72c0, 0x10020867, // asr r1, r1, r3
-/* [0x00000d88] */ 0x910e72b6, 0x18024844, // shl r1, r1, r2          ; mov rb4, ra3.8a
-/* [0x00000d90] */ 0x8f0e70f6, 0x1a024485, // asr ra18, r0, r3          ; mov rb5, ra3.8b
+/* [0x00000d60] */ 0x10227380, 0x1e7200e7, // ror ra3.8d, r1, ra8.8d
+/* [0x00000d68] */ 0x10227380, 0x1c720067, // ror ra1.8d, r1, ra8.8c
+/* [0x00000d70] */ 0x95160dbf, 0x12025392, // mov rb14, ra5.16a          ; mov ra18, unif
+/* [0x00000d78] */ 0x150e7d80, 0x18021127, // mov rb4, ra3.8a
+/* [0x00000d80] */ 0x150e7d80, 0x1a021167, // mov rb5, ra3.8b
+/* [0x00000d88] */ 0x150e7d80, 0x1c0211a7, // mov rb6, ra3.8c
+/* [0x00000d90] */ 0x154a7d80, 0x10060167, // mov.ifnz ra5, ra18
 /* [0x00000d98] */ 0x00000000, 0xf0f7e9e7, // bra -, ra31
-/* [0x00000da0] */ 0x910e70f6, 0x1c024806, // shl r0, r0, r3            ; mov rb6, ra3.8c
-/* [0x00000da8] */ 0x950c0ff6, 0xde0248c7, // mov r3, 0                 ; mov rb7, ra3.8d
-/* [0x00000db0] */ 0x0f9c93c0, 0xd0021327, // asr rb12, r1, 9
+/* [0x00000da0] */ 0x1114ddc0, 0x14020827, // shl r0, ra5.16b, rb13
+/* [0x00000da8] */ 0x0f9c91c0, 0xd0021327, // asr rb12, r0, 9
+/* [0x00000db0] */ 0x950c0ff6, 0xde0248c7, // mov r3, 0                  ; mov rb7, ra3.8d
 // ::mc_filter
-/* [0x00000db8] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-/* [0x00000dc0] */ 0x0f9cf1c0, 0xd00213a7, // asr rb14, r0, 15
-/* [0x00000dc8] */ 0x11481dc0, 0xd00613a7, // shl.ifnz rb14, ra18, 1
+/* [0x00000db8] */ 0x11141dc0, 0xd20213a7, // shl rb14, ra5.16a, 1
 // :yloop
-/* [0x00000dd0] */ 0xcd5117de, 0xa00269e3, // sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
-/* [0x00000dd8] */ 0x8e4539bf, 0xb0029819, // shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
-/* [0x00000de0] */ 0x956a7d9b, 0x1004461f, // mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
-/* [0x00000de8] */ 0x95710dbf, 0x10044763, // mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-/* [0x00000df0] */ 0x8e5409f6, 0x14129855, // shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
-/* [0x00000df8] */ 0x13740dc0, 0xd00208a7, // max r2, ra_y, 0
-/* [0x00000e00] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
-/* [0x00000e08] */ 0x4c741dd3, 0xd0024762, // add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-/* [0x00000e10] */ 0xec614c87, 0x10024e20, // add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20
-/* [0x00000e18] */ 0x13540dc0, 0xd20208a7, // max r2, ra_y2, 0
-/* [0x00000e20] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
-/* [0x00000e28] */ 0x4c541dd3, 0xd2124562, // add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
-/* [0x00000e30] */ 0xec654c8f, 0x10024f21, // add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
-/* [0x00000e38] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-/* [0x00000e40] */ 0x40027030, 0x180049e3, // nop                  ; mul24      r3, ra0.8a,      r0
-/* [0x00000e48] */ 0x40038031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
-/* [0x00000e50] */ 0x4003f030, 0xda0049e2, // nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
-/* [0x00000e58] */ 0x40037031, 0xda00c9e2, // nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
-/* [0x00000e60] */ 0x4d03e4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
-/* [0x00000e68] */ 0x40036031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-/* [0x00000e70] */ 0x4d03d4f0, 0xde0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
-/* [0x00000e78] */ 0x40035031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
-/* [0x00000e80] */ 0x4c07c4f0, 0xd80248a3, // add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
-/* [0x00000e88] */ 0x40074031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
-/* [0x00000e90] */ 0x4c07b4f0, 0xda0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
-/* [0x00000e98] */ 0x40073031, 0xda00c9e3, // nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
-/* [0x00000ea0] */ 0x4d07a4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
-/* [0x00000ea8] */ 0x40072031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
-/* [0x00000eb0] */ 0x4c0794f0, 0xde0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
-/* [0x00000eb8] */ 0x40071031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
-/* [0x00000ec0] */ 0x8d9df4ff, 0x10024823, // sub r0, r2, r3       ; mov r3, rb31
-/* [0x00000ec8] */ 0x8d2087f6, 0xd00269e1, // sub.setf -, r3, 8       ; mov r1,   ra8
-/* [0x00000ed0] */ 0x95249dbf, 0x10024208, // mov ra8,  ra9           ; mov rb8,  rb9
-/* [0x00000ed8] */ 0xfffffed8, 0xf06809e7, // brr.anyn -, r:yloop
-/* [0x00000ee0] */ 0x9528adbf, 0x10024249, // mov ra9,  ra10          ; mov rb9,  rb10
-/* [0x00000ee8] */ 0x952cbdbf, 0x1002428a, // mov ra10, ra11          ; mov rb10, rb11
-/* [0x00000ef0] */ 0x959e7009, 0x100242cb, // mov ra11, r0            ; mov rb11, r1
-/* [0x00000ef8] */ 0x4008803e, 0x180049e0, // nop                     ; mul24 r0, rb8,  ra2.8a
-/* [0x00000f00] */ 0x4008903e, 0x1a0049e1, // nop                     ; mul24 r1, rb9,  ra2.8b
-/* [0x00000f08] */ 0x4d08a23e, 0x1c024860, // sub r1, r1, r0          ; mul24 r0, rb10, ra2.8c
-/* [0x00000f10] */ 0x4d08b23e, 0x1e024860, // sub r1, r1, r0          ; mul24 r0, rb11, ra2.8d
-/* [0x00000f18] */ 0x4c204237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra8,  rb4
-/* [0x00000f20] */ 0x4c245237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra9,  rb5
-/* [0x00000f28] */ 0x4d286237, 0x10024860, // sub r1, r1, r0          ; mul24 r0, ra10, rb6
-/* [0x00000f30] */ 0x4c2c7237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra11, rb7
-/* [0x00000f38] */ 0x8d9f223f, 0x10020867, // sub r1, r1, r0          ; mov -, vw_wait
-/* [0x00000f40] */ 0x4d5927ce, 0x100269e1, // sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
-/* [0x00000f48] */ 0x0f9ce3c0, 0xd0020867, // asr r1, r1, 14
-/* [0x00000f50] */ 0x409ce00f, 0x100049e1, // nop                     ; mul24 r1, r1, rb14
-/* [0x00000f58] */ 0x0c9cc3c0, 0x10020867, // add r1, r1, rb12
-/* [0x00000f60] */ 0x119c83c0, 0xd0020867, // shl r1, r1, 8
-/* [0x00000f68] */ 0xfffffe48, 0xf06809e7, // brr.anyn -, r:yloop
-/* [0x00000f70] */ 0x0f9cd3c0, 0x10020867, // asr r1, r1, rb13
-/* [0x00000f78] */ 0x129d63c0, 0x10020867, // min r1, r1, rb_k255
-/* [0x00000f80] */ 0x139c03c0, 0xd0020c27, // max vpm, r1, 0
-/* [0x00000f88] */ 0xfffffc20, 0xf0f809e7, // brr -, r:per_block_setup
-/* [0x00000f90] */ 0x159dafc0, 0x10021c67, // mov vw_setup, rb26
-/* [0x00000f98] */ 0x159ddfc0, 0x10021c67, // mov vw_setup, rb29
-/* [0x00000fa0] */ 0x15827d80, 0x10021ca7, // mov vw_addr, unif
+/* [0x00000dc0] */ 0xcd5117de, 0xa00269e3, // sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
+/* [0x00000dc8] */ 0x8e4539bf, 0xb0029819, // shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
+/* [0x00000dd0] */ 0x956a7d9b, 0x1004461f, // mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
+/* [0x00000dd8] */ 0x95710dbf, 0x10044763, // mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
+/* [0x00000de0] */ 0x8e5409f6, 0x14129855, // shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
+/* [0x00000de8] */ 0x13740dc0, 0xd00208a7, // max r2, ra_y, 0
+/* [0x00000df0] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
+/* [0x00000df8] */ 0x4c741dd3, 0xd0024762, // add ra_y, ra_y, 1            ; mul24 r2, r2, r3
+/* [0x00000e00] */ 0xec614c87, 0x10024e20, // add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20
+/* [0x00000e08] */ 0x13540dc0, 0xd20208a7, // max r2, ra_y2, 0
+/* [0x00000e10] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
+/* [0x00000e18] */ 0x4c541dd3, 0xd2124562, // add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
+/* [0x00000e20] */ 0xec654c8f, 0x10024f21, // add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
+/* [0x00000e28] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+/* [0x00000e30] */ 0x40027030, 0x180049e3, // nop                  ; mul24      r3, ra0.8a,      r0
+/* [0x00000e38] */ 0x40038031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
+/* [0x00000e40] */ 0x4003f030, 0xda0049e2, // nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
+/* [0x00000e48] */ 0x40037031, 0xda00c9e2, // nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
+/* [0x00000e50] */ 0x4d03e4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
+/* [0x00000e58] */ 0x40036031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+/* [0x00000e60] */ 0x4d03d4f0, 0xde0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
+/* [0x00000e68] */ 0x40035031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+/* [0x00000e70] */ 0x4c07c4f0, 0xd80248a3, // add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
+/* [0x00000e78] */ 0x40074031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
+/* [0x00000e80] */ 0x4c07b4f0, 0xda0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
+/* [0x00000e88] */ 0x40073031, 0xda00c9e3, // nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
+/* [0x00000e90] */ 0x4d07a4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
+/* [0x00000e98] */ 0x40072031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
+/* [0x00000ea0] */ 0x4c0794f0, 0xde0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
+/* [0x00000ea8] */ 0x40071031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
+/* [0x00000eb0] */ 0x8d9df4ff, 0x10024823, // sub r0, r2, r3       ; mov r3, rb31
+/* [0x00000eb8] */ 0x8d2087f6, 0xd00269e1, // sub.setf -, r3, 8       ; mov r1,   ra8
+/* [0x00000ec0] */ 0x95249dbf, 0x10024208, // mov ra8,  ra9           ; mov rb8,  rb9
+/* [0x00000ec8] */ 0xfffffed8, 0xf06809e7, // brr.anyn -, r:yloop
+/* [0x00000ed0] */ 0x9528adbf, 0x10024249, // mov ra9,  ra10          ; mov rb9,  rb10
+/* [0x00000ed8] */ 0x952cbdbf, 0x1002428a, // mov ra10, ra11          ; mov rb10, rb11
+/* [0x00000ee0] */ 0x959e7009, 0x100242cb, // mov ra11, r0            ; mov rb11, r1
+/* [0x00000ee8] */ 0x4008803e, 0x180049e0, // nop                     ; mul24 r0, rb8,  ra2.8a
+/* [0x00000ef0] */ 0x4008903e, 0x1a0049e1, // nop                     ; mul24 r1, rb9,  ra2.8b
+/* [0x00000ef8] */ 0x4d08a23e, 0x1c024860, // sub r1, r1, r0          ; mul24 r0, rb10, ra2.8c
+/* [0x00000f00] */ 0x4d08b23e, 0x1e024860, // sub r1, r1, r0          ; mul24 r0, rb11, ra2.8d
+/* [0x00000f08] */ 0x4c204237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra8,  rb4
+/* [0x00000f10] */ 0x4c245237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra9,  rb5
+/* [0x00000f18] */ 0x4d286237, 0x10024860, // sub r1, r1, r0          ; mul24 r0, ra10, rb6
+/* [0x00000f20] */ 0x4c2c7237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra11, rb7
+/* [0x00000f28] */ 0x8d9f223f, 0x10020867, // sub r1, r1, r0          ; mov -, vw_wait
+/* [0x00000f30] */ 0x4d5927ce, 0x100269e1, // sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
+/* [0x00000f38] */ 0x0f9ce3c0, 0xd0020867, // asr r1, r1, 14
+/* [0x00000f40] */ 0x409ce00f, 0x100049e1, // nop                     ; mul24 r1, r1, rb14
+/* [0x00000f48] */ 0x0c9cc3c0, 0x10020867, // add r1, r1, rb12
+/* [0x00000f50] */ 0x119c83c0, 0xd0020867, // shl r1, r1, 8
+/* [0x00000f58] */ 0xfffffe48, 0xf06809e7, // brr.anyn -, r:yloop
+/* [0x00000f60] */ 0x0f9cd3c0, 0x10020867, // asr r1, r1, rb13
+/* [0x00000f68] */ 0x129d63c0, 0x10020867, // min r1, r1, rb_k255
+/* [0x00000f70] */ 0x139c03c0, 0xd0020c27, // max vpm, r1, 0
+/* [0x00000f78] */ 0xfffffc30, 0xf0f809e7, // brr -, r:per_block_setup
+/* [0x00000f80] */ 0x159dafc0, 0x10021c67, // mov vw_setup, rb26
+/* [0x00000f88] */ 0x159ddfc0, 0x10021c67, // mov vw_setup, rb29
+/* [0x00000f90] */ 0x15827d80, 0x10021ca7, // mov vw_addr, unif
 // ::mc_filter_b
-/* [0x00000fa8] */ 0x0f9d01c0, 0xd00213a7, // asr rb14, r0, i_shift16
 // :yloopb
-/* [0x00000fb0] */ 0xcd5117de, 0xa00269e3, // sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
-/* [0x00000fb8] */ 0x8e4539bf, 0xb0029819, // shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
-/* [0x00000fc0] */ 0x956a7d9b, 0x1004461f, // mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
-/* [0x00000fc8] */ 0x95710dbf, 0x10044763, // mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-/* [0x00000fd0] */ 0x8e5409f6, 0x14129855, // shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
-/* [0x00000fd8] */ 0x13740dc0, 0xd00208a7, // max r2, ra_y, 0
-/* [0x00000fe0] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
-/* [0x00000fe8] */ 0x4c741dd3, 0xd0024762, // add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-/* [0x00000ff0] */ 0xec614c87, 0x10024e20, // add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20
-/* [0x00000ff8] */ 0x13540dc0, 0xd20208a7, // max r2, ra_y2, 0
-/* [0x00001000] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
-/* [0x00001008] */ 0x4c541dd3, 0xd2124562, // add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
-/* [0x00001010] */ 0xec654c8f, 0x10024f21, // add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
-/* [0x00001018] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-/* [0x00001020] */ 0x40027030, 0x180049e3, // nop                  ; mul24      r3, ra0.8a,      r0
-/* [0x00001028] */ 0x40038031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
-/* [0x00001030] */ 0x4003f030, 0xda0049e2, // nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
-/* [0x00001038] */ 0x40037031, 0xda00c9e2, // nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
-/* [0x00001040] */ 0x4d03e4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
-/* [0x00001048] */ 0x40036031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-/* [0x00001050] */ 0x4d03d4f0, 0xde0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
-/* [0x00001058] */ 0x40035031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
-/* [0x00001060] */ 0x4c07c4f0, 0xd80248a3, // add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
-/* [0x00001068] */ 0x40074031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
-/* [0x00001070] */ 0x4c07b4f0, 0xda0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
-/* [0x00001078] */ 0x40073031, 0xda00c9e3, // nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
-/* [0x00001080] */ 0x4d07a4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
-/* [0x00001088] */ 0x40072031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
-/* [0x00001090] */ 0x4c0794f0, 0xde0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
-/* [0x00001098] */ 0x40071031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
-/* [0x000010a0] */ 0x8d9df4ff, 0x10024823, // sub r0, r2, r3       ; mov r3, rb31
-/* [0x000010a8] */ 0x8d2087f6, 0xd00269e1, // sub.setf -, r3, 8       ; mov r1,   ra8
-/* [0x000010b0] */ 0x95249dbf, 0x10024208, // mov ra8,  ra9           ; mov rb8,  rb9
-/* [0x000010b8] */ 0xfffffed8, 0xf06809e7, // brr.anyn -, r:yloopb
-/* [0x000010c0] */ 0x9528adbf, 0x10024249, // mov ra9,  ra10          ; mov rb9,  rb10
-/* [0x000010c8] */ 0x952cbdbf, 0x1002428a, // mov ra10, ra11          ; mov rb10, rb11
-/* [0x000010d0] */ 0x959e7009, 0x100242cb, // mov ra11, r0            ; mov rb11, r1
-/* [0x000010d8] */ 0x4008803e, 0x180049e0, // nop                     ; mul24 r0, rb8,  ra2.8a
-/* [0x000010e0] */ 0x4008903e, 0x1a0049e1, // nop                     ; mul24 r1, rb9,  ra2.8b
-/* [0x000010e8] */ 0x4d08a23e, 0x1c024860, // sub r1, r1, r0          ; mul24 r0, rb10, ra2.8c
-/* [0x000010f0] */ 0x4d08b23e, 0x1e024860, // sub r1, r1, r0          ; mul24 r0, rb11, ra2.8d
-/* [0x000010f8] */ 0x4c204237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra8,  rb4
-/* [0x00001100] */ 0x4c245237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra9,  rb5
-/* [0x00001108] */ 0x4d286237, 0x10024860, // sub r1, r1, r0          ; mul24 r0, ra10, rb6
-/* [0x00001110] */ 0x4c2c7237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra11, rb7
-/* [0x00001118] */ 0x8d9cc23f, 0x10024862, // sub r1, r1, r0          ; mov r2, rb12
-/* [0x00001120] */ 0x4d5927ce, 0x100269e1, // sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
-/* [0x00001128] */ 0x0f9ce3c0, 0xd0020867, // asr r1, r1, 14
-/* [0x00001130] */ 0x409ce00f, 0x100049e0, // nop                     ; mul24 r0, r1, rb14
-/* [0x00001138] */ 0x4c4b808e, 0xd0024821, // add r0, r0, r2          ; mul24 r1, r1 << 8, ra18 << 8
-/* [0x00001140] */ 0x8c9f223f, 0x10020867, // add r1, r1, r0          ; mov -, vw_wait
-/* [0x00001148] */ 0x119c83c0, 0xd0020867, // shl r1, r1, 8
-/* [0x00001150] */ 0xfffffe40, 0xf06809e7, // brr.anyn -, r:yloopb
-/* [0x00001158] */ 0x0f9cd3c0, 0x10020867, // asr r1, r1, rb13
-/* [0x00001160] */ 0x129d63c0, 0x10020867, // min r1, r1, rb_k255
-/* [0x00001168] */ 0x139c03c0, 0xd0020c27, // max vpm, r1, 0
-/* [0x00001170] */ 0xfffffa38, 0xf0f809e7, // brr -, r:per_block_setup
-/* [0x00001178] */ 0x159dafc0, 0x10021c67, // mov vw_setup, rb26
-/* [0x00001180] */ 0x159ddfc0, 0x10021c67, // mov vw_setup, rb29
-/* [0x00001188] */ 0x15827d80, 0x10021ca7, // mov vw_addr, unif
+/* [0x00000f98] */ 0xcd5117de, 0xa00269e3, // sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
+/* [0x00000fa0] */ 0x8e4539bf, 0xb0029819, // shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
+/* [0x00000fa8] */ 0x956a7d9b, 0x1004461f, // mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
+/* [0x00000fb0] */ 0x95710dbf, 0x10044763, // mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
+/* [0x00000fb8] */ 0x8e5409f6, 0x14129855, // shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
+/* [0x00000fc0] */ 0x13740dc0, 0xd00208a7, // max r2, ra_y, 0
+/* [0x00000fc8] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
+/* [0x00000fd0] */ 0x4c741dd3, 0xd0024762, // add ra_y, ra_y, 1            ; mul24 r2, r2, r3
+/* [0x00000fd8] */ 0xec614c87, 0x10024e20, // add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20
+/* [0x00000fe0] */ 0x13540dc0, 0xd20208a7, // max r2, ra_y2, 0
+/* [0x00000fe8] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_frame_height_minus_1
+/* [0x00000ff0] */ 0x4c541dd3, 0xd2124562, // add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
+/* [0x00000ff8] */ 0xec654c8f, 0x10024f21, // add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
+/* [0x00001000] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+/* [0x00001008] */ 0x40027030, 0x180049e3, // nop                  ; mul24      r3, ra0.8a,      r0
+/* [0x00001010] */ 0x40038031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
+/* [0x00001018] */ 0x4003f030, 0xda0049e2, // nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
+/* [0x00001020] */ 0x40037031, 0xda00c9e2, // nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
+/* [0x00001028] */ 0x4d03e4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
+/* [0x00001030] */ 0x40036031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+/* [0x00001038] */ 0x4d03d4f0, 0xde0248a3, // sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
+/* [0x00001040] */ 0x40035031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+/* [0x00001048] */ 0x4c07c4f0, 0xd80248a3, // add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
+/* [0x00001050] */ 0x40074031, 0xd800c9e3, // nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
+/* [0x00001058] */ 0x4c07b4f0, 0xda0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
+/* [0x00001060] */ 0x40073031, 0xda00c9e3, // nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
+/* [0x00001068] */ 0x4d07a4f0, 0xdc0248a3, // sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
+/* [0x00001070] */ 0x40072031, 0xdc00c9e3, // nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
+/* [0x00001078] */ 0x4c0794f0, 0xde0248a3, // add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
+/* [0x00001080] */ 0x40071031, 0xde00c9e3, // nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
+/* [0x00001088] */ 0x8d9df4ff, 0x10024823, // sub r0, r2, r3       ; mov r3, rb31
+/* [0x00001090] */ 0x8d2087f6, 0xd00269e1, // sub.setf -, r3, 8       ; mov r1,   ra8
+/* [0x00001098] */ 0x95249dbf, 0x10024208, // mov ra8,  ra9           ; mov rb8,  rb9
+/* [0x000010a0] */ 0xfffffed8, 0xf06809e7, // brr.anyn -, r:yloopb
+/* [0x000010a8] */ 0x9528adbf, 0x10024249, // mov ra9,  ra10          ; mov rb9,  rb10
+/* [0x000010b0] */ 0x952cbdbf, 0x1002428a, // mov ra10, ra11          ; mov rb10, rb11
+/* [0x000010b8] */ 0x959e7009, 0x100242cb, // mov ra11, r0            ; mov rb11, r1
+/* [0x000010c0] */ 0x4008803e, 0x180049e0, // nop                     ; mul24 r0, rb8,  ra2.8a
+/* [0x000010c8] */ 0x4008903e, 0x1a0049e1, // nop                     ; mul24 r1, rb9,  ra2.8b
+/* [0x000010d0] */ 0x4d08a23e, 0x1c024860, // sub r1, r1, r0          ; mul24 r0, rb10, ra2.8c
+/* [0x000010d8] */ 0x4d08b23e, 0x1e024860, // sub r1, r1, r0          ; mul24 r0, rb11, ra2.8d
+/* [0x000010e0] */ 0x4c204237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra8,  rb4
+/* [0x000010e8] */ 0x4c245237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra9,  rb5
+/* [0x000010f0] */ 0x4d286237, 0x10024860, // sub r1, r1, r0          ; mul24 r0, ra10, rb6
+/* [0x000010f8] */ 0x4c2c7237, 0x10024860, // add r1, r1, r0          ; mul24 r0, ra11, rb7
+/* [0x00001100] */ 0x8d9cc23f, 0x10024862, // sub r1, r1, r0          ; mov r2, rb12
+/* [0x00001108] */ 0x4d5927ce, 0x100269e1, // sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
+/* [0x00001110] */ 0x0f9ce3c0, 0xd0020867, // asr r1, r1, 14
+/* [0x00001118] */ 0x409ce00f, 0x100049e0, // nop                     ; mul24 r0, r1, rb14
+/* [0x00001120] */ 0x4c4b808e, 0xd2024821, // add r0, r0, r2          ; mul24 r1, r1 << 8, ra18.16a << 8
+/* [0x00001128] */ 0x8c9f223f, 0x10020867, // add r1, r1, r0          ; mov -, vw_wait
+/* [0x00001130] */ 0x119c83c0, 0xd0020867, // shl r1, r1, 8
+/* [0x00001138] */ 0xfffffe40, 0xf06809e7, // brr.anyn -, r:yloopb
+/* [0x00001140] */ 0x0f9cd3c0, 0x10020867, // asr r1, r1, rb13
+/* [0x00001148] */ 0x129d63c0, 0x10020867, // min r1, r1, rb_k255
+/* [0x00001150] */ 0x139c03c0, 0xd0020c27, // max vpm, r1, 0
+/* [0x00001158] */ 0xfffffa50, 0xf0f809e7, // brr -, r:per_block_setup
+/* [0x00001160] */ 0x159dafc0, 0x10021c67, // mov vw_setup, rb26
+/* [0x00001168] */ 0x159ddfc0, 0x10021c67, // mov vw_setup, rb29
+/* [0x00001170] */ 0x15827d80, 0x10021ca7, // mov vw_addr, unif
 // ::mc_interrupt_exit12
-/* [0x00001190] */ 0x159f2fc0, 0x100009e7, // mov  -, vw_wait
-/* [0x00001198] */ 0x009e7000, 0xa00009e7, // ldtmu0
-/* [0x000011a0] */ 0x009e7000, 0xa00009e7, // ldtmu0
-/* [0x000011a8] */ 0x009e7000, 0xb00009e7, // ldtmu1
-/* [0x000011b0] */ 0x009e7000, 0xb00009e7, // ldtmu1
+/* [0x00001178] */ 0x159f2fc0, 0x100009e7, // mov  -, vw_wait
+/* [0x00001180] */ 0x009e7000, 0xa00009e7, // ldtmu0
+/* [0x00001188] */ 0x009e7000, 0xa00009e7, // ldtmu0
+/* [0x00001190] */ 0x009e7000, 0xb00009e7, // ldtmu1
+/* [0x00001198] */ 0x009e7000, 0xb00009e7, // ldtmu1
+/* [0x000011a0] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
+/* [0x000011a8] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
+/* [0x000011b0] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
 /* [0x000011b8] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
 /* [0x000011c0] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
 /* [0x000011c8] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
@@ -612,21 +612,18 @@ unsigned int rpi_shader[] = {
 /* [0x000011e0] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
 /* [0x000011e8] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
 /* [0x000011f0] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
-/* [0x000011f8] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
-/* [0x00001200] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
-/* [0x00001208] */ 0x00000010, 0xe80009e7, // mov -,sacq(0)
-/* [0x00001210] */ 0x009e7000, 0x300009e7, // nop        ; nop ; thrend
-/* [0x00001218] */ 0x00000001, 0xe00209a7, // mov interrupt, 1; nop
-/* [0x00001220] */ 0x009e7000, 0x100009e7, // nop        ; nop
+/* [0x000011f8] */ 0x009e7000, 0x300009e7, // nop        ; nop ; thrend
+/* [0x00001200] */ 0x00000001, 0xe00209a7, // mov interrupt, 1; nop
+/* [0x00001208] */ 0x009e7000, 0x100009e7, // nop        ; nop
 // ::mc_exit1
-/* [0x00001228] */ 0x159f2fc0, 0x100009e7, // mov  -, vw_wait
-/* [0x00001230] */ 0x009e7000, 0xa00009e7, // ldtmu0
-/* [0x00001238] */ 0x009e7000, 0xb00009e7, // ldtmu1
-/* [0x00001240] */ 0x009e7000, 0xa00009e7, // ldtmu0
-/* [0x00001248] */ 0x009e7000, 0xb00009e7, // ldtmu1
-/* [0x00001250] */ 0x009e7000, 0x300009e7, // nop        ; nop ; thrend
-/* [0x00001258] */ 0x00000001, 0xe00209a7, // mov interrupt, 1; nop
-/* [0x00001260] */ 0x009e7000, 0x100009e7, // nop        ; nop
+/* [0x00001210] */ 0x159f2fc0, 0x100009e7, // mov  -, vw_wait
+/* [0x00001218] */ 0x009e7000, 0xa00009e7, // ldtmu0
+/* [0x00001220] */ 0x009e7000, 0xb00009e7, // ldtmu1
+/* [0x00001228] */ 0x009e7000, 0xa00009e7, // ldtmu0
+/* [0x00001230] */ 0x009e7000, 0xb00009e7, // ldtmu1
+/* [0x00001238] */ 0x009e7000, 0x300009e7, // nop        ; nop ; thrend
+/* [0x00001240] */ 0x00000001, 0xe00209a7, // mov interrupt, 1; nop
+/* [0x00001248] */ 0x009e7000, 0x100009e7, // nop        ; nop
 // ::mc_end
 };
 #ifdef __HIGHC__

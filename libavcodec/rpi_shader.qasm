@@ -747,7 +747,7 @@ nop        ; nop # delay slot 2
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl ra_xshift_next, r0, 3 # Compute shifts
-  mov r3, 8                          ; mov ra_y_next, ra1.16b
+  mov ra_y_next, ra1.16b
   and r0, r0, ~3                     ; mov ra1, unif # y2_x2
   add ra_frame_base_next, r2, r0
 
@@ -755,7 +755,7 @@ nop        ; nop # delay slot 2
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl rx_xshift2_next, r0, 3         # Compute shifts
-  add r3, r3, r3                     ; mov ra_y2_next, ra1.16b  # r3 = 16 ;
+  mov ra_y2_next, ra1.16b
   and r0, r0, ~3                     ; mov ra1, unif  # width_height ; r0 gives the clipped and aligned x coordinate
   add rx_frame_base2_next, r2, r0    # r2 is address for frame1 (not including y offset)
 
@@ -772,7 +772,7 @@ nop        ; nop # delay slot 2
   add rb26, r0, rb27                 ; mov r0, unif   # Packed filter offsets
 
 # get filter coefficients and discard unused B frame values
-  shl.ifz r0, r0, i_shift16      # Pick half to use
+  shl.ifz r0, r0, i_shift16          ; mov ra5, unif    #  Pick half to use ; L0 offset/weight
   shl ra8, r0, 3
 
 # Pack the 1st 4 filter coefs for H & V tightly
@@ -809,30 +809,36 @@ nop        ; nop # delay slot 2
   ror ra3.8c, r1, ra8.8d
   ror ra1.8c, r1, ra8.8c
 
-# Extract weighted prediction information in parallel
-
   mov r1,0x01010000  # -ve
-  ror ra3.8d, r1, ra8.8d    ; mov r0, unif      # ; weight L1 weight L1 (hi16)/weight L0 (lo16)
-  ror ra1.8d, r1, ra8.8c    ; mov r2, rb13      # ; rb13 = weight denom + 6 + 9
+  ror ra3.8d, r1, ra8.8d
+  ror ra1.8d, r1, ra8.8c
 
-# r3 = 16 from (long way) above
-  mov r1, unif                                  # combined offet = ((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) ;
-  shl.ifz r1, r1, r3
-  asr r1, r1, r3
-  shl r1, r1, r2          ; mov rb4, ra3.8a
-  asr ra18, r0, r3          ; mov rb5, ra3.8b
+# Extract weighted prediction information in parallel
+# We are annoyingly A src limited here
+
+  mov rb14, ra5.16a          ; mov ra18, unif    # # Save L0 weight on all slices for Bi ; L1 offset/weight
+
+  mov rb4, ra3.8a
+  mov rb5, ra3.8b
+  mov rb6, ra3.8c
+  mov.ifnz ra5, ra18
+
   bra -, ra31
-  shl r0, r0, r3            ; mov rb6, ra3.8c
-  mov r3, 0                 ; mov rb7, ra3.8d   # loop count ;
-  asr rb12, r1, 9
+
+  shl r0, ra5.16b, rb13
+  asr rb12, r0, 9            # Offset calc
+  mov r3, 0                  ; mov rb7, ra3.8d
+
+
 
 # >>> branch ra31
 #
 # r3 = 0
-# ra18 = weight L1
-# r0   = weight L0 << 16 (will be put into rb14 in filter preamble)
-# rb13 = weight denom + 6 + 9
-# rb12 = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
+# ra18.16a = weight L1
+# ra5.16a  = weight L0/L1 depending on side (wanted for 2x mono-pred)
+# rb12     = (((is P) ? offset L0/L1 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
+# rb13     = weight denom + 6 + 9
+# rb14     = weight L0
 
 
 ################################################################################
@@ -841,10 +847,9 @@ nop        ; nop # delay slot 2
 # At this point we have already issued two pairs of texture requests for the current block
 
 ::mc_filter
-# r0 = weight << 16; We want weight * 2 in rb14
-  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-  asr rb14, r0, 15
-  shl.ifnz rb14, ra18, 1
+# ra5.16a = weight << 16; We want weight * 2 in rb14
+
+  shl rb14, ra5.16a, 1
 
 # r3 = 0
 
@@ -958,7 +963,7 @@ nop        ; nop # delay slot 2
 
 ::mc_filter_b
   # r0 = weightL0 << 16, we want it in rb14
-  asr rb14, r0, i_shift16
+#  asr rb14, r0, i_shift16
 
 :yloopb
 # retrieve texture results and pick out bytes
@@ -1032,7 +1037,7 @@ nop        ; nop # delay slot 2
 
   asr r1, r1, 14
   nop                     ; mul24 r0, r1, rb14
-  add r0, r0, r2          ; mul24 r1, r1 << 8, ra18 << 8
+  add r0, r0, r2          ; mul24 r1, r1 << 8, ra18.16a << 8
 
   add r1, r1, r0          ; mov -, vw_wait
   shl r1, r1, 8
