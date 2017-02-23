@@ -816,7 +816,7 @@ nop        ; nop # delay slot 2
 # Extract weighted prediction information in parallel
 # We are annoyingly A src limited here
 
-  mov rb14, ra5.16a          ; mov ra18, unif    # # Save L0 weight on all slices for Bi ; L1 offset/weight
+  mov rb14, ra5.16a          ; mov ra18, unif    # Save L0 weight on all slices for Bi ; L1 offset/weight
 
   mov rb4, ra3.8a
   mov rb5, ra3.8b
@@ -825,12 +825,9 @@ nop        ; nop # delay slot 2
 
   bra -, ra31
 
-  shl r0, ra5.16b, rb13
-  asr rb12, r0, 9            # Offset calc
+  shl r0, ra5.16b, rb13      # Offset calc
+  asr rb12, r0, 9            # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   mov r3, 0                  ; mov rb7, ra3.8d
-
-
-
 # >>> branch ra31
 #
 # r3 = 0
