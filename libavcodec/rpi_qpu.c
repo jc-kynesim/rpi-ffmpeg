@@ -303,33 +303,118 @@ void gpu_cache_flush(const GPU_MEM_PTR_T * const p)
 #endif
 }
 
-void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2)
+
+#include "libavutil/avassert.h"
+
+
+rpi_cache_flush_env_t * rpi_cache_flush_init()
 {
-#ifdef RPI_FAST_CACHEFLUSH
-    struct vcsm_user_clean_invalid_s iocache = {};
-    iocache.s[0].handle = p0->vcsm_handle;
-    iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int) p0->arm;
-    iocache.s[0].size  = p0->numbytes;
-    iocache.s[1].handle = p1->vcsm_handle;
-    iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = (int) p1->arm;
-    iocache.s[1].size  = p1->numbytes;
-    iocache.s[2].handle = p2->vcsm_handle;
-    iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = (int) p2->arm;
-    iocache.s[2].size  = p2->numbytes;
-    vcsm_clean_invalid( &iocache );
-#else
-    void *tmp;
-    tmp = vcsm_lock(p0->vcsm_handle);
-    vcsm_unlock_ptr(tmp);
-    tmp = vcsm_lock(p1->vcsm_handle);
-    vcsm_unlock_ptr(tmp);
-    tmp = vcsm_lock(p2->vcsm_handle);
-    vcsm_unlock_ptr(tmp);
-#endif
+    rpi_cache_flush_env_t * const rfe = calloc(1, sizeof(rpi_cache_flush_env_t));
+    if (rfe == NULL)
+        return NULL;
+
+    return rfe;
 }
+
+void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe)
+{
+    if (rfe != NULL)
+        free(rfe);
+}
+
+int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
+{
+    int rc = vcsm_clean_invalid(&rfe->a);
+
+    free(rfe);
+
+    if (rc == 0)
+        return 0;
+
+    av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid failed: errno=%d\n", errno);
+    return rc;
+}
+
+void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode)
+{
+    av_assert0(rfe->n < sizeof(rfe->a.s) / sizeof(rfe->a.s[0]));
+
+    // Deal with empty pointer trivially
+    if (gm == NULL || gm->numbytes == 0)
+        return;
+
+    rfe->a.s[rfe->n].cmd = mode;
+    rfe->a.s[rfe->n].handle = gm->vcsm_handle;
+    rfe->a.s[rfe->n].addr = (unsigned int)gm->arm;
+    rfe->a.s[rfe->n].size = gm->numbytes;
+    ++rfe->n;
+}
+
+void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
+  const unsigned int offset, const unsigned int size)
+{
+    // Deal with empty pointer trivially
+    if (gm == NULL || size == 0)
+        return;
+
+    av_assert0(rfe->n < sizeof(rfe->a.s) / sizeof(rfe->a.s[0]));
+    av_assert0(offset + size <= gm->numbytes);
+
+    rfe->a.s[rfe->n].cmd = mode;
+    rfe->a.s[rfe->n].handle = gm->vcsm_handle;
+    rfe->a.s[rfe->n].addr = (unsigned int)gm->arm + offset;
+    rfe->a.s[rfe->n].size = size;
+    ++rfe->n;
+}
+
+void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode)
+{
+#if !RPI_ONE_BUF
+#error Fixme! (NIF)
+#endif
+  if (gpu_is_buf1(frame)) {
+    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf1_gmem(frame), mode);
+  }
+  else
+  {
+    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf3_gmem(frame, 0), mode);
+    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf3_gmem(frame, 1), mode);
+    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf3_gmem(frame, 2), mode);
+  }
+}
+
+void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
+  const unsigned int start_line, const unsigned int n, const unsigned int uv_shift, const int do_luma, const int do_chroma)
+{
+  const unsigned int y_offset = frame->linesize[0] * start_line;
+  const unsigned int y_size = frame->linesize[0] * n;
+  // Round UV up/down to get everything
+  const unsigned int uv_rnd = (1U << uv_shift) >> 1;
+  const unsigned int uv_offset = frame->linesize[1] * (start_line >> uv_shift);
+  const unsigned int uv_size = frame->linesize[1] * ((start_line + n + uv_rnd) >> uv_shift) - uv_offset;
+
+  if (gpu_is_buf1(frame)) {
+    const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
+    if (do_luma) {
+      rpi_cache_flush_add_gm_range(rfe, gm, mode, y_offset, y_size);
+    }
+    if (do_chroma) {
+      rpi_cache_flush_add_gm_range(rfe, gm, mode, frame->data[1] - frame->data[0] + uv_offset, uv_size);
+      rpi_cache_flush_add_gm_range(rfe, gm, mode, frame->data[2] - frame->data[0] + uv_offset, uv_size);
+    }
+  }
+  else
+  {
+    if (do_luma) {
+      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 0), mode, y_offset, y_size);
+    }
+    if (do_chroma) {
+      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 1), mode, uv_offset, uv_size);
+      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
+    }
+  }
+}
+
 
 static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
   p->numbytes = numbytes;

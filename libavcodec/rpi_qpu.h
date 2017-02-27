@@ -1,6 +1,8 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
+#include "rpi_user_vcsm.h"
+
 // Define RPI_FAST_CACHEFLUSH to use the VCSM cache flush code
 // *** N.B. Code has rotted & crashes if this is unset (before this set of changes)
 #define RPI_FAST_CACHEFLUSH
@@ -20,7 +22,6 @@ extern int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p);
 extern int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p);
 extern void gpu_free(GPU_MEM_PTR_T *p);
 extern void gpu_cache_flush(const GPU_MEM_PTR_T * const p);
-extern void gpu_cache_flush3(GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2);
 
 #include "libavutil/frame.h"
 #if !RPI_ONE_BUF
@@ -124,6 +125,31 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
 }
 
 #endif
+
+// Cache flush stuff
+
+typedef struct rpi_flush_envss {
+    unsigned int n;
+    struct vcsm_user_clean_invalid_s a;
+} rpi_cache_flush_env_t;
+
+rpi_cache_flush_env_t * rpi_cache_flush_init(void);
+// Free env without flushing
+void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe);
+// Do the accumulated flush & free the env
+int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe);
+
+#define RPI_CACHE_FLUSH_MODE_INVALIDATE      1
+#define RPI_CACHE_FLUSH_MODE_WRITEBACK       2
+#define RPI_CACHE_FLUSH_MODE_WB_INVALIDATE   3
+
+void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode);
+void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
+  const unsigned int offset, const unsigned int size);
+void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode);
+void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
+  const unsigned int start_line, const unsigned int n, const unsigned int uv_shift, const int do_luma, const int do_chroma);
+
 
 
 // QPU specific functions

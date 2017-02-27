@@ -3654,115 +3654,35 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 
 #ifdef RPI
 
-#ifndef RPI_FAST_CACHEFLUSH
-#error RPI_FAST_CACHEFLUSH is broken
-static void flush_buffer(AVBufferRef *bref) {
-    GPU_MEM_PTR_T *p = av_buffer_pool_opaque(bref);
-    gpu_cache_flush(p);
-}
-#endif
-
 static void flush_frame(HEVCContext *s,AVFrame *frame)
 {
-#ifdef RPI_FAST_CACHEFLUSH
-    struct vcsm_user_clean_invalid_s iocache = {};
-    GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(s->frame);
-    int n = s->ps.sps->height;
-    int curr_y = 0;
-    int curr_uv = 0;
-    int n_uv = n >> s->ps.sps->vshift[1];
-    int sz,base;
-    sz = s->frame->linesize[1] * (n_uv-curr_uv);
-    base = s->frame->linesize[1] * curr_uv;
-    iocache.s[0].handle = p.vcsm_handle;
-    iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int)(p.arm) + base;
-    iocache.s[0].size  = sz;
-    p = get_gpu_mem_ptr_v(s->frame);
-    iocache.s[1].handle = p.vcsm_handle;
-    iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = (int)(p.arm) + base;
-    iocache.s[1].size  = sz;
-    p = get_gpu_mem_ptr_y(s->frame);
-    sz = s->frame->linesize[0] * (n-curr_y);
-    base = s->frame->linesize[0] * curr_y;
-    iocache.s[2].handle = p.vcsm_handle;
-    iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = (int)(p.arm) + base;
-    iocache.s[2].size  = sz;
-    vcsm_clean_invalid( &iocache );
-#else
-    flush_buffer(frame->buf[0]);
-    flush_buffer(frame->buf[1]);
-    flush_buffer(frame->buf[2]);
-#endif
+  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init();
+  rpi_cache_flush_add_frame(rfe, frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+  rpi_cache_flush_finish(rfe);
 }
 
 static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2, int job)
 {
-#ifdef RPI_FAST_CACHEFLUSH
-    struct vcsm_user_clean_invalid_s iocache = {};
-    int n;
-    int curr_y;
-    int curr_uv;
-    int n_uv;
-    GPU_MEM_PTR_T p = get_gpu_mem_ptr_u(s->frame);
-    int sz,base;
-    int (*d)[2] = s->dblk_cmds[job];
-    int low=(*d)[1];
-    int high=(*d)[1];
-    for(n = s->num_dblk_cmds[job]; n>0 ;n--,d++) {
-        int y = (*d)[1];
-        low=FFMIN(low,y);
-        high=FFMAX(high,y);
-    }
-    curr_y = low;
-    n = high+(1 << s->ps.sps->log2_ctb_size);
-    curr_uv = curr_y >> s->ps.sps->vshift[1];
-    n_uv = n >> s->ps.sps->vshift[1];
+  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init();
+  int (*d)[2] = s->dblk_cmds[job];
+  int low=(*d)[1];
+  int high=(*d)[1];
+  int n, curr_y;
+  for(n = s->num_dblk_cmds[job]; n>0 ;n--,d++) {
+      int y = (*d)[1];
+      low=FFMIN(low,y);
+      high=FFMAX(high,y);
+  }
+  curr_y = low;
+  n = high+(1 << s->ps.sps->log2_ctb_size);
 
-    sz = s->frame->linesize[1] * (n_uv-curr_uv);
-    base = s->frame->linesize[1] * curr_uv;
-    iocache.s[0].handle = p.vcsm_handle;
-    iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int)(p.arm) + base;
-    iocache.s[0].size  = sz;
-    p = get_gpu_mem_ptr_v(s->frame);
-    iocache.s[1].handle = p.vcsm_handle;
-    iocache.s[1].cmd = 3; // clean+invalidate
-    iocache.s[1].addr = (int)(p.arm) + base;
-    iocache.s[1].size  = sz;
-    p = get_gpu_mem_ptr_y(s->frame);
-    sz = s->frame->linesize[0] * (n-curr_y);
-    base = s->frame->linesize[0] * curr_y;
-    iocache.s[2].handle = p.vcsm_handle;
-    iocache.s[2].cmd = 3; // clean+invalidate
-    iocache.s[2].addr = (int)(p.arm) + base;
-    iocache.s[2].size  = sz;
+  rpi_cache_flush_add_frame_lines(rfe, frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+    curr_y, n - curr_y, s->ps.sps->vshift[1], 1, 1);
 
-    iocache.s[3].handle = p0->vcsm_handle;
-    iocache.s[3].cmd = 3; // clean+invalidate
-    iocache.s[3].addr = (int) p0->arm;
-    iocache.s[3].size  = p0->numbytes;
-    if (p1) {
-      iocache.s[4].handle = p1->vcsm_handle;
-      iocache.s[4].cmd = 3; // clean+invalidate
-      iocache.s[4].addr = (int) p1->arm;
-      iocache.s[4].size  = p1->numbytes;
-    }
-    if (p2) {
-      iocache.s[5].handle = p2->vcsm_handle;
-      iocache.s[5].cmd = 3; // clean+invalidate
-      iocache.s[5].addr = (int) p2->arm;
-      iocache.s[5].size  = p2->numbytes;
-    }
-    vcsm_clean_invalid( &iocache );
-#else
-    flush_buffer(frame->buf[0]);
-    flush_buffer(frame->buf[1]);
-    flush_buffer(frame->buf[2]);
-    gpu_cache_flush3(p0, p1, p2);
-#endif
+  rpi_cache_flush_add_gm_ptr(rfe, p0, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+  rpi_cache_flush_add_gm_ptr(rfe, p1, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+  rpi_cache_flush_add_gm_ptr(rfe, p2, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+  rpi_cache_flush_finish(rfe);
 }
 
 #endif
