@@ -87,6 +87,10 @@ static ZcPoolEnt * zc_pool_alloc(ZcPool * const pool, const int numbytes)
     }
 
     pthread_mutex_unlock(&pool->lock);
+
+    // Start with our buffer empty of preconceptions
+    rpi_cache_flush_one_gm_ptr(&zp->gmem, RPI_CACHE_FLUSH_MODE_INVALIDATE);
+
     return zp;
 }
 

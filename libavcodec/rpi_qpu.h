@@ -21,7 +21,6 @@ typedef struct gpu_mem_ptr_s {
 extern int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p);
 extern int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p);
 extern void gpu_free(GPU_MEM_PTR_T *p);
-extern void gpu_cache_flush(const GPU_MEM_PTR_T * const p);
 
 #include "libavutil/frame.h"
 #if !RPI_ONE_BUF
@@ -139,17 +138,22 @@ void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe);
 // Do the accumulated flush & free the env
 int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe);
 
-#define RPI_CACHE_FLUSH_MODE_INVALIDATE      1
-#define RPI_CACHE_FLUSH_MODE_WRITEBACK       2
-#define RPI_CACHE_FLUSH_MODE_WB_INVALIDATE   3
+typedef enum
+{
+    RPI_CACHE_FLUSH_MODE_INVALIDATE     = 1,
+    RPI_CACHE_FLUSH_MODE_WRITEBACK      = 2,
+    RPI_CACHE_FLUSH_MODE_WB_INVALIDATE  = 3
+} rpi_cache_flush_mode_t;
 
-void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode);
-void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
+void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const rpi_cache_flush_mode_t mode);
+void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const rpi_cache_flush_mode_t mode,
   const unsigned int offset, const unsigned int size);
-void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode);
-void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
+void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const rpi_cache_flush_mode_t mode);
+void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const rpi_cache_flush_mode_t mode,
   const unsigned int start_line, const unsigned int n, const unsigned int uv_shift, const int do_luma, const int do_chroma);
 
+// init, add, finish for one gm ptr
+void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T * const p, const rpi_cache_flush_mode_t mode);
 
 
 // QPU specific functions

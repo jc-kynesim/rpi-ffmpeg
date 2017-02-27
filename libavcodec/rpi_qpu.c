@@ -287,23 +287,6 @@ int gpu_get_mailbox(void)
   return gpu->mb;
 }
 
-// Call this to clean and invalidate a region of memory
-void gpu_cache_flush(const GPU_MEM_PTR_T * const p)
-{
-#ifdef RPI_FAST_CACHEFLUSH
-    struct vcsm_user_clean_invalid_s iocache = {};
-    iocache.s[0].handle = p->vcsm_handle;
-    iocache.s[0].cmd = 3; // clean+invalidate
-    iocache.s[0].addr = (int) p->arm;
-    iocache.s[0].size  = p->numbytes;
-    vcsm_clean_invalid( &iocache );
-#else
-    void *tmp = vcsm_lock(p->vcsm_handle);
-    vcsm_unlock_ptr(tmp);
-#endif
-}
-
-
 #include "libavutil/avassert.h"
 
 
@@ -414,6 +397,15 @@ void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AV
     }
   }
 }
+
+// Call this to clean and invalidate a region of memory
+void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T *const p, const rpi_cache_flush_mode_t mode)
+{
+  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init();
+  rpi_cache_flush_add_gm_ptr(rfe, p, mode);
+  rpi_cache_flush_finish(rfe);
+}
+
 
 
 static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {

@@ -3067,7 +3067,7 @@ static void rpi_execute_transform(HEVCContext *s)
         s->hevcdsp.idct[5-2](coeffs, 32);
     }*/
 
-    gpu_cache_flush(&s->coeffs_buf_accelerated[job]);
+    rpi_cache_flush_one_gm_ptr(&s->coeffs_buf_accelerated[job], RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
     s->vpu_id = vpu_post_code2( vpu_get_fn(), vpu_get_constants(), s->coeffs_buf_vc[job][2],
                                s->num_coeffs[job][2] >> 8, s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
                                s->num_coeffs[job][3] >> 10, 0, &s->coeffs_buf_accelerated[job]);
