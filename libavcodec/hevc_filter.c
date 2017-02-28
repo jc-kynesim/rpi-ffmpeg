@@ -878,8 +878,6 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 #undef CR
 
 #ifdef RPI_DEBLOCK_VPU
-#error Not fixed yet
-
 // ff_hevc_flush_buffer_lines
 // flushes and invalidates all pixel rows in [start,end-1]
 static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
@@ -907,7 +905,6 @@ void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
 #endif
 
 #ifdef RPI_DEBLOCK_VPU
-#error XXX
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
 static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 {
@@ -979,7 +976,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x - ctb_size, y);
         if (y && x_end) {
             sao_filter_CTB(s, x, y - ctb_size);
-            if (s->threads_type & FF_THREAD_FRAME ) {
+            if (s->threads_type == FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
                 ff_hevc_flush_buffer(s,&s->ref->tf, y);
 #endif
@@ -988,14 +985,14 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
         }
         if (x_end && y_end) {
             sao_filter_CTB(s, x , y);
-            if (s->threads_type & FF_THREAD_FRAME ) {
+            if (s->threads_type == FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
                 ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
             }
         }
-    } else if (s->threads_type & FF_THREAD_FRAME && x_end) {
+    } else if (s->threads_type == FF_THREAD_FRAME && x_end) {
         //int newh = y + ctb_size - 4;
         //int currh = s->ref->tf.progress->data[0];
         //if (((y + ctb_size)&63)==0)

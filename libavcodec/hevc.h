@@ -52,16 +52,23 @@
     #define RPI_LUMA_QPU
   #endif
 
-  // By passing jobs to a worker thread we hope to be able to catch up during slow frames
-  #define RPI_MAX_JOBS 2
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
+  // By passing jobs to a worker thread we hope to be able to catch up during slow frames
+  // This has no effect unless RPI_WORKER is defined
+  // N.B. The extra thread count is effectively RPI_MAX_JOBS - 1 as
+  // RPI_MAX_JOBS defines the number of worker parameter sets and we must have one
+  // free for the foreground to fill in.
+  #define RPI_MAX_JOBS 2
+
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
+  // As it stands there is something mildy broken in VPU deblock - looks mostly OK
+  // but reliably fails some conformance tests (e.g. DBLK_A/B/C_)
+  // With VPU luma & chroma pred it is much the same spoeed to deblock on the ARM
 //  #define RPI_DEBLOCK_VPU
 
+  #define RPI_VPU_DEBLOCK_CACHED 1
 #endif
-
-#define RPI_VPU_DEBLOCK_CACHED 1
 
 #define MAX_DPB_SIZE 16 // A.4.1
 #define MAX_REFS 16
@@ -866,6 +873,7 @@ typedef struct HEVCMvCmd {
 // Command for intra prediction and transform_add of predictions to coefficients
 #define RPI_PRED_TRANSFORM_ADD 0
 #define RPI_PRED_INTRA 1
+#define RPI_PRED_I_PCM 2
 typedef struct HEVCPredCmd {
     uint8_t size;
     uint8_t type;

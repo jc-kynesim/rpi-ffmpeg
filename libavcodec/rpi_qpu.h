@@ -3,10 +3,6 @@
 
 #include "rpi_user_vcsm.h"
 
-// Define RPI_FAST_CACHEFLUSH to use the VCSM cache flush code
-// *** N.B. Code has rotted & crashes if this is unset (before this set of changes)
-#define RPI_FAST_CACHEFLUSH
-
 #define RPI_ONE_BUF 1
 
 typedef struct gpu_mem_ptr_s {
