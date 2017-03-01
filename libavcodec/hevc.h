@@ -874,22 +874,29 @@ typedef struct HEVCMvCmd {
 #define RPI_PRED_TRANSFORM_ADD 0
 #define RPI_PRED_INTRA 1
 #define RPI_PRED_I_PCM 2
+
 typedef struct HEVCPredCmd {
-    uint8_t size;
     uint8_t type;
-    uint8_t na;
-    uint8_t c_idx;
+    uint8_t size;  // log2 "size" used by all variants
+    uint8_t na;    // i_pred - but left here as they pack well
+    uint8_t c_idx; // i_pred
     union {
-        uint8_t *dst; // RPI_PRED_TRANSFORM_ADD
-        uint32_t x;   // RPI_PRED_INTRA
-    };
-    union {
-        int16_t *buf; // RPI_PRED_TRANSFORM_ADD
-        uint32_t y;   // RPI_PRED_INTRA
-    };
-    union {
-        enum IntraPredMode mode; // RPI_PRED_TRANSFORM_ADD
-        uint32_t stride;         // RPI_PRED_INTRA
+        struct {  // TRANSFORM_ADD
+            uint8_t * dst;
+            const int16_t * buf;
+            uint32_t stride;
+        } ta;
+        struct {  // INTRA
+            uint16_t x;
+            uint16_t y;
+            enum IntraPredMode mode;
+        } i_pred;
+        struct {  // I_PCM
+            uint16_t x;
+            uint16_t y;
+            const void * src;
+            uint32_t src_len;
+        } i_pcm;
     };
 } HEVCPredCmd;
 
@@ -1277,5 +1284,9 @@ extern const uint8_t ff_hevc_diag_scan4x4_x[16];
 extern const uint8_t ff_hevc_diag_scan4x4_y[16];
 extern const uint8_t ff_hevc_diag_scan8x8_x[64];
 extern const uint8_t ff_hevc_diag_scan8x8_y[64];
+
+#ifdef RPI
+int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n);
+#endif
 
 #endif /* AVCODEC_HEVC_H */

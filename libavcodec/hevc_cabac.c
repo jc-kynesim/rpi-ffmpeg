@@ -1529,10 +1529,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     uint8_t *dst = &s->frame->data[c_idx][(y0 >> vshift) * stride +
                                           ((x0 >> hshift) << s->ps.sps->pixel_shift)];
 #ifdef RPI
-    //***** transform_skip_flag decoded later!
-    int use_vpu = s->enable_rpi && !lc->cu.cu_transquant_bypass_flag /* && !transform_skip_flag*/ && !lc->tu.cross_pf && log2_trafo_size>=4;
+    int use_vpu;
 #endif
-    int16_t *coeffs = (int16_t*)(c_idx ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
+    int16_t *coeffs;
     uint8_t significant_coeff_group_flag[9] = {0};  // Allow 1 final byte that is always zero
     int explicit_rdpcm_flag = 0;
     int explicit_rdpcm_dir_flag;
@@ -1550,34 +1549,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     const int c_idx_nz = (c_idx != 0);
 
     int may_hide_sign;
-
-#ifdef RPI
-    if (s->enable_rpi) {
-        int n = trafo_size * trafo_size;
-        if (use_vpu) {
-            // We support size 4 and size 5.
-            // Size 4 grows from the front  (Coeffs_buf_arm[2] points to start of buf)
-            // Size 5 grows from the back   (Coeffs_buf_arm[3] points to end of buf)
-            // num_coeffs is indexed by log2_trafo_size-2
-            if (log2_trafo_size == 4)
-                coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] + s->num_coeffs[s->pass0_job][log2_trafo_size - 2];
-            else
-                coeffs = s->coeffs_buf_arm[s->pass0_job][log2_trafo_size - 2] - s->num_coeffs[s->pass0_job][log2_trafo_size - 2] - n;
-            s->num_coeffs[s->pass0_job][log2_trafo_size - 2] += n;
-        } else {
-            coeffs = s->coeffs_buf_arm[s->pass0_job][0] + s->num_coeffs[s->pass0_job][0];
-            s->num_coeffs[s->pass0_job][0] += n;
-        }
-    }
-    // We now do the memset after transform_add while we know the data is cached.
-    #ifdef RPI_PRECLEAR
-    #else
-    memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
-    #endif
-#else
-    memset(coeffs, 0, trafo_size * trafo_size * sizeof(int16_t));
-#endif
-
 
 
     // Derive QP for dequant
@@ -1700,6 +1671,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         may_hide_sign = 0;
     }
 
+
+
+
     if (lc->cu.pred_mode == MODE_INTER && s->ps.sps->explicit_rdpcm_enabled_flag &&
         trans_skip_or_bypass) {
         explicit_rdpcm_flag = explicit_rdpcm_flag_decode(s, c_idx_nz);
@@ -1780,6 +1754,26 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     significant_coeff_group_flag[y_cg_last_sig] = 1 << x_cg_last_sig; // 1st subset always significant
 
     scan_xy_off = off_xys[scan_idx][log2_trafo_size - 2];
+
+    {
+        const unsigned int ccount = 1 << (log2_trafo_size * 2);
+#ifdef RPI
+        use_vpu = 0;
+        if (s->enable_rpi) {
+            use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size>=4;
+            coeffs = rpi_alloc_coeff_buf(s, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
+#ifndef RPI_PRECLEAR
+            // We now do the memset after transform_add while we know the data is cached.
+            memset(coeffs, 0, ccount * sizeof(int16_t));
+#endif
+        }
+        else
+#endif
+        {
+            coeffs = (int16_t*)(c_idx_nz ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
+            memset(coeffs, 0, ccount * sizeof(int16_t));
+        }
+    }
 
     i = num_last_subset;
     do {
@@ -2144,9 +2138,9 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
         cmd->type = RPI_PRED_TRANSFORM_ADD;
         cmd->size = log2_trafo_size;
-        cmd->buf = coeffs;
-        cmd->dst = dst;
-        cmd->stride = stride;
+        cmd->ta.buf = coeffs;
+        cmd->ta.dst = dst;
+        cmd->ta.stride = stride;
         return;
     }
 #endif

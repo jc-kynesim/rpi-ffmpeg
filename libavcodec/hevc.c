@@ -1258,11 +1258,11 @@ static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, 
         HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
         cmd->type = RPI_PRED_INTRA;
         cmd->size = log2_trafo_size;
-        cmd->c_idx = c_idx;
-        cmd->x = x0;
-        cmd->y = y0;
         cmd->na = (lc->na.cand_bottom_left<<4) + (lc->na.cand_left<<3) + (lc->na.cand_up_left<<2) + (lc->na.cand_up<<1) + lc->na.cand_up_right;
-        cmd->mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
+        cmd->c_idx = c_idx;
+        cmd->i_pred.x = x0;
+        cmd->i_pred.y = y0;
+        cmd->i_pred.mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
     } else {
         s->hpc.intra_pred[log2_trafo_size - 2](s, x0, y0, c_idx);
     }
@@ -1683,14 +1683,12 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
     return 0;
 }
 
-// *** export
-static int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n)
+int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n)
 {
-    int16_t * const coeffs = (n != 3) ?
+    int16_t * const coeffs = (buf_no != 3) ?
         s->coeffs_buf_arm[s->pass0_job][buf_no] + s->num_coeffs[s->pass0_job][buf_no] :
         s->coeffs_buf_arm[s->pass0_job][buf_no] - s->num_coeffs[s->pass0_job][buf_no] - n;
     s->num_coeffs[s->pass0_job][buf_no] += n;
-    printf("c=%p, n=%d\n", coeffs, n);
     return coeffs;
 }
 
@@ -1708,7 +1706,6 @@ static int hls_pcm_sample(HEVCContext *s, int x0, int y0, int log2_cb_size)
         ff_hevc_deblocking_boundary_strengths(s, x0, y0, log2_cb_size);
 
     if (s->enable_rpi) {
-        printf("I_PCM 1\n");
         // Copy coeffs
         const int blen = (length + 7) >> 3;
         int16_t * const coeffs = rpi_alloc_coeff_buf(s, 0, (blen + 1) >> 1);
@@ -1719,10 +1716,10 @@ static int hls_pcm_sample(HEVCContext *s, int x0, int y0, int log2_cb_size)
             HEVCPredCmd * const cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
             cmd->type = RPI_PRED_I_PCM;
             cmd->size = log2_cb_size;
-            cmd->buf = coeffs;
-            cmd->x = PACK2(y0, x0);
-            cmd->stride = length;
-            printf("I_PCM 2: buf=%p/%p, len=%d, x,y=%d,%d, log size=%d\n", coeffs, (uint8_t *)cmd->buf, cmd->stride, cmd->x, cmd->y, cmd->size);
+            cmd->i_pcm.src = coeffs;
+            cmd->i_pcm.x = x0;
+            cmd->i_pcm.y = y0;
+            cmd->i_pcm.src_len = length;
         }
         return 0;
     }
@@ -3130,7 +3127,7 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
 {
   int i;
   int job = s->pass1_job;
-  HEVCPredCmd *cmd = s->univ_pred_cmds[job];
+  const HEVCPredCmd *cmd = s->univ_pred_cmds[job];
 #ifdef RPI_WORKER
   HEVCLocalContextIntra *lc = &s->HEVClcIntra;
 #else
@@ -3142,36 +3139,25 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
       switch (cmd->type)
       {
           case RPI_PRED_INTRA:
-              lc->tu.intra_pred_mode_c = lc->tu.intra_pred_mode = cmd->mode;
+              lc->tu.intra_pred_mode_c = lc->tu.intra_pred_mode = cmd->i_pred.mode;
               lc->na.cand_bottom_left  = (cmd->na >> 4) & 1;
               lc->na.cand_left         = (cmd->na >> 3) & 1;
               lc->na.cand_up_left      = (cmd->na >> 2) & 1;
               lc->na.cand_up           = (cmd->na >> 1) & 1;
               lc->na.cand_up_right     = (cmd->na >> 0) & 1;
-              s->hpc.intra_pred[cmd->size - 2](s, cmd->x, cmd->y, cmd->c_idx);
+              s->hpc.intra_pred[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
               break;
 
           case RPI_PRED_TRANSFORM_ADD:
-          {
+              s->hevcdsp.transform_add[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
 #ifdef RPI_PRECLEAR
-              int trafo_size = 1 << cmd->size;
-#endif
-              s->hevcdsp.transform_add[cmd->size-2](cmd->dst, cmd->buf, cmd->stride);
-#ifdef RPI_PRECLEAR
-              memset(cmd->buf, 0, trafo_size * trafo_size * sizeof(int16_t)); // Clear coefficients here while they are in the cache
+              memset(cmd->buf, 0, sizeof(int16_t) << (cmd->size * 2)); // Clear coefficients here while they are in the cache
 #endif
               break;
-          }
 
           case RPI_PRED_I_PCM:
-          {
-              int x0 = cmd->x & 0xffff;
-              int y0 = cmd->x >> 16;
-              printf("I_PCM 3: buf=%p, len=%d, x,y=%d,%d, log size=%d\n", (uint8_t *)cmd->buf, cmd->stride, x0, y0, cmd->size);
-              pcm_extract(s, (uint8_t *)cmd->buf, cmd->stride, x0, y0, 1 << cmd->size);
-              printf("I_PCM 4\n");
+              pcm_extract(s, cmd->i_pcm.src, cmd->i_pcm.src_len, cmd->i_pcm.x, cmd->i_pcm.y, 1 << cmd->size);
               break;
-          }
 
           default:
               av_log(NULL, AV_LOG_PANIC, "Bad command %d in worker pred Q\n", cmd->type);
