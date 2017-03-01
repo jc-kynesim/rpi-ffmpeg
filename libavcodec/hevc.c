@@ -4298,7 +4298,11 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
         if (ret < 0)
             return ret;
 
-        s->used_for_ref = !(s->nal_unit_type == NAL_TRAIL_N ||
+        // The definition of _N unit types is "non-reference for other frames
+        // with the same temporal_id" so they may/will be ref frames for pics
+        // with a higher temporal_id.
+        s->used_for_ref = s->ps.sps->max_sub_layers > s->temporal_id + 1 ||
+            !(s->nal_unit_type == NAL_TRAIL_N ||
                         s->nal_unit_type == NAL_TSA_N   ||
                         s->nal_unit_type == NAL_STSA_N  ||
                         s->nal_unit_type == NAL_RADL_N  ||
@@ -4434,7 +4438,7 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
 fail:  // Also success path
     if (s->ref && s->threads_type == FF_THREAD_FRAME) {
 #ifdef RPI_INTER_QPU
-        ff_hevc_flush_buffer(s, &s->ref->tf, s->ps.sps->height);
+        rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
     } else if (s->ref) {

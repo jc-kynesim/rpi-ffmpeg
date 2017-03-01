@@ -890,10 +890,10 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
 #endif
 
 #ifdef RPI_INTER_QPU
-void ff_hevc_flush_buffer(HEVCContext *s, ThreadFrame *f, int n)
+// Flush some lines of a reference frames
+void rpi_flush_ref_frame_progress(HEVCContext *s, ThreadFrame *f, int n)
 {
-    if (s->enable_rpi) {
-//    if (s->enable_rpi && s->used_for_ref) {
+    if (s->enable_rpi && s->used_for_ref) {
         const int curr_y = ((int *)f->progress->data)[0];
 
         rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
@@ -978,7 +978,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x, y - ctb_size);
             if (s->threads_type == FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
-                ff_hevc_flush_buffer(s,&s->ref->tf, y);
+                rpi_flush_ref_frame_progress(s,&s->ref->tf, y);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y, 0);
             }
@@ -987,7 +987,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             sao_filter_CTB(s, x , y);
             if (s->threads_type == FF_THREAD_FRAME ) {
 #ifdef RPI_INTER_QPU
-                ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size);
+                rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
             }
@@ -1004,13 +1004,13 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
           }
         } else {
 #ifdef RPI_INTER_QPU
-          ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size - 4);
+          rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
 #endif
           ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
         }
 #else
 #ifdef RPI_INTER_QPU
-        ff_hevc_flush_buffer(s, &s->ref->tf, y + ctb_size - 4);
+        rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
         // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
 #endif
         ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
