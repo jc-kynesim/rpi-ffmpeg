@@ -1760,7 +1760,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #ifdef RPI
         use_vpu = 0;
         if (s->enable_rpi) {
-            use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size>=4 && 0;
+            use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size>=4;
             coeffs = rpi_alloc_coeff_buf(s, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
 #ifndef RPI_PRECLEAR
             // We now do the memset after transform_add while we know the data is cached.
