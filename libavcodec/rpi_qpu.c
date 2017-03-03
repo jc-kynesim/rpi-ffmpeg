@@ -578,7 +578,20 @@ static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n,
 
 static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, void (* const cb)(void *), void * v)
 {
-  if (vqj->mask != 0) {
+  if (vqj->mask == 0) {
+    cb(v);
+  }
+  // If we only have one sort of thing then attach the callback to the
+  // last el.
+  else if (vqj->mask == 1 || vqj->mask == 2) {
+    struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
+    av_assert0(j->callback.func == 0);
+
+    j->callback.func = cb;
+    j->callback.cookie = v;
+  }
+  else
+  {
     struct gpu_job_s *const j = new_job(vqj);
 
     j->command = EXECUTE_SYNC;
@@ -587,10 +600,6 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, void (* const c
     j->callback.cookie = v;
 
     vqj->mask = 0;
-  }
-  else
-  {
-    cb(v);
   }
 }
 
