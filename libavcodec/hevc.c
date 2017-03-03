@@ -3625,14 +3625,14 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
     uint32_t mail_y[QPU_N_Y * QPU_MAIL_EL_VALS];
     unsigned int n_y = 0;
 
-#if 1
+#if 0
     if (s->sh.slice_type == I_SLICE) {
         rpi_execute_transform(s);
         return;
     }
 #endif
 #ifdef RPI_INTER_QPU
-    if (mc_terminate_uv(s, job) != 0 || 1)
+    if (mc_terminate_uv(s, job) != 0)
     {
         uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
         const uint32_t code = qpu_get_fn(QPU_MC_SETUP_UV);
@@ -3647,7 +3647,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
     }
 #endif
 #ifdef RPI_LUMA_QPU
-    if (mc_terminate_y(s, job) != 0 || 1)
+    if (mc_terminate_y(s, job) != 0)
     {
         uint32_t * const y_unif_vc = (uint32_t *)s->y_unif_mvs_ptr[job].vc;
         const uint32_t code = qpu_get_fn(QPU_MC_SETUP);
@@ -3677,8 +3677,8 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
 #endif
 
     s->vpu_id = vpu_qpu_post_code2(
-        vpu_get_fn(),
-//        (s->num_coeffs[job][3] + s->num_coeffs[job][2] == 0) ? 0 : vpu_get_fn(),
+//        vpu_get_fn(),
+        (s->num_coeffs[job][3] + s->num_coeffs[job][2] == 0) ? 0 : vpu_get_fn(),
         vpu_get_constants(),
         s->coeffs_buf_vc[job][2],
         s->num_coeffs[job][2] >> 8,

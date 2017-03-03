@@ -514,8 +514,9 @@ static void post_code2_cb(void * v)
   }
 }
 
-#define VPU_QPU_MASK_VPU  1
-#define VPU_QPU_MASK_QPU  2
+// Header comments were wrong for these two
+#define VPU_QPU_MASK_QPU  1
+#define VPU_QPU_MASK_VPU  2
 
 #define VPU_QPU_JOB_MAX 4
 typedef struct vpu_qpu_job_env_s
