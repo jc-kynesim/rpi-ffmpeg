@@ -582,9 +582,9 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, void (* const c
   if (vqj->mask == 0) {
     cb(v);
   }
-  // If we only have one sort of thing then attach the callback to the
-  // last el.
-  else if (vqj->mask == 1 || vqj->mask == 2) {
+  // There are 2 VPU Qs & 1 QPU Q so we can collapse sync
+  // If we only posted one thing or only QPU jobs
+  else if (vqj->n == 1 || vqj->mask == VPU_QPU_MASK_QPU) {
     struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
     av_assert0(j->callback.func == 0);
 
