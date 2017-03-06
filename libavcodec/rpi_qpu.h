@@ -1,6 +1,7 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
+#include <semaphore.h>
 #include "rpi_user_vcsm.h"
 
 #define RPI_ONE_BUF 1
@@ -187,9 +188,8 @@ extern unsigned int vpu_get_constants(void);
 extern int vpu_post_code2( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf);
 int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
     int qpu0_n, const uint32_t * qpu0_mail,
-    int qpu1_n, const uint32_t * qpu1_mail);
-
-extern void vpu_wait( int id);
+    int qpu1_n, const uint32_t * qpu1_mail,
+    sem_t * const sem);
 
 // Simple test of shader code
 extern int rpi_test_shader(void);
