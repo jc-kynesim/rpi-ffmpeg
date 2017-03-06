@@ -889,16 +889,16 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
 }
 #endif
 
-#ifdef RPI_INTER_QPU
+#if RPI_MC_CHROMA_QPU || RPI_MC_LUMA_QPU
+
 // Flush some lines of a reference frames
 void rpi_flush_ref_frame_progress(HEVCContext *s, ThreadFrame *f, int n)
 {
     if (s->enable_rpi && s->used_for_ref) {
         const int curr_y = ((int *)f->progress->data)[0];
-
         rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
         rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-          curr_y, n - curr_y, s->ps.sps->vshift[1], 1, 1);
+          curr_y, n - curr_y, s->ps.sps->vshift[1], RPI_MC_LUMA_QPU, RPI_MC_CHROMA_QPU);
         rpi_cache_flush_finish(rfe);
     }
 }
@@ -977,7 +977,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
         if (y && x_end) {
             sao_filter_CTB(s, x, y - ctb_size);
             if (s->threads_type == FF_THREAD_FRAME ) {
-#ifdef RPI_INTER_QPU
+#if RPI_MC_CHROMA_QPU || RPI_MC_LUMA_QPU
                 rpi_flush_ref_frame_progress(s,&s->ref->tf, y);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y, 0);
@@ -986,7 +986,7 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
         if (x_end && y_end) {
             sao_filter_CTB(s, x , y);
             if (s->threads_type == FF_THREAD_FRAME ) {
-#ifdef RPI_INTER_QPU
+#if RPI_MC_CHROMA_QPU || RPI_MC_LUMA_QPU
                 rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size);
 #endif
                 ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
@@ -1003,13 +1003,13 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
             ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
           }
         } else {
-#ifdef RPI_INTER_QPU
+#if RPI_MC_CHROMA_QPU || RPI_MC_LUMA_QPU
           rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
 #endif
           ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
         }
 #else
-#ifdef RPI_INTER_QPU
+#if RPI_MC_CHROMA_QPU || RPI_MC_LUMA_QPU
         rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
         // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
 #endif

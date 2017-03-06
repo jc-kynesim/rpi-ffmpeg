@@ -41,16 +41,17 @@
 #include "videodsp.h"
 
 // define RPI to split the CABAC/prediction/transform into separate stages
-#ifdef RPI
+#ifndef RPI
+
+#define RPI_MC_CHROMA_QPU 0
+#define RPI_MC_LUMA_QPU  0
+
+#else
 
   #include "rpi_qpu.h"
   // Define RPI_INTER_QPU to use QPU for chroma inter prediction
-  #define RPI_INTER_QPU
-
-  #ifdef RPI_INTER_QPU
-    // Define RPI_LUMA_QPU to also use QPU for luma inter prediction
-    #define RPI_LUMA_QPU
-  #endif
+  #define RPI_MC_CHROMA_QPU  0
+  #define RPI_MC_LUMA_QPU   1
 
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks
   #define RPI_WORKER
@@ -942,7 +943,7 @@ typedef struct HEVCContext {
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
     int ctu_per_y_chan; // Number of CTUs per luma QPU
     int ctu_per_uv_chan; // Number of CTUs per chroma QPU
-#ifdef RPI_INTER_QPU
+#if RPI_MC_CHROMA_QPU
     GPU_MEM_PTR_T unif_mvs_ptr[RPI_MAX_JOBS];
     uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
 
@@ -956,7 +957,7 @@ typedef struct HEVCContext {
     uint32_t mc_filter_uv_b0;
     uint32_t mc_filter_uv_b;
 #endif
-#ifdef RPI_LUMA_QPU
+#if RPI_MC_LUMA_QPU
     GPU_MEM_PTR_T y_unif_mvs_ptr[RPI_MAX_JOBS];
     uint32_t *y_unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
     uint32_t *y_mvs_base[RPI_MAX_JOBS][12];
@@ -1257,7 +1258,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                  int log2_trafo_size, enum ScanType scan_idx,
                                  int c_idx);
 
-#ifdef RPI_INTER_QPU
+#if RPI_MC_CHROMA_QPU || RPI_MC_LUMA_QPU
 extern void rpi_flush_ref_frame_progress(HEVCContext *s, ThreadFrame *f, int n);
 #endif
 
