@@ -133,6 +133,11 @@ mov rb23, 24
 
 # touch vertical context to keep simulator happy
 
+  mov ra4, 0 ; mov rb4, 0
+  mov ra5, 0 ; mov rb5, 0
+  mov ra6, 0 ; mov rb6, 0
+  mov ra7, 0 ; mov rb7, 0
+
 mov ra8, 0
 mov ra9, 0
 mov ra10, 0
@@ -327,7 +332,7 @@ mov vw_addr, unif # start the VDW
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 ::mc_filter_uv_b0
-mov ra31, unif
+mov -, unif                  # Ignore chain address - always "b"
 
 # per-channel shifts were calculated on the *previous* invocation
 
@@ -339,7 +344,8 @@ sub r2, unif, r3             ; mov ra_xshift, ra_xshift_next # compute offset fr
 shl ra_xshift_next, r0, 3
 add r0, r0, r3  	     ; mov ra1, unif   # ; width_height
 and rb_x_next, r0, ~3        ; mov ra0, unif   # ; H filter coeffs
-mov ra_y_next, r1            ; mov vw_setup, rb21
+mov ra_y_next, r1
+#            ; mov vw_setup, rb21
 
 add ra_frame_base_next, rb_x_next, r2
 
@@ -414,21 +420,34 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # apply vertical filter and write to VPM
 
-sub r1, r1, r0          ; mul24 r0, ra14, rb10
-sub.setf -, r3, rb18
-brr.anyn -, r:uvloop_b0
-add r1, r1, r0          ; mul24 r0, ra15, rb11
-sub r1, r1, r0          ; mov -, vw_wait
-asr vpm, r1, 6
-# >>> .anyn uvloop_b0
+  sub r1, r1, r0        ; mul24 r0, ra14, rb10
+  add r1, r1, r0        ; mul24 r0, ra15, rb11
+  sub r1, r1, r0        ; mov -, vw_wait
 
-# in pass0 we don't really need to save any results, but need to discard the uniforms
-# DMA out for U
+# FIFO goes:
+# b7b, a6b, b5b, a4b, b4b, a5b, b6b, a7b : b7a, a6a, b5a, a4a, b4a, a5a, b6a, a7a
+# a8 used as temp
 
-bra -, ra31
-mov -, unif           # Delay 1
-mov -, unif           # Delay 2
-nop                   # Delay 3
+  sub.setf -, r3, rb18       ; mov ra8, ra7.16b
+  asr ra8.16bs, r1, 6   # sat shouldn't be needed, but costs nothing
+  mov ra7, rb6          ; mov rb6, ra5
+  brr.anyn -, r:uvloop_b0
+  mov ra5, rb4          ; mov rb4, ra4
+  mov ra4, rb5          ; mov rb5, ra6
+  mov ra6, rb7          ; mov rb7, ra8
+# >>>
+
+
+  # plausible heights are 16, 12, 8, 6, 4, 3, 2
+  # we are allowed 3/4 cb_size w/h :-(
+
+# *** Need to shift for heights other than 16
+
+# Discard destination uniforms then drop through to _b - we will always
+# do b after b0
+
+  mov -, unif
+  mov -, unif
 
 
 ################################################################################
@@ -461,7 +480,7 @@ add ra_frame_base_next, rb_x_next, r2
 # For vr_setup we want height<<20 (so 20-7=13 additional bits)
 shl r3, r0, i_shift21     ; mov ra3, unif # Shl 13 + Mask off top 8 bits ; V filter coeffs
 shr r3, r3, 8
-add vr_setup, r3, rb21
+#add vr_setup, r3, rb21
 
 add r0, r0, ra1.16b    # Combine width and height of destination area
 shl r0, r0, i_shift16  # Shift into bits 16 upwards of the vdw_setup0 register
@@ -530,12 +549,19 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 sub r1, r1, r0          ; mul24 r0, ra14, rb10
 add r1, r1, r0          ; mul24 r0, ra15, rb11
 # Beware: vpm read gets unsigned 16-bit value, so we must sign extend it
-sub r1, r1, r0          ; mul24 r0, vpm, ra4  # ra4 = 0x10000
+sub r1, r1, r0
 sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14          # shift2=6
 
-asr r0, r0, i_shift16   ; mul24 r1, r1, ra1.16a
-nop                     ; mul24 r0, r0, rb14
+  nop                   ; mul24 r1, r1, ra1.16a
+  nop                   ; mul24 r0, ra7.16a, rb14
+
+  # Rotate FIFO
+  shr r2, ra7, i_shift16 # Could be a mov - but use zeros for debug
+  mov ra7, rb6       ; mov rb6, ra5
+  mov ra5, rb4       ; mov rb4, ra4
+  mov ra4, rb5       ; mov rb5, ra6
+  mov ra6, rb7       ; mov rb7, r2
 
 add r1, r1, r0          ; mov -, vw_wait
 shl r1, r1, 8           # Lose bad top 8 bits & sign extend
@@ -546,6 +572,7 @@ brr.anyn -, r:uvloop_b
 asr r1, r1, rb13         # Delay 1
 min r1, r1, rb_k255       # Delay 2
 max vpm, r1, 0         # Delay 3
+# >>>
 
 
 # DMA out for U
