@@ -422,14 +422,16 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
   sub r1, r1, r0        ; mul24 r0, ra14, rb10
   add r1, r1, r0        ; mul24 r0, ra15, rb11
-  sub r1, r1, r0        ; mov -, vw_wait
+  sub r1, r1, r0
 
 # FIFO goes:
-# b7b, a6b, b5b, a4b, b4b, a5b, b6b, a7b : b7a, a6a, b5a, a4a, b4a, a5a, b6a, a7a
+# b7a, a6a, b5a, a4a, b4a, a5a, b6a, a7a : b7b, a6b, b5b, a4b, b4b, a5b, b6b, a7b
+# This arrangement optimizes the inner loop FIFOs at the expense of making the
+# bulk shift between loops quite a bit nastier
 # a8 used as temp
 
-  sub.setf -, r3, rb18       ; mov ra8, ra7.16b
-  asr ra8.16bs, r1, 6   # sat shouldn't be needed, but costs nothing
+  sub.setf -, r3, rb18  ; mov ra8.16b, ra7
+  asr ra8.16as, r1, 6   # sat shouldn't be needed, but costs nothing
   mov ra7, rb6          ; mov rb6, ra5
   brr.anyn -, r:uvloop_b0
   mov ra5, rb4          ; mov rb4, ra4
@@ -446,9 +448,57 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # Discard destination uniforms then drop through to _b - we will always
 # do b after b0
 
+  sub.setf -, 15, r3   # 12 + 3 of preroll
+  brr.anyn -, r:mc_filter_uv_b  # > 12 => 16
   mov -, unif
   mov -, unif
+  sub r3, 11, r3         # Convert r3 to shifts wanted
+# >>>
+  brr.anyz -, r:uv_b0_post12    # == 12 deal with specially
+  nop
+  mov r0, i_shift16
+  mov r1, 0x10000
+# >>>
 
+# Shift 8 with discard (a ->b on all regs)
+  shl ra7, ra7, r0      ; mul24 rb7, rb7, r1
+  shl ra6, ra6, r0      ; mul24 rb6, rb6, r1
+  shl ra5, ra5, r0      ; mul24 rb5, rb5, r1
+  shl ra4, ra4, r0      ; mul24 rb4, rb4, r1
+
+  and.setf -, r3, 4
+  mov.ifnz ra7, ra4     ; mov.ifnz rb6, rb5
+  mov.ifnz ra5, ra6     ; mov.ifnz rb4, rb7
+  # If we shifted by 4 here then the max length remaining is 4 so we can
+  # so that is it
+
+  and.setf -, r3, 2
+  brr -, r:mc_filter_uv_b
+  mov.ifnz ra7, ra5    ; mov.ifnz rb6, rb4
+  mov.ifnz ra5, ra4    ; mov.ifnz rb4, rb5
+  mov.ifnz ra4, ra6    ; mov.ifnz rb5, rb7
+  # 6 / 2 so need 6 outputs
+# >>>
+
+:uv_b0_post12
+# this one is annoying as we need to swap haves of things that don't
+#  really want to be swapped
+
+# b7a, a6a, b5a, a4a
+# b4a, a5a, b6a, a7a
+# b7b, a6b, b5b, a4b
+# b4b, a5b, b6b, a7b
+
+  mov r2,  ra4     ; mov r3,  rb5
+  shl ra4, ra7, r0 ; mul24 rb5, rb6, r1
+  mov ra7, r2      ; mov rb6, r3
+
+  mov r2, ra6      ; mov r3, rb7
+  shl ra6, ra5, r0 ; mul24 rb7, rb4, r1
+  mov ra5, r2      ; mov rb4, r3
+
+
+  # drop through
 
 ################################################################################
 
@@ -554,10 +604,10 @@ sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
 asr r1, r1, 14          # shift2=6
 
   nop                   ; mul24 r1, r1, ra1.16a
-  nop                   ; mul24 r0, ra7.16a, rb14
+  nop                   ; mul24 r0, ra7.16b, rb14
 
   # Rotate FIFO
-  shr r2, ra7, i_shift16 # Could be a mov - but use zeros for debug
+  shl r2, ra7, i_shift16
   mov ra7, rb6       ; mov rb6, ra5
   mov ra5, rb4       ; mov rb4, ra4
   mov ra4, rb5       ; mov rb5, ra6
