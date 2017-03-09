@@ -2287,6 +2287,38 @@ rpi_pred_y(HEVCContext * const s, const int x0, const int y0,
 #endif
 
 #if RPI_MC_CHROMA_QPU
+
+typedef struct qpu_mc_pred_c_s {
+    uint32_t next_fn;
+    int32_t next_src_x;
+    int32_t next_src_y;
+    uint32_t next_src_base_u;
+    uint32_t next_src_base_v;
+    union {
+        struct {
+            uint16_t h;
+            uint16_t w;
+            uint32_t coeffs_x;
+            uint32_t coeffs_y;
+            uint32_t wo_u;
+            uint32_t wo_v;
+            uint32_t dst_addr_u;
+            uint32_t dst_addr_v;
+        } p;
+        struct {
+            uint32_t pic_w;
+            uint32_t pic_h;
+            uint32_t stride_u;
+            uint32_t stride_v;
+            uint32_t wdenom;
+            uint32_t dummy0;
+            uint32_t vpm_section;
+        } s;
+    };
+} qpu_mc_pred_c_t;
+
+static const char static_assert_qpu_mc_pred[sizeof(qpu_mc_pred_c_t) != RPI_CHROMA_COMMAND_WORDS * 4 ? -1 : 1] = {0};
+
 static void
 rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
@@ -2309,32 +2341,36 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   uint32_t dst_base_u = get_vc_address_u(s->frame) + x0_c + y0_c * s->frame->linesize[1];
   uint32_t dst_base_v = get_vc_address_v(s->frame) + x0_c + y0_c * s->frame->linesize[2];
 
-  uint32_t *u = s->curr_u_mvs;
+  qpu_mc_pred_c_t * u = (qpu_mc_pred_c_t *)s->curr_u_mvs;
+
   for(int start_y=0;start_y < nPbH_c;start_y+=16)
   {
     const int bh = FFMIN(nPbH_c-start_y, 16);
+    // We are allowed 3/4 powers of two as well as powers of 2
+    av_assert0(bh == 16 || bh == 12 || bh == 8 || bh == 6 || bh == 4 || bh == 2);
 
-    for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH)
+    for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH, ++u)
     {
         const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
-        u++[-RPI_CHROMA_COMMAND_WORDS] = s->mc_filter_uv;
-        u++[-RPI_CHROMA_COMMAND_WORDS] = x1_c + start_x;
-        u++[-RPI_CHROMA_COMMAND_WORDS] = y1_c + start_y;
-        u++[-RPI_CHROMA_COMMAND_WORDS] = src_base_u;
-        u++[-RPI_CHROMA_COMMAND_WORDS] = src_base_v;
-        *u++ = PACK2(bw, bh);
-        *u++ = x_coeffs;
-        *u++ = y_coeffs;
-        *u++ = wo_u;
-        *u++ = wo_v;
-        *u++ = dst_base_u + start_x;
-        *u++ = dst_base_v + start_x;
+        u[-1].next_fn  = s->mc_filter_uv;
+        u[-1].next_src_x = x1_c + start_x;
+        u[-1].next_src_y = y1_c + start_y;
+        u[-1].next_src_base_u = src_base_u;
+        u[-1].next_src_base_v = src_base_v;
+        u[0].p.h = bh;
+        u[0].p.w = bw;
+        u[0].p.coeffs_x = x_coeffs;
+        u[0].p.coeffs_y = y_coeffs;
+        u[0].p.wo_u = wo_u;
+        u[0].p.wo_v = wo_v;
+        u[0].p.dst_addr_u = dst_base_u + start_x;
+        u[0].p.dst_addr_v = dst_base_v + start_x;
     }
 
     dst_base_u += s->frame->linesize[1] * 16;
     dst_base_v += s->frame->linesize[2] * 16;
   }
-  s->curr_u_mvs = u;
+  s->curr_u_mvs = (uint32_t *)u;
   return;
 }
 #endif
@@ -3258,19 +3294,22 @@ static void rpi_begin(HEVCContext *s)
     int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
 
     for(i=0;i<8;i++) {
-        s->u_mvs[job][i] = s->mvs_base[job][i];
-        *s->u_mvs[job][i]++ = 0;
-        *s->u_mvs[job][i]++ = 0;
-        *s->u_mvs[job][i]++ = 0;
-        *s->u_mvs[job][i]++ = 0;
-        *s->u_mvs[job][i]++ = 0;
-        *s->u_mvs[job][i]++ = pic_width;
-        *s->u_mvs[job][i]++ = pic_height;
-        *s->u_mvs[job][i]++ = s->frame->linesize[1];
-        *s->u_mvs[job][i]++ = s->frame->linesize[2];
-        *s->u_mvs[job][i]++ = s->sh.chroma_log2_weight_denom + 6;
-        *s->u_mvs[job][i]++ = 0;
-        *s->u_mvs[job][i]++ = i;  // Select section of VPM (avoid collisions with 3d unit)
+        qpu_mc_pred_c_t * const u = (qpu_mc_pred_c_t *)s->mvs_base[job][i];
+
+        u->next_fn = 0;
+        u->next_src_x = 0;
+        u->next_src_y = 0;
+        u->next_src_base_u = 0;
+        u->next_src_base_v = 0;
+        u->s.pic_w = pic_width;
+        u->s.pic_h = pic_height;
+        u->s.stride_u = s->frame->linesize[1];
+        u->s.stride_v = s->frame->linesize[2];
+        u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
+        u->s.dummy0 = 0;
+        u->s.vpm_section = i; // Select section of VPM (avoid collisions with 3d unit)
+
+        s->u_mvs[job][i] = (uint32_t *)(u + 1);
     }
     s->curr_u_mvs = s->u_mvs[job][0];
 #endif
@@ -3610,18 +3649,17 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 
     // Add final commands to Q
     for(i = 0; i != QPU_N_UV; ++i) {
-        uint32_t * const pu = s->u_mvs[job][i] - RPI_CHROMA_COMMAND_WORDS;
-        const int cmd_count = pu - s->mvs_base[job][i];
+        qpu_mc_pred_c_t * const pu = (qpu_mc_pred_c_t *)s->u_mvs[job][i] - 1;
+        const int cmd_count = (uint32_t *)pu - s->mvs_base[job][i];
         tc += cmd_count;
 
-        av_assert0(cmd_count < UV_COMMANDS_PER_QPU - 1);
-
+        pu->next_fn = (i != QPU_N_UV - 1) ? exit_fn : exit_fn2;  // Actual fn ptr
+        // Need to set the src to something that can be (pointlessly) prefetched
+        pu->next_src_x = 0;
+        pu->next_src_y = 0;
         // We use this code as a dummy texture - safe?
-        pu[0] = (i != QPU_N_UV - 1) ? exit_fn : exit_fn2;  // Actual fn ptr
-        pu[1] = 0; // x
-        pu[2] = 0; // y
-        pu[3] = dummy_texture;
-        pu[4] = dummy_texture;
+        pu->next_src_base_u = dummy_texture;
+        pu->next_src_base_v = dummy_texture;
     }
 
     return tc;
