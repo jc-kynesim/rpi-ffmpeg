@@ -312,8 +312,8 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 
     av_assert0(sps);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
-    s->ctu_per_y_chan = s->max_ctu_count / 12;
-    s->ctu_per_uv_chan = s->max_ctu_count / 8;
+    s->ctu_per_y_chan = s->max_ctu_count / QPU_N_Y;
+    s->ctu_per_uv_chan = s->max_ctu_count / QPU_N_UV;
     for(job=0;job<RPI_MAX_JOBS;job++) {
       for(job=0;job<RPI_MAX_JOBS;job++) {
         gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
@@ -2312,7 +2312,7 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t stride_v;
             uint32_t wdenom;
             uint32_t dummy0;
-            uint32_t vpm_section;
+            uint32_t dummy1;
         } s;
     };
 } qpu_mc_pred_c_t;
@@ -3293,7 +3293,7 @@ static void rpi_begin(HEVCContext *s)
     int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
     int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
 
-    for(i=0;i<8;i++) {
+    for(i=0; i < QPU_N_UV;i++) {
         qpu_mc_pred_c_t * const u = (qpu_mc_pred_c_t *)s->mvs_base[job][i];
 
         u->next_fn = 0;
@@ -3307,7 +3307,7 @@ static void rpi_begin(HEVCContext *s)
         u->s.stride_v = s->frame->linesize[2];
         u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
         u->s.dummy0 = 0;
-        u->s.vpm_section = i; // Select section of VPM (avoid collisions with 3d unit)
+        u->s.dummy1 = 0;
 
         s->u_mvs[job][i] = (uint32_t *)(u + 1);
     }
@@ -3315,7 +3315,7 @@ static void rpi_begin(HEVCContext *s)
 #endif
 
 #if RPI_MC_LUMA_QPU
-    for(i=0;i<12;i++) {
+    for(i=0;i < QPU_N_Y;i++) {
         // This needs to have a generally similar structure to the
         // actual filter code as various pipelined bits need to land correctly
         // when inserted by the filter requests
@@ -3643,7 +3643,13 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 {
     unsigned int i;
     const uint32_t exit_fn = qpu_get_fn(QPU_MC_EXIT);
+#if QPU_N_UV == 8
     const uint32_t exit_fn2 = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8);
+#elif QPU_N_Y == 12
+    const uint32_t exit_fn2 = qpu_get_fn(QPU_MC_INTERRUPT_EXIT12);
+#else
+#error Need appropriate exit code
+#endif
     const uint32_t dummy_texture = qpu_get_fn(QPU_MC_SETUP_UV);
     unsigned int tc = 0;
 
@@ -3844,19 +3850,19 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
 
 #if RPI_MC_CHROMA_QPU
-        s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count % 8];
+        s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count % QPU_N_UV];
 #endif
 #if RPI_MC_LUMA_QPU
-        s->curr_y_mvs = s->y_mvs[s->pass0_job][s->ctu_count % 12];
+        s->curr_y_mvs = s->y_mvs[s->pass0_job][s->ctu_count % QPU_N_Y];
 #endif
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
 #if RPI_MC_CHROMA_QPU
-        s->u_mvs[s->pass0_job][s->ctu_count % 8]= s->curr_u_mvs;
+        s->u_mvs[s->pass0_job][s->ctu_count % QPU_N_UV]= s->curr_u_mvs;
 #endif
 #if RPI_MC_LUMA_QPU
-        s->y_mvs[s->pass0_job][s->ctu_count % 12] = s->curr_y_mvs;
+        s->y_mvs[s->pass0_job][s->ctu_count % QPU_N_Y] = s->curr_y_mvs;
 #endif
 
 #ifdef RPI
@@ -4825,15 +4831,15 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     for (job = 0; job < RPI_MAX_JOBS; job++) {
         uint32_t *p;
 #ifdef RPI_CACHE_UNIF_MVS
-        gpu_malloc_cached( 8 * UV_COMMANDS_PER_QPU * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
+        gpu_malloc_cached(QPU_N_UV * UV_COMMANDS_PER_QPU * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #else
-        gpu_malloc_uncached( 8 * UV_COMMANDS_PER_QPU * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
+        gpu_malloc_uncached(QPU_N_UV * UV_COMMANDS_PER_QPU * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #endif
         s->unif_mvs[job] = (uint32_t *) s->unif_mvs_ptr[job].arm;
 
         // Set up initial locations for uniform streams
         p = s->unif_mvs[job];
-        for(i = 0; i < 8; i++) {
+        for(i = 0; i < QPU_N_UV; i++) {
             s->mvs_base[job][i] = p;
             p += UV_COMMANDS_PER_QPU;
         }
@@ -4848,15 +4854,15 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     {
         uint32_t *p;
 #ifdef RPI_CACHE_UNIF_MVS
-        gpu_malloc_cached( 12 * Y_COMMANDS_PER_QPU * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
+        gpu_malloc_cached(QPU_N_Y * Y_COMMANDS_PER_QPU * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
 #else
-        gpu_malloc_uncached( 12 * Y_COMMANDS_PER_QPU * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
+        gpu_malloc_uncached(QPU_N_Y * Y_COMMANDS_PER_QPU * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
 #endif
         s->y_unif_mvs[job] = (uint32_t *) s->y_unif_mvs_ptr[job].arm;
 
         // Set up initial locations for uniform streams
         p = s->y_unif_mvs[job];
-        for(i = 0; i < 12; i++) {
+        for(i = 0; i < QPU_N_Y; i++) {
             s->y_mvs_base[job][i] = p;
             p += Y_COMMANDS_PER_QPU;
         }

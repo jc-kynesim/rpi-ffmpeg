@@ -37,7 +37,7 @@
 # ra23 ra_y2_next                               ra_y2_next
 #
 # rb20                                          0xffffff00
-# rb21                                          vpm_setup for reading/writing 16bit results into VPM
+# rb21                                          -- free --
 # rb22 rb_k255                                  255
 # rb23                                          24
 #
@@ -93,6 +93,27 @@
 # With shifts only the bottom 5 bits are considered so -16=16, -15=17 etc.
 .set i_shift16,                    -16
 .set i_shift21,                    -11
+
+# Much of the setup code is common between Y & C
+# Macros that express this - obviously these can't be overlapped
+# so are probably unsuitable for loop code
+
+.macro m_calc_dma_regs, r_vpm, r_dma
+  mov r2, qpu_num
+  asr r1, r2, 2
+  shl r1, r1, 6
+  and r0, r2, 3
+  or  r0, r0, r1
+
+  mov r1, vpm_setup(0, 4, h8p(0, 0))   # 4 is stride - stride acts on ADDR which is Y[5:0],B[1:0] for 8 bit
+  add r_vpm, r0, r1  # VPM 8bit storage
+
+  mov r1, vdw_setup_0(0, 0, dma_h8p(0,0,0)) # height,width added later
+  shl r0, r0, 5
+  add r_dma, r0, r1  # DMA out
+.endm
+
+
 
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
@@ -166,25 +187,10 @@ mov r2, 9
 add rb13, r2, unif  # denominator
 mov -, unif         # Unused
 
-# Compute part of VPM to use for DMA output
-mov r2, unif
-shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
-and r2, r2, 15
-mov r1, r2
-asr r1, r1, 2
-shl r1, r1, 6
-mov r0, r2
-and r0, r0, 3
-add r0, r0, r1
+mov -, unif   # ??? same as (register) qpu_num
 
-mov r1, vpm_setup(0, 4, h8p(0, 0))   # 4 is stride - stride acts on ADDR which is Y[5:0],B[1:0] for 8 bit
-add rb28, r0, r1  # VPM 8bit storage
-asr r2, r0, 1     # r0 = bc0000d
-mov r1, vpm_setup(0, 2, h16p(0, 0))  # 2 is stride - stride acts on ADDR which is Y[5:0],H[0] for 16 bit
-add rb21, r2, r1  # VPM for 16bit intermediates
-mov r1, vdw_setup_0(0, 0, dma_h8p(0,0,0)) # height,width added later
-shl r0, r0, 5
-add rb27, r0, r1  # DMA out
+# Compute part of VPM to use for DMA output
+m_calc_dma_regs rb28, rb27
 
 # submit texture requests for second line
 max r1, ra_y, 0
@@ -338,11 +344,11 @@ mov -, unif                  # Ignore chain address - always "b"
 
 # get base addresses and per-channel shifts for *next* invocation
 add r0, unif, elem_num       # x
-max r0, r0, 0                ; mov r1, unif # y
-min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
-sub r2, unif, r3             ; mov ra_xshift, ra_xshift_next # compute offset from frame base u to frame base v ;
+max r0, r0, 0                ; mov r1, unif    # ; y
+min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # ; frame_u_base
+sub r2, unif, r3             ; mov ra_xshift, ra_xshift_next # frame_v_base ;
 shl ra_xshift_next, r0, 3
-add r0, r0, r3  	     ; mov ra1, unif   # ; width_height
+add r0, r0, r3               ; mov ra1, unif   # ; width_height
 and rb_x_next, r0, ~3        ; mov ra0, unif   # ; H filter coeffs
 mov ra_y_next, r1
 #            ; mov vw_setup, rb21
@@ -353,14 +359,12 @@ add ra_frame_base_next, rb_x_next, r2
 # chroma filter always goes -ve, +ve, +ve, -ve. This is fixed in the
 # filter code. Unpack into b regs for V
 
-# set up VPM write, we need to save 16bit precision
-
 sub rb29, rb24, ra1.16b         # Compute vdw_setup1(dst_pitch-width)
 add rb17, ra1.16a, 1
 add rb18, ra1.16a, 3
 shl r0,   ra1.16a, 7
-add r0,   r0, ra1.16b           # Combine width and height of destination area
-shl r0,   r0, i_shift16      ; mov ra3, unif  # ; V filter coeffs
+add r0,   r0, ra1.16b        ; mov ra3, unif   # Combine width and height of destination area ; V filter coeffs
+shl r0,   r0, i_shift16      ; mov rb14, unif  # U weight L0
 add rb26, r0, rb27
 
 mov rb8, ra3.8a
@@ -373,8 +377,8 @@ mov rb11, ra3.8d
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-mov      rb14, unif                 # U weight L0
 mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
+
 # rb14 unused in b0 but will hang around till the second pass
 
 # retrieve texture results and pick out bytes
@@ -530,7 +534,6 @@ add ra_frame_base_next, rb_x_next, r2
 # For vr_setup we want height<<20 (so 20-7=13 additional bits)
 shl r3, r0, i_shift21     ; mov ra3, unif # Shl 13 + Mask off top 8 bits ; V filter coeffs
 shr r3, r3, 8
-#add vr_setup, r3, rb21
 
 add r0, r0, ra1.16b    # Combine width and height of destination area
 shl r0, r0, i_shift16  # Shift into bits 16 upwards of the vdw_setup0 register
@@ -773,18 +776,7 @@ nop        ; nop # delay slot 2
   mov ra15, 0
 
 # Compute part of VPM to use
-  mov r2, qpu_num
-  mov r1, r2
-  asr r1, r1, 2
-  shl r1, r1, 6
-  mov r0, r2
-  and r0, r0, 3
-  add r0, r0, r1
-  mov r1, vpm_setup(0, 4, h8p(0, 0))   # 4 is stride - stride acts on ADDR which is Y[5:0],B[1:0] for 8 bit
-  add rb28, r0, r1  # VPM for saving data
-  mov r1, vdw_setup_0(0, 0, dma_h8p(0,0,0)) # height,width added later
-  shl r0, r0, 5
-  add rb27, r0, r1  # Command for dma output
+  m_calc_dma_regs rb28, rb27
 
 # Weighted prediction denom
   add rb13, unif, 9  # unif = weight denom + 6

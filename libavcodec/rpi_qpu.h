@@ -172,7 +172,7 @@ enum {
   };
 extern unsigned int qpu_get_fn(int num);
 
-#define QPU_N_UV   8
+#define QPU_N_UV   12
 #define QPU_N_Y    12
 #define QPU_N_MAX  16
 

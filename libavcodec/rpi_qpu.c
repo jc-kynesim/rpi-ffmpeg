@@ -563,7 +563,7 @@ static void vpu_qpu_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_co
   }
 }
 
-static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t * const mail)
+static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t pflags, const uint32_t * const mail)
 {
   if (n != 0) {
     struct gpu_job_s *const j = new_job(vqj);
@@ -571,7 +571,7 @@ static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n,
 
     j->command = EXECUTE_QPU;
     j->u.q.jobs = n;
-//    j->u.q.noflush = qpu_pflags;
+    j->u.q.noflush = pflags;
     j->u.q.timeout = 5000;
     memcpy(j->u.q.control, mail, n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
   }
@@ -627,21 +627,21 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 {
   vpu_qpu_job_env_t * const vqj = vpu_qpu_job_new();
 
-//  uint32_t qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH;
-#if 0
+  uint32_t qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH;
+#if 1
   static int z = 0;
   if (z == 0) {
     z = 1;
     qpu_pflags = QPU_FLAGS_PROF_CLEAR_PROFILE;
   }
   else if ((z++ & 2047) == 0) {
-    qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH | QPU_FLAGS_PROF_OUTPUT_COUNTS;
+    qpu_pflags = QPU_FLAGS_PROF_OUTPUT_COUNTS;
   }
 #endif
 
   vpu_qpu_add_vpu(vqj, vpu_code, r0, r1, r2, r3, r4, r5);
-  vpu_qpu_add_qpu(vqj, qpu1_n, qpu1_mail);
-  vpu_qpu_add_qpu(vqj, qpu0_n, qpu0_mail);
+  vpu_qpu_add_qpu(vqj, qpu1_n, QPU_FLAGS_PROF_NO_FLUSH, qpu1_mail);
+  vpu_qpu_add_qpu(vqj, qpu0_n, qpu_pflags, qpu0_mail);
   if (sem != NULL)
     vpu_qpu_add_sync_this(vqj, callback, sem);
   av_assert0(vpu_qpu_start(vqj) == 0);
