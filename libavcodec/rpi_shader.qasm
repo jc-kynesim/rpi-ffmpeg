@@ -56,7 +56,7 @@
 # ra27                                          next ra25
 # ra28                                          next y
 # ra29                                          y for next texture access
-# ra30                                          -- free --
+# ra30                                          chroma-B height+3; free otherwise
 #
 # ra31                                          next kernel address
 
@@ -358,7 +358,7 @@ add ra_frame_base_next, rb_x_next, r2
 
 sub rb29, rb24, ra1.16b         # Compute vdw_setup1(dst_pitch-width)
 add rb17, ra1.16a, 1
-add rb18, ra1.16a, 3
+add ra30, ra1.16a, 3
 shl r0,   ra1.16a, 7
 add r0,   r0, ra1.16b        ; mov ra3, unif   # Combine width and height of destination area ; V filter coeffs
 shl r0,   r0, i_shift16      ; mov rb14, unif  # U weight L0
@@ -431,8 +431,8 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # bulk shift between loops quite a bit nastier
 # a8 used as temp
 
-  sub.setf -, r3, rb18  ; mov rb6, ra5
-  asr ra8.16as, r1, 6                           # sat shouldn't be needed, but costs nothing
+  sub.setf -, r3, ra30
+  asr ra8.16a, r1, 6    ; mov rb6, ra5          # This discards the high bits that might be bad
   brr.anyn -, r:uvloop_b0
   mov ra5, rb4          ; mov rb4, ra4
   mov ra4, rb5          ; mov rb5, ra6
@@ -449,8 +449,8 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
   sub.setf -, 15, r3   # 12 + 3 of preroll
   brr.anyn -, r:mc_filter_uv_b  # > 12 => 16
-  mov -, unif
-  mov -, unif
+  mov -, unif                                   # Discard u_dst_addr
+  mov -, unif                                   # Discard v_dst_addr
   sub r3, 11, r3         # Convert r3 to shifts wanted
 # >>>
   brr.anyz -, r:uv_b0_post12    # == 12 deal with specially
@@ -515,24 +515,12 @@ max r0, r0, 0                      ; mov ra_y_next, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif        # V frame_base
 # compute offset from frame base u to frame base v
 sub r2, unif, r3                   ; mul24 ra_xshift_next, r0, 8 # U frame_base
-add r0, r0, r3                     ; mov ra1, unif       # width_height
+add r0, r0, r3                     ; mov -, unif         # discard width_height
 and rb_x_next, r0, ~3              ; mov ra0, unif       # H filter coeffs
 
-sub rb29, rb24, ra1.16b  # Compute vdw_setup1(dst_pitch-width)
-add rb17, ra1.16a, 1
-add rb18, ra1.16a, 3
-shl r0,   ra1.16a, 7
+# rb17, rb26, rb29, ra30 inherited from B0 as w/h must be the same
 
-add ra_frame_base_next, rb_x_next, r2
-
-# r0 is currently height<<7
-# For vr_setup we want height<<20 (so 20-7=13 additional bits)
-shl r3, r0, i_shift21     ; mov ra3, unif # Shl 13 + Mask off top 8 bits ; V filter coeffs
-shr r3, r3, 8
-
-add r0, r0, ra1.16b    # Combine width and height of destination area
-shl r0, r0, i_shift16  # Shift into bits 16 upwards of the vdw_setup0 register
-add rb26, r0, rb27
+mov ra3, unif #  V filter coeffs
 
 # get filter coefficients
 
@@ -543,7 +531,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 # The unif read occurs unconditionally, only the write is conditional
 mov      ra1, unif  ; mov rb8,  ra3.8a    # U offset/weight ;
 mov.ifnz ra1, unif  ; mov rb9,  ra3.8b    # V offset/weight ;
-nop                 ; mov rb10, ra3.8c
+add ra_frame_base_next, rb_x_next, r2 ; mov rb10, ra3.8c
 mov r3, 0           ; mov rb11, ra3.8d    # Loop counter ;
 
 shl r1, ra1.16b, rb13
@@ -588,38 +576,29 @@ sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b
 mov ra13, ra14          ; mul24 r1, ra14, rb9
-mov ra14, ra15
+mov ra14, ra15          ; mul24 r2, ra15, rb10
 mov ra15, r0            ; mul24 r0, ra12, rb8
 # >>> .anyn uvloop_b
 
 # apply vertical filter and write to VPM
 
-sub r1, r1, r0          ; mul24 r0, ra14, rb10
-add r1, r1, r0          ; mul24 r0, ra15, rb11
-# Beware: vpm read gets unsigned 16-bit value, so we must sign extend it
-sub r1, r1, r0
-sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
-asr r1, r1, 14          # shift2=6
+  sub r1, r1, r0        ; mov ra8.16b, ra7      # FIFO rotate (all ra/b4..7)
+  add r1, r1, r2        ; mul24 r0, ra15, rb11
+  sub r1, r1, r0        ; mul24 r0, ra7.16b, rb14
+  mov ra7, rb6          ; mul24 r1, r1, ra_k256
+  asr r1, r1, 14        ; mov rb6, ra5 # shift2=6
 
-  nop                   ; mul24 r1, r1, ra1.16a
-  nop                   ; mul24 r0, ra7.16b, rb14
+  mov ra5, rb4          ; mul24 r1, r1, ra1.16a
+  add r1, r1, r0        ; mov rb4, ra4
 
-  # Rotate FIFO
-  shl r2, ra7, i_shift16
-  mov ra7, rb6       ; mov rb6, ra5
-  mov ra5, rb4       ; mov rb4, ra4
-  mov ra4, rb5       ; mov rb5, ra6
-  mov ra6, rb7       ; mov rb7, r2
+  mov ra4, rb5          ; mul24 r1, r1, ra_k256 # Lose bad top 8 bits & sign extend
+  add r1, r1, rb12      ; mov rb5, ra6          # rb12 = (offsetL0 + offsetL1 + 1) << (rb13 - 1)
 
-add r1, r1, r0          ; mov -, vw_wait
-shl r1, r1, 8           # Lose bad top 8 bits & sign extend
-
-add r1, r1, rb12        # rb12 = (offsetL0 + offsetL1 + 1) << (rb13 - 1)
-
-brr.anyn -, r:uvloop_b
-asr r1, r1, rb13         # Delay 1
-min r1, r1, rb_k255       # Delay 2
-max vpm, r1, 0         # Delay 3
+  sub.setf -, r3, ra30  ; mov ra6, rb7
+  brr.anyn -, r:uvloop_b
+  asr ra8.8as, r1, rb13
+  mov -, vw_wait        ; mov rb7, ra8          #  vw_wait is B-reg (annoyingly) ; Final FIFO mov
+  mov vpm, ra8.8a
 # >>>
 
 

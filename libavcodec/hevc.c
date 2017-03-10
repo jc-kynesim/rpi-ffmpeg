@@ -2308,8 +2308,8 @@ typedef struct qpu_mc_pred_c_s {
         struct {
             uint32_t pic_w;
             uint32_t pic_h;
-            uint32_t stride_u;
-            uint32_t stride_v;
+            uint32_t src_stride;
+            uint32_t dst_stride;
             uint32_t wdenom;
             uint32_t dummy0;
             uint32_t dummy1;
@@ -3303,11 +3303,11 @@ static void rpi_begin(HEVCContext *s)
         u->next_src_base_v = 0;
         u->s.pic_w = pic_width;
         u->s.pic_h = pic_height;
-        u->s.stride_u = s->frame->linesize[1];
-        u->s.stride_v = s->frame->linesize[2];
+        u->s.src_stride = s->frame->linesize[1];
+        u->s.dst_stride = s->frame->linesize[1];
         u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
         u->s.dummy0 = 0;
-        u->s.dummy1 = 0;
+        u->s.dummy1 = i;  // Was QPU number *** make zero when happy with new code
 
         s->u_mvs[job][i] = (uint32_t *)(u + 1);
     }
