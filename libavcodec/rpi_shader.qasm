@@ -14,7 +14,7 @@
 #
 # rb8...rb11                                    eight vertical filter coefficients
 
-# ra4                                           y: Fiter, UV: 0x10000
+# ra4                                           y: Fiter, UV: part -of b0 -> b stash
 
 # rb12                                          offset to add before shift (round + weighting offsets)
 # rb13                                          shift: denom + 6 + 9
@@ -56,7 +56,7 @@
 # ra27                                          next ra25
 # ra28                                          next y
 # ra29                                          y for next texture access
-# ra30                                          64
+# ra30                                          -- free --
 #
 # ra31                                          next kernel address
 
@@ -136,24 +136,22 @@ sub rb30,unif,1
 # get source pitch
 mov rb16, unif
 
-# get destination pitch
-mov r0, unif
+# get destination vdw setup
 mov r1, vdw_setup_1(0)
-add rb24, r1, r0
+add rb24, r1, unif      # dst_stride
 
 # load constants
 
-mov ra4, 0x10000
 mov ra_k1, 1
 mov ra_k256, 256
-mov ra30, 64
 
 mov rb20, 0xffffff00
 mov rb_k255, 255
 mov rb23, 24
 
-# touch vertical context to keep simulator happy
+# touch registers to keep simulator happy
 
+  # B0 -> B stash registers
   mov ra4, 0 ; mov rb4, 0
   mov ra5, 0 ; mov rb5, 0
   mov ra6, 0 ; mov rb6, 0
@@ -170,21 +168,20 @@ mov ra15, 0
 
 # Compute base address for first and second access
 mov r0, ra_x           # Load x
-max r0, r0, 0; mov r1, ra_y # Load y
+max r0, r0, 0                      ; mov r1, ra_y # Load y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, ra_frame_base  # Load the frame base
-shl ra_xshift_next, r0, 3 ; mov r2, ra_u2v_ref_offset
+shl ra_xshift_next, r0, 3          ; mov r2, ra_u2v_ref_offset
 add ra_y, r1, 1
 add r0, r0, r3
 and r0, r0, ~3
-max r1, r1, 0 ; mov ra_x, r0 # y
+max r1, r1, 0                      ; mov ra_x, r0 # y
 min r1, r1, rb_frame_height_minus_1
 # submit texture requests for first line
 add r2, r2, r0 ; mul24 r1, r1, rb_pitch
 add t0s, r0, r1 ; mov ra_frame_base, r2
 add t1s, r2, r1
 
-mov r2, 9
-add rb13, r2, unif  # denominator
+add rb13, 9, unif   # denominator
 mov -, unif         # Unused
 
 mov -, unif   # ??? same as (register) qpu_num
@@ -417,16 +414,16 @@ nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
 sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b0
-mov ra13, ra14          ; mul24 r1, ra14, rb9  # ra14 is about to be ra13
-mov ra14, ra15
+mov ra13, ra14          ; mul24 r1, ra14, rb9   # ra14 is about to be ra13
+mov ra14, ra15          ; mul24 r2, ra15, rb10  # ra15 is about to be ra14
 mov ra15, r0            ; mul24 r0, ra12, rb8
 # >>> .anyn uvloop_b0
 
-# apply vertical filter and write to VPM
+# apply vertical filter and write to B-FIFO
 
-  sub r1, r1, r0        ; mul24 r0, ra14, rb10
-  add r1, r1, r0        ; mul24 r0, ra15, rb11
-  sub r1, r1, r0
+  sub r1, r1, r0        ; mov ra8.16b, ra7      # start of B FIFO writes
+  add r1, r1, r2        ; mul24 r0, ra15, rb11  # N.B. ra15 write gap
+  sub r1, r1, r0        ; mov ra7, rb6
 
 # FIFO goes:
 # b7a, a6a, b5a, a4a, b4a, a5a, b6a, a7a : b7b, a6b, b5b, a4b, b4b, a5b, b6b, a7b
@@ -434,20 +431,18 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # bulk shift between loops quite a bit nastier
 # a8 used as temp
 
-  sub.setf -, r3, rb18  ; mov ra8.16b, ra7
-  asr ra8.16as, r1, 6   # sat shouldn't be needed, but costs nothing
-  mov ra7, rb6          ; mov rb6, ra5
+  sub.setf -, r3, rb18  ; mov rb6, ra5
+  asr ra8.16as, r1, 6                           # sat shouldn't be needed, but costs nothing
   brr.anyn -, r:uvloop_b0
   mov ra5, rb4          ; mov rb4, ra4
   mov ra4, rb5          ; mov rb5, ra6
   mov ra6, rb7          ; mov rb7, ra8
 # >>>
 
+# Need to bulk rotate FIFO for heights other than 16
+# plausible heights are 16, 12, 8, 6, 4, 3, 2
+# we are allowed 3/4 cb_size w/h :-(
 
-  # plausible heights are 16, 12, 8, 6, 4, 3, 2
-  # we are allowed 3/4 cb_size w/h :-(
-
-# *** Need to shift for heights other than 16
 
 # Discard destination uniforms then drop through to _b - we will always
 # do b after b0
@@ -758,7 +753,6 @@ nop        ; nop # delay slot 2
 
   mov ra_k1, 1
   mov ra_k256, 256
-  mov ra30, 64
 
   mov rb20, 0xffffff00
   mov rb_k255, 255

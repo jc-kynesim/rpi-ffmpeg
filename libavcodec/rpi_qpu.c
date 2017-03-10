@@ -628,7 +628,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   vpu_qpu_job_env_t * const vqj = vpu_qpu_job_new();
 
   uint32_t qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH;
-#if 1
+#if 0
   static int z = 0;
   if (z == 0) {
     z = 1;
