@@ -3642,11 +3642,11 @@ static unsigned int mc_terminate_y(HEVCContext * const s, const int job)
 static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 {
     unsigned int i;
-    const uint32_t exit_fn = qpu_get_fn(QPU_MC_EXIT);
+    const uint32_t exit_fn = qpu_get_fn(QPU_MC_EXIT_C);
 #if QPU_N_UV == 8
     const uint32_t exit_fn2 = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8);
-#elif QPU_N_Y == 12
-    const uint32_t exit_fn2 = qpu_get_fn(QPU_MC_INTERRUPT_EXIT12);
+#elif QPU_N_UV == 12
+    const uint32_t exit_fn2 = qpu_get_fn(QPU_MC_INTERRUPT_EXIT12_C);
 #else
 #error Need appropriate exit code
 #endif

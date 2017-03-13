@@ -114,7 +114,6 @@
 .endm
 
 
-
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_uv
@@ -221,6 +220,7 @@ shl ra_xshift_next, r0, 3
 add r0, r0, r3        ; mov ra1, unif  # ; width_height
 and rb_x_next, r0, ~3 ; mov ra0, unif  # H filter coeffs
 mov ra_y_next, r1     ; mov vw_setup, rb28
+
 add ra_frame_base_next, rb_x_next, r2
 
 # set up VPM write
@@ -230,9 +230,19 @@ sub rb29, rb24, ra1.16b  # Compute vdw_setup1(dst_pitch-width)
 add rb17, ra1.16a, 1
 add rb18, ra1.16a, 3
 shl r0,   ra1.16a, 7
+
+  mov.setf -, ra9     ; mov -, vw_wait
+  brr.anyz -, r:filter_uv_1
+
 add r0,   r0, ra1.16b    # Combine width and height of destination area
 shl r0,   r0, i_shift16  # Shift into bits 16 upwards of the vdw_setup0 register
 add rb26, r0, rb27    ; mov ra3, unif  # ; V filter coeffs
+# >>> (skip V DMA if never requested)
+
+  sub vw_setup, ra9, -16
+  mov vw_setup, ra10
+  mov vw_addr, ra11
+:filter_uv_1
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
@@ -309,24 +319,15 @@ brr.anyn -, r:uvloop
 asr r1, r1, rb13
 min r1, r1, rb_k255       # Delay 2
 max vpm, r1, 0         # Delay 3
+# >>>
 
-# DMA out for U
-
-mov vw_setup, rb26 # VDW setup 0
-mov vw_setup, rb29 # Stride
-mov vw_addr, unif # start the VDW
-
-# DMA out for V
-# We need to wait for the U to complete first, but have nothing useful to compute while we wait.
-# Could potentially push this write into the start of the next pipeline stage.
-mov r0, 16
-mov -, vw_wait
-
-bra -, ra31
-add vw_setup, rb26, r0 # VDW setup 0
-mov vw_setup, rb29 # Stride
-mov vw_addr, unif # start the VDW
-
+# DMA out for U & stash for V
+  mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
+  bra -, ra31
+  mov vw_setup, rb29    ; mov ra10, rb29 # Stride
+  mov vw_addr, unif     # u_dst_addr
+  mov ra11, unif        # v_dst_addr
+# >>>
 
 ################################################################################
 
@@ -348,7 +349,6 @@ shl ra_xshift_next, r0, 3
 add r0, r0, r3               ; mov ra1, unif   # ; width_height
 and rb_x_next, r0, ~3        ; mov ra0, unif   # ; H filter coeffs
 mov ra_y_next, r1
-#            ; mov vw_setup, rb21
 
 add ra_frame_base_next, rb_x_next, r2
 
@@ -502,6 +502,10 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 ################################################################################
 
 ::mc_filter_uv_b
+
+  mov.setf -, ra9       ; mov -, vw_wait  # Delayed V DMA
+  brr.anyz -, r:uv_filter_b_1
+
 mov ra31, unif
 
 # per-channel shifts were calculated on the *previous* invocation
@@ -511,6 +515,12 @@ mov ra_xshift, ra_xshift_next      ; mov vw_setup, rb28
 
 # get base addresses and per-channel shifts for *next* invocation
 add r0, unif, elem_num    # x
+# >>>
+  sub vw_setup, ra9, -16
+  mov vw_setup, ra10
+  mov vw_addr, ra11
+:uv_filter_b_1
+
 max r0, r0, 0                      ; mov ra_y_next, unif # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif        # V frame_base
 # compute offset from frame base u to frame base v
@@ -596,32 +606,38 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
   sub.setf -, r3, ra30  ; mov ra6, rb7
   brr.anyn -, r:uvloop_b
-  asr ra8.8as, r1, rb13
+  asr ra3.8as, r1, rb13
   mov -, vw_wait        ; mov rb7, ra8          #  vw_wait is B-reg (annoyingly) ; Final FIFO mov
-  mov vpm, ra8.8a
+  mov vpm, ra3.8a
 # >>>
 
+# DMA out for U & stash for V
 
-# DMA out for U
+  mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
+  bra -, ra31
+  mov vw_setup, rb29    ; mov ra10, rb29 # Stride
+  mov vw_addr, unif     # u_dst_addr
+  mov ra11, unif        # v_dst_addr
 
-mov vw_setup, rb26 # VDW setup 0
-mov vw_setup, rb29 # Stride
-mov vw_addr, unif # start the VDW
 
-# DMA out for V
-# We need to wait for the U to complete first, but have nothing useful to compute while we wait.
-# Could potentially push this write into the start of the next pipeline stage.
-mov r0, 16
-mov -, vw_wait
-
-bra -, ra31
-add vw_setup, rb26, r0 # VDW setup 0
-mov vw_setup, rb29 # Stride
-mov vw_addr, unif # start the VDW
 
 ################################################################################
 
 # mc_exit()
+
+::mc_exit_c
+  mov.setf -, ra9      ; mov -, vw_wait
+  brr.anyz -, r:exit_c_1
+  nop
+  nop
+  nop
+# >>>
+
+  sub vw_setup, ra9, -16
+  mov vw_setup, ra10
+  mov vw_addr, ra11
+  nop
+:exit_c_1
 
 ::mc_exit
 mov  -, vw_wait # wait on the VDW
@@ -1093,6 +1109,19 @@ nop        ; nop # delay slot 2
   mov vw_addr, unif # start the VDW   Delay 3
 
 ################################################################################
+::mc_interrupt_exit12c
+  mov.setf -, ra9      ; mov -, vw_wait
+  brr.anyz -, r:exit12_c_1
+  nop
+  nop
+  nop
+# >>>
+
+  sub vw_setup, ra9, -16
+  mov vw_setup, ra10
+  mov vw_addr, ra11
+  mov ra9, 0
+:exit12_c_1
 
 # mc_interrupt_exit12()
 ::mc_interrupt_exit12

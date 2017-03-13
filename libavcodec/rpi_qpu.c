@@ -666,8 +666,14 @@ unsigned int qpu_get_fn(int num) {
     case QPU_MC_FILTER:
       fn = mc_filter;
       break;
+    case QPU_MC_EXIT_C:
+      fn = mc_exit_c;
+      break;
     case QPU_MC_EXIT:
       fn = mc_exit;
+      break;
+    case QPU_MC_INTERRUPT_EXIT12_C:
+      fn = mc_interrupt_exit12c;
       break;
     case QPU_MC_INTERRUPT_EXIT12:
       fn = mc_interrupt_exit12;
