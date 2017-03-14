@@ -828,7 +828,7 @@ typedef struct HEVCLocalContext {
 // This is a distance of 1536 pixels across the screen
 // Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
 // but allocate more memory and increase the latency before data in the next frame can be processed
-#define RPI_NUM_CHUNKS 1
+#define RPI_NUM_CHUNKS 4
 
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
 #define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*24)
@@ -1001,7 +1001,7 @@ typedef struct HEVCContext {
         int (*vpu_cmds_arm)[6]; // r0-r5 for each command
         int vpu_cmds_vc;
 
-        int cmd_id;
+        sem_t cmd_id;
     } dvq_ents[RPI_DEBLOCK_VPU_Q_COUNT];
 
     struct dblk_vpu_q_s * dvq;
