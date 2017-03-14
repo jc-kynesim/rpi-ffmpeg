@@ -503,17 +503,6 @@ static void callback(void *cookie)
 #endif
 
 
-static volatile uint32_t post_done = 0;
-static volatile uint32_t post_qed = 0;
-
-static void post_code2_cb(void * v)
-{
-  uint32_t n = (uint32_t)v;
-  if ((int32_t)(n - post_done) > 0) {
-    post_done = n;
-  }
-}
-
 // Header comments were wrong for these two
 #define VPU_QPU_MASK_QPU  1
 #define VPU_QPU_MASK_VPU  2
