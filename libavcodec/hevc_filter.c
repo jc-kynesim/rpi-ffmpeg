@@ -934,13 +934,13 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   s->dvq->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
   s->dvq->vpu_cmds_arm[2][5] = 4;
   // Call VPU
-  vpu_qpu_post_code2( vpu_get_fn(), s->dvq->vpu_cmds_vc, 3, 0, 0, 0, 5, // 5 means to do all the commands
-                     0, NULL, 0, NULL, &s->dvq->cmd_id);
+  s->dvq->cmd_id = vpu_qpu_post_code2( vpu_get_fn(), s->dvq->vpu_cmds_vc, 3, 0, 0, 0, 5, // 5 means to do all the commands
+                     0, NULL, 0, NULL);
 
   s->dvq_n = (s->dvq_n + 1) & (RPI_DEBLOCK_VPU_Q_COUNT - 1);
   s->dvq = s->dvq_ents + s->dvq_n;
 
-  sem_wait(&s->dvq->cmd_id);
+  vpu_qpu_wait(s->dvq->cmd_id);
 }
 
 #endif

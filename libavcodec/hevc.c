@@ -58,7 +58,7 @@
 
   static void rpi_execute_dblk_cmds(HEVCContext *s);
 //  static void rpi_execute_transform(HEVCContext *s);
-  static void rpi_launch_vpu_qpu(HEVCContext *s, sem_t * const sem);
+  static void rpi_launch_vpu_qpu(HEVCContext *s);
   static void rpi_execute_pred_cmds(HEVCContext *s);
   static void rpi_execute_inter_cmds(HEVCContext *s);
   static void rpi_begin(HEVCContext *s);
@@ -121,16 +121,13 @@ static const uint32_t rpi_filter_coefs[8] = {
 // Core execution tasks
 static void worker_core(HEVCContext * const s)
 {
-    sem_t sync0;
-    sem_init(&sync0, 0, 0);
-
     // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
-    rpi_launch_vpu_qpu(s, &sync0);
+    rpi_launch_vpu_qpu(s);
     // Perform inter prediction
     rpi_execute_inter_cmds(s);
 
     // Wait for transform completion
-    sem_wait(&sync0);
+    vpu_qpu_wait(s->vpu_id);
 
     // Perform intra prediction and residual reconstruction
     rpi_execute_pred_cmds(s);
@@ -375,7 +372,7 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
             dvq->uv_setup_arm = (void*)p_arm;
             dvq->uv_setup_vc = (void*)p_vc;
 
-            sem_init(&dvq->cmd_id, 0, 1);
+            dvq->cmd_id = -1;
         }
 
         s->dvq_n = 0;
@@ -3673,7 +3670,7 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 #endif
 
 #ifdef RPI
-static void rpi_launch_vpu_qpu(HEVCContext *s, sem_t * const sem)
+static void rpi_launch_vpu_qpu(HEVCContext *s)
 {
     const int job = s->pass1_job;
     uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
@@ -3684,6 +3681,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s, sem_t * const sem)
 #if 0
     if (s->sh.slice_type == I_SLICE) {
         rpi_execute_transform(s);
+        s->vpu_id = -1;
         return;
     }
 #endif
@@ -3746,10 +3744,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s, sem_t * const sem)
         mail_uv,
         // QPU job 2
         n_y,
-        mail_y,
-        // Sync
-        sem
-        );
+        mail_y);
 
     memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));  //???? Surely we haven't done the smaller
 }

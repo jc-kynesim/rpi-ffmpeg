@@ -187,11 +187,10 @@ extern unsigned int qpu_get_fn(int num);
 extern unsigned int vpu_get_fn(void);
 extern unsigned int vpu_get_constants(void);
 //extern unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5);
-extern int vpu_post_code2( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf);
 int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
     int qpu0_n, const uint32_t * qpu0_mail,
-    int qpu1_n, const uint32_t * qpu1_mail,
-    sem_t * const sem);
+    int qpu1_n, const uint32_t * qpu1_mail);
+void vpu_qpu_wait(const int n);
 
 // Simple test of shader code
 extern int rpi_test_shader(void);

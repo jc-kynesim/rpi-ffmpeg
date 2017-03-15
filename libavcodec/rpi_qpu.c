@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "libavutil/avassert.h"
+#include "libavutil/atomic.h"
 
 #include "config.h"
 
@@ -495,13 +496,6 @@ unsigned int vpu_get_constants(void) {
   return gpu->vc + offsetof(struct GPU,transMatrix2even);
 }
 
-#ifdef GPUSERVICE
-static void callback(void *cookie)
-{
-  sem_post((sem_t *)cookie);
-}
-#endif
-
 
 // Header comments were wrong for these two
 #define VPU_QPU_MASK_QPU  1
@@ -514,6 +508,58 @@ typedef struct vpu_qpu_job_env_s
   unsigned int mask;
   struct gpu_job_s j[VPU_QPU_JOB_MAX];
 } vpu_qpu_job_env_t;
+
+
+#define S_WAIT_COUNT 8
+typedef struct vpu_qpu_wait_env_s
+{
+  volatile int init_done;
+  volatile int n;
+  sem_t sems[S_WAIT_COUNT];
+} s_wait_env_t;
+
+
+static void s_wait_init(s_wait_env_t * const sw)
+{
+  unsigned int i;
+  avpriv_atomic_int_set(&sw->n, 1);
+  for (i = 0; i != S_WAIT_COUNT; ++i) {
+    sem_init(sw->sems + i, 0, 0);
+  }
+  sw->init_done = 1;
+}
+
+static int s_wait_next(s_wait_env_t * const sw)
+{
+  unsigned int n;
+
+  if (!sw->init_done) {
+    s_wait_init(sw);
+  }
+
+  n = avpriv_atomic_int_add_and_fetch(&sw->n, 1);
+  return n % S_WAIT_COUNT;
+}
+
+static void s_wait_wait(s_wait_env_t * const sw, const int i)
+{
+  if (i >= 0) {
+    sem_wait(sw->sems + i);
+  }
+}
+
+static void s_wait_post(s_wait_env_t * const sw, const int i)
+{
+  av_assert0(i >= 0 && i < S_WAIT_COUNT);
+  sem_post(sw->sems + i);
+}
+
+static s_wait_env_t s_wait_env = {0};
+
+static void s_wait_callback(void * v)
+{
+  s_wait_post(&s_wait_env, (int)v);
+}
 
 static vpu_qpu_job_env_t * vpu_qpu_job_new(void)
 {
@@ -566,30 +612,39 @@ static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n,
   }
 }
 
-static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, void (* const cb)(void *), void * v)
+static int vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj)
 {
   if (vqj->mask == 0) {
-    cb(v);
+    return -1;
   }
   // There are 2 VPU Qs & 1 QPU Q so we can collapse sync
   // If we only posted one thing or only QPU jobs
-  else if (vqj->n == 1 || vqj->mask == VPU_QPU_MASK_QPU) {
-    struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
-    av_assert0(j->callback.func == 0);
-
-    j->callback.func = cb;
-    j->callback.cookie = v;
-  }
   else
   {
-    struct gpu_job_s *const j = new_job(vqj);
+    int n = s_wait_next(&s_wait_env);
+    void * const v = (void *)n;
+    void (* const cb)(void *) = s_wait_callback;
 
-    j->command = EXECUTE_SYNC;
-    j->u.s.mask = vqj->mask;
-    j->callback.func = cb;
-    j->callback.cookie = v;
+    if (vqj->n == 1 || vqj->mask == VPU_QPU_MASK_QPU) {
+      struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
+      av_assert0(j->callback.func == 0);
 
-    vqj->mask = 0;
+      j->callback.func = cb;
+      j->callback.cookie = v;
+    }
+    else
+    {
+      struct gpu_job_s *const j = new_job(vqj);
+
+      j->command = EXECUTE_SYNC;
+      j->u.s.mask = vqj->mask;
+      j->callback.func = cb;
+      j->callback.cookie = v;
+
+      vqj->mask = 0;
+    }
+
+    return n;
   }
 }
 
@@ -598,23 +653,13 @@ static int vpu_qpu_start(vpu_qpu_job_env_t * const vqj)
   return vqj->n == 0 ? 0 : vc_gpuserv_execute_code(vqj->n, vqj->j);
 }
 
-// Post a command to the queue
-// Returns an id which we can use to wait for completion
-int vpu_post_code2(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
-{
-  sem_t sync0;
-  sem_init(&sync0, 0, 0);
-  vpu_qpu_post_code2(code, r0, r1, r2, r3, r4, r5, 0, NULL, 0, NULL, &sync0);
-  sem_wait(&sync0);
-  return 0;
-}
 
 int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
     int qpu0_n, const uint32_t * qpu0_mail,
-    int qpu1_n, const uint32_t * qpu1_mail,
-    sem_t * const sem)
+    int qpu1_n, const uint32_t * qpu1_mail)
 {
   vpu_qpu_job_env_t * const vqj = vpu_qpu_job_new();
+  int n;
 
   uint32_t qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH;
 #if 0
@@ -631,12 +676,16 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   vpu_qpu_add_vpu(vqj, vpu_code, r0, r1, r2, r3, r4, r5);
   vpu_qpu_add_qpu(vqj, qpu1_n, QPU_FLAGS_PROF_NO_FLUSH, qpu1_mail);
   vpu_qpu_add_qpu(vqj, qpu0_n, qpu_pflags, qpu0_mail);
-  if (sem != NULL)
-    vpu_qpu_add_sync_this(vqj, callback, sem);
+  n = vpu_qpu_add_sync_this(vqj);
   av_assert0(vpu_qpu_start(vqj) == 0);
   vpu_qpu_job_delete(vqj);
 
-  return 0;
+  return n;
+}
+
+void vpu_qpu_wait(const int n)
+{
+  s_wait_wait(&s_wait_env, n);
 }
 
 
