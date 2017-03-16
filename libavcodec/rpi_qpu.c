@@ -197,11 +197,11 @@ static int gpu_init(gpu_env_t ** const gpu) {
   ptr = (volatile struct GPU*)ge->code_gm_ptr.arm;
 
   // Zero everything so we have zeros between the code bits
-  memset(ptr, 0, sizeof(*ptr));
+  memset((void *)ptr, 0, sizeof(*ptr));
 
   // Now copy over the QPU code into GPU memory
   {
-    int num_bytes = qpu_get_fn(QPU_MC_END) - qpu_get_fn(QPU_MC_SETUP_UV);
+    int num_bytes = (char *)mc_end - (char *)rpi_shader;
     av_assert0(num_bytes<=QPU_CODE_SIZE*sizeof(unsigned int));
     memcpy((void*)ptr->qpu_code, rpi_shader, num_bytes);
   }
@@ -694,59 +694,9 @@ void vpu_qpu_term()
   gpu_unlock_unref();
 }
 
-unsigned int qpu_get_fn(int num) {
-    // Make sure that the gpu is initialized
-    unsigned int *fn;
-
-    switch(num) {
-    case QPU_MC_SETUP:
-      fn = mc_setup;
-      break;
-    case QPU_MC_FILTER:
-      fn = mc_filter;
-      break;
-    case QPU_MC_EXIT_C:
-      fn = mc_exit_c;
-      break;
-    case QPU_MC_EXIT:
-      fn = mc_exit;
-      break;
-    case QPU_MC_INTERRUPT_EXIT12_C:
-      fn = mc_interrupt_exit12c;
-      break;
-    case QPU_MC_INTERRUPT_EXIT12:
-      fn = mc_interrupt_exit12;
-      break;
-    case QPU_MC_FILTER_B:
-      fn = mc_filter_b;
-      break;
-    //case QPU_MC_FILTER_HONLY:
-    //  fn = mc_filter_honly;
-    //  break;
-    case QPU_MC_SETUP_UV:
-      fn = mc_setup_uv;
-      break;
-    case QPU_MC_FILTER_UV:
-      fn = mc_filter_uv;
-      break;
-    case QPU_MC_FILTER_UV_B0:
-      fn = mc_filter_uv_b0;
-      break;
-    case QPU_MC_FILTER_UV_B:
-      fn = mc_filter_uv_b;
-      break;
-    case QPU_MC_INTERRUPT_EXIT8:
-      fn = mc_interrupt_exit8;
-      break;
-    case QPU_MC_END:
-      fn = mc_end;
-      break;
-    default:
-      printf("Unknown function\n");
-      exit(-1);
-    }
-    return gpu->code_gm_ptr.vc + 4 * (int)(fn - rpi_shader) + offsetof(struct GPU, qpu_code);
-    //return code[num] + gpu->vc;
+uint32_t qpu_fn(const int * const mc_fn)
+{
+  return gpu->code_gm_ptr.vc + ((const char *)mc_fn - (const char *)rpi_shader) + offsetof(struct GPU, qpu_code);
 }
 
 #if 0

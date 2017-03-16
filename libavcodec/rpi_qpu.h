@@ -1,7 +1,6 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
-#include <semaphore.h>
 #include "rpi_user_vcsm.h"
 
 #define RPI_ONE_BUF 1
@@ -154,25 +153,7 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T * const p, const rpi_cache_f
 
 
 // QPU specific functions
-extern void rpi_test_qpu(void);
-
-enum {
-  QPU_MC_SETUP,
-  QPU_MC_FILTER,
-  QPU_MC_EXIT_C,
-  QPU_MC_EXIT,
-  QPU_MC_INTERRUPT_EXIT12_C,
-  QPU_MC_INTERRUPT_EXIT12,
-  QPU_MC_FILTER_B,
-  QPU_MC_FILTER_HONLY,
-  QPU_MC_SETUP_UV,
-  QPU_MC_FILTER_UV,
-  QPU_MC_FILTER_UV_B0,
-  QPU_MC_FILTER_UV_B,
-  QPU_MC_INTERRUPT_EXIT8,
-  QPU_MC_END
-  };
-extern unsigned int qpu_get_fn(int num);
+uint32_t qpu_fn(const int * const mc_fn);
 
 #define QPU_N_UV   12
 #define QPU_N_Y    12

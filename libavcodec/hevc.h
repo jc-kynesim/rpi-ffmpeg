@@ -952,9 +952,9 @@ typedef struct HEVCContext {
     uint32_t *u_mvs[RPI_MAX_JOBS][QPU_N_UV];
     uint32_t *curr_u_mvs; // Current uniform stream to use for chroma
     // Function pointers
-    uint32_t mc_filter_uv;
-    uint32_t mc_filter_uv_b0;
-    uint32_t mc_filter_uv_b;
+    uint32_t qpu_filter_uv;
+    uint32_t qpu_filter_uv_b0;
+    uint32_t qpu_filter_uv_b;
 #endif
 #if RPI_MC_LUMA_QPU
     GPU_MEM_PTR_T y_unif_mvs_ptr[RPI_MAX_JOBS];
@@ -963,8 +963,8 @@ typedef struct HEVCContext {
     uint32_t *y_mvs[RPI_MAX_JOBS][QPU_N_Y];
     uint32_t *curr_y_mvs; // Current uniform stream for luma
     // Function pointers
-    uint32_t mc_filter;
-    uint32_t mc_filter_b;
+    uint32_t qpu_filter;
+    uint32_t qpu_filter_b;
 #endif
 
 #ifdef RPI_WORKER
