@@ -1,15 +1,4 @@
 #ifdef RPI
-// Use vchiq service for submitting jobs
-#define GPUSERVICE
-
-// This works better than the mmap in that the memory can be cached, but requires a kernel modification to enable the device.
-// define RPI_TIME_TOTAL_QPU to print out how much time is spent in the QPU code
-//#define RPI_TIME_TOTAL_QPU
-// define RPI_TIME_TOTAL_VPU to print out how much time is spent in the VPI code
-//#define RPI_TIME_TOTAL_VPU
-// define RPI_TIME_TOTAL_POSTED to print out how much time is spent in the multi execute QPU/VPU combined
-#define RPI_TIME_TOTAL_POSTED
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,13 +17,15 @@
 #include "rpi_hevc_transform.h"
 
 #include "rpi_user_vcsm.h"
-#ifdef GPUSERVICE
+
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files
 #pragma GCC diagnostic ignored "-Wredundant-decls"
 #include "interface/vmcs_host/vc_vchi_gpuserv.h"
 #pragma GCC diagnostic pop
-#endif
+
+// Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
+#define RPI_TRACE_TIME_VPU_QPU_WAIT 1
 
 // QPU profile flags
 #define QPU_FLAGS_PROF_NO_FLUSH 1
@@ -104,8 +95,6 @@ struct GPU
   int open_count; // Number of allocated video buffers
   int      mb; // Mailbox handle
   int      vc; // Address in GPU memory
-  int mail[12*2]; // These are used to pass pairs of code/unifs to the QPUs for the first QPU task
-  int mail2[12*2]; // These are used to pass pairs of code/unifs to the QPUs for the second QPU task
 };
 
 // Stop more than one thread trying to allocate memory or use the processing resources at once
@@ -113,16 +102,15 @@ static pthread_mutex_t gpu_mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile struct GPU* gpu = NULL;
 static GPU_MEM_PTR_T gpu_mem_ptr;
 
-#if defined(RPI_TIME_TOTAL_QPU) || defined(RPI_TIME_TOTAL_VPU) || defined(RPI_TIME_TOTAL_POSTED)
-static unsigned int Microseconds(void) {
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+
+static int64_t ns_time(void)
+{
     struct timespec ts;
-    unsigned int x;
-    static unsigned int base = 0;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    x = ts.tv_sec*1000000 + ts.tv_nsec/1000;
-    if (base==0) base=x;
-    return x-base;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * (int64_t)1000000000 + ts.tv_nsec;
 }
+
 #endif
 
 static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb);
@@ -133,12 +121,13 @@ static int gpu_init(volatile struct GPU **gpu) {
   int mb = mbox_open();
   int vc;
   volatile struct GPU* ptr;
-	if (mb < 0)
-		return -1;
-#ifndef RPI_ASYNC
-	if (qpu_enable(mb, 1)) return -2;
-#endif
+
+  if (mb < 0)
+    return -1;
+  if (qpu_enable(mb, 1) != 0)
+    return -2;
   vcsm_init();
+
   gpu_malloc_uncached_internal(sizeof(struct GPU), &gpu_mem_ptr, mb);
   ptr = (volatile struct GPU*)gpu_mem_ptr.arm;
   memset((void*)ptr, 0, sizeof *ptr);
@@ -166,77 +155,6 @@ static int gpu_init(volatile struct GPU **gpu) {
   // And the transform coefficients
   memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
 
-#ifdef RPI_ASYNC
-  {
-    int err;
-    vpu_async_tail = 0;
-    vpu_async_head = 0;
-    err = pthread_create(&vpu_thread, NULL, vpu_start, NULL);
-    //printf("Created thread\n");
-    if (err) {
-        av_log(NULL, AV_LOG_FATAL, "Failed to create vpu thread\n");
-        return -4;
-    }
-
-    {
-      struct sched_param param = {0};
-      int policy = 0;
-
-      if (pthread_getschedparam(vpu_thread, &policy, &param) != 0)
-      {
-        av_log(NULL, AV_LOG_ERROR, "Unable to get VPU thread scheduling parameters\n");
-      }
-      else
-      {
-        av_log(NULL, AV_LOG_INFO, "VPU thread: policy=%d (%s), pri=%d\n",
-            policy,
-            policy == SCHED_RR ? "RR" : policy == SCHED_FIFO ? "FIFO" : "???" ,
-            param.sched_priority);
-
-        policy = SCHED_FIFO;
-        param.sched_priority = sched_get_priority_max(SCHED_FIFO);
-
-        av_log(NULL, AV_LOG_INFO, "Attempt to set: policy=%d (%s), pri=%d\n",
-            policy,
-            policy == SCHED_RR ? "RR" : policy == SCHED_FIFO ? "FIFO" : "???" ,
-            param.sched_priority);
-
-        if (pthread_setschedparam(vpu_thread, policy, &param) != 0)
-        {
-          av_log(NULL, AV_LOG_ERROR, "Unable to set VPU thread scheduling parameters\n");
-        }
-        else
-        {
-          if (pthread_getschedparam(vpu_thread, &policy, &param) != 0)
-          {
-            av_log(NULL, AV_LOG_ERROR, "Unable to get VPU thread scheduling parameters\n");
-          }
-          else
-          {
-            av_log(NULL, AV_LOG_INFO, "VPU thread (after): policy=%d (%s), pri=%d\n",
-                policy,
-                policy == SCHED_RR ? "RR" : policy == SCHED_FIFO ? "FIFO" : "???" ,
-                param.sched_priority);
-          }
-        }
-      }
-
-    }
-
-  }
-#endif
-
-  return 0;
-}
-
-// Returns 1 if the gpu is currently idle
-static int gpu_idle(void)
-{
-  int ret = pthread_mutex_trylock(&gpu_mutex);
-  if (ret==0) {
-    pthread_mutex_unlock(&gpu_mutex);
-    return 1;
-  }
   return 0;
 }
 
@@ -495,12 +413,88 @@ unsigned int vpu_get_constants(void) {
   return gpu->vc + offsetof(struct GPU,transMatrix2even);
 }
 
-#ifdef GPUSERVICE
-static void callback(void *cookie)
+
+// Wait abstractions - mostly so we can easily add profile code
+typedef struct vpu_qpu_wait_s
 {
-  sem_post((sem_t *)cookie);
+  sem_t sem;
+} vq_wait_t;
+
+// If sem_init actually takes time then maybe we want a pool...
+static vq_wait_t * vq_wait_new(void)
+{
+  vq_wait_t * wait = malloc(sizeof(vq_wait_t));
+  av_assert0(wait != NULL);
+  sem_init(&wait->sem, 0, 0);
+  return wait;
 }
+
+static void vq_wait_delete(vq_wait_t * const wait)
+{
+  sem_destroy(&wait->sem);
+  free(wait);
+}
+
+#ifdef RPI_TRACE_TIME_VPU_QPU_WAIT
+volatile int wait_count = 0;
+volatile int64_t wait_start0 = 0;
+volatile int64_t wait_last_update = 0;
+volatile int64_t wait_start[8] = {0};
+volatile int64_t wait_total[8] = {0};
+
+#define WAIT_TIME_PRINT_PERIOD (int64_t)2000000000
+
+#define T_MS(t) ((unsigned int)((t)/(int64_t)1000000) % 1000U)
+#define T_SEC(t) (unsigned int)((t)/(int64_t)1000000000)
+#define T_ARG(t) T_SEC(t), T_MS(t)
+#define T_FMT "%u.%03u"
+
 #endif
+
+static void vq_wait_wait(vq_wait_t * const wait)
+{
+  int err;
+
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+  gpu_lock();
+  wait_start[wait_count++] = ns_time();
+  gpu_unlock();
+#endif
+
+  while ((err = sem_wait(&wait->sem)) == -1 && errno == EINTR)
+    /* loop */;
+
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+  gpu_lock();
+  {
+    const int n = --wait_count;
+    const int64_t now = ns_time();
+    wait_total[n] += now - wait_start[n];
+    if (wait_start0 == 0)
+    {
+      wait_last_update = wait_start[n];
+      wait_start0 = wait_start[n];
+    }
+    if (now - wait_last_update > WAIT_TIME_PRINT_PERIOD)
+    {
+      wait_last_update += WAIT_TIME_PRINT_PERIOD;
+      printf("Total:" T_FMT ", Idle:" T_FMT ", 1:" T_FMT ", 2:" T_FMT ", 3:" T_FMT ", 4:" T_FMT "\n",
+             T_ARG(now - wait_start0), T_ARG(now - wait_start0 - wait_total[0]),
+             T_ARG(wait_total[0]),
+             T_ARG(wait_total[1]),
+             T_ARG(wait_total[2]),
+             T_ARG(wait_total[3]));
+    }
+  }
+  gpu_unlock();
+#endif
+}
+
+static void vq_wait_post(vq_wait_t * const wait)
+{
+  sem_post(&wait->sem);
+}
+
 
 
 // Header comments were wrong for these two
@@ -566,19 +560,32 @@ static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n,
   }
 }
 
-static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, void (* const cb)(void *), void * v)
+static void vpu_qpu_callback_wait(void * v)
 {
+  vq_wait_post(v);
+}
+
+static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * const wait_h)
+{
+  vq_wait_t * wait;
+
   if (vqj->mask == 0) {
-    cb(v);
+    *wait_h = NULL;
+    return;
   }
+
+  // We are going to want a sync object
+  wait = vq_wait_new();
+
   // There are 2 VPU Qs & 1 QPU Q so we can collapse sync
   // If we only posted one thing or only QPU jobs
-  else if (vqj->n == 1 || vqj->mask == VPU_QPU_MASK_QPU) {
+  if (vqj->n == 1 || vqj->mask == VPU_QPU_MASK_QPU)
+  {
     struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
     av_assert0(j->callback.func == 0);
 
-    j->callback.func = cb;
-    j->callback.cookie = v;
+    j->callback.func = vpu_qpu_callback_wait;
+    j->callback.cookie = wait;
   }
   else
   {
@@ -586,11 +593,12 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, void (* const c
 
     j->command = EXECUTE_SYNC;
     j->u.s.mask = vqj->mask;
-    j->callback.func = cb;
-    j->callback.cookie = v;
-
-    vqj->mask = 0;
+    j->callback.func = vpu_qpu_callback_wait;
+    j->callback.cookie = wait;
   }
+
+  vqj->mask = 0;
+  *wait_h = wait;
 }
 
 static int vpu_qpu_start(vpu_qpu_job_env_t * const vqj)
@@ -598,21 +606,11 @@ static int vpu_qpu_start(vpu_qpu_job_env_t * const vqj)
   return vqj->n == 0 ? 0 : vc_gpuserv_execute_code(vqj->n, vqj->j);
 }
 
-// Post a command to the queue
-// Returns an id which we can use to wait for completion
-int vpu_post_code2(unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf)
-{
-  sem_t sync0;
-  sem_init(&sync0, 0, 0);
-  vpu_qpu_post_code2(code, r0, r1, r2, r3, r4, r5, 0, NULL, 0, NULL, &sync0);
-  sem_wait(&sync0);
-  return 0;
-}
 
 int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
     int qpu0_n, const uint32_t * qpu0_mail,
     int qpu1_n, const uint32_t * qpu1_mail,
-    sem_t * const sem)
+    vpu_qpu_wait_h * const wait_h)
 {
   vpu_qpu_job_env_t * const vqj = vpu_qpu_job_new();
 
@@ -631,14 +629,26 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   vpu_qpu_add_vpu(vqj, vpu_code, r0, r1, r2, r3, r4, r5);
   vpu_qpu_add_qpu(vqj, qpu1_n, QPU_FLAGS_PROF_NO_FLUSH, qpu1_mail);
   vpu_qpu_add_qpu(vqj, qpu0_n, qpu_pflags, qpu0_mail);
-  if (sem != NULL)
-    vpu_qpu_add_sync_this(vqj, callback, sem);
+  if (wait_h != NULL)
+    vpu_qpu_add_sync_this(vqj, wait_h);
   av_assert0(vpu_qpu_start(vqj) == 0);
   vpu_qpu_job_delete(vqj);
 
   return 0;
 }
 
+void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h)
+{
+  if (wait_h != NULL)
+  {
+    vq_wait_t * const wait = *wait_h;
+    if (wait != NULL) {
+      *wait_h = NULL;
+      vq_wait_wait(wait);
+      vq_wait_delete(wait);
+    }
+  }
+}
 
 unsigned int qpu_get_fn(int num) {
     // Make sure that the gpu is initialized

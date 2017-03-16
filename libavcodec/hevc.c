@@ -58,7 +58,7 @@
 
   static void rpi_execute_dblk_cmds(HEVCContext *s);
 //  static void rpi_execute_transform(HEVCContext *s);
-  static void rpi_launch_vpu_qpu(HEVCContext *s, sem_t * const sem);
+  static void rpi_launch_vpu_qpu(HEVCContext *s, vpu_qpu_wait_h * const sem);
   static void rpi_execute_pred_cmds(HEVCContext *s);
   static void rpi_execute_inter_cmds(HEVCContext *s);
   static void rpi_begin(HEVCContext *s);
@@ -121,16 +121,15 @@ static const uint32_t rpi_filter_coefs[8] = {
 // Core execution tasks
 static void worker_core(HEVCContext * const s)
 {
-    sem_t sync0;
-    sem_init(&sync0, 0, 0);
+    vpu_qpu_wait_h sync;
 
     // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
-    rpi_launch_vpu_qpu(s, &sync0);
+    rpi_launch_vpu_qpu(s, &sync);
     // Perform inter prediction
     rpi_execute_inter_cmds(s);
 
     // Wait for transform completion
-    sem_wait(&sync0);
+    vpu_qpu_wait(&sync);
 
     // Perform intra prediction and residual reconstruction
     rpi_execute_pred_cmds(s);
@@ -3673,7 +3672,7 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 #endif
 
 #ifdef RPI
-static void rpi_launch_vpu_qpu(HEVCContext *s, sem_t * const sem)
+static void rpi_launch_vpu_qpu(HEVCContext *s, vpu_qpu_wait_h * const wait_h)
 {
     const int job = s->pass1_job;
     uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
@@ -3748,7 +3747,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s, sem_t * const sem)
         n_y,
         mail_y,
         // Sync
-        sem
+        wait_h
         );
 
     memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));  //???? Surely we haven't done the smaller

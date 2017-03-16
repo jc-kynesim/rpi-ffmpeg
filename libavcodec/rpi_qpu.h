@@ -183,15 +183,22 @@ extern unsigned int qpu_get_fn(int num);
 #define QPU_MAIL_VALS_MAX (QPU_N_MAX * QPU_MAIL_EL_VALS)
 #define QPU_MAIL_SIZE (QPU_MAIL_VALS_MAX * sizeof(uint32_t))
 
+struct vpu_qpu_wait_s;
+typedef struct vpu_qpu_wait_s * vpu_qpu_wait_h;
+
 // VPU specific functions
 extern unsigned int vpu_get_fn(void);
 extern unsigned int vpu_get_constants(void);
-//extern unsigned vpu_execute_code( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5);
-extern int vpu_post_code2( unsigned code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5, GPU_MEM_PTR_T *buf);
+// Packaged code poster.
+// If vpu_code == 0 then no vpu code will be posted
+// If qpuX_n == 0 then no qpu code will be posted
+// If wait_h == NULL then no sync will be requested
 int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
     int qpu0_n, const uint32_t * qpu0_mail,
     int qpu1_n, const uint32_t * qpu1_mail,
-    sem_t * const sem);
+    vpu_qpu_wait_h * const wait_h);
+// Waits for previous post_codee to complete and Will null out *wait_h after use
+void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h);
 
 // Simple test of shader code
 extern int rpi_test_shader(void);

@@ -940,7 +940,7 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   s->dvq_n = (s->dvq_n + 1) & (RPI_DEBLOCK_VPU_Q_COUNT - 1);
   s->dvq = s->dvq_ents + s->dvq_n;
 
-  sem_wait(&s->dvq->cmd_id);
+  vpu_qpu_wait(&s->dvq->cmd_id);
 }
 
 #endif

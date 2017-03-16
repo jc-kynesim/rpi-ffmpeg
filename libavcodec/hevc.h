@@ -1001,7 +1001,7 @@ typedef struct HEVCContext {
         int (*vpu_cmds_arm)[6]; // r0-r5 for each command
         int vpu_cmds_vc;
 
-        sem_t cmd_id;
+        vpu_qpu_wait_h cmd_id;
     } dvq_ents[RPI_DEBLOCK_VPU_Q_COUNT];
 
     struct dblk_vpu_q_s * dvq;
