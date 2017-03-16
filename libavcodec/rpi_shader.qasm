@@ -39,7 +39,7 @@
 # rb20                                          0xffffff00
 # rb21                                          -- free --
 # rb22 rb_k255                                  255
-# rb23                                          24
+# rb23                                          -- free --
 #
 # rb24                                          vdw_setup_1(dst_pitch)
 # rb25                                          frame width-1
@@ -146,7 +146,6 @@ mov ra_k256, 256
 
 mov rb20, 0xffffff00
 mov rb_k255, 255
-mov rb23, 24
 
 # touch registers to keep simulator happy
 
@@ -654,27 +653,25 @@ nop        ; nop # delay slot 1
 nop        ; nop # delay slot 2
 
 # mc_interrupt_exit8()
-::mc_interrupt_exit8
-mov  -, vw_wait # wait on the VDW
-
-ldtmu0
-ldtmu1
-ldtmu0
-ldtmu1
-
-mov -,sacq(0) # 1
-mov -,sacq(0) # 2
-mov -,sacq(0) # 3
-mov -,sacq(0) # 4
-mov -,sacq(0) # 5
-mov -,sacq(0) # 6
-mov -,sacq(0) # 7
-
-nop        ; nop ; thrend
-mov interrupt, 1; nop # delay slot 1
-nop        ; nop # delay slot 2
-
-
+#::mc_interrupt_exit8
+#mov  -, vw_wait # wait on the VDW
+#
+#ldtmu0
+#ldtmu1
+#ldtmu0
+#ldtmu1
+#
+#mov -,sacq(0) # 1
+#mov -,sacq(0) # 2
+#mov -,sacq(0) # 3
+#mov -,sacq(0) # 4
+#mov -,sacq(0) # 5
+#mov -,sacq(0) # 6
+#mov -,sacq(0) # 7
+#
+#nop        ; nop ; thrend
+#mov interrupt, 1; nop # delay slot 1
+#nop        ; nop # delay slot 2
 
 
 
@@ -744,6 +741,22 @@ nop        ; nop # delay slot 2
   add t1s, r2, r1 ; mov ra_frame_base2, r2
 
 
+# mov.setf ra8, unif
+# mov r2, 0x80000000
+# sub r0, r2, rb_frame_height_minus_1  # r0 is "const" - so precalc / stash?
+# max r1, ra8.16b, 0            ; mov ra_ou1, ra8.16b
+# min r1, r1, rb_frame_height_minus_1
+# add.ifnn ra_ou1, r0, ra_ou1   ; mul24 r1, r1, rb_pitch
+# add r1, r1, unif              ; mov r0, elem_num  # Frame base
+#
+# add r0, r0, ra8.16a           # elem_num is a side
+# max r0, r0, 0
+# min r0, r0, rb_frame_width_minus_1
+# add r1, r1, r0  ; mul24 ra_xshift_next, r0, 8
+# and ra_addr0, r1, ~3
+
+
+
 # load constants
 
   mov ra_k1, 1
@@ -751,7 +764,6 @@ nop        ; nop # delay slot 2
 
   mov rb20, 0xffffff00
   mov rb_k255, 255
-  mov rb23, 24
 
 # touch vertical context to keep simulator happy
 
@@ -934,6 +946,28 @@ nop        ; nop # delay slot 2
   min r2, r2, rb_frame_height_minus_1
   add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
   add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
+
+
+
+# sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
+# shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
+# mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
+# mov.ifz ra_ou1, ra_ou1_next   ; mov r3, rb_pitch
+# shr r1, r4, rx_xshift2    ; mov.ifz ra_ou2, ra_ou2_next
+#
+#
+# add rb31, r3, 1            ; nop   ; ldtmu0
+# shr r0, r4, ra_xshift      ; nop   ; ldtmu1
+# shr r1, r4, rx_xshift2     ; mov r3, rb_pitch
+#
+# add.setf ra_ou0, ra_ou0, 1
+# add.ifnn ra_addr0, ra_addr0, r3
+# add.setf ra_ou1, ra_ou1, 1
+# add.ifnn ra_addr1, ra_addr1, r3
+# mov t0s, ra_addr0          ; v8subs, r0, r0, rb20
+# mov t1s, ra_addr1          ; v8subs, r1, r1, rb20
+
+
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
