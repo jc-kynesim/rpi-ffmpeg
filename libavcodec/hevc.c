@@ -4740,6 +4740,8 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 #endif
     }
 
+    vpu_qpu_term();
+
 #endif
 
     for (i = 0; i < 3; i++) {
@@ -4812,6 +4814,13 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->sList[0] = s;
 
 #ifdef RPI
+    // Whilst FFmpegs init fn is only called once the close fn is called as
+    // many times as we have threads (init_thread_copy is called for the
+    // threads).  So to match init & term put the init here where it will be
+    // called by both init & copy
+    if (vpu_qpu_init() != 0)
+        goto fail;
+
     for(job = 0; job < RPI_MAX_JOBS; job++) {
         s->unif_mv_cmds[job] = av_mallocz(sizeof(HEVCMvCmd)*RPI_MAX_MV_CMDS);
         if (!s->unif_mv_cmds[job])

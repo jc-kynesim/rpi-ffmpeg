@@ -17,7 +17,7 @@ typedef struct gpu_mem_ptr_s {
 // General GPU functions
 extern int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p);
 extern int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p);
-extern void gpu_free(GPU_MEM_PTR_T *p);
+extern void gpu_free(GPU_MEM_PTR_T * const p);
 
 #include "libavutil/frame.h"
 #if !RPI_ONE_BUF
@@ -199,6 +199,8 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
     vpu_qpu_wait_h * const wait_h);
 // Waits for previous post_codee to complete and Will null out *wait_h after use
 void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h);
+int vpu_qpu_init(void);
+void vpu_qpu_term(void);
 
 // Simple test of shader code
 extern int rpi_test_shader(void);

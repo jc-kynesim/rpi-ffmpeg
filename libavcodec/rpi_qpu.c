@@ -87,20 +87,24 @@ const short rpi_transMatrix2even[32][16] = { // Even rows first
 { 4, -13,  22, -31,  38, -46,  54, -61,  67, -73,  78, -82,  85, -88,  90, -90}
 };
 
+// Code/constants on GPU
 struct GPU
 {
   unsigned int qpu_code[QPU_CODE_SIZE];
   unsigned int vpu_code[VPU_CODE_SIZE];
   short transMatrix2even[16*16*2];
-  int open_count; // Number of allocated video buffers
-  int      mb; // Mailbox handle
-  int      vc; // Address in GPU memory
 };
+
+typedef struct gpu_env_s
+{
+  int open_count;
+  int mb;
+  GPU_MEM_PTR_T code_gm_ptr;
+} gpu_env_t;
 
 // Stop more than one thread trying to allocate memory or use the processing resources at once
 static pthread_mutex_t gpu_mutex = PTHREAD_MUTEX_INITIALIZER;
-static volatile struct GPU* gpu = NULL;
-static GPU_MEM_PTR_T gpu_mem_ptr;
+static gpu_env_t * gpu = NULL;
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
 
@@ -113,32 +117,87 @@ static int64_t ns_time(void)
 
 #endif
 
-static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb);
-static void gpu_free_internal(GPU_MEM_PTR_T *p);
+// GPU memory alloc fns (internal)
+
+// GPU_MEM_PTR_T alloc fns
+static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
+  p->numbytes = numbytes;
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
+  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
+  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
+  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
+  av_assert0(p->vcsm_handle);
+  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
+  av_assert0(p->vc_handle);
+  p->arm = vcsm_lock(p->vcsm_handle);
+  av_assert0(p->arm);
+  p->vc = mem_lock(mb, p->vc_handle);
+  av_assert0(p->vc);
+  return 0;
+}
+
+static int gpu_malloc_uncached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
+  p->numbytes = numbytes;
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
+  av_assert0(p->vcsm_handle);
+  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
+  av_assert0(p->vc_handle);
+  p->arm = vcsm_lock(p->vcsm_handle);
+  av_assert0(p->arm);
+  p->vc = mem_lock(mb, p->vc_handle);
+  av_assert0(p->vc);
+  return 0;
+}
+
+static void gpu_free_internal(const int mb, GPU_MEM_PTR_T * const p) {
+  mem_unlock(mb, p->vc_handle);
+  vcsm_unlock_ptr(p->arm);
+  vcsm_free(p->vcsm_handle);
+  memset(p, 0, sizeof(*p));  // Ensure we crash hard if we try and use this again
+}
+
+
+// GPU init, free, lock, unlock
+
+static void gpu_term(void)
+{
+  gpu_env_t * const ge = gpu;
+
+  // We have to hope that eveything has terminated...
+  gpu = NULL;
+
+  qpu_enable(ge->mb, 0);
+  gpu_free_internal(ge->mb, &ge->code_gm_ptr);
+
+  vcsm_exit();
+
+  mbox_close(ge->mb);
+  free(ge);
+}
+
 
 // Connect to QPU, returns 0 on success.
-static int gpu_init(volatile struct GPU **gpu) {
-  int mb = mbox_open();
-  int vc;
+static int gpu_init(gpu_env_t ** const gpu) {
   volatile struct GPU* ptr;
+  gpu_env_t * const ge = calloc(1, sizeof(gpu_env_t));
+  *gpu = NULL;
 
-  if (mb < 0)
+  if (ge == NULL)
     return -1;
-  if (qpu_enable(mb, 1) != 0)
+
+  if ((ge->mb = mbox_open()) < 0)
+    return -1;
+
+  if (qpu_enable(ge->mb, 1) != 0)
     return -2;
+
   vcsm_init();
 
-  gpu_malloc_uncached_internal(sizeof(struct GPU), &gpu_mem_ptr, mb);
-  ptr = (volatile struct GPU*)gpu_mem_ptr.arm;
-  memset((void*)ptr, 0, sizeof *ptr);
-  vc = gpu_mem_ptr.vc;
+  gpu_malloc_uncached_internal(ge->mb, sizeof(struct GPU), &ge->code_gm_ptr);
+  ptr = (volatile struct GPU*)ge->code_gm_ptr.arm;
 
-  ptr->mb = mb;
-  ptr->vc = vc;
-
-  printf("GPU allocated at 0x%x\n",vc);
-
-  *gpu = ptr;
+  // Zero everything so we have zeros between the code bits
+  memset(ptr, 0, sizeof(*ptr));
 
   // Now copy over the QPU code into GPU memory
   {
@@ -155,34 +214,49 @@ static int gpu_init(volatile struct GPU **gpu) {
   // And the transform coefficients
   memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
 
+  *gpu = ge;
   return 0;
 }
 
-// Make sure we have exclusive access to the mailbox, and enable qpu if necessary.
-static void gpu_lock(void) {
-  pthread_mutex_lock(&gpu_mutex);
 
-  if (gpu==NULL) {
-    gpu_init(&gpu);
-  }
-}
 
 static void gpu_unlock(void) {
   pthread_mutex_unlock(&gpu_mutex);
 }
 
-static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb) {
-  p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
-  av_assert0(p->vcsm_handle);
-  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
-  av_assert0(p->vc_handle);
-  p->arm = vcsm_lock(p->vcsm_handle);
-  av_assert0(p->arm);
-  p->vc = mem_lock(mb, p->vc_handle);
-  av_assert0(p->vc);
+// Make sure we have exclusive access to the mailbox, and enable qpu if necessary.
+static int gpu_lock(void) {
+  pthread_mutex_lock(&gpu_mutex);
+
+  if (gpu == NULL) {
+    int rv = gpu_init(&gpu);
+    if (rv != 0) {
+      gpu_unlock();
+      return rv;
+    }
+  }
+
   return 0;
 }
+
+static int gpu_lock_ref(void)
+{
+  int rv = gpu_lock();
+  if (rv == 0)
+    ++gpu->open_count;
+  return rv;
+}
+
+static void gpu_unlock_unref(void)
+{
+  if (--gpu->open_count == 0)
+    gpu_term();
+
+  gpu_unlock();
+}
+
+
+// Public gpu fns
 
 // Allocate memory on GPU
 // Fills in structure <p> containing ARM pointer, videocore handle, videocore memory address, numbytes
@@ -192,11 +266,39 @@ static int gpu_malloc_uncached_internal(int numbytes, GPU_MEM_PTR_T *p, int mb) 
 int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
 {
   int r;
-  gpu_lock();
-  r = gpu_malloc_uncached_internal(numbytes, p, gpu->mb);
-  gpu->open_count++;
+  gpu_lock_ref();
+  r = gpu_malloc_uncached_internal(gpu->mb, numbytes, p);
   gpu_unlock();
   return r;
+}
+
+// This allocates data that will be
+//    Cached in ARM L2
+//    Uncached in VPU L2
+int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
+{
+  int r;
+  gpu_lock_ref();
+  r = gpu_malloc_cached_internal(gpu->mb, numbytes, p);
+  gpu_unlock();
+  return r;
+}
+
+void gpu_free(GPU_MEM_PTR_T * const p) {
+  gpu_lock();
+  gpu_free_internal(gpu->mb, p);
+  gpu_unlock_unref();
+}
+
+unsigned int vpu_get_fn(void) {
+  // Make sure that the gpu is initialized
+  av_assert0(gpu != NULL);
+  return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code);
+}
+
+unsigned int vpu_get_constants(void) {
+  av_assert0(gpu != NULL);
+  return gpu->code_gm_ptr.vc + offsetof(struct GPU,transMatrix2even);
 }
 
 int gpu_get_mailbox(void)
@@ -205,7 +307,9 @@ int gpu_get_mailbox(void)
   return gpu->mb;
 }
 
-#include "libavutil/avassert.h"
+// ----------------------------------------------------------------------------
+//
+// Cache flush functions
 
 
 rpi_cache_flush_env_t * rpi_cache_flush_init()
@@ -325,93 +429,7 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T *const p, const rpi_cache_fl
 }
 
 
-
-static int gpu_malloc_cached_internal(int numbytes, GPU_MEM_PTR_T *p) {
-  p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
-  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
-  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
-  //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
-  av_assert0(p->vcsm_handle);
-  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
-  av_assert0(p->vc_handle);
-  p->arm = vcsm_lock(p->vcsm_handle);
-  av_assert0(p->arm);
-  p->vc = mem_lock(gpu->mb, p->vc_handle);
-  av_assert0(p->vc);
-  return 0;
-}
-
-// This allocates data that will be
-//    Cached in ARM L2
-//    Uncached in VPU L2
-int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
-{
-  int r;
-  gpu_lock();
-  r = gpu_malloc_cached_internal(numbytes, p);
-  gpu->open_count++;
-  gpu_unlock();
-  return r;
-}
-
-static void gpu_term(void)
-{
-  int mb;
-
-  if (gpu==NULL)
-    return;
-  mb = gpu->mb;
-
-  // ??? Tear down anything needed for gpuexecute
-
-  qpu_enable(mb, 0);
-  gpu_free_internal(&gpu_mem_ptr);
-
-  vcsm_exit();
-
-  mbox_close(mb);
-  gpu = NULL;
-}
-
-void gpu_free_internal(GPU_MEM_PTR_T *p) {
-  int mb = gpu->mb;
-  mem_unlock(mb,p->vc_handle);
-  vcsm_unlock_ptr(p->arm);
-  vcsm_free(p->vcsm_handle);
-}
-
-void gpu_free(GPU_MEM_PTR_T *p) {
-  gpu_lock();
-
-  gpu_free_internal(p);
-
-  gpu->open_count--;
-  if (gpu->open_count==0) {
-      printf("Closing GPU\n");
-      gpu_term();
-      gpu = NULL;
-  }
-  gpu_unlock();
-}
-
-unsigned int vpu_get_fn(void) {
-  // Make sure that the gpu is initialized
-  if (gpu==NULL) {
-    printf("Preparing gpu\n");
-    gpu_lock();
-    gpu_unlock();
-  }
-  return gpu->vc + offsetof(struct GPU,vpu_code);
-}
-
-unsigned int vpu_get_constants(void) {
-  if (gpu==NULL) {
-    gpu_lock();
-    gpu_unlock();
-  }
-  return gpu->vc + offsetof(struct GPU,transMatrix2even);
-}
+// ----------------------------------------------------------------------------
 
 
 // Wait abstractions - mostly so we can easily add profile code
@@ -436,11 +454,13 @@ static void vq_wait_delete(vq_wait_t * const wait)
 }
 
 #ifdef RPI_TRACE_TIME_VPU_QPU_WAIT
-volatile int wait_count = 0;
-volatile int64_t wait_start0 = 0;
-volatile int64_t wait_last_update = 0;
-volatile int64_t wait_start[8] = {0};
-volatile int64_t wait_total[8] = {0};
+
+#define WAIT_COUNT_MAX 16
+static volatile int wait_count = 0;
+static volatile int64_t wait_start0 = 0;
+static volatile int64_t wait_last_update = 0;
+static volatile int64_t wait_start[WAIT_COUNT_MAX] = {0};
+static volatile int64_t wait_total[WAIT_COUNT_MAX] = {0};
 
 #define WAIT_TIME_PRINT_PERIOD (int64_t)2000000000
 
@@ -457,7 +477,11 @@ static void vq_wait_wait(vq_wait_t * const wait)
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
   gpu_lock();
-  wait_start[wait_count++] = ns_time();
+  {
+    const int n = wait_count++;
+    wait_start[n] = ns_time();
+    av_assert0(n < WAIT_COUNT_MAX);
+  }
   gpu_unlock();
 #endif
 
@@ -469,6 +493,8 @@ static void vq_wait_wait(vq_wait_t * const wait)
   {
     const int n = --wait_count;
     const int64_t now = ns_time();
+    av_assert0(n >= 0);
+
     wait_total[n] += now - wait_start[n];
     if (wait_start0 == 0)
     {
@@ -650,14 +676,28 @@ void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h)
   }
 }
 
+int vpu_qpu_init()
+{
+  int rv;
+  if ((rv = gpu_lock_ref()) != 0)
+    return rv;  // Init as side effect of lock
+
+  gpu_unlock();
+  return 0;
+}
+
+void vpu_qpu_term()
+{
+  av_assert0(gpu != NULL);
+
+  gpu_lock();
+  gpu_unlock_unref();
+}
+
 unsigned int qpu_get_fn(int num) {
     // Make sure that the gpu is initialized
     unsigned int *fn;
-    if (gpu==NULL) {
-      printf("Preparing gpu\n");
-      gpu_lock();
-      gpu_unlock();
-    }
+
     switch(num) {
     case QPU_MC_SETUP:
       fn = mc_setup;
@@ -705,7 +745,7 @@ unsigned int qpu_get_fn(int num) {
       printf("Unknown function\n");
       exit(-1);
     }
-    return gpu->vc + 4*(int)(fn-rpi_shader);
+    return gpu->code_gm_ptr.vc + 4 * (int)(fn - rpi_shader) + offsetof(struct GPU, qpu_code);
     //return code[num] + gpu->vc;
 }
 
