@@ -93,6 +93,7 @@
 # With shifts only the bottom 5 bits are considered so -16=16, -15=17 etc.
 .set i_shift16,                    -16
 .set i_shift21,                    -11
+.set i_shift30,                     -2
 
 # Much of the setup code is common between Y & C
 # Macros that express this - obviously these can't be overlapped
@@ -439,49 +440,47 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   mov ra6, rb7          ; mov rb7, ra8
 # >>>
 
+# 1st half done all results now in the a/b4..7 fifo
+
 # Need to bulk rotate FIFO for heights other than 16
-# plausible heights are 16, 12, 8, 6, 4, 3, 2
+# plausible heights are 16, 12, 8, 6, 4, 3, 2 and that is all we deal with
 # we are allowed 3/4 cb_size w/h :-(
 
-
-# Discard destination uniforms then drop through to _b - we will always
-# do b after b0
+# Destination uniforms discarded
+# At the end drop through to _b - we will always do b after b0
 
   sub.setf -, 15, r3   # 12 + 3 of preroll
-  brr.anyn -, r:mc_filter_uv_b  # > 12 => 16
-  mov -, unif                                   # Discard u_dst_addr
-  mov -, unif                                   # Discard v_dst_addr
-  sub r3, 11, r3         # Convert r3 to shifts wanted
-# >>>
-  brr.anyz -, r:uv_b0_post12    # == 12 deal with specially
-  nop
-  mov r0, i_shift16
+  brr.anyn -, r:uv_b0_post_fin                  # > 12 (n) => 16
+  sub r3, 11, r3        ; mov -, unif           # r3 = shifts wanted ; Discard u_dst_addr
+  mov r0, i_shift16     ; mov -, unif           # ; Discard v_dst_addr
   mov r1, 0x10000
 # >>>
-
-# Shift 8 with discard (a ->b on all regs)
-  shl ra7, ra7, r0      ; mul24 rb7, rb7, r1
-  shl ra6, ra6, r0      ; mul24 rb6, rb6, r1
-  shl ra5, ra5, r0      ; mul24 rb5, rb5, r1
+  brr.anyz -, r:uv_b0_post12    # == 12 deal with specially
+# Shift 8 with discard (.16b = .16a on all regs)
+  shl.ifnz ra7, ra7, r0 ; mul24.ifnz rb7, rb7, r1
+  shl.ifnz ra6, ra6, r0 ; mul24.ifnz rb6, rb6, r1
+  shl.ifnz ra5, ra5, r0 ; mul24.ifnz rb5, rb5, r1
+# >>>
   shl ra4, ra4, r0      ; mul24 rb4, rb4, r1
 
-  and.setf -, r3, 4
-  mov.ifnz ra7, ra4     ; mov.ifnz rb6, rb5
-  mov.ifnz ra5, ra6     ; mov.ifnz rb4, rb7
-  # If we shifted by 4 here then the max length remaining is 4 so we can
+  shl.setf -, r3, i_shift30  # b2 -> C, b1 -> N
+# Shift 4
+  mov.ifc ra7, ra4      ; mov.ifc rb6, rb5
+  mov.ifc ra5, ra6      ; mov.ifc rb4, rb7
+  # If we shifted by 4 here then the max length remaining is 4
   # so that is it
 
-  and.setf -, r3, 2
-  brr -, r:mc_filter_uv_b
-  mov.ifnz ra7, ra5    ; mov.ifnz rb6, rb4
-  mov.ifnz ra5, ra4    ; mov.ifnz rb4, rb5
-  mov.ifnz ra4, ra6    ; mov.ifnz rb5, rb7
+  brr -, r:uv_b0_post_fin
+# Shift 2
+  mov.ifn ra7, ra5      ; mov.ifn rb6, rb4
+  mov.ifn ra5, ra4      ; mov.ifn rb4, rb5
+  mov.ifn ra4, ra6      ; mov.ifn rb5, rb7
   # 6 / 2 so need 6 outputs
 # >>>
 
 :uv_b0_post12
-# this one is annoying as we need to swap haves of things that don't
-#  really want to be swapped
+# this one is annoying as we need to swap halves of things that don't
+# really want to be swapped
 
 # b7a, a6a, b5a, a4a
 # b4a, a5a, b6a, a7a
@@ -496,7 +495,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   shl ra6, ra5, r0 ; mul24 rb7, rb4, r1
   mov ra5, r2      ; mov rb4, r3
 
-
+:uv_b0_post_fin
   # drop through
 
 ################################################################################

@@ -27,10 +27,14 @@
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
 #define RPI_TRACE_TIME_VPU_QPU_WAIT 1
 
-// QPU profile flags
-#define QPU_FLAGS_PROF_NO_FLUSH 1
-#define QPU_FLAGS_PROF_CLEAR_PROFILE 2
-#define QPU_FLAGS_PROF_OUTPUT_COUNTS 4
+// QPU "noflush" flags
+// a mixture of flushing & profiling
+
+#define QPU_FLAGS_NO_FLUSH_VPU          1       // If unset VPU cache will be flushed
+#define QPU_FLAGS_PROF_CLEAR_AND_ENABLE 2       // Clear & Enable detailed QPU profiling registers
+#define QPU_FLAGS_PROF_OUTPUT_COUNTS    4       // Print the results
+#define QPU_FLAGS_OUTPUT_QPU_TIMES      8       // Print QPU times - independant of the profiling
+#define QPU_FLAGS_FLUSH_QPU             16      // Flush QPU caches & TMUs
 
 // On Pi2 there is no way to access the VPU L2 cache
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
@@ -572,7 +576,8 @@ static void vpu_qpu_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_co
   }
 }
 
-static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t pflags, const uint32_t * const mail)
+// flags are QPU_FLAGS_xxx
+static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t flags, const uint32_t * const mail)
 {
   if (n != 0) {
     struct gpu_job_s *const j = new_job(vqj);
@@ -580,7 +585,7 @@ static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n,
 
     j->command = EXECUTE_QPU;
     j->u.q.jobs = n;
-    j->u.q.noflush = pflags;
+    j->u.q.noflush = flags;
     j->u.q.timeout = 5000;
     memcpy(j->u.q.control, mail, n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
   }
@@ -640,21 +645,21 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 {
   vpu_qpu_job_env_t * const vqj = vpu_qpu_job_new();
 
-  uint32_t qpu_pflags = QPU_FLAGS_PROF_NO_FLUSH;
-#if 0
+  uint32_t qpu_flags = QPU_FLAGS_NO_FLUSH_VPU;
+#if 1
   static int z = 0;
   if (z == 0) {
     z = 1;
-    qpu_pflags = QPU_FLAGS_PROF_CLEAR_PROFILE;
+    qpu_flags |= QPU_FLAGS_PROF_CLEAR_AND_ENABLE;
   }
-  else if ((z++ & 2047) == 0) {
-    qpu_pflags = QPU_FLAGS_PROF_OUTPUT_COUNTS;
+  else if ((z++ & 7) == 0) {
+    qpu_flags |= QPU_FLAGS_PROF_OUTPUT_COUNTS;
   }
 #endif
 
   vpu_qpu_add_vpu(vqj, vpu_code, r0, r1, r2, r3, r4, r5);
-  vpu_qpu_add_qpu(vqj, qpu1_n, QPU_FLAGS_PROF_NO_FLUSH, qpu1_mail);
-  vpu_qpu_add_qpu(vqj, qpu0_n, qpu_pflags, qpu0_mail);
+  vpu_qpu_add_qpu(vqj, qpu0_n, QPU_FLAGS_NO_FLUSH_VPU, qpu0_mail);
+  vpu_qpu_add_qpu(vqj, qpu1_n, qpu_flags, qpu1_mail);
   if (wait_h != NULL)
     vpu_qpu_add_sync_this(vqj, wait_h);
   av_assert0(vpu_qpu_start(vqj) == 0);
