@@ -36,10 +36,10 @@
 # ra22 ra_k256                                  256
 # ra23 ra_y2_next                               ra_y2_next
 #
-# rb20                                          0xffffff00
+# rb20                                          -- free --
 # rb21                                          -- free --
 # rb22 rb_k255                                  255
-# rb23                                          24
+# rb23                                          -- free --
 #
 # rb24                                          vdw_setup_1(dst_pitch)
 # rb25                                          frame width-1
@@ -126,7 +126,7 @@ mov ra31, unif
 add ra_x, unif, elem_num # Store x
 mov ra_y, unif # Store y
 mov ra_frame_base, unif # Store frame u base
-nop
+mov r1, vdw_setup_1(0)  # Merged with dst_stride shortly, delay slot for ra_frame_base
 sub ra_u2v_ref_offset, unif, ra_frame_base # Store offset to add to move from u to v in reference frame
 
 # Read image dimensions
@@ -137,34 +137,29 @@ sub rb30,unif,1
 mov rb16, unif
 
 # get destination vdw setup
-mov r1, vdw_setup_1(0)
 add rb24, r1, unif      # dst_stride
 
 # load constants
-
-mov ra_k1, 1
-mov ra_k256, 256
-
-mov rb20, 0xffffff00
-mov rb_k255, 255
-mov rb23, 24
+  mov ra_k1, 1
+  mov ra_k256, 256
+  mov rb_k255, 255
 
 # touch registers to keep simulator happy
 
-  # B0 -> B stash registers
+  # ra/b4..7: B0 -> B stash registers
   mov ra4, 0 ; mov rb4, 0
   mov ra5, 0 ; mov rb5, 0
   mov ra6, 0 ; mov rb6, 0
   mov ra7, 0 ; mov rb7, 0
 
-mov ra8, 0
-mov ra9, 0
-mov ra10, 0
-mov ra11, 0
-mov ra12, 0
-mov ra13, 0
-mov ra14, 0
-mov ra15, 0
+  # ra12..15: vertical scroll registers
+  mov ra12, 0
+  mov ra13, 0
+  mov ra14, 0
+  mov ra15, 0
+
+  # ra9 - delayed setup - must be 0 initially
+  mov ra9, 0
 
 # Compute base address for first and second access
 mov r0, ra_x           # Load x
@@ -275,12 +270,12 @@ sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop co
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
 mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-shr r1, r4, ra_xshift    ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
+shr r1, r4, ra_xshift    ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 max r2, ra_y, 0  # y
 min r2, r2, rb_frame_height_minus_1
 add ra_y, ra_y, 1         ; mul24 r2, r2, r3
-add t0s, ra_x, r2    ; v8subs r1, r1, rb20
+add t0s, ra_x, r2    ; v8min r1, r1, rb_k255
 add t1s, ra_frame_base, r2
 
 # generate seven shifted versions
@@ -387,37 +382,37 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
-shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
-mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
-mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-shr r1, r4, ra_xshift    ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
+  sub.setf -, r3, rb17  ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
+  shr r0, r4, ra_xshift ; mov.ifz ra_x, rb_x_next       ; ldtmu1
+  mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
+  mov.ifz ra_y, ra_y_next ; mov r3, rb_pitch
+  shr r1, r4, ra_xshift ; v8min r0, r0, rb_k255          # v8subs masks out all but bottom byte
 
-max r2, ra_y, 0  # y
-min r2, r2, rb_frame_height_minus_1
-add ra_y, ra_y, 1         ; mul24 r2, r2, r3
-add t0s, ra_x, r2    ; v8subs r1, r1, rb20
-add t1s, ra_frame_base, r2
+  max r2, ra_y, 0       # y
+  min r2, r2, rb_frame_height_minus_1
+  add ra_y, ra_y, 1     ; mul24 r2, r2, r3
+  add t0s, ra_x, r2     ; v8min r1, r1, rb_k255
+  add t1s, ra_frame_base, r2
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
 
-mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-nop                  ; mul24      r3, ra0.8a,       r0
-nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
-nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1
-nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
-sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2
-nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3
-nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
-sub r0, r2, r3       ; mov r3, rb31
-sub.setf -, r3, 4    ; mov ra12, ra13
-brr.anyn -, r:uvloop_b0
-mov ra13, ra14          ; mul24 r1, ra14, rb9   # ra14 is about to be ra13
-mov ra14, ra15          ; mul24 r2, ra15, rb10  # ra15 is about to be ra14
-mov ra15, r0            ; mul24 r0, ra12, rb8
+  nop                   ; mul24      r3, ra0.8a,       r0
+  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
+  nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1
+  nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
+  sub r2, r2, r3        ; mul24      r3, ra0.8c << 2,  r0 << 2
+  nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
+  add r2, r2, r3        ; mul24      r3, ra0.8d << 3,  r0 << 3
+  nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+  sub r0, r2, r3        ; mov r3, rb31
+  sub.setf -, r3, 4     ; mov ra12, ra13
+  brr.anyn -, r:uvloop_b0
+  mov ra13, ra14        ; mul24 r1, ra14, rb9   # ra14 is about to be ra13
+  mov ra14, ra15        ; mul24 r2, ra15, rb10  # ra15 is about to be ra14
+  mov ra15, r0          ; mul24 r0, ra12, rb8
 # >>> .anyn uvloop_b0
 
 # apply vertical filter and write to B-FIFO
@@ -449,14 +444,15 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # Destination uniforms discarded
 # At the end drop through to _b - we will always do b after b0
 
-  sub.setf -, 15, r3   # 12 + 3 of preroll
-  brr.anyn -, r:uv_b0_post_fin                  # > 12 (n) => 16
+  sub.setf -, 15, r3    # 12 + 3 of preroll
+  brr.anyn -, r:uv_b0_post_fin                  # h > 12 (n) => 16 (do nothing)
   sub r3, 11, r3        ; mov -, unif           # r3 = shifts wanted ; Discard u_dst_addr
   mov r0, i_shift16     ; mov -, unif           # ; Discard v_dst_addr
   mov r1, 0x10000
 # >>>
-  brr.anyz -, r:uv_b0_post12    # == 12 deal with specially
-# Shift 8 with discard (.16b = .16a on all regs)
+  brr.anyz -, r:uv_b0_post12                    # h == 12 deal with specially
+# If h != 16 && h != 12 then h <= 8 so
+# shift 8 with discard (.16b = .16a on all regs)
   shl.ifnz ra7, ra7, r0 ; mul24.ifnz rb7, rb7, r1
   shl.ifnz ra6, ra6, r0 ; mul24.ifnz rb6, rb6, r1
   shl.ifnz ra5, ra5, r0 ; mul24.ifnz rb5, rb5, r1
@@ -487,13 +483,13 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # b7b, a6b, b5b, a4b
 # b4b, a5b, b6b, a7b
 
-  mov r2,  ra4     ; mov r3,  rb5
-  shl ra4, ra7, r0 ; mul24 rb5, rb6, r1
-  mov ra7, r2      ; mov rb6, r3
+  mov r2,  ra4          ; mov r3,  rb5
+  shl ra4, ra7, r0      ; mul24 rb5, rb6, r1
+  mov ra7, r2           ; mov rb6, r3
 
-  mov r2, ra6      ; mov r3, rb7
-  shl ra6, ra5, r0 ; mul24 rb7, rb4, r1
-  mov ra5, r2      ; mov rb4, r3
+  mov r2, ra6           ; mov r3, rb7
+  shl ra6, ra5, r0      ; mul24 rb7, rb4, r1
+  mov ra5, r2           ; mov rb4, r3
 
 :uv_b0_post_fin
   # drop through
@@ -560,12 +556,12 @@ sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop co
 shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next       ; ldtmu1
 mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
 mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-shr r1, r4, ra_xshift     ; v8subs r0, r0, rb20  # v8subs masks out all but bottom byte
+shr r1, r4, ra_xshift     ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 max r2, ra_y, 0  # y
 min r2, r2, rb_frame_height_minus_1
 add ra_y, ra_y, 1         ; mul24 r2, r2, r3
-add t0s, ra_x, r2         ; v8subs r1, r1, rb20
+add t0s, ra_x, r2         ; v8min r1, r1, rb_k255
 add t1s, ra_frame_base, r2
 
 # generate seven shifted versions
@@ -626,6 +622,8 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 ::mc_exit_c
   mov.setf -, ra9      ; mov -, vw_wait
+# Annoyingly it looks iike condition codes don't work on writes to special
+# registers so we have to branch around the writes
   brr.anyz -, r:exit_c_1
   nop
   nop
@@ -653,26 +651,26 @@ nop        ; nop # delay slot 1
 nop        ; nop # delay slot 2
 
 # mc_interrupt_exit8()
-::mc_interrupt_exit8
-mov  -, vw_wait # wait on the VDW
-
-ldtmu0
-ldtmu1
-ldtmu0
-ldtmu1
-
-mov -,sacq(0) # 1
-mov -,sacq(0) # 2
-mov -,sacq(0) # 3
-mov -,sacq(0) # 4
-mov -,sacq(0) # 5
-mov -,sacq(0) # 6
-mov -,sacq(0) # 7
-
-nop        ; nop ; thrend
-mov interrupt, 1; nop # delay slot 1
-nop        ; nop # delay slot 2
-
+#::mc_interrupt_exit8
+#mov  -, vw_wait # wait on the VDW
+#
+#ldtmu0
+#ldtmu1
+#ldtmu0
+#ldtmu1
+#
+#mov -,sacq(0) # 1
+#mov -,sacq(0) # 2
+#mov -,sacq(0) # 3
+#mov -,sacq(0) # 4
+#mov -,sacq(0) # 5
+#mov -,sacq(0) # 6
+#mov -,sacq(0) # 7
+#
+#nop        ; nop ; thrend
+#mov interrupt, 1; nop # delay slot 1
+#nop        ; nop # delay slot 2
+#
 
 
 
@@ -748,20 +746,14 @@ nop        ; nop # delay slot 2
   mov ra_k1, 1
   mov ra_k256, 256
 
-  mov rb20, 0xffffff00
   mov rb_k255, 255
-  mov rb23, 24
 
 # touch vertical context to keep simulator happy
 
-  mov ra8, 0
-  mov ra9, 0
-  mov ra10, 0
-  mov ra11, 0
-  mov ra12, 0
-  mov ra13, 0
-  mov ra14, 0
-  mov ra15, 0
+  mov ra8,  0           ; mov rb8,  0
+  mov ra9,  0           ; mov rb9,  0
+  mov ra10, 0           ; mov rb10, 0
+  mov ra11, 0           ; mov rb11, 0
 
 # Compute part of VPM to use
   m_calc_dma_regs rb28, rb27
@@ -927,12 +919,12 @@ nop        ; nop # delay slot 2
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+  add t0s, ra_frame_base, r2   ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
-  add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
+  add t1s, ra_frame_base2, r2  ; v8min r1, r1, rb_k255
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -1035,12 +1027,12 @@ nop        ; nop # delay slot 2
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-  add t0s, ra_frame_base, r2   ; v8subs r0, r0, rb20 # v8subs masks out all but bottom byte
+  add t0s, ra_frame_base, r2   ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
-  add t1s, ra_frame_base2, r2  ; v8subs r1, r1, rb20
+  add t1s, ra_frame_base2, r2  ; v8min r1, r1, rb_k255
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
