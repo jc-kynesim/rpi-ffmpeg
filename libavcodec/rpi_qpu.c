@@ -25,7 +25,7 @@
 #pragma GCC diagnostic pop
 
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
-#define RPI_TRACE_TIME_VPU_QPU_WAIT 1
+#define RPI_TRACE_TIME_VPU_QPU_WAIT     0
 
 // QPU "noflush" flags
 // a mixture of flushing & profiling
@@ -99,11 +99,27 @@ struct GPU
   short transMatrix2even[16*16*2];
 };
 
+
+#define WAIT_COUNT_MAX 16
+
+typedef struct trace_time_wait_s
+{
+  int count;
+  int64_t start0;
+  int64_t last_update;
+  int64_t start[WAIT_COUNT_MAX];
+  int64_t total[WAIT_COUNT_MAX];
+} trace_time_wait_t;
+
 typedef struct gpu_env_s
 {
   int open_count;
+  int init_count;
   int mb;
   GPU_MEM_PTR_T code_gm_ptr;
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+  trace_time_wait_t ttw;
+#endif
 } gpu_env_t;
 
 // Stop more than one thread trying to allocate memory or use the processing resources at once
@@ -457,14 +473,7 @@ static void vq_wait_delete(vq_wait_t * const wait)
   free(wait);
 }
 
-#ifdef RPI_TRACE_TIME_VPU_QPU_WAIT
-
-#define WAIT_COUNT_MAX 16
-static volatile int wait_count = 0;
-static volatile int64_t wait_start0 = 0;
-static volatile int64_t wait_last_update = 0;
-static volatile int64_t wait_start[WAIT_COUNT_MAX] = {0};
-static volatile int64_t wait_total[WAIT_COUNT_MAX] = {0};
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
 
 #define WAIT_TIME_PRINT_PERIOD (int64_t)2000000000
 
@@ -472,6 +481,16 @@ static volatile int64_t wait_total[WAIT_COUNT_MAX] = {0};
 #define T_SEC(t) (unsigned int)((t)/(int64_t)1000000000)
 #define T_ARG(t) T_SEC(t), T_MS(t)
 #define T_FMT "%u.%03u"
+
+static void ttw_print(const trace_time_wait_t * ttw, const int64_t now)
+{
+  printf("Total:" T_FMT ", Idle:" T_FMT ", 1:" T_FMT ", 2:" T_FMT ", 3:" T_FMT ", 4:" T_FMT "\n",
+         T_ARG(now - ttw->start0), T_ARG(now - ttw->start0 - ttw->total[0]),
+         T_ARG(ttw->total[0]),
+         T_ARG(ttw->total[1]),
+         T_ARG(ttw->total[2]),
+         T_ARG(ttw->total[3]));
+}
 
 #endif
 
@@ -482,8 +501,9 @@ static void vq_wait_wait(vq_wait_t * const wait)
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
   gpu_lock();
   {
-    const int n = wait_count++;
-    wait_start[n] = ns_time();
+    trace_time_wait_t * const ttw = &gpu->ttw;
+    const int n = ttw->count++;
+    ttw->start[n] = ns_time();
     av_assert0(n < WAIT_COUNT_MAX);
   }
   gpu_unlock();
@@ -495,25 +515,21 @@ static void vq_wait_wait(vq_wait_t * const wait)
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
   gpu_lock();
   {
-    const int n = --wait_count;
+    trace_time_wait_t * const ttw = &gpu->ttw;
+    const int n = --ttw->count;
     const int64_t now = ns_time();
     av_assert0(n >= 0);
 
-    wait_total[n] += now - wait_start[n];
-    if (wait_start0 == 0)
+    ttw->total[n] += now - ttw->start[n];
+    if (ttw->start0 == 0)
     {
-      wait_last_update = wait_start[n];
-      wait_start0 = wait_start[n];
+      ttw->last_update = ttw->start[n];
+      ttw->start0 = ttw->start[n];
     }
-    if (now - wait_last_update > WAIT_TIME_PRINT_PERIOD)
+    if (now - ttw->last_update > WAIT_TIME_PRINT_PERIOD)
     {
-      wait_last_update += WAIT_TIME_PRINT_PERIOD;
-      printf("Total:" T_FMT ", Idle:" T_FMT ", 1:" T_FMT ", 2:" T_FMT ", 3:" T_FMT ", 4:" T_FMT "\n",
-             T_ARG(now - wait_start0), T_ARG(now - wait_start0 - wait_total[0]),
-             T_ARG(wait_total[0]),
-             T_ARG(wait_total[1]),
-             T_ARG(wait_total[2]),
-             T_ARG(wait_total[3]));
+      ttw->last_update += WAIT_TIME_PRINT_PERIOD;
+      ttw_print(ttw, now);
     }
   }
   gpu_unlock();
@@ -646,7 +662,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
   vpu_qpu_job_env_t * const vqj = vpu_qpu_job_new();
 
   uint32_t qpu_flags = QPU_FLAGS_NO_FLUSH_VPU;
-#if 1
+#if 0
   static int z = 0;
   if (z == 0) {
     z = 1;
@@ -687,6 +703,8 @@ int vpu_qpu_init()
   if ((rv = gpu_lock_ref()) != 0)
     return rv;  // Init as side effect of lock
 
+  ++gpu->init_count;
+
   gpu_unlock();
   return 0;
 }
@@ -696,6 +714,15 @@ void vpu_qpu_term()
   av_assert0(gpu != NULL);
 
   gpu_lock();
+
+  --gpu->init_count;
+
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+  if (gpu->init_count == 0) {
+    ttw_print(&gpu->ttw, ns_time());
+  }
+#endif
+
   gpu_unlock_unref();
 }
 

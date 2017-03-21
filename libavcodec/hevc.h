@@ -49,7 +49,7 @@
 #else
 
   #include "rpi_qpu.h"
-  #define RPI_MC_CHROMA_QPU  1          // 0 use ARM for UV inter-pred, 1 use QPU
+  #define RPI_MC_CHROMA_QPU  0          // 0 use ARM for UV inter-pred, 1 use QPU
   #define RPI_MC_LUMA_QPU    1          // 0 use ARM for Y inter-pred, 1 use QPU
 
   // Define RPI_WORKER to launch a worker thread for pixel processing tasks

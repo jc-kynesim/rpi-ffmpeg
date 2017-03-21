@@ -60,11 +60,14 @@ def main():
                     ttotal['idle'] += time - idle_start
                     idle_start = None
 
-    tlogged = time - time0
+    if not time0:
+        print "No v3d profile records found"
+    else:
+        tlogged = time - time0
 
-    print "Logged time:", tlogged, "  Op count:", op_count
-    for unit in sorted(ttotal):
-        print b'%6s: %10.3f    %7.3f%%' % (unit, ttotal[unit], ttotal[unit] * 100.0 / tlogged)
+        print "Logged time:", tlogged, "  Op count:", op_count
+        for unit in sorted(ttotal):
+            print b'%6s: %10.3f    %7.3f%%' % (unit, ttotal[unit], ttotal[unit] * 100.0 / tlogged)
 
 
 if __name__ == '__main__':

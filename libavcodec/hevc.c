@@ -374,8 +374,6 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 
             dvq->uv_setup_arm = (void*)p_arm;
             dvq->uv_setup_vc = (void*)p_vc;
-
-            sem_init(&dvq->cmd_id, 0, 1);
         }
 
         s->dvq_n = 0;
