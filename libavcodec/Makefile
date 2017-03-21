@@ -1088,10 +1088,14 @@ $(SUBDIR)sinewin.o: $(SUBDIR)sinewin_tables.h
 $(SUBDIR)sinewin_fixed.o: $(SUBDIR)sinewin_fixed_tables.h
 endif
 
+QASM := $(SUBDIR)../pi-util/qasm.py
+
+ifneq ("$(wildcard $(QASM))","")
 $(SUBDIR)rpi_shader.c: $(SUBDIR)rpi_shader.qasm
-	python $(SUBDIR)../pi-util/qasm.py -mc_c:rpi_shader,rpi_shader,rpi_shader $< > $@
+	python $(QASM) -mc_c:rpi_shader,rpi_shader,rpi_shader $< > $@
 
 $(SUBDIR)rpi_shader.h: $(SUBDIR)rpi_shader.qasm
-	python $(SUBDIR)../pi-util/qasm.py -mc_h:rpi_shader,rpi_shader,rpi_shader $< > $@
+	python $(QASM) -mc_h:rpi_shader,rpi_shader,rpi_shader $< > $@
+endif
 
 $(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_shader.h
