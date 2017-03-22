@@ -64,7 +64,7 @@
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
   // As it stands there is something mildy broken in VPU deblock - looks mostly OK
   // but reliably fails some conformance tests (e.g. DBLK_A/B/C_)
-  // With VPU luma & chroma pred it is much the same spoeed to deblock on the ARM
+  // With VPU luma & chroma pred it is much the same speed to deblock on the ARM
 //  #define RPI_DEBLOCK_VPU
 
   #define RPI_VPU_DEBLOCK_CACHED 1
