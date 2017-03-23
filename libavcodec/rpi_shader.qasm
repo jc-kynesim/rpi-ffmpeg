@@ -137,6 +137,9 @@
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_uv
+nop        ; nop ; thrend
+mov interrupt, 1; nop # delay slot 1
+nop        ; nop # delay slot 2
 
 
 #  zap_all_reg

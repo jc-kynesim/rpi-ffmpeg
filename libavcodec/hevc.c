@@ -3656,7 +3656,15 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
         luma_done = 1;
     }
 #endif
-#if RPI_MC_CHROMA_QPU || 1
+#if 1
+    if (luma_done) {
+        uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
+        mail_uv[0] = (uint32_t)(unif_vc + (s->mvs_base[job][0] - (uint32_t*)s->unif_mvs_ptr[job].arm));
+        mail_uv[1] = qpu_get_fn(QPU_MC_SETUP_UV);
+        n_uv = 1;
+    }
+#endif
+#if RPI_MC_CHROMA_QPU
     if (mc_terminate_uv(s, job) != 0 || luma_done)
     {
         uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
