@@ -2725,7 +2725,7 @@ static int stream_component_open(VideoState *is, int stream_index)
                 goto fail;
             link = is->out_audio_filter->inputs[0];
             sample_rate    = link->sample_rate;
-            nb_channels    = link->channels;
+            nb_channels    = avfilter_link_get_channels(link);
             channel_layout = link->channel_layout;
         }
 #else
@@ -2936,7 +2936,7 @@ static int read_thread(void *arg)
         AVStream *st = ic->streams[i];
         enum AVMediaType type = st->codecpar->codec_type;
         st->discard = AVDISCARD_ALL;
-        if (wanted_stream_spec[type] && st_index[type] == -1)
+        if (type >= 0 && wanted_stream_spec[type] && st_index[type] == -1)
             if (avformat_match_stream_specifier(ic, st, wanted_stream_spec[type]) > 0)
                 st_index[type] = i;
     }
@@ -3775,6 +3775,8 @@ int main(int argc, char **argv)
     VideoState *is;
     char dummy_videodriver[] = "SDL_VIDEODRIVER=dummy";
     char alsa_bufsize[] = "SDL_AUDIO_ALSA_SET_BUFFER_SIZE=1";
+
+    init_dynload();
 
     av_log_set_flags(AV_LOG_SKIP_REPEATED);
     parse_loglevel(argc, argv, options);

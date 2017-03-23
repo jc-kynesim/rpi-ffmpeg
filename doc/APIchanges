@@ -15,6 +15,22 @@ libavutil:     2015-08-28
 
 API changes, most recent first:
 
+2016-06-30 - c1c7e0ab - lavf 57.41.100 - avformat.h
+  Moved codecpar field from AVStream to the end of the struct, so that
+  the following private fields are in the same location as in FFmpeg 3.0 (lavf 57.25.100).
+
+2016-06-30 - 042fb69d - lavu 55.28.100 - frame.h
+  Moved hw_frames_ctx field from AVFrame to the end of the struct, so that
+  the following private fields are in the same location as in FFmpeg 3.0 (lavu 55.17.103).
+
+2016-06-29 - 1a751455 - lavfi 6.47.100 - avfilter.h
+  Fix accidental ABI breakage in AVFilterContext.
+  ABI was broken in 8688d3a, lavfi 6.42.100 and released as ffmpeg 3.1.
+
+  Because of this, ffmpeg and ffplay built against lavfi>=6.42.100 will not be
+  compatible with lavfi>=6.47.100. Potentially also affects other users of
+  libavfilter if they are using one of the affected fields.
+
 -------- 8< --------- FFmpeg 3.1 was cut here -------- 8< ---------
 
 2016-06-26 - 481f320 / 1c9e861 - lavu 55.27.100 / 55.13.0 - hwcontext.h
