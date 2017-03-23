@@ -943,7 +943,7 @@ typedef struct HEVCContext {
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
     int ctu_per_y_chan; // Number of CTUs per luma QPU
     int ctu_per_uv_chan; // Number of CTUs per chroma QPU
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
     GPU_MEM_PTR_T unif_mvs_ptr[RPI_MAX_JOBS];
     uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
 

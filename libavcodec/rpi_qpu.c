@@ -572,7 +572,7 @@ static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n,
     j->command = EXECUTE_QPU;
     j->u.q.jobs = n;
 //    j->u.q.noflush = qpu_pflags;
-    j->u.q.timeout = 5000;
+    j->u.q.timeout = 5000000;
     memcpy(j->u.q.control, mail, n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
   }
 }

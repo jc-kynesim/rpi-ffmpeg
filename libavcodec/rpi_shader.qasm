@@ -94,9 +94,52 @@
 .set i_shift16,                    -16
 .set i_shift21,                    -11
 
+.macro zap_all_reg
+  mov ra0, 0   ; mov rb0, 0
+  mov ra1, 0   ; mov rb1, 0
+  mov ra2, 0   ; mov rb2, 0
+  mov ra3, 0   ; mov rb3, 0
+  mov ra4, 0   ; mov rb4, 0
+  mov ra5, 0   ; mov rb5, 0
+  mov ra6, 0   ; mov rb6, 0
+  mov ra7, 0   ; mov rb7, 0
+  mov ra8, 0   ; mov rb8, 0
+  mov ra9, 0   ; mov rb9, 0
+  mov ra10, 0  ; mov rb10, 0
+  mov ra11, 0  ; mov rb11, 0
+  mov ra12, 0  ; mov rb12, 0
+  mov ra13, 0  ; mov rb13, 0
+  mov ra14, 0  ; mov rb14, 0
+  mov ra15, 0  ; mov rb15, 0
+  mov ra16, 0  ; mov rb16, 0
+  mov ra17, 0  ; mov rb17, 0
+  mov ra18, 0  ; mov rb18, 0
+  mov ra19, 0  ; mov rb19, 0
+  mov ra20, 0  ; mov rb20, 0
+  mov ra21, 0  ; mov rb21, 0
+  mov ra22, 0  ; mov rb22, 0
+  mov ra23, 0  ; mov rb23, 0
+  mov ra24, 0  ; mov rb24, 0
+  mov ra25, 0  ; mov rb25, 0
+  mov ra26, 0  ; mov rb26, 0
+  mov ra27, 0  ; mov rb27, 0
+  mov ra28, 0  ; mov rb28, 0
+  mov ra29, 0  ; mov rb29, 0
+  mov ra30, 0  ; mov rb30, 0
+  mov ra31, 0  ; mov rb31, 0
+  mov r0, 0    ; mov r1, 0
+  mov r2, 0    ; mov r3, 0
+  mov r5rep, 0
+
+
+.endm
+
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_uv
+
+
+  zap_all_reg
 
 # Read starting kernel
 mov ra31, unif
@@ -163,6 +206,7 @@ mov -, unif         # Unused
 
 # Compute part of VPM to use for DMA output
 mov r2, unif
+.if 0
 shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
 and r2, r2, 15
 mov r1, r2
@@ -180,6 +224,7 @@ add rb21, r2, r1  # VPM for 16bit intermediates
 mov r1, vdw_setup_0(0, 0, dma_h8p(0,0,0)) # height,width added later
 shl r0, r0, 5
 add rb27, r0, r1  # DMA out
+.endif
 
 # submit texture requests for second line
 max r1, ra_y, 0
@@ -190,8 +235,6 @@ nop ; mul24 r1, r1, rb_pitch
 add t0s, r1, ra_x
 add t1s, r1, ra_frame_base
 
-
-
 ################################################################################
 
 # mc_filter_uv(next_kernel, x, y, frame_u_base, frame_v_base, width_height, hcoeffs, vcoeffs, offset_weight_u, offset_weight_v, this_u_dst, this_v_dst)
@@ -199,6 +242,7 @@ add t1s, r1, ra_frame_base
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 ::mc_filter_uv
+.if 0
 mov ra31, unif
 
 # per-channel shifts were calculated on the *previous* invocation
@@ -318,7 +362,7 @@ bra -, ra31
 add vw_setup, rb26, r0 # VDW setup 0
 mov vw_setup, rb29 # Stride
 mov vw_addr, unif # start the VDW
-
+.endif
 
 ################################################################################
 
@@ -327,6 +371,7 @@ mov vw_addr, unif # start the VDW
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 ::mc_filter_uv_b0
+.if 0
 mov ra31, unif
 
 # per-channel shifts were calculated on the *previous* invocation
@@ -429,11 +474,12 @@ bra -, ra31
 mov -, unif           # Delay 1
 mov -, unif           # Delay 2
 nop                   # Delay 3
-
+.endif
 
 ################################################################################
 
 ::mc_filter_uv_b
+.if 0
 mov ra31, unif
 
 # per-channel shifts were calculated on the *previous* invocation
@@ -564,6 +610,7 @@ bra -, ra31
 add vw_setup, rb26, r0 # VDW setup 0
 mov vw_setup, rb29 # Stride
 mov vw_addr, unif # start the VDW
+.endif
 
 ################################################################################
 
@@ -572,15 +619,16 @@ mov vw_addr, unif # start the VDW
 ::mc_exit
 mov  -, vw_wait # wait on the VDW
 
-mov -,srel(0)
 
 ldtmu0
 ldtmu1
 ldtmu0
 ldtmu1
+
+  zap_all_reg
 
 nop        ; nop ; thrend
-nop        ; nop # delay slot 1
+mov -,srel(0)
 nop        ; nop # delay slot 2
 
 # mc_interrupt_exit8()
@@ -591,6 +639,8 @@ ldtmu0
 ldtmu1
 ldtmu0
 ldtmu1
+
+  zap_all_reg
 
 mov -,sacq(0) # 1
 mov -,sacq(0) # 2
@@ -616,6 +666,44 @@ nop        ; nop # delay slot 2
 ################################################################################
 # mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, tbd, next_kernel)
 ::mc_setup
+
+  mov ra0, 0   ; mov rb0, 0
+  mov ra1, 0   ; mov rb1, 0
+  mov ra2, 0   ; mov rb2, 0
+  mov ra3, 0   ; mov rb3, 0
+  mov ra4, 0   ; mov rb4, 0
+  mov ra5, 0   ; mov rb5, 0
+  mov ra6, 0   ; mov rb6, 0
+  mov ra7, 0   ; mov rb7, 0
+  mov ra8, 0   ; mov rb8, 0
+  mov ra9, 0   ; mov rb9, 0
+  mov ra10, 0  ; mov rb10, 0
+  mov ra11, 0  ; mov rb11, 0
+  mov ra12, 0  ; mov rb12, 0
+  mov ra13, 0  ; mov rb13, 0
+  mov ra14, 0  ; mov rb14, 0
+  mov ra15, 0  ; mov rb15, 0
+  mov ra16, 0  ; mov rb16, 0
+  mov ra17, 0  ; mov rb17, 0
+  mov ra18, 0  ; mov rb18, 0
+  mov ra19, 0  ; mov rb19, 0
+  mov ra20, 0  ; mov rb20, 0
+  mov ra21, 0  ; mov rb21, 0
+  mov ra22, 0  ; mov rb22, 0
+  mov ra23, 0  ; mov rb23, 0
+  mov ra24, 0  ; mov rb24, 0
+  mov ra25, 0  ; mov rb25, 0
+  mov ra26, 0  ; mov rb26, 0
+  mov ra27, 0  ; mov rb27, 0
+  mov ra28, 0  ; mov rb28, 0
+  mov ra29, 0  ; mov rb29, 0
+  mov ra30, 0  ; mov rb30, 0
+  mov ra31, 0  ; mov rb31, 0
+  mov r0, 0    ; mov r1, 0
+  mov r2, 0    ; mov r3, 0
+  mov r5rep, 0
+
+
   mov r3, 16
 
   # Need to save these because we need to know the frame dimensions before computing texture coordinates
@@ -1071,6 +1159,8 @@ nop        ; nop # delay slot 2
   ldtmu0
   ldtmu1
   ldtmu1
+
+  zap_all_reg
 
   mov -,sacq(0) # 1
   mov -,sacq(0) # 2

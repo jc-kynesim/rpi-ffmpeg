@@ -82,7 +82,7 @@ static av_always_inline av_const unsigned av_mod_uintp2_c(unsigned a, unsigned p
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
 
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
 
 // Each luma QPU processes 2*RPI_NUM_CHUNKS 64x64 blocks
 // Each chroma QPU processes 3*RPI_NUM_CHUNKS 64x64 blocks, but requires two commands for B blocks
@@ -3249,7 +3249,7 @@ static void rpi_begin(HEVCContext *s)
 {
     int job = s->pass0_job;
     int i;
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
     int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
     int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
 
@@ -3595,7 +3595,7 @@ static unsigned int mc_terminate_y(HEVCContext * const s, const int job)
 }
 #endif
 
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
 static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 {
     unsigned int i;
@@ -3639,8 +3639,8 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
         return;
     }
 #endif
-#if RPI_MC_CHROMA_QPU
-    if (mc_terminate_uv(s, job) != 0)
+#if RPI_MC_CHROMA_QPU || 1
+    if (mc_terminate_uv(s, job) != 0 || 1)
     {
         uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
         const uint32_t code = qpu_get_fn(QPU_MC_SETUP_UV);
@@ -3655,7 +3655,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
     }
 #endif
 #if RPI_MC_LUMA_QPU
-    if (mc_terminate_y(s, job) != 0)
+    if (mc_terminate_y(s, job) != 0 || 1)
     {
         uint32_t * const y_unif_vc = (uint32_t *)s->y_unif_mvs_ptr[job].vc;
         const uint32_t code = qpu_get_fn(QPU_MC_SETUP);
@@ -3799,7 +3799,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
 
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
         s->curr_u_mvs = s->u_mvs[s->pass0_job][s->ctu_count % 8];
 #endif
 #if RPI_MC_LUMA_QPU
@@ -3808,7 +3808,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
         s->u_mvs[s->pass0_job][s->ctu_count % 8]= s->curr_u_mvs;
 #endif
 #if RPI_MC_LUMA_QPU
@@ -4677,7 +4677,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
       av_freep(&s->unif_mv_cmds[i]);
       av_freep(&s->univ_pred_cmds[i]);
 
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
       if (s->unif_mvs[i]) {
         gpu_free( &s->unif_mvs_ptr[i] );
         s->unif_mvs[i] = 0;
@@ -4772,7 +4772,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
             goto fail;
     }
 
-#if RPI_MC_CHROMA_QPU
+#if RPI_MC_CHROMA_QPU || 1
     // We divide the image into blocks 256 wide and 64 high
     // We support up to 2048 widths
     // We compute the number of chroma motion vector commands for 4:4:4 format and 4x4 chroma blocks - assuming all blocks are B predicted
