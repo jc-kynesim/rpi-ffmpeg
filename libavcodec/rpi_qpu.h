@@ -167,6 +167,7 @@ enum {
   QPU_MC_FILTER_UV_B0,
   QPU_MC_FILTER_UV_B,
   QPU_MC_INTERRUPT_EXIT8,
+  QPU_MC_EXIT_NOWAIT,
   QPU_MC_END
   };
 extern unsigned int qpu_get_fn(int num);

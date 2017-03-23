@@ -127,7 +127,7 @@
   mov ra29, 0  ; mov rb29, 0
   mov ra30, 0  ; mov rb30, 0
   mov ra31, 0  ; mov rb31, 0
-  mov r0, 0    ; mov r1, 0
+  mov.setf r0, 0    ; mov r1, 0
   mov r2, 0    ; mov r3, 0
   mov r5rep, 0
 
@@ -139,11 +139,29 @@
 ::mc_setup_uv
 
 
-  zap_all_reg
+#  zap_all_reg
 
 # Read starting kernel
-mov ra31, unif
+mov ra0, unif
+.if 1
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+mov -, unif
+bra -, ra0
+nop
+nop
+nop
 
+.else
 # Load first request location
 add ra_x, unif, elem_num # Store x
 mov ra_y, unif # Store y
@@ -206,7 +224,6 @@ mov -, unif         # Unused
 
 # Compute part of VPM to use for DMA output
 mov r2, unif
-.if 0
 shl r2, r2, 1   # Convert QPU numbers to be even (this means we can only use 8 QPUs, but is necessary as we need to save 16bit intermediate results)
 and r2, r2, 15
 mov r1, r2
@@ -224,7 +241,6 @@ add rb21, r2, r1  # VPM for 16bit intermediates
 mov r1, vdw_setup_0(0, 0, dma_h8p(0,0,0)) # height,width added later
 shl r0, r0, 5
 add rb27, r0, r1  # DMA out
-.endif
 
 # submit texture requests for second line
 max r1, ra_y, 0
@@ -234,6 +250,7 @@ bra -, ra31
 nop ; mul24 r1, r1, rb_pitch
 add t0s, r1, ra_x
 add t1s, r1, ra_frame_base
+.endif
 
 ################################################################################
 
@@ -616,6 +633,16 @@ mov vw_addr, unif # start the VDW
 
 # mc_exit()
 
+::mc_exit_nowait
+#mov  -, vw_wait # wait on the VDW
+#  zap_all_reg
+
+nop        ; nop ; thrend
+mov -,srel(0)
+nop        ; nop # delay slot 2
+
+
+
 ::mc_exit
 mov  -, vw_wait # wait on the VDW
 
@@ -633,14 +660,14 @@ nop        ; nop # delay slot 2
 
 # mc_interrupt_exit8()
 ::mc_interrupt_exit8
-mov  -, vw_wait # wait on the VDW
+#mov  -, vw_wait # wait on the VDW
 
-ldtmu0
-ldtmu1
-ldtmu0
-ldtmu1
+#ldtmu0
+#ldtmu1
+#ldtmu0
+#ldtmu1
 
-  zap_all_reg
+#  zap_all_reg
 
 mov -,sacq(0) # 1
 mov -,sacq(0) # 2

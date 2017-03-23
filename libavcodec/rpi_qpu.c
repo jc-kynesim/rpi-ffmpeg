@@ -782,6 +782,9 @@ unsigned int qpu_get_fn(int num) {
     case QPU_MC_INTERRUPT_EXIT8:
       fn = mc_interrupt_exit8;
       break;
+    case QPU_MC_EXIT_NOWAIT:
+      fn = mc_exit_nowait;
+      break;
     case QPU_MC_END:
       fn = mc_end;
       break;

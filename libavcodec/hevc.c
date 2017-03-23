@@ -3599,7 +3599,7 @@ static unsigned int mc_terminate_y(HEVCContext * const s, const int job)
 static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 {
     unsigned int i;
-    const uint32_t exit_fn = qpu_get_fn(QPU_MC_EXIT);
+    const uint32_t exit_fn = qpu_get_fn(QPU_MC_EXIT_NOWAIT);
     const uint32_t exit_fn2 = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8);
     const uint32_t dummy_texture = qpu_get_fn(QPU_MC_SETUP_UV);
     unsigned int tc = 0;
@@ -3632,6 +3632,7 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
     unsigned int n_uv = 0;
     uint32_t mail_y[QPU_N_Y * QPU_MAIL_EL_VALS];
     unsigned int n_y = 0;
+    int luma_done = 0;
 
 #if 0
     if (s->sh.slice_type == I_SLICE) {
@@ -3639,23 +3640,8 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
         return;
     }
 #endif
-#if RPI_MC_CHROMA_QPU || 1
-    if (mc_terminate_uv(s, job) != 0 || 1)
-    {
-        uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
-        const uint32_t code = qpu_get_fn(QPU_MC_SETUP_UV);
-        uint32_t * p;
-        unsigned int i;
-
-        for (p = mail_uv, i = 0; i != QPU_N_UV; ++i) {
-            *p++ = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
-            *p++ = code;
-            ++n_uv;
-        }
-    }
-#endif
 #if RPI_MC_LUMA_QPU
-    if (mc_terminate_y(s, job) != 0 || 1)
+    if (mc_terminate_y(s, job) != 0)
     {
         uint32_t * const y_unif_vc = (uint32_t *)s->y_unif_mvs_ptr[job].vc;
         const uint32_t code = qpu_get_fn(QPU_MC_SETUP);
@@ -3666,6 +3652,22 @@ static void rpi_launch_vpu_qpu(HEVCContext *s)
             *p++ = (uint32_t)(y_unif_vc + (s->y_mvs_base[job][i] - (uint32_t*)s->y_unif_mvs_ptr[job].arm));
             *p++ = code;
             ++n_y;
+        }
+        luma_done = 1;
+    }
+#endif
+#if RPI_MC_CHROMA_QPU || 1
+    if (mc_terminate_uv(s, job) != 0 || luma_done)
+    {
+        uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
+        const uint32_t code = qpu_get_fn(QPU_MC_SETUP_UV);
+        uint32_t * p;
+        unsigned int i;
+
+        for (p = mail_uv, i = 0; i != QPU_N_UV; ++i) {
+            *p++ = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
+            *p++ = code;
+            ++n_uv;
         }
     }
 #endif
