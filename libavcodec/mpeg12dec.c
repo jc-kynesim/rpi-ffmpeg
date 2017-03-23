@@ -2389,7 +2389,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
     s->closed_gop = get_bits1(&s->gb);
-    /* broken_link indicate that after editing the
+    /* broken_link indicates that after editing the
      * reference frames of the first B-Frames after GOP I-Frame
      * are missing (open gop) */
     broken_link = get_bits1(&s->gb);
@@ -2784,6 +2784,7 @@ static int mpeg_decode_frame(AVCodecContext *avctx, void *data,
                             avctx->extradata, avctx->extradata_size);
         if (*got_output) {
             av_log(avctx, AV_LOG_ERROR, "picture in extradata\n");
+            av_frame_unref(picture);
             *got_output = 0;
         }
         s->extradata_decoded = 1;

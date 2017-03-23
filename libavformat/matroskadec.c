@@ -3371,18 +3371,6 @@ static int matroska_read_seek(AVFormatContext *s, int stream_index,
         tracks[i].audio.sub_packet_cnt = 0;
         tracks[i].audio.buf_timecode   = AV_NOPTS_VALUE;
         tracks[i].end_timecode         = 0;
-        if (tracks[i].type == MATROSKA_TRACK_TYPE_SUBTITLE &&
-            tracks[i].stream &&
-            tracks[i].stream->discard != AVDISCARD_ALL) {
-            index_sub = av_index_search_timestamp(
-                tracks[i].stream, st->index_entries[index].timestamp,
-                AVSEEK_FLAG_BACKWARD);
-            while (index_sub >= 0 &&
-                  index_min > 0 &&
-                  tracks[i].stream->index_entries[index_sub].pos < st->index_entries[index_min].pos &&
-                  st->index_entries[index].timestamp - tracks[i].stream->index_entries[index_sub].timestamp < 30000000000 / matroska->time_scale)
-                index_min--;
-        }
     }
 
     avio_seek(s->pb, st->index_entries[index_min].pos, SEEK_SET);
@@ -3748,6 +3736,11 @@ static int webm_dash_manifest_read_header(AVFormatContext *s)
     if (ret) {
         av_log(s, AV_LOG_ERROR, "Failed to read file headers\n");
         return -1;
+    }
+    if (!s->nb_streams) {
+        matroska_read_close(s);
+        av_log(s, AV_LOG_ERROR, "No streams found\n");
+        return AVERROR_INVALIDDATA;
     }
 
     if (!matroska->is_live) {
