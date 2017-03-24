@@ -149,7 +149,7 @@ static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_
   av_assert0(p->vc_handle);
   p->arm = vcsm_lock(p->vcsm_handle);
   av_assert0(p->arm);
-  p->vc = mem_lock(mb, p->vc_handle);
+  p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
   return 0;
 }
@@ -162,13 +162,13 @@ static int gpu_malloc_uncached_internal(const int mb, const int numbytes, GPU_ME
   av_assert0(p->vc_handle);
   p->arm = vcsm_lock(p->vcsm_handle);
   av_assert0(p->arm);
-  p->vc = mem_lock(mb, p->vc_handle);
+  p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
   return 0;
 }
 
 static void gpu_free_internal(const int mb, GPU_MEM_PTR_T * const p) {
-  mem_unlock(mb, p->vc_handle);
+  mbox_mem_unlock(mb, p->vc_handle);
   vcsm_unlock_ptr(p->arm);
   vcsm_free(p->vcsm_handle);
   memset(p, 0, sizeof(*p));  // Ensure we crash hard if we try and use this again
@@ -186,7 +186,6 @@ static void gpu_term(void)
 
   vc_gpuserv_deinit();
 
-//  qpu_enable(ge->mb, 0);
   gpu_free_internal(ge->mb, &ge->code_gm_ptr);
 
   vcsm_exit();
@@ -207,9 +206,6 @@ static int gpu_init(gpu_env_t ** const gpu) {
 
   if ((ge->mb = mbox_open()) < 0)
     return -1;
-
-//  if (qpu_enable(ge->mb, 1) != 0)
-//    return -2;
 
   vcsm_init();
 

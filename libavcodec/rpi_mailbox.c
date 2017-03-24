@@ -62,7 +62,7 @@ static int mbox_property(int file_desc, void *buf)
    return ret_val;
 }
 
-unsigned mem_lock(int file_desc, unsigned handle)
+unsigned mbox_mem_lock(int file_desc, unsigned handle)
 {
    int i=0;
    unsigned p[32];
@@ -81,7 +81,7 @@ unsigned mem_lock(int file_desc, unsigned handle)
    return p[5];
 }
 
-unsigned mem_unlock(int file_desc, unsigned handle)
+unsigned mbox_mem_unlock(int file_desc, unsigned handle)
 {
    int i=0;
    unsigned p[32];
