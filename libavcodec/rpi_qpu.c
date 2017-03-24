@@ -109,12 +109,29 @@ typedef struct trace_time_wait_s
   int64_t total[WAIT_COUNT_MAX];
 } trace_time_wait_t;
 
+typedef struct vq_wait_s
+{
+  sem_t sem;
+  struct vq_wait_s * next;
+} vq_wait_t;
+
+#define VQ_WAIT_POOL_SIZE 16
+typedef struct vq_wait_pool_s
+{
+  vq_wait_t * head;
+  vq_wait_t pool[VQ_WAIT_POOL_SIZE];
+} vq_wait_pool_t;
+
+static void vq_wait_pool_init(vq_wait_pool_t * const pool);
+static void vq_wait_pool_deinit(vq_wait_pool_t * const pool);
+
 typedef struct gpu_env_s
 {
   int open_count;
   int init_count;
   int mb;
   GPU_MEM_PTR_T code_gm_ptr;
+  vq_wait_pool_t wait_pool;
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
   trace_time_wait_t ttw;
 #endif
@@ -191,6 +208,9 @@ static void gpu_term(void)
   vcsm_exit();
 
   mbox_close(ge->mb);
+
+  vq_wait_pool_deinit(&ge->wait_pool);
+
   free(ge);
 }
 
@@ -207,9 +227,9 @@ static int gpu_init(gpu_env_t ** const gpu) {
   if ((ge->mb = mbox_open()) < 0)
     return -1;
 
-  vcsm_init();
+  vq_wait_pool_init(&ge->wait_pool);
 
-  vc_gpuserv_init();
+  vcsm_init();
 
   gpu_malloc_uncached_internal(ge->mb, sizeof(struct GPU), &ge->code_gm_ptr);
   ptr = (volatile struct GPU*)ge->code_gm_ptr.arm;
@@ -243,31 +263,32 @@ static void gpu_unlock(void) {
 }
 
 // Make sure we have exclusive access to the mailbox, and enable qpu if necessary.
-static int gpu_lock(void) {
+static gpu_env_t * gpu_lock(void) {
+  pthread_mutex_lock(&gpu_mutex);
+
+  av_assert0(gpu != NULL);
+  return gpu;
+}
+
+static gpu_env_t * gpu_lock_ref(void)
+{
   pthread_mutex_lock(&gpu_mutex);
 
   if (gpu == NULL) {
     int rv = gpu_init(&gpu);
     if (rv != 0) {
       gpu_unlock();
-      return rv;
+      return NULL;
     }
   }
 
-  return 0;
+  ++gpu->open_count;
+  return gpu;
 }
 
-static int gpu_lock_ref(void)
+static void gpu_unlock_unref(gpu_env_t * const ge)
 {
-  int rv = gpu_lock();
-  if (rv == 0)
-    ++gpu->open_count;
-  return rv;
-}
-
-static void gpu_unlock_unref(void)
-{
-  if (--gpu->open_count == 0)
+  if (--ge->open_count == 0)
     gpu_term();
 
   gpu_unlock();
@@ -284,8 +305,10 @@ static void gpu_unlock_unref(void)
 int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
 {
   int r;
-  gpu_lock_ref();
-  r = gpu_malloc_uncached_internal(gpu->mb, numbytes, p);
+  gpu_env_t * const ge = gpu_lock_ref();
+  if (ge == NULL)
+    return -1;
+  r = gpu_malloc_uncached_internal(ge->mb, numbytes, p);
   gpu_unlock();
   return r;
 }
@@ -296,16 +319,18 @@ int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
 int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
 {
   int r;
-  gpu_lock_ref();
-  r = gpu_malloc_cached_internal(gpu->mb, numbytes, p);
+  gpu_env_t * const ge = gpu_lock_ref();
+  if (ge == NULL)
+    return -1;
+  r = gpu_malloc_cached_internal(ge->mb, numbytes, p);
   gpu_unlock();
   return r;
 }
 
 void gpu_free(GPU_MEM_PTR_T * const p) {
-  gpu_lock();
-  gpu_free_internal(gpu->mb, p);
-  gpu_unlock_unref();
+  gpu_env_t * const ge = gpu_lock();
+  gpu_free_internal(ge->mb, p);
+  gpu_unlock_unref(ge);
 }
 
 unsigned int vpu_get_fn(void) {
@@ -451,24 +476,45 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T *const p, const rpi_cache_fl
 
 
 // Wait abstractions - mostly so we can easily add profile code
-typedef struct vpu_qpu_wait_s
+static void vq_wait_pool_init(vq_wait_pool_t * const wp)
 {
-  sem_t sem;
-} vq_wait_t;
+  unsigned int i;
+  for (i = 0; i != VQ_WAIT_POOL_SIZE; ++i) {
+    sem_init(&wp->pool[i].sem, 0, 0);
+    wp->pool[i].next = wp->pool + i + 1;
+  }
+  wp->head = wp->pool + 0;
+  wp->pool[VQ_WAIT_POOL_SIZE - 1].next = NULL;
+}
+
+static void vq_wait_pool_deinit(vq_wait_pool_t * const wp)
+{
+  unsigned int i;
+  wp->head = NULL;
+  for (i = 0; i != VQ_WAIT_POOL_SIZE; ++i) {
+    sem_destroy(&wp->pool[i].sem);
+    wp->pool[i].next = NULL;
+  }
+}
+
 
 // If sem_init actually takes time then maybe we want a pool...
 static vq_wait_t * vq_wait_new(void)
 {
-  vq_wait_t * wait = malloc(sizeof(vq_wait_t));
-  av_assert0(wait != NULL);
-  sem_init(&wait->sem, 0, 0);
+  gpu_env_t * const ge = gpu_lock_ref();
+  vq_wait_t * const wait = ge->wait_pool.head;
+  ge->wait_pool.head = wait->next;
+  wait->next = NULL;
+  gpu_unlock();
   return wait;
 }
 
 static void vq_wait_delete(vq_wait_t * const wait)
 {
-  sem_destroy(&wait->sem);
-  free(wait);
+  gpu_env_t * const ge = gpu_lock();
+  wait->next = ge->wait_pool.head;
+  ge->wait_pool.head = wait;
+  gpu_unlock_unref(ge);
 }
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
@@ -697,11 +743,15 @@ void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h)
 
 int vpu_qpu_init()
 {
-  int rv;
-  if ((rv = gpu_lock_ref()) != 0)
-    return rv;  // Init as side effect of lock
+  gpu_env_t * const ge = gpu_lock_ref();
+  if (ge == NULL)
+    return -1;
 
-  ++gpu->init_count;
+  if (ge->init_count++ == 0)
+  {
+    printf("Init gpuserv\n");
+    vc_gpuserv_init();
+  }
 
   gpu_unlock();
   return 0;
@@ -711,17 +761,18 @@ void vpu_qpu_term()
 {
   av_assert0(gpu != NULL);
 
-  gpu_lock();
+  gpu_env_t * const ge = gpu_lock();
 
-  --gpu->init_count;
+  if (--ge->init_count == 0) {
+    printf("DeInit gpuserv\n");
+    vc_gpuserv_deinit();
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
-  if (gpu->init_count == 0) {
-    ttw_print(&gpu->ttw, ns_time());
-  }
+    ttw_print(&ge->ttw, ns_time());
 #endif
+  }
 
-  gpu_unlock_unref();
+  gpu_unlock_unref(ge);
 }
 
 uint32_t qpu_fn(const int * const mc_fn)
