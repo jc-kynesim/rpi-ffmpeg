@@ -23,7 +23,7 @@
 #pragma GCC diagnostic pop
 
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
-#define RPI_TRACE_TIME_VPU_QPU_WAIT     0
+#define RPI_TRACE_TIME_VPU_QPU_WAIT     1
 
 // QPU "noflush" flags
 // a mixture of flushing & profiling
@@ -103,6 +103,7 @@ struct GPU
 typedef struct trace_time_wait_s
 {
   int count;
+  unsigned int jcount;
   int64_t start0;
   int64_t last_update;
   int64_t start[WAIT_COUNT_MAX];
@@ -148,6 +149,31 @@ static int64_t ns_time(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * (int64_t)1000000000 + ts.tv_nsec;
+}
+
+
+#define WAIT_TIME_PRINT_PERIOD (int64_t)2000000000
+
+#define T_MS(t) ((unsigned int)((t)/(int64_t)1000000) % 1000U)
+#define T_SEC(t) (unsigned int)((t)/(int64_t)1000000000)
+#define T_ARG(t) T_SEC(t), T_MS(t)
+#define T_FMT "%u.%03u"
+
+static void ttw_print(trace_time_wait_t * ttw, const int64_t now)
+{
+  // Update totals for levels that are still pending
+  for (int i = 0; i < ttw->count; ++i) {
+    ttw->total[i] += now - ttw->start[i];
+    ttw->start[i] = now;
+  }
+
+  printf("Jobs:%u, Total:" T_FMT ", Idle:" T_FMT ", 1:" T_FMT ", 2:" T_FMT ", 3:" T_FMT ", 4:" T_FMT "\n",
+         ttw->jcount,
+         T_ARG(now - ttw->start0), T_ARG(now - ttw->start0 - ttw->total[0]),
+         T_ARG(ttw->total[0]),
+         T_ARG(ttw->total[1]),
+         T_ARG(ttw->total[2]),
+         T_ARG(ttw->total[3]));
 }
 
 #endif
@@ -505,6 +531,16 @@ static vq_wait_t * vq_wait_new(void)
   vq_wait_t * const wait = ge->wait_pool.head;
   ge->wait_pool.head = wait->next;
   wait->next = NULL;
+
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+  {
+    trace_time_wait_t * const ttw = &ge->ttw;
+    const int n = ttw->count++;
+    ttw->jcount++;
+    ttw->start[n] = ns_time();
+  }
+#endif
+
   gpu_unlock();
   return wait;
 }
@@ -514,52 +550,10 @@ static void vq_wait_delete(vq_wait_t * const wait)
   gpu_env_t * const ge = gpu_lock();
   wait->next = ge->wait_pool.head;
   ge->wait_pool.head = wait;
-  gpu_unlock_unref(ge);
-}
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
-
-#define WAIT_TIME_PRINT_PERIOD (int64_t)2000000000
-
-#define T_MS(t) ((unsigned int)((t)/(int64_t)1000000) % 1000U)
-#define T_SEC(t) (unsigned int)((t)/(int64_t)1000000000)
-#define T_ARG(t) T_SEC(t), T_MS(t)
-#define T_FMT "%u.%03u"
-
-static void ttw_print(const trace_time_wait_t * ttw, const int64_t now)
-{
-  printf("Total:" T_FMT ", Idle:" T_FMT ", 1:" T_FMT ", 2:" T_FMT ", 3:" T_FMT ", 4:" T_FMT "\n",
-         T_ARG(now - ttw->start0), T_ARG(now - ttw->start0 - ttw->total[0]),
-         T_ARG(ttw->total[0]),
-         T_ARG(ttw->total[1]),
-         T_ARG(ttw->total[2]),
-         T_ARG(ttw->total[3]));
-}
-
-#endif
-
-static void vq_wait_wait(vq_wait_t * const wait)
-{
-  int err;
-
-#if RPI_TRACE_TIME_VPU_QPU_WAIT
-  gpu_lock();
   {
-    trace_time_wait_t * const ttw = &gpu->ttw;
-    const int n = ttw->count++;
-    ttw->start[n] = ns_time();
-    av_assert0(n < WAIT_COUNT_MAX);
-  }
-  gpu_unlock();
-#endif
-
-  while ((err = sem_wait(&wait->sem)) == -1 && errno == EINTR)
-    /* loop */;
-
-#if RPI_TRACE_TIME_VPU_QPU_WAIT
-  gpu_lock();
-  {
-    trace_time_wait_t * const ttw = &gpu->ttw;
+    trace_time_wait_t * const ttw = &ge->ttw;
     const int n = --ttw->count;
     const int64_t now = ns_time();
     av_assert0(n >= 0);
@@ -576,8 +570,16 @@ static void vq_wait_wait(vq_wait_t * const wait)
       ttw_print(ttw, now);
     }
   }
-  gpu_unlock();
 #endif
+  gpu_unlock_unref(ge);
+}
+
+static void vq_wait_wait(vq_wait_t * const wait)
+{
+  int err;
+
+  while ((err = sem_wait(&wait->sem)) == -1 && errno == EINTR)
+    /* loop */;
 }
 
 static void vq_wait_post(vq_wait_t * const wait)
@@ -749,7 +751,6 @@ int vpu_qpu_init()
 
   if (ge->init_count++ == 0)
   {
-    printf("Init gpuserv\n");
     vc_gpuserv_init();
   }
 
@@ -759,12 +760,9 @@ int vpu_qpu_init()
 
 void vpu_qpu_term()
 {
-  av_assert0(gpu != NULL);
-
   gpu_env_t * const ge = gpu_lock();
 
   if (--ge->init_count == 0) {
-    printf("DeInit gpuserv\n");
     vc_gpuserv_deinit();
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
