@@ -1,7 +1,7 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
-#include "rpi_user_vcsm.h"
+#include <interface/vcsm/user-vcsm.h>
 
 #define RPI_ONE_BUF 1
 

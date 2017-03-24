@@ -43,7 +43,6 @@
 
 #ifdef RPI
   #include "rpi_qpu.h"
-  #include "rpi_user_vcsm.h"
   #include "rpi_shader.h"
   // Move Inter prediction into separate pass
   #define RPI_INTER

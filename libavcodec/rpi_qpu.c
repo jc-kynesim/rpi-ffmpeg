@@ -16,8 +16,6 @@
 #include "rpi_shader.h"
 #include "rpi_hevc_transform.h"
 
-#include "rpi_user_vcsm.h"
-
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files
 #pragma GCC diagnostic ignored "-Wredundant-decls"
@@ -34,7 +32,7 @@
 #define QPU_FLAGS_PROF_CLEAR_AND_ENABLE 2       // Clear & Enable detailed QPU profiling registers
 #define QPU_FLAGS_PROF_OUTPUT_COUNTS    4       // Print the results
 #define QPU_FLAGS_OUTPUT_QPU_TIMES      8       // Print QPU times - independant of the profiling
-#define QPU_FLAGS_FLUSH_QPU             16      // Flush QPU caches & TMUs
+#define QPU_FLAGS_NO_FLUSH_QPU          16      // If unset flush QPU caches & TMUs (uniforms always flushed)
 
 // On Pi2 there is no way to access the VPU L2 cache
 // GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
@@ -186,7 +184,9 @@ static void gpu_term(void)
   // We have to hope that eveything has terminated...
   gpu = NULL;
 
-  qpu_enable(ge->mb, 0);
+  vc_gpuserv_deinit();
+
+//  qpu_enable(ge->mb, 0);
   gpu_free_internal(ge->mb, &ge->code_gm_ptr);
 
   vcsm_exit();
@@ -208,10 +208,12 @@ static int gpu_init(gpu_env_t ** const gpu) {
   if ((ge->mb = mbox_open()) < 0)
     return -1;
 
-  if (qpu_enable(ge->mb, 1) != 0)
-    return -2;
+//  if (qpu_enable(ge->mb, 1) != 0)
+//    return -2;
 
   vcsm_init();
+
+  vc_gpuserv_init();
 
   gpu_malloc_uncached_internal(ge->mb, sizeof(struct GPU), &ge->code_gm_ptr);
   ptr = (volatile struct GPU*)ge->code_gm_ptr.arm;

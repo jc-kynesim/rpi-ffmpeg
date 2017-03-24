@@ -38,7 +38,6 @@
 #include "bit_depth_template.c"
 
 #ifdef RPI
-#include "rpi_user_vcsm.h"
 #include "rpi_qpu.h"
 #endif
 
