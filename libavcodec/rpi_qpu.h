@@ -165,7 +165,7 @@ uint32_t qpu_fn(const int * const mc_fn);
 #define QPU_MAIL_SIZE (QPU_MAIL_VALS_MAX * sizeof(uint32_t))
 
 struct vpu_qpu_wait_s;
-typedef struct vpu_qpu_wait_s * vpu_qpu_wait_h;
+typedef struct vq_wait_s * vpu_qpu_wait_h;
 
 // VPU specific functions
 extern unsigned int vpu_get_fn(void);

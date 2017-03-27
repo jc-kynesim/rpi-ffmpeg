@@ -100,14 +100,20 @@ struct GPU
 
 #define WAIT_COUNT_MAX 16
 
-typedef struct trace_time_wait_s
+typedef struct trace_time_one_s
 {
   int count;
+  int64_t start[WAIT_COUNT_MAX];
+  int64_t total[WAIT_COUNT_MAX];
+} trace_time_one_t;
+
+typedef struct trace_time_wait_s
+{
   unsigned int jcount;
   int64_t start0;
   int64_t last_update;
-  int64_t start[WAIT_COUNT_MAX];
-  int64_t total[WAIT_COUNT_MAX];
+  trace_time_one_t active;
+  trace_time_one_t wait;
 } trace_time_wait_t;
 
 typedef struct vq_wait_s
@@ -159,21 +165,42 @@ static int64_t ns_time(void)
 #define T_ARG(t) T_SEC(t), T_MS(t)
 #define T_FMT "%u.%03u"
 
-static void ttw_print(trace_time_wait_t * ttw, const int64_t now)
+static void tto_print(trace_time_one_t * tto, const int64_t now, const int64_t start0, const char * const prefix)
 {
   // Update totals for levels that are still pending
-  for (int i = 0; i < ttw->count; ++i) {
-    ttw->total[i] += now - ttw->start[i];
-    ttw->start[i] = now;
+  for (int i = 0; i < tto->count; ++i) {
+    tto->total[i] += now - tto->start[i];
+    tto->start[i] = now;
   }
 
-  printf("Jobs:%u, Total:" T_FMT ", Idle:" T_FMT ", 1:" T_FMT ", 2:" T_FMT ", 3:" T_FMT ", 4:" T_FMT "\n",
-         ttw->jcount,
-         T_ARG(now - ttw->start0), T_ARG(now - ttw->start0 - ttw->total[0]),
-         T_ARG(ttw->total[0]),
-         T_ARG(ttw->total[1]),
-         T_ARG(ttw->total[2]),
-         T_ARG(ttw->total[3]));
+  printf("%s: Idle:" T_FMT ", 1:" T_FMT ", 2:" T_FMT ", 3:" T_FMT ", 4:" T_FMT "\n",
+         prefix,
+         T_ARG(now - start0 - tto->total[0]),
+         T_ARG(tto->total[0]),
+         T_ARG(tto->total[1]),
+         T_ARG(tto->total[2]),
+         T_ARG(tto->total[3]));
+}
+
+
+static void tto_start(trace_time_one_t * const tto, const int64_t now)
+{
+  av_assert0(tto->count < WAIT_COUNT_MAX);
+  tto->start[tto->count++] = now;
+}
+
+static void tto_end(trace_time_one_t * const tto, const int64_t now)
+{
+  const int n = --tto->count;
+  av_assert0(n >= 0);
+  tto->total[n] += now - tto->start[n];
+}
+
+static void ttw_print(trace_time_wait_t * const ttw, const int64_t now)
+{
+  printf("Jobs:%d, Total time=" T_FMT "\n", ttw->jcount, T_ARG(now - ttw->start0));
+  tto_print(&ttw->active, now, ttw->start0, "Active");
+  tto_print(&ttw->wait,   now, ttw->start0, "  Wait");
 }
 
 #endif
@@ -533,12 +560,7 @@ static vq_wait_t * vq_wait_new(void)
   wait->next = NULL;
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
-  {
-    trace_time_wait_t * const ttw = &ge->ttw;
-    const int n = ttw->count++;
-    ttw->jcount++;
-    ttw->start[n] = ns_time();
-  }
+  tto_start(&ge->ttw.active, ns_time());
 #endif
 
   gpu_unlock();
@@ -554,15 +576,14 @@ static void vq_wait_delete(vq_wait_t * const wait)
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
   {
     trace_time_wait_t * const ttw = &ge->ttw;
-    const int n = --ttw->count;
     const int64_t now = ns_time();
-    av_assert0(n >= 0);
+    tto_end(&ttw->active, now);
+    tto_end(&ttw->wait, now);
 
-    ttw->total[n] += now - ttw->start[n];
     if (ttw->start0 == 0)
     {
-      ttw->last_update = ttw->start[n];
-      ttw->start0 = ttw->start[n];
+      ttw->start0 = ttw->active.start[0];
+      ttw->last_update = ttw->start0;
     }
     if (now - ttw->last_update > WAIT_TIME_PRINT_PERIOD)
     {
@@ -577,6 +598,14 @@ static void vq_wait_delete(vq_wait_t * const wait)
 static void vq_wait_wait(vq_wait_t * const wait)
 {
   int err;
+
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+  {
+      gpu_env_t * const ge = gpu_lock();
+      tto_start(&ge->ttw.wait, ns_time());
+      gpu_unlock();
+  }
+#endif
 
   while ((err = sem_wait(&wait->sem)) == -1 && errno == EINTR)
     /* loop */;
