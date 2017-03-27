@@ -2403,22 +2403,22 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame,
   AVFrame * const src_frame2)
 {
-    int hshift           = s->ps.sps->hshift[1];
-    int vshift           = s->ps.sps->vshift[1];
-    intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
-    intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
-    intptr_t _mx         = mx << (1 - hshift);
-    intptr_t _my         = my << (1 - vshift); // Fractional part of motion vector
-    int x1_c = x0_c + (mv->x >> (2 + hshift));
-    int y1_c = y0_c + (mv->y >> (2 + hshift));
+    const int hshift = s->ps.sps->hshift[1];
+    const int vshift = s->ps.sps->vshift[1];
+    const unsigned int mx = av_mod_uintp2(mv->x, 2 + hshift);
+    const unsigned int my = av_mod_uintp2(mv->y, 2 + vshift);
+    const uint32_t coefs0_x = rpi_filter_coefs[mx << (1 - hshift)];
+    const uint32_t coefs0_y = rpi_filter_coefs[my << (1 - vshift)]; // Fractional part of motion vector
+    const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
+    const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
 
-    intptr_t mx2          = av_mod_uintp2(mv2->x, 2 + hshift);
-    intptr_t my2          = av_mod_uintp2(mv2->y, 2 + vshift);
-    intptr_t _mx2         = mx2 << (1 - hshift);
-    intptr_t _my2         = my2 << (1 - vshift); // Fractional part of motion vector
+    const unsigned int mx2 = av_mod_uintp2(mv2->x, 2 + hshift);
+    const unsigned int my2 = av_mod_uintp2(mv2->y, 2 + vshift);
+    const uint32_t coefs1_x = rpi_filter_coefs[mx2 << (1 - hshift)];
+    const uint32_t coefs1_y = rpi_filter_coefs[my2 << (1 - vshift)]; // Fractional part of motion vector
 
-    int x2_c = x0_c + (mv2->x >> (2 + hshift));
-    int y2_c = y0_c + (mv2->y >> (2 + hshift));
+    const int x2_c = x0_c + (mv2->x >> (2 + hshift)) - 1;
+    const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
 
     uint32_t dst_base_u = get_vc_address_u(s->frame) + x0_c + y0_c * s->frame->linesize[1];
     uint32_t dst_base_v = get_vc_address_v(s->frame) + x0_c + y0_c * s->frame->linesize[2];
@@ -2429,29 +2429,29 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
           int bw = nPbW_c-start_x;
           int bh = nPbH_c-start_y;
           u[-1].next_fn = s->qpu_filter_uv_b0; // In fact ignored
-          u[-1].next_src_x = x1_c - 1 + start_x;
-          u[-1].next_src_y = y1_c - 1 + start_y;
+          u[-1].next_src_x = x1_c + start_x;
+          u[-1].next_src_y = y1_c + start_y;
           u[-1].next_src_base_u = get_vc_address_u(src_frame);
           u[-1].next_src_base_v = get_vc_address_v(src_frame);
 
           u[0].next_fn = s->qpu_filter_uv_b;
-          u[0].next_src_x = x2_c - 1 + start_x;
-          u[0].next_src_y = y2_c - 1 + start_y;
+          u[0].next_src_x = x2_c + start_x;
+          u[0].next_src_y = y2_c + start_y;
           u[0].next_src_base_u = get_vc_address_u(src_frame2);
           u[0].next_src_base_v = get_vc_address_v(src_frame2);
 
           u[0].b0.h = (bh<16 ? bh : 16);
           u[0].b0.w = (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH);
-          u[0].b0.coeffs_x = rpi_filter_coefs[_mx];
-          u[0].b0.coeffs_y = rpi_filter_coefs[_my];
+          u[0].b0.coeffs_x = coefs0_x;
+          u[0].b0.coeffs_y = coefs0_y;
           u[0].b0.weight_u = c_weights[0]; // Weight L0 U
           u[0].b0.weight_v = c_weights[1]; // Weight L0 V
           u[0].b0.dummy0 = 0;  // Intermediate results are not written back in first pass of B filtering
           u[0].b0.dummy1 = 0;
 
           u[1].b1.dummy0 = 0;  // w,h inherited from b0
-          u[1].b1.coeffs_x = rpi_filter_coefs[_mx2];
-          u[1].b1.coeffs_y = rpi_filter_coefs[_my2];
+          u[1].b1.coeffs_x = coefs1_x;
+          u[1].b1.coeffs_y = coefs1_y;
           u[1].b1.wo_u = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
           u[1].b1.wo_v = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
           u[1].b1.dst_addr_u = dst_base_u + start_x;
