@@ -834,7 +834,8 @@ typedef struct HEVCLocalContext {
 #define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*24)
 
 // Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane, * 2 for bi
-#define RPI_MAX_MV_CMDS   (2*16*3*(RPI_MAX_WIDTH/4))
+#define RPI_MAX_MV_CMDS_Y   (2*16*1*(RPI_MAX_WIDTH/4))
+#define RPI_MAX_MV_CMDS_C   (2*16*2*(RPI_MAX_WIDTH/4))
 // Each block can have an intra prediction and a transform_add command
 #define RPI_MAX_PRED_CMDS (2*16*3*(RPI_MAX_WIDTH/4))
 // Worst case is 16x16 CTUs
@@ -923,7 +924,8 @@ typedef struct HEVCContext {
 
 #ifdef RPI
     int enable_rpi;
-    HEVCMvCmd *unif_mv_cmds[RPI_MAX_JOBS];
+    HEVCMvCmd *unif_mv_cmds_y[RPI_MAX_JOBS];
+    HEVCMvCmd *unif_mv_cmds_c[RPI_MAX_JOBS];
     HEVCPredCmd *univ_pred_cmds[RPI_MAX_JOBS];
     int buf_width;
     GPU_MEM_PTR_T coeffs_buf_default[RPI_MAX_JOBS];
@@ -932,7 +934,8 @@ typedef struct HEVCContext {
     unsigned int coeffs_buf_vc[RPI_MAX_JOBS][4];
     int num_coeffs[RPI_MAX_JOBS][4];
     int num_xfm_cmds[RPI_MAX_JOBS];
-    int num_mv_cmds[RPI_MAX_JOBS];
+    int num_mv_cmds_y[RPI_MAX_JOBS];
+    int num_mv_cmds_c[RPI_MAX_JOBS];
     int num_pred_cmds[RPI_MAX_JOBS];
     int num_dblk_cmds[RPI_MAX_JOBS];
     int vpu_id;

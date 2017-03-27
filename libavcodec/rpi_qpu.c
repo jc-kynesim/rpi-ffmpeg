@@ -577,6 +577,7 @@ static void vq_wait_delete(vq_wait_t * const wait)
   {
     trace_time_wait_t * const ttw = &ge->ttw;
     const int64_t now = ns_time();
+    ++ttw->jcount;
     tto_end(&ttw->active, now);
     tto_end(&ttw->wait, now);
 
