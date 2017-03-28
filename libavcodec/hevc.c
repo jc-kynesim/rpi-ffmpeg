@@ -41,11 +41,13 @@
 #include "hevc.h"
 #include "profiles.h"
 
-#ifdef RPI
+#ifndef RPI
+  #define RPI_INTER  0
+#else
   #include "rpi_qpu.h"
   #include "rpi_shader.h"
   // Move Inter prediction into separate pass
-  #define RPI_INTER
+  #define RPI_INTER  1
 
   // Define RPI_CACHE_UNIF_MVS to write motion vector uniform stream to cached memory
   // RPI_CACHE_UNIF_MVS doesn't seem to make much difference, so left undefined.
@@ -64,7 +66,6 @@
   static void rpi_begin(HEVCContext *s);
   static void flush_frame(HEVCContext *s,AVFrame *frame);
   static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2, int job);
-
 #endif
 
 // #define DISABLE_MC
@@ -1750,7 +1751,7 @@ static int hls_pcm_sample(HEVCContext * const s, const int x0, const int y0, uns
  * @param luma_offset additive offset applied to the luma prediction value
  */
 
-#ifdef RPI_INTER
+#if RPI_INTER
 #define RPI_REDIRECT(fn) (s->enable_rpi ? rpi_ ## fn : fn)
 static void rpi_luma_mc_uni(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
                         AVFrame *ref, const Mv *mv, int x_off, int y_off,
@@ -1794,8 +1795,8 @@ static void rpi_luma_mc_bi(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
 }
 
 static void rpi_chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
-                          ptrdiff_t dststride, uint8_t *src0, ptrdiff_t srcstride, int reflist,
-                          int x_off, int y_off, int block_w, int block_h, struct MvField *current_mv, int chroma_weight, int chroma_offset)
+                          ptrdiff_t dststride, uint8_t *src0, ptrdiff_t srcstride,
+                          int x_off, int y_off, int block_w, int block_h, const Mv * const mv, int chroma_weight, int chroma_offset)
 {
     HEVCMvCmd *cmd = s->unif_mv_cmds_c[s->pass0_job] + s->num_mv_cmds_c[s->pass0_job]++;
     cmd->cmd = RPI_CMD_CHROMA_UNI;
@@ -1803,7 +1804,7 @@ static void rpi_chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
     cmd->dststride = dststride;
     cmd->src = src0;
     cmd->srcstride = srcstride;
-    cmd->mv = current_mv->mv[reflist];
+    cmd->mv = *mv;
     cmd->x_off = x_off;
     cmd->y_off = y_off;
     cmd->block_w = block_w;
@@ -1813,7 +1814,7 @@ static void rpi_chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
 }
 
 static void rpi_chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVFrame *ref0, AVFrame *ref1,
-                         int x_off, int y_off, int block_w, int block_h, struct MvField *current_mv, int cidx)
+                         int x_off, int y_off, int block_w, int block_h, const struct MvField * const current_mv, int cidx)
 {
     HEVCMvCmd *cmd = s->unif_mv_cmds_c[s->pass0_job] + s->num_mv_cmds_c[s->pass0_job]++;
     cmd->cmd = RPI_CMD_CHROMA_BI+cidx;
@@ -2283,7 +2284,7 @@ rpi_pred_y(HEVCContext * const s, const int x0, const int y0,
 }
 #endif
 
-#if RPI_MC_CHROMA_QPU
+#if RPI_INTER
 
 typedef struct qpu_mc_pred_c_s {
     uint32_t next_fn;
@@ -2333,7 +2334,9 @@ typedef struct qpu_mc_pred_c_s {
     };
 } qpu_mc_pred_c_t;
 
+#if RPI_MC_CHROMA_QPU
 static const char static_assert_qpu_mc_pred[sizeof(qpu_mc_pred_c_t) != RPI_CHROMA_COMMAND_WORDS * 4 ? -1 : 1] = {0};
+#endif
 
 static void
 rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
@@ -2343,59 +2346,76 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   const int16_t * const c_offsets,
   AVFrame * const src_frame)
 {
-  const int hshift           = s->ps.sps->hshift[1];
-  const int vshift           = s->ps.sps->vshift[1];
 
-  const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
-  const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
-  const uint32_t src_base_u = get_vc_address_u(src_frame);
-  const uint32_t src_base_v = get_vc_address_v(src_frame);
-  const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->x, 2 + hshift) << (1 - hshift)];
-  const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->y, 2 + vshift) << (1 - vshift)];
-  const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
-  const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
-  uint32_t dst_base_u = get_vc_address_u(s->frame) + x0_c + y0_c * s->frame->linesize[1];
-  uint32_t dst_base_v = get_vc_address_v(s->frame) + x0_c + y0_c * s->frame->linesize[2];
+    const unsigned int c_off = x0_c + y0_c * s->frame->linesize[1];
+    av_assert0(s->frame->linesize[1] == s->frame->linesize[2]);
 
-  qpu_mc_pred_c_t * u = (qpu_mc_pred_c_t *)s->curr_u_mvs;
+#if RPI_MC_CHROMA_QPU == 0
+    rpi_chroma_mc_uni(s, s->frame->data[1] + c_off, s->frame->linesize[1], src_frame->data[1], src_frame->linesize[1],
+                x0_c, y0_c, nPbW_c, nPbH_c, mv,
+                c_weights[0], c_offsets[0]);
 
-  for(int start_y=0;start_y < nPbH_c;start_y+=16)
-  {
-    const int bh = FFMIN(nPbH_c-start_y, 16);
-    // We are allowed 3/4 powers of two as well as powers of 2
-    av_assert0(bh == 16 || bh == 12 || bh == 8 || bh == 6 || bh == 4 || bh == 2);
+    rpi_chroma_mc_uni(s, s->frame->data[2] + c_off, s->frame->linesize[2], src_frame->data[2], src_frame->linesize[2],
+                x0_c, y0_c, nPbW_c, nPbH_c, mv,
+                c_weights[1], c_offsets[1]);
 
-    for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH, ++u)
+#else
     {
-        const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
-        u[-1].next_fn  = s->qpu_filter_uv;
-        u[-1].next_src_x = x1_c + start_x;
-        u[-1].next_src_y = y1_c + start_y;
-        u[-1].next_src_base_u = src_base_u;
-        u[-1].next_src_base_v = src_base_v;
-        u[0].p.h = bh;
-        u[0].p.w = bw;
-        u[0].p.coeffs_x = x_coeffs;
-        u[0].p.coeffs_y = y_coeffs;
-        u[0].p.wo_u = wo_u;
-        u[0].p.wo_v = wo_v;
-        u[0].p.dst_addr_u = dst_base_u + start_x;
-        u[0].p.dst_addr_v = dst_base_v + start_x;
-    }
+        const int hshift           = s->ps.sps->hshift[1];
+        const int vshift           = s->ps.sps->vshift[1];
 
-    dst_base_u += s->frame->linesize[1] * 16;
-    dst_base_v += s->frame->linesize[2] * 16;
-  }
-  s->curr_u_mvs = (uint32_t *)u;
+        const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
+        const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
+        const uint32_t src_base_u = get_vc_address_u(src_frame);
+        const uint32_t src_base_v = get_vc_address_v(src_frame);
+        const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->x, 2 + hshift) << (1 - hshift)];
+        const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->y, 2 + vshift) << (1 - vshift)];
+        const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
+        const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
+        uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
+        uint32_t dst_base_v = get_vc_address_v(s->frame) + c_off;
+
+        qpu_mc_pred_c_t * u = (qpu_mc_pred_c_t *)s->curr_u_mvs;
+
+        for(int start_y=0;start_y < nPbH_c;start_y+=16)
+        {
+            const int bh = FFMIN(nPbH_c-start_y, 16);
+            // We are allowed 3/4 powers of two as well as powers of 2
+            av_assert2(bh == 16 || bh == 12 || bh == 8 || bh == 6 || bh == 4 || bh == 2);
+
+            for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH, ++u)
+            {
+                const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
+                u[-1].next_fn  = s->qpu_filter_uv;
+                u[-1].next_src_x = x1_c + start_x;
+                u[-1].next_src_y = y1_c + start_y;
+                u[-1].next_src_base_u = src_base_u;
+                u[-1].next_src_base_v = src_base_v;
+                u[0].p.h = bh;
+                u[0].p.w = bw;
+                u[0].p.coeffs_x = x_coeffs;
+                u[0].p.coeffs_y = y_coeffs;
+                u[0].p.wo_u = wo_u;
+                u[0].p.wo_v = wo_v;
+                u[0].p.dst_addr_u = dst_base_u + start_x;
+                u[0].p.dst_addr_v = dst_base_v + start_x;
+            }
+
+            dst_base_u += s->frame->linesize[1] * 16;
+            dst_base_v += s->frame->linesize[2] * 16;
+        }
+        s->curr_u_mvs = (uint32_t *)u;
+    }
+#endif
   return;
 }
 
 
+#if RPI_INTER
 static void
 rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
-  const Mv * const mv,
-  const Mv * const mv2,
+  const struct MvField * const mv_field,
   const int16_t * const c_weights,
   const int16_t * const c_offsets,
   const int16_t * const c_weights2,
@@ -2403,67 +2423,84 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame,
   AVFrame * const src_frame2)
 {
-    const int hshift = s->ps.sps->hshift[1];
-    const int vshift = s->ps.sps->vshift[1];
-    const unsigned int mx = av_mod_uintp2(mv->x, 2 + hshift);
-    const unsigned int my = av_mod_uintp2(mv->y, 2 + vshift);
-    const uint32_t coefs0_x = rpi_filter_coefs[mx << (1 - hshift)];
-    const uint32_t coefs0_y = rpi_filter_coefs[my << (1 - vshift)]; // Fractional part of motion vector
-    const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
-    const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
+    const unsigned int c_off = x0_c + y0_c * s->frame->linesize[1];
+    av_assert0(s->frame->linesize[1] == s->frame->linesize[2]);
 
-    const unsigned int mx2 = av_mod_uintp2(mv2->x, 2 + hshift);
-    const unsigned int my2 = av_mod_uintp2(mv2->y, 2 + vshift);
-    const uint32_t coefs1_x = rpi_filter_coefs[mx2 << (1 - hshift)];
-    const uint32_t coefs1_y = rpi_filter_coefs[my2 << (1 - vshift)]; // Fractional part of motion vector
+#if !RPI_MC_CHROMA_QPU
+    rpi_chroma_mc_bi(s, s->frame->data[1] + c_off, s->frame->linesize[1], src_frame, src_frame2,
+                 x0_c, y0_c, nPbW_c, nPbH_c, mv_field, 0);
 
-    const int x2_c = x0_c + (mv2->x >> (2 + hshift)) - 1;
-    const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
+    rpi_chroma_mc_bi(s, s->frame->data[2] + c_off, s->frame->linesize[2], src_frame, src_frame2,
+                 x0_c, y0_c, nPbW_c, nPbH_c, mv_field, 1);
+#else
+    {
+        const int hshift = s->ps.sps->hshift[1];
+        const int vshift = s->ps.sps->vshift[1];
+        const Mv * const mv = mv_field->mv + 0;
+        const Mv * const mv2 = mv_field->mv + 1;
 
-    uint32_t dst_base_u = get_vc_address_u(s->frame) + x0_c + y0_c * s->frame->linesize[1];
-    uint32_t dst_base_v = get_vc_address_v(s->frame) + x0_c + y0_c * s->frame->linesize[2];
-    qpu_mc_pred_c_t * u = (qpu_mc_pred_c_t *)s->curr_u_mvs;
+        const unsigned int mx = av_mod_uintp2(mv->x, 2 + hshift);
+        const unsigned int my = av_mod_uintp2(mv->y, 2 + vshift);
+        const uint32_t coefs0_x = rpi_filter_coefs[mx << (1 - hshift)];
+        const uint32_t coefs0_y = rpi_filter_coefs[my << (1 - vshift)]; // Fractional part of motion vector
+        const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
+        const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
 
-    for (int start_y = 0; start_y < nPbH_c; start_y += 16) {
-      for (int start_x=0; start_x < nPbW_c; start_x += RPI_CHROMA_BLOCK_WIDTH, u += 2) {
-          int bw = nPbW_c-start_x;
-          int bh = nPbH_c-start_y;
-          u[-1].next_fn = s->qpu_filter_uv_b0; // In fact ignored
-          u[-1].next_src_x = x1_c + start_x;
-          u[-1].next_src_y = y1_c + start_y;
-          u[-1].next_src_base_u = get_vc_address_u(src_frame);
-          u[-1].next_src_base_v = get_vc_address_v(src_frame);
+        const unsigned int mx2 = av_mod_uintp2(mv2->x, 2 + hshift);
+        const unsigned int my2 = av_mod_uintp2(mv2->y, 2 + vshift);
+        const uint32_t coefs1_x = rpi_filter_coefs[mx2 << (1 - hshift)];
+        const uint32_t coefs1_y = rpi_filter_coefs[my2 << (1 - vshift)]; // Fractional part of motion vector
 
-          u[0].next_fn = s->qpu_filter_uv_b;
-          u[0].next_src_x = x2_c + start_x;
-          u[0].next_src_y = y2_c + start_y;
-          u[0].next_src_base_u = get_vc_address_u(src_frame2);
-          u[0].next_src_base_v = get_vc_address_v(src_frame2);
+        const int x2_c = x0_c + (mv2->x >> (2 + hshift)) - 1;
+        const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
 
-          u[0].b0.h = (bh<16 ? bh : 16);
-          u[0].b0.w = (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH);
-          u[0].b0.coeffs_x = coefs0_x;
-          u[0].b0.coeffs_y = coefs0_y;
-          u[0].b0.weight_u = c_weights[0]; // Weight L0 U
-          u[0].b0.weight_v = c_weights[1]; // Weight L0 V
-          u[0].b0.dummy0 = 0;  // Intermediate results are not written back in first pass of B filtering
-          u[0].b0.dummy1 = 0;
+        uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
+        uint32_t dst_base_v = get_vc_address_v(s->frame) + c_off;
+        qpu_mc_pred_c_t * u = (qpu_mc_pred_c_t *)s->curr_u_mvs;
 
-          u[1].b1.dummy0 = 0;  // w,h inherited from b0
-          u[1].b1.coeffs_x = coefs1_x;
-          u[1].b1.coeffs_y = coefs1_y;
-          u[1].b1.wo_u = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
-          u[1].b1.wo_v = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
-          u[1].b1.dst_addr_u = dst_base_u + start_x;
-          u[1].b1.dst_addr_v = dst_base_v + start_x;
-      }
+        for (int start_y = 0; start_y < nPbH_c; start_y += 16) {
+          for (int start_x=0; start_x < nPbW_c; start_x += RPI_CHROMA_BLOCK_WIDTH, u += 2) {
+              int bw = nPbW_c-start_x;
+              int bh = nPbH_c-start_y;
+              u[-1].next_fn = s->qpu_filter_uv_b0; // In fact ignored
+              u[-1].next_src_x = x1_c + start_x;
+              u[-1].next_src_y = y1_c + start_y;
+              u[-1].next_src_base_u = get_vc_address_u(src_frame);
+              u[-1].next_src_base_v = get_vc_address_v(src_frame);
 
-      dst_base_u += s->frame->linesize[1] * 16;
-      dst_base_v += s->frame->linesize[2] * 16;
+              u[0].next_fn = s->qpu_filter_uv_b;
+              u[0].next_src_x = x2_c + start_x;
+              u[0].next_src_y = y2_c + start_y;
+              u[0].next_src_base_u = get_vc_address_u(src_frame2);
+              u[0].next_src_base_v = get_vc_address_v(src_frame2);
+
+              u[0].b0.h = (bh<16 ? bh : 16);
+              u[0].b0.w = (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH);
+              u[0].b0.coeffs_x = coefs0_x;
+              u[0].b0.coeffs_y = coefs0_y;
+              u[0].b0.weight_u = c_weights[0]; // Weight L0 U
+              u[0].b0.weight_v = c_weights[1]; // Weight L0 V
+              u[0].b0.dummy0 = 0;  // Intermediate results are not written back in first pass of B filtering
+              u[0].b0.dummy1 = 0;
+
+              u[1].b1.dummy0 = 0;  // w,h inherited from b0
+              u[1].b1.coeffs_x = coefs1_x;
+              u[1].b1.coeffs_y = coefs1_y;
+              u[1].b1.wo_u = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
+              u[1].b1.wo_v = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
+              u[1].b1.dst_addr_u = dst_base_u + start_x;
+              u[1].b1.dst_addr_v = dst_base_v + start_x;
+          }
+
+          dst_base_u += s->frame->linesize[1] * 16;
+          dst_base_v += s->frame->linesize[2] * 16;
+        }
+
+        s->curr_u_mvs = (uint32_t *)u;
     }
-
-    s->curr_u_mvs = (uint32_t *)u;
+#endif
 }
+#endif
 
 
 #endif
@@ -2552,7 +2589,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         }
 
         if (s->ps.sps->chroma_format_idc) {
-#if RPI_MC_CHROMA_QPU
+#if RPI_INTER
             if (s->enable_rpi) {
                 rpi_pred_c(s, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 0,
                   s->sh.chroma_weight_l0[current_mv.ref_idx[0]], s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
@@ -2560,10 +2597,10 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
                 return;
             }
 #endif
-            RPI_REDIRECT(chroma_mc_uni)(s, dst1, s->frame->linesize[1], ref0->frame->data[1], ref0->frame->linesize[1],
+            chroma_mc_uni(s, dst1, s->frame->linesize[1], ref0->frame->data[1], ref0->frame->linesize[1],
                           0, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
                           s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]);
-            RPI_REDIRECT(chroma_mc_uni)(s, dst2, s->frame->linesize[2], ref0->frame->data[2], ref0->frame->linesize[2],
+            chroma_mc_uni(s, dst2, s->frame->linesize[2], ref0->frame->data[2], ref0->frame->linesize[2],
                           0, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
                           s->sh.chroma_weight_l0[current_mv.ref_idx[0]][1], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][1]);
         }
@@ -2589,7 +2626,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         }
 
         if (s->ps.sps->chroma_format_idc) {
-#if RPI_MC_CHROMA_QPU
+#if RPI_INTER
             if (s->enable_rpi) {
                 rpi_pred_c(s, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 1,
                   s->sh.chroma_weight_l1[current_mv.ref_idx[1]], s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
@@ -2597,11 +2634,11 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
                 return;
             }
 #endif
-            RPI_REDIRECT(chroma_mc_uni)(s, dst1, s->frame->linesize[1], ref1->frame->data[1], ref1->frame->linesize[1],
+            chroma_mc_uni(s, dst1, s->frame->linesize[1], ref1->frame->data[1], ref1->frame->linesize[1],
                           1, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
                           s->sh.chroma_weight_l1[current_mv.ref_idx[1]][0], s->sh.chroma_offset_l1[current_mv.ref_idx[1]][0]);
 
-            RPI_REDIRECT(chroma_mc_uni)(s, dst2, s->frame->linesize[2], ref1->frame->data[2], ref1->frame->linesize[2],
+            chroma_mc_uni(s, dst2, s->frame->linesize[2], ref1->frame->data[2], ref1->frame->linesize[2],
                           1, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
                           s->sh.chroma_weight_l1[current_mv.ref_idx[1]][1], s->sh.chroma_offset_l1[current_mv.ref_idx[1]][1]);
         }
@@ -2659,10 +2696,10 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         }
 
         if (s->ps.sps->chroma_format_idc) {
-#if RPI_MC_CHROMA_QPU
+#if RPI_INTER
           if (s->enable_rpi) {
               rpi_pred_c_b(s, x0_c, y0_c, nPbW_c, nPbH_c,
-                           current_mv.mv + 0, current_mv.mv + 1,
+                           &current_mv,
                            s->sh.chroma_weight_l0[current_mv.ref_idx[0]],
                            s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
                            s->sh.chroma_weight_l1[current_mv.ref_idx[1]],
@@ -2672,10 +2709,10 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
                 return;
             }
 #endif
-            RPI_REDIRECT(chroma_mc_bi)(s, dst1, s->frame->linesize[1], ref0->frame, ref1->frame,
+            chroma_mc_bi(s, dst1, s->frame->linesize[1], ref0->frame, ref1->frame,
                          x0_c, y0_c, nPbW_c, nPbH_c, &current_mv, 0);
 
-            RPI_REDIRECT(chroma_mc_bi)(s, dst2, s->frame->linesize[2], ref0->frame, ref1->frame,
+            chroma_mc_bi(s, dst2, s->frame->linesize[2], ref0->frame, ref1->frame,
                          x0_c, y0_c, nPbW_c, nPbH_c, &current_mv, 1);
         }
     }
