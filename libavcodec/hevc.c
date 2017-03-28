@@ -1774,7 +1774,8 @@ static void rpi_luma_mc_uni(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
 
 static void rpi_luma_mc_bi(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
                        AVFrame *ref0, const Mv *mv0, int x_off, int y_off,
-                       int block_w, int block_h, AVFrame *ref1, const Mv *mv1, struct MvField *current_mv)
+                       int block_w, int block_h, AVFrame *ref1, const Mv *mv1,
+                       const struct MvField * const current_mv)
 {
     HEVCMvCmd *cmd = s->unif_mv_cmds_y[s->pass0_job] + s->num_mv_cmds_y[s->pass0_job]++;
     cmd->cmd = RPI_CMD_LUMA_BI;
@@ -1794,7 +1795,7 @@ static void rpi_luma_mc_bi(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
     cmd->ref_idx[1] = current_mv->ref_idx[1];
 }
 
-static void rpi_chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
+static inline void rpi_chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
                           ptrdiff_t dststride, uint8_t *src0, ptrdiff_t srcstride,
                           int x_off, int y_off, int block_w, int block_h, const Mv * const mv, int chroma_weight, int chroma_offset)
 {
@@ -1813,7 +1814,7 @@ static void rpi_chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
     cmd->offset = chroma_offset;
 }
 
-static void rpi_chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVFrame *ref0, AVFrame *ref1,
+static inline void rpi_chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVFrame *ref0, AVFrame *ref1,
                          int x_off, int y_off, int block_w, int block_h, const struct MvField * const current_mv, int cidx)
 {
     HEVCMvCmd *cmd = s->unif_mv_cmds_c[s->pass0_job] + s->num_mv_cmds_c[s->pass0_job]++;
@@ -2216,72 +2217,147 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
 }
 
 
-#if RPI_MC_LUMA_QPU
+#if RPI_INTER
 static void
-rpi_pred_y(HEVCContext * const s, const int x0, const int y0,
-  const int nPbW, const int nPbH,
-  const Mv * const mv,
-  const int weight_mul,
-  const int weight_offset,
-  AVFrame * const src_frame)
+rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
+           const int nPbW, const int nPbH,
+           const Mv *const mv,
+           const int weight_mul,
+           const int weight_offset,
+           AVFrame *const src_frame)
 {
-  const unsigned int mx          = mv->x & 3;
-  const unsigned int my          = mv->y & 3;
-  const unsigned int my_mx       = (my<<8) | mx;
-  const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
-  const int x1_m3 = x0 + (mv->x >> 2) - 3;
-  const int y1_m3 = y0 + (mv->y >> 2) - 3;
-  const uint32_t src_vc_address_y = get_vc_address_y(src_frame);
-  uint32_t * y = s->curr_y_mvs;
-  uint32_t dst_base = get_vc_address_y(s->frame) + x0 + y0 * s->frame->linesize[0];
-  const uint32_t wo_0 = PACK2(weight_offset * 2 + 1, weight_mul);
+    const unsigned int y_off = x0 + y0 * s->frame->linesize[0];
 
-  for(int start_y=0; start_y < nPbH; start_y += 16, dst_base += s->frame->linesize[0] * 16)
-  {  // Potentially we could change the assembly code to support taller sizes in one go
-    const uint32_t src_yx_y = y1_m3 + start_y;
-    int start_x = 0;
-    const int bh = FFMIN(nPbH - start_y, 16);
-    uint32_t *const py = y - RPI_LUMA_COMMAND_WORDS;
-    uint32_t *const ppy = y - RPI_LUMA_COMMAND_WORDS * 2;
+#if !RPI_MC_LUMA_QPU
+    rpi_luma_mc_uni(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
+                    mv, x0, y0, nPbW, nPbH,
+                    weight_mul, weight_offset);
+#else
+    {
+        const unsigned int mx          = mv->x & 3;
+        const unsigned int my          = mv->y & 3;
+        const unsigned int my_mx       = (my << 8) | mx;
+        const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
+        const int x1_m3 = x0 + (mv->x >> 2) - 3;
+        const int y1_m3 = y0 + (mv->y >> 2) - 3;
+        const uint32_t src_vc_address_y = get_vc_address_y(src_frame);
+        uint32_t *y = s->curr_y_mvs;
+        uint32_t dst_base = get_vc_address_y(s->frame) + y_off;
+        const uint32_t wo_0 = PACK2(weight_offset * 2 + 1, weight_mul);
 
-    // As Y-pred operates on two independant 8-wide src blocks we can merge
-    // this pred with the previous one if it the previous one is 8 pel wide,
-    // the same height as the current block, immediately to the left of our
-    // current dest block and mono-pred.
-    //
-    // In the init (1st) block w/h is pic width height so given
-    // that no pic will ever be 8 pixels wide the first test here
-    // should fail if this is the first pred (i.e. after that test
-    // ppy is valid)
-    if (py[4] == ((8 << 16) | bh) && py[8] + 8 == dst_base && ppy[9] == s->qpu_filter) {
-      const int bw = FFMIN(nPbW, 8);
+        // Potentially we could change the assembly code to support taller sizes in one go
+        for (int start_y = 0; start_y < nPbH; start_y += 16, dst_base += s->frame->linesize[0] * 16) {
+            const uint32_t src_yx_y = y1_m3 + start_y;
+            int start_x = 0;
+            const int bh = FFMIN(nPbH - start_y, 16);
+            uint32_t *const py = y - RPI_LUMA_COMMAND_WORDS;
+            uint32_t *const ppy = y - RPI_LUMA_COMMAND_WORDS * 2;
 
-      ppy[2] = PACK2(src_yx_y, x1_m3);
-      ppy[3] = src_vc_address_y;
-      py[4] += bw << 16;
-      py[5] = PACK2(my2_mx2_my_mx, py[5]);
-      // py[6] stays the same
-      py[7] = wo_0;
+            // As Y-pred operates on two independant 8-wide src blocks we can merge
+            // this pred with the previous one if it the previous one is 8 pel wide,
+            // the same height as the current block, immediately to the left of our
+            // current dest block and mono-pred.
+            //
+            // In the init (1st) block w/h is pic width height so given
+            // that no pic will ever be 8 pixels wide the first test here
+            // should fail if this is the first pred (i.e. after that test
+            // ppy is valid)
+            if (py[4] == ((8 << 16) | bh) && py[8] + 8 == dst_base && ppy[9] == s->qpu_filter) {
+                const int bw = FFMIN(nPbW, 8);
 
-      start_x = bw;
+                ppy[2] = PACK2(src_yx_y, x1_m3);
+                ppy[3] = src_vc_address_y;
+                py[4] += bw << 16;
+                py[5] = PACK2(my2_mx2_my_mx, py[5]);
+                // py[6] stays the same
+                py[7] = wo_0;
+
+                start_x = bw;
+            }
+
+            for (; start_x < nPbW; start_x += 16) {
+                const int bw = FFMIN(nPbW - start_x, 16);;
+                y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(src_yx_y, x1_m3 + start_x);
+                y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
+                y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(src_yx_y, x1_m3 + 8 + start_x);
+                y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
+                *y++ = PACK2(bw, bh);
+                *y++ = my2_mx2_my_mx;
+                *y++ = wo_0;
+                *y++ = wo_0;
+                *y++ = dst_base + start_x;
+                y++[-RPI_LUMA_COMMAND_WORDS] = s->qpu_filter;
+            }
+        }
+        s->curr_y_mvs = y;
     }
-
-    for (; start_x < nPbW; start_x += 16) {
-        const int bw = FFMIN(nPbW - start_x, 16);;
-        y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(src_yx_y, x1_m3 + start_x);
-        y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
-        y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(src_yx_y, x1_m3 + 8 + start_x);
-        y++[-RPI_LUMA_COMMAND_WORDS] = src_vc_address_y;
-        *y++ = PACK2(bw, bh);
-        *y++ = my2_mx2_my_mx;
-        *y++ = wo_0;
-        *y++ = wo_0;
-        *y++ = dst_base + start_x;
-        y++[-RPI_LUMA_COMMAND_WORDS] = s->qpu_filter;
-    }
-  }
-  s->curr_y_mvs = y;
+#endif
 }
+
+static void
+rpi_pred_y_b(HEVCContext * const s,
+           const int x0, const int y0,
+           const int nPbW, const int nPbH,
+           const struct MvField *const mv_field,
+           AVFrame *const src_frame,
+           AVFrame *const src_frame2)
+{
+    const unsigned int y_off = x0 + y0 * s->frame->linesize[0];
+    const Mv * const mv  = mv_field->mv + 0;
+    const Mv * const mv2 = mv_field->mv + 1;
+
+#if !RPI_MC_LUMA_QPU
+    rpi_luma_mc_bi(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
+           mv, x0, y0, nPbW, nPbH,
+           src_frame2, mv2, &current_mv);
+#else
+    {
+        const unsigned int mx          = mv->x & 3;
+        const unsigned int my          = mv->y & 3;
+        const unsigned int my_mx = (my<<8) | mx;
+        const unsigned int mx2          = mv2->x & 3;
+        const unsigned int my2          = mv2->y & 3;
+        const unsigned int my2_mx2 = (my2<<8) | mx2;
+        const uint32_t     my2_mx2_my_mx = (my2_mx2 << 16) | my_mx;
+        const int x1 = x0 + (mv->x >> 2) - 3;
+        const int y1 = y0 + (mv->y >> 2) - 3;
+        const int x2 = x0 + (mv2->x >> 2) - 3;
+        const int y2 = y0 + (mv2->y >> 2) - 3;
+        const unsigned int ref_idx0 = mv_field->ref_idx[0];
+        const unsigned int ref_idx1 = mv_field->ref_idx[1];
+        const uint32_t wt_offset = s->sh.luma_offset_l0[ref_idx0] +
+                     s->sh.luma_offset_l1[ref_idx1] + 1;
+        const uint32_t wo_0 = PACK2(wt_offset, s->sh.luma_weight_l0[ref_idx0]);
+        const uint32_t wo_1 = PACK2(wt_offset, s->sh.luma_weight_l1[ref_idx1]);
+
+        uint32_t * y = s->curr_y_mvs;
+        uint32_t dst = get_vc_address_y(s->frame) + y_off;
+
+        for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
+          for(int start_x=0;start_x < nPbW;start_x+=8) { // B blocks work 8 at a time
+              int bw = nPbW-start_x;
+              int bh = nPbH-start_y;
+              y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(y1 + start_y, x1 + start_x);
+              y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(src_frame);
+              y++[-RPI_LUMA_COMMAND_WORDS] = PACK2(y2 + start_y, x2 + start_x);
+              y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(src_frame2);
+              *y++ = PACK2(bw<8 ? bw : 8, bh<16 ? bh : 16);
+              *y++ = my2_mx2_my_mx;
+
+              *y++ = wo_0;
+              *y++ = wo_1;
+
+              *y++ = dst + start_x;
+              y++[-RPI_LUMA_COMMAND_WORDS] = s->qpu_filter_b;
+          }
+          dst += s->frame->linesize[0] * 16;
+        }
+        s->curr_y_mvs = y;
+    }
+#endif
+}
+
+
 #endif
 
 #if RPI_INTER
@@ -2574,7 +2650,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
-#if RPI_MC_LUMA_QPU
+#if RPI_INTER
         if (s->enable_rpi) {
             rpi_pred_y(s, x0, y0, nPbW, nPbH, current_mv.mv + 0,
               s->sh.luma_weight_l0[current_mv.ref_idx[0]], s->sh.luma_offset_l0[current_mv.ref_idx[0]],
@@ -2582,7 +2658,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         } else
 #endif
         {
-            RPI_REDIRECT(luma_mc_uni)(s, dst0, s->frame->linesize[0], ref0->frame,
+            luma_mc_uni(s, dst0, s->frame->linesize[0], ref0->frame,
                     &current_mv.mv[0], x0, y0, nPbW, nPbH,
                     s->sh.luma_weight_l0[current_mv.ref_idx[0]],
                     s->sh.luma_offset_l0[current_mv.ref_idx[0]]);
@@ -2610,7 +2686,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
-#if RPI_MC_LUMA_QPU
+#if RPI_INTER
         if (s->enable_rpi) {
             rpi_pred_y(s, x0, y0, nPbW, nPbH, current_mv.mv + 1,
               s->sh.luma_weight_l1[current_mv.ref_idx[1]], s->sh.luma_offset_l1[current_mv.ref_idx[1]],
@@ -2619,7 +2695,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
 #endif
 
         {
-            RPI_REDIRECT(luma_mc_uni)(s, dst0, s->frame->linesize[0], ref1->frame,
+            luma_mc_uni(s, dst0, s->frame->linesize[0], ref1->frame,
                     &current_mv.mv[1], x0, y0, nPbW, nPbH,
                     s->sh.luma_weight_l1[current_mv.ref_idx[1]],
                     s->sh.luma_offset_l1[current_mv.ref_idx[1]]);
@@ -2648,49 +2724,13 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
-#if RPI_MC_LUMA_QPU
+#if RPI_INTER
         if (s->enable_rpi) {
-            const Mv *mv    = &current_mv.mv[0];
-            int mx          = mv->x & 3;
-            int my          = mv->y & 3;
-            int my_mx = (my<<8) + mx;
-            const Mv *mv2    = &current_mv.mv[1];
-            int mx2          = mv2->x & 3;
-            int my2          = mv2->y & 3;
-            int my2_mx2 = (my2<<8) + mx2;
-            int my2_mx2_my_mx = (my2_mx2 << 16) + my_mx;
-            int x1 = x0 + (mv->x >> 2);
-            int y1 = y0 + (mv->y >> 2);
-            int x2 = x0 + (mv2->x >> 2);
-            int y2 = y0 + (mv2->y >> 2);
-            const uint32_t wt_offset = s->sh.luma_offset_l0[current_mv.ref_idx[0]] +
-                         s->sh.luma_offset_l1[current_mv.ref_idx[1]] + 1;
-            const uint32_t wo_0 = PACK2(wt_offset, s->sh.luma_weight_l0[current_mv.ref_idx[0]]);
-            const uint32_t wo_1 = PACK2(wt_offset, s->sh.luma_weight_l1[current_mv.ref_idx[1]]);
-            uint32_t *y = s->curr_y_mvs;
-            for(int start_y=0;start_y < nPbH;start_y+=16) {  // Potentially we could change the assembly code to support taller sizes in one go
-              for(int start_x=0;start_x < nPbW;start_x+=8) { // B blocks work 8 at a time
-                  int bw = nPbW-start_x;
-                  int bh = nPbH-start_y;
-                  y++[-RPI_LUMA_COMMAND_WORDS] = ((y1 - 3 + start_y) << 16) + ( (x1 - 3 + start_x) & 0xffff);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref0->frame);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = ((y2 - 3 + start_y) << 16) + ( (x2 - 3 + start_x) & 0xffff); // Second fetch is for ref1
-                  y++[-RPI_LUMA_COMMAND_WORDS] = get_vc_address_y(ref1->frame);
-                  *y++ = PACK2(bw<8 ? bw : 8, bh<16 ? bh : 16);
-                  *y++ = my2_mx2_my_mx;
-
-                  *y++ = wo_0;
-                  *y++ = wo_1;
-
-                  *y++ = (get_vc_address_y(s->frame) + x0 + start_x + (start_y + y0) * s->frame->linesize[0]);
-                  y++[-RPI_LUMA_COMMAND_WORDS] = s->qpu_filter_b;
-                }
-            }
-            s->curr_y_mvs = y;
+            rpi_pred_y_b(s, x0, y0, nPbW, nPbH, &current_mv, ref0->frame, ref1->frame);
         } else
 #endif
         {
-            RPI_REDIRECT(luma_mc_bi)(s, dst0, s->frame->linesize[0], ref0->frame,
+            luma_mc_bi(s, dst0, s->frame->linesize[0], ref0->frame,
                    &current_mv.mv[0], x0, y0, nPbW, nPbH,
                    ref1->frame, &current_mv.mv[1], &current_mv);
         }
