@@ -46,7 +46,7 @@
   #include "rpi_shader.h"
 
   // Define RPI_CACHE_UNIF_MVS to write motion vector uniform stream to cached memory
-  // RPI_CACHE_UNIF_MVS doesn't seem to make much difference, so left undefined.
+  #define RPI_CACHE_UNIF_MVS  1
 
   // Define RPI_SIMULATE_QPUS for debugging to run QPU code on the ARMs (*rotted*)
   //#define RPI_SIMULATE_QPUS
@@ -3817,19 +3817,17 @@ static void rpi_launch_vpu_qpu(HEVCContext * const s,
     }
 #endif
 
-#ifdef RPI_CACHE_UNIF_MVS
-#error NIF
-    flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],&s->y_unif_mvs_ptr[job], &s->unif_mvs_ptr[job], job);
-#else
     if (n_uv + n_y != 0) {
+#if RPI_CACHE_UNIF_MVS
+        flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],&s->y_unif_mvs_ptr[job], &s->unif_mvs_ptr[job], job);
+#else
         flush_frame3(s, s->frame, &s->coeffs_buf_accelerated[job], NULL, NULL, job);
+#endif
     }
     else
     {
         rpi_cache_flush_one_gm_ptr(&s->coeffs_buf_accelerated[job], RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
     }
-
-#endif
 
     s->vpu_id = vpu_qpu_post_code2(
 //        vpu_get_fn(),
@@ -4935,7 +4933,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     for (job = 0; job < RPI_MAX_JOBS; job++) {
         uint32_t *p;
-#ifdef RPI_CACHE_UNIF_MVS
+#if RPI_CACHE_UNIF_MVS
         gpu_malloc_cached(QPU_N_UV * UV_COMMANDS_PER_QPU * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
 #else
         gpu_malloc_uncached(QPU_N_UV * UV_COMMANDS_PER_QPU * sizeof(uint32_t), &s->unif_mvs_ptr[job] );
@@ -4956,7 +4954,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     for (job=0; job < RPI_MAX_JOBS; job++)
     {
         uint32_t *p;
-#ifdef RPI_CACHE_UNIF_MVS
+#if RPI_CACHE_UNIF_MVS
         gpu_malloc_cached(QPU_N_Y * Y_COMMANDS_PER_QPU * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
 #else
         gpu_malloc_uncached(QPU_N_Y * Y_COMMANDS_PER_QPU * sizeof(uint32_t), &s->y_unif_mvs_ptr[job] );
