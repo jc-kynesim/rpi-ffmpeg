@@ -1,3 +1,10 @@
+
+# The @ "mul_used", 0 annotations that occur by various mul blocks suppress
+# the warning that we are using rotation & ra/rb registers. r0..3 can be
+# rotated through all 16 elems ra regs can only be routated through their
+# local 4.  As it happens this is what is wanted here as we do not want the
+# constants from the other half of the calc.
+
 # register allocation
 #
 # ra0...ra7                                     eight horizontal filter coefficients
@@ -56,9 +63,9 @@
 # ra27                                          next ra25
 # ra28                                          next y
 # ra29                                          y for next texture access
-# ra30                                          chroma-B height+3; free otherwise
 #
-# ra31                                          next kernel address
+# ra30                                          next kernel address
+# ra31                                          chroma-B height+3; free otherwise
 
 .set rb_frame_width_minus_1,       rb25
 .set rb_frame_height_minus_1,      rb30
@@ -118,9 +125,7 @@
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_uv
-
-# Read starting kernel
-mov ra31, unif
+  mov tmurs, 1          ; mov ra30, unif        # No swap TMUs ; Next fn
 
 # Load first request location
 add ra_x, unif, elem_num # Store x
@@ -188,7 +193,7 @@ m_calc_dma_regs rb28, rb27
 max r1, ra_y, 0
 min r1, r1, rb_frame_height_minus_1
 add ra_y, ra_y, 1
-bra -, ra31
+bra -, ra30
 nop ; mul24 r1, r1, rb_pitch
 add t0s, r1, ra_x
 add t1s, r1, ra_frame_base
@@ -202,7 +207,7 @@ add t1s, r1, ra_frame_base
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 ::mc_filter_uv
-mov ra31, unif
+mov ra30, unif
 
 # per-channel shifts were calculated on the *previous* invocation
 
@@ -285,13 +290,13 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
 nop                  ; mul24      r3, ra0.8a,       r0
-nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
-nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1
-nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
-sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2
-nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3
-nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8     @ "mul_used", 0
+nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1     @ "mul_used", 0
+nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9     @ "mul_used", 0
+sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2     @ "mul_used", 0
+nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10    @ "mul_used", 0
+add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3     @ "mul_used", 0
+nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11    @ "mul_used", 0
 sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop
@@ -319,7 +324,7 @@ max vpm, r1, 0         # Delay 3
 
 # DMA out for U & stash for V
   mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
-  bra -, ra31
+  bra -, ra30
   mov vw_setup, rb29    ; mov ra10, rb29 # Stride
   mov vw_addr, unif     # u_dst_addr
   mov ra11, unif        # v_dst_addr
@@ -354,7 +359,7 @@ add ra_frame_base_next, rb_x_next, r2
 
 sub rb29, rb24, ra1.16b         # Compute vdw_setup1(dst_pitch-width)
 add rb17, ra1.16a, 1
-add ra30, ra1.16a, 3
+add ra31, ra1.16a, 3
 shl r0,   ra1.16a, 7
 add r0,   r0, ra1.16b        ; mov ra3, unif   # Combine width and height of destination area ; V filter coeffs
 shl r0,   r0, i_shift16      ; mov rb14, unif  # U weight L0
@@ -400,13 +405,13 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
   nop                   ; mul24      r3, ra0.8a,       r0
-  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
-  nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1
-  nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
-  sub r2, r2, r3        ; mul24      r3, ra0.8c << 2,  r0 << 2
-  nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-  add r2, r2, r3        ; mul24      r3, ra0.8d << 3,  r0 << 3
-  nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0
+  nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1  @ "mul_used", 0
+  nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9  @ "mul_used", 0
+  sub r2, r2, r3        ; mul24      r3, ra0.8c << 2,  r0 << 2  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10 @ "mul_used", 0
+  add r2, r2, r3        ; mul24      r3, ra0.8d << 3,  r0 << 3  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11 @ "mul_used", 0
   sub r0, r2, r3        ; mov r3, rb31
   sub.setf -, r3, 4     ; mov ra12, ra13
   brr.anyn -, r:uvloop_b0
@@ -427,7 +432,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 # bulk shift between loops quite a bit nastier
 # a8 used as temp
 
-  sub.setf -, r3, ra30
+  sub.setf -, r3, ra31
   asr ra8.16a, r1, 6    ; mov rb6, ra5          # This discards the high bits that might be bad
   brr.anyn -, r:uvloop_b0
   mov ra5, rb4          ; mov rb4, ra4
@@ -501,7 +506,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   mov.setf -, ra9       ; mov -, vw_wait  # Delayed V DMA
   brr.anyz -, r:uv_filter_b_1
 
-mov ra31, unif
+mov ra30, unif
 
 # per-channel shifts were calculated on the *previous* invocation
 
@@ -523,7 +528,7 @@ sub r2, unif, r3                   ; mul24 ra_xshift_next, r0, 8 # U frame_base
 add r0, r0, r3                     ; mov -, unif         # discard width_height
 and rb_x_next, r0, ~3              ; mov ra0, unif       # H filter coeffs
 
-# rb17, rb26, rb29, ra30 inherited from B0 as w/h must be the same
+# rb17, rb26, rb29, ra31 inherited from B0 as w/h must be the same
 
 mov ra3, unif #  V filter coeffs
 
@@ -570,13 +575,13 @@ add t1s, ra_frame_base, r2
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 nop                  ; mul24      r3, ra0.8a,       r0
-nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8
-nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1
-nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9
-sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2
-nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3
-nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
+nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8     @ "mul_used", 0
+nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1     @ "mul_used", 0
+nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9     @ "mul_used", 0
+sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2     @ "mul_used", 0
+nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10    @ "mul_used", 0
+add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3     @ "mul_used", 0
+nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11    @ "mul_used", 0
 sub r0, r2, r3       ; mov r3, rb31
 sub.setf -, r3, 4    ; mov ra12, ra13
 brr.anyn -, r:uvloop_b
@@ -599,7 +604,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   mov ra4, rb5          ; mul24 r1, r1, ra_k256 # Lose bad top 8 bits & sign extend
   add r1, r1, rb12      ; mov rb5, ra6          # rb12 = (offsetL0 + offsetL1 + 1) << (rb13 - 1)
 
-  sub.setf -, r3, ra30  ; mov ra6, rb7
+  sub.setf -, r3, ra31  ; mov ra6, rb7
   brr.anyn -, r:uvloop_b
   asr ra3.8as, r1, rb13
   mov -, vw_wait        ; mov rb7, ra8          #  vw_wait is B-reg (annoyingly) ; Final FIFO mov
@@ -609,7 +614,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # DMA out for U & stash for V
 
   mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
-  bra -, ra31
+  bra -, ra30
   mov vw_setup, rb29    ; mov ra10, rb29 # Stride
   mov vw_addr, unif     # u_dst_addr
   mov ra11, unif        # v_dst_addr
@@ -683,69 +688,53 @@ nop        ; nop # delay slot 2
 ################################################################################
 # mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, tbd, next_kernel)
 ::mc_setup
-  mov r3, 16
-
   # Need to save these because we need to know the frame dimensions before computing texture coordinates
-  mov ra8, unif  # y_x
-  mov ra9, unif  # ref_y_base
-  mov ra10, unif # y2_x2
-  mov ra11, unif # ref_y2_base
+  mov tmurs, 1          ; mov ra8, unif         # No TMU swap ; y_x
+  mov ra9, unif         # ref_y_base
+  mov ra10, unif        # y2_x2
+  mov ra11, unif        # ref_y2_base
 
 # Read image dimensions
-  mov r1, unif # width_height
-  shl r0,r1,r3
-  asr r1,r1,r3 # width
-  asr r0,r0,r3 # height
-  sub rb_frame_width_minus_1,r1,1
-  sub rb_frame_height_minus_1,r0,1
-
-# get source pitch
-  mov rb_pitch, unif # src_pitch
+  mov ra3, unif         # width_height
+  mov rb_pitch, unif    # src_pitch [ra3 delay]
+  sub rb_frame_width_minus_1, ra3.16b, 1
+  sub rb_frame_height_minus_1, ra3.16a, 1
 
 # get destination pitch
-  mov r0, unif       # dst_pitch
   mov r1, vdw_setup_1(0)
-  add rb24, r1, r0
+  or  rb24, r1, unif    # dst_pitch
 
 # Compute base address for first and second access
-  mov r1, ra8 # y_x
-  shl r0,r1,r3 # r0 is x<<16
-  asr r1,r1,r3 # r1 is y
-  asr r0,r0,r3 # r0 is x
-  add r0, r0, elem_num # Load x
+  mov r3, elem_num
+  add r0, ra8.16a, r3   # Load x + elem_num
   max r0, r0, 0
-  min r0, r0, rb_frame_width_minus_1 ; mov r2, ra9  # Load the frame base
+  min r0, r0, rb_frame_width_minus_1
   shl ra_xshift_next, r0, 3 # Compute shifts
-  add ra_y, r1, 1
-  and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
-  add r2, r2, r0  # r2 is address for frame0 (not including y offset)
-  max r1, r1, 0
+  add ra_y, ra8.16b, 1
+  and r0, r0, ~3        # r0 gives the clipped and aligned x coordinate
+  add r2, ra9, r0       # ra9 is address for frame0 (not including y offset)
+  max r1, ra8.16b, 0
   min r1, r1, rb_frame_height_minus_1
-  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-  add t0s, r2, r1 ; mov ra_frame_base, r2
+  nop                   ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
+  add t0s, r2, r1       ; mov ra_frame_base, r2
 
-  mov r1, ra10 # y_x
-  shl r0,r1,r3 # r0 is x<<16
-  asr r1,r1,r3 # r1 is y
-  asr r0,r0,r3 # r0 is x
-  add r0, r0, elem_num # Load x
+  # r3 still contains elem_num
+  add r0, ra10.16a, r3  # Load x
   max r0, r0, 0
-  min r0, r0, rb_frame_width_minus_1 ; mov r2, ra11  # Load the frame base
+  min r0, r0, rb_frame_width_minus_1
   shl rx_xshift2_next, r0, 3 # Compute shifts
-  add ra_y2, r1, 1
-  and r0, r0, ~3  # r0 gives the clipped and aligned x coordinate
-  add r2, r2, r0  # r2 is address for frame1 (not including y offset)
-  max r1, r1, 0
+  add ra_y2, ra10.16b, 1
+  and r0, r0, ~3        # r0 gives the clipped and aligned x coordinate
+  add r2, ra11, r0      # r2 is address for frame1 (not including y offset)
+  max r1, ra10.16b, 0
   min r1, r1, rb_frame_height_minus_1
-  nop             ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-  add t1s, r2, r1 ; mov ra_frame_base2, r2
-
+  nop                   ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
+  add t1s, r2, r1       ; mov ra_frame_base2, r2
 
 # load constants
 
   mov ra_k1, 1
   mov ra_k256, 256
-
   mov rb_k255, 255
 
 # touch vertical context to keep simulator happy
@@ -759,21 +748,19 @@ nop        ; nop # delay slot 2
   m_calc_dma_regs rb28, rb27
 
 # Weighted prediction denom
-  add rb13, unif, 9  # unif = weight denom + 6
-
-  mov -, unif # Unused
+  add rb13, unif, 9     # unif = weight denom + 6
 
 # submit texture requests for second line
   max r1, ra_y, 0
   min r1, r1, rb_frame_height_minus_1
   add ra_y, ra_y, 1
-  nop ; mul24 r1, r1, rb_pitch
+  mov -, unif           ; mul24 r1, r1, rb_pitch  # unused ;
   add t0s, r1, ra_frame_base
 
   max r1, ra_y2, 0
   min r1, r1, rb_frame_height_minus_1
   add ra_y2, ra_y2, 1
-  nop ; mul24 r1, r1, rb_pitch
+  nop                   ; mul24 r1, r1, rb_pitch
   add t1s, r1, ra_frame_base2
 
 # FALL THROUGHT TO PER-BLOCK SETUP
@@ -782,7 +769,7 @@ nop        ; nop # delay slot 2
 # P and B blocks share the same setup code to save on Icache space
 :per_block_setup
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-  mov ra31, unif
+  mov ra30, unif
 
   mov ra1, unif  ; mov r1, elem_num  # y_x ; elem_num has implicit unpack??
 
@@ -822,7 +809,8 @@ nop        ; nop # delay slot 2
 
 # get filter coefficients and discard unused B frame values
   shl.ifz r0, r0, i_shift16          ; mov ra5, unif    #  Pick half to use ; L0 offset/weight
-  shl ra8, r0, 3
+  mov r2, 0x01040400                 # [ra5 delay]
+  shl ra8, r0, 3                     ; mov rb14, ra5.16a
 
 # Pack the 1st 4 filter coefs for H & V tightly
 
@@ -830,9 +818,8 @@ nop        ; nop # delay slot 2
   ror ra2.8a, r1, ra8.8d
   ror ra0.8a, r1, ra8.8c
 
-  mov r1,0x01040400
-  ror ra2.8b, r1, ra8.8d
-  ror ra0.8b, r1, ra8.8c
+  ror ra2.8b, r2, ra8.8d
+  ror ra0.8b, r2, ra8.8c
 
   mov r1,0x050b0a00  # -ve
   ror ra2.8c, r1, ra8.8d
@@ -865,19 +852,17 @@ nop        ; nop # delay slot 2
 # Extract weighted prediction information in parallel
 # We are annoyingly A src limited here
 
-  mov rb14, ra5.16a          ; mov ra18, unif    # Save L0 weight on all slices for Bi ; L1 offset/weight
-
-  mov rb4, ra3.8a
+  mov rb4, ra3.8a            ; mov ra18, unif
   mov rb5, ra3.8b
   mov rb6, ra3.8c
   mov.ifnz ra5, ra18
 
-  bra -, ra31
+  bra -, ra30
 
   shl r0, ra5.16b, rb13      # Offset calc
   asr rb12, r0, 9            # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   mov r3, 0                  ; mov rb7, ra3.8d
-# >>> branch ra31
+# >>> branch ra30
 #
 # r3 = 0
 # ra18.16a = weight L1
@@ -933,21 +918,21 @@ nop        ; nop # delay slot 2
 
 # apply horizontal filter
   nop                  ; mul24      r3, ra0.8a,      r0
-  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
-  nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
-  nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
-  sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
-  nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-  sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
-  nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
-  add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
-  nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
-  add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
-  nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
-  sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
-  nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
-  add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
-  nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
+  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
+  nop                  ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
+  nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
+  sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
+  sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11  @ "mul_used", 0
+  add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12  @ "mul_used", 0
+  add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13  @ "mul_used", 0
+  sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
+  add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
   sub r0, r2, r3       ; mov r3, rb31
 
   sub.setf -, r3, 8       ; mov r1,   ra8
@@ -1041,21 +1026,21 @@ nop        ; nop # delay slot 2
 
 # apply horizontal filter
   nop                  ; mul24      r3, ra0.8a,      r0
-  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8
-  nop                  ; mul24      r2, ra0.8b << 1, r0 << 1
-  nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9
-  sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2
-  nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10
-  sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3
-  nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11
-  add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4
-  nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12
-  add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5
-  nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13
-  sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6
-  nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14
-  add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7
-  nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15
+  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
+  nop                  ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
+  nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
+  sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
+  sub r2, r2, r3       ; mul24      r3, ra0.8d << 3, r0 << 3    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11  @ "mul_used", 0
+  add r2, r2, r3       ; mul24      r3, ra1.8a << 4, r0 << 4    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8a << 12, r1 << 12  @ "mul_used", 0
+  add r2, r2, r3       ; mul24      r3, ra1.8b << 5, r0 << 5    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8b << 13, r1 << 13  @ "mul_used", 0
+  sub r2, r2, r3       ; mul24      r3, ra1.8c << 6, r0 << 6    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
+  add r2, r2, r3       ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
   sub r0, r2, r3       ; mov r3, rb31
 
   sub.setf -, r3, 8       ; mov r1,   ra8
@@ -1067,7 +1052,6 @@ nop        ; nop # delay slot 2
   # >>> .anyn yloopb
 
   # apply vertical filter and write to VPM
-
   nop                     ; mul24 r0, rb8,  ra2.8a
   nop                     ; mul24 r1, rb9,  ra2.8b
   sub r1, r1, r0          ; mul24 r0, rb10, ra2.8c
@@ -1083,7 +1067,7 @@ nop        ; nop # delay slot 2
 
   asr r1, r1, 14
   nop                     ; mul24 r0, r1, rb14
-  add r0, r0, r2          ; mul24 r1, r1 << 8, ra18.16a << 8
+  add r0, r0, r2          ; mul24 r1, r1 << 8, ra18.16a << 8    @ "mul_used", 0
 
   add r1, r1, r0          ; mov -, vw_wait
   shl r1, r1, 8
