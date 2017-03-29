@@ -113,21 +113,58 @@ static const uint32_t rpi_filter_coefs[8] = {
 
 
 #ifdef RPI
+
+typedef struct worker_global_env_s
+{
+    unsigned int arm_load;
+    pthread_mutex_t lock;
+} worker_global_env_t;
+
+static worker_global_env_t worker_global_env =
+{
+    .lock = PTHREAD_MUTEX_INITIALIZER
+};
+
 // Core execution tasks
 static void worker_core(HEVCContext * const s)
 {
-    static int z = 0;
-
-    int qpu_chroma = 1;
-    int qpu_luma = 0;
-
+    worker_global_env_t * const wg = &worker_global_env;
+    unsigned int arm_cost = 0;
     vpu_qpu_wait_h sync;
 
-    // printf("%d %d %d : %d %d %d %d\n",s->poc, x_ctb, y_ctb, s->num_pred_cmds,s->num_mv_cmds,s->num_coeffs[2] >> 8,s->num_coeffs[3] >> 10);
-    rpi_launch_vpu_qpu(s, qpu_luma, qpu_chroma, &sync);
+    pthread_mutex_lock(&wg->lock);
+    {
+#if 1
+        static int z = 0;
+        const unsigned int gpu_load = vpu_qpu_current_load();
 
-    // Perform inter prediction
-    rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
+        int qpu_chroma = (gpu_load < 8);
+        int qpu_luma = (gpu_load < 6 && wg->arm_load >= 9);
+#else
+        int qpu_chroma = 1;
+        int qpu_luma = 0;
+#endif
+        arm_cost = (qpu_chroma ? 0 : 2) + (qpu_luma ? 0 : 3);
+        wg->arm_load += arm_cost;
+
+        if (++z > 1024) {
+            z = 0;
+            printf("Arm load=%d, GPU=%d   \n", wg->arm_load, gpu_load);
+        }
+
+        rpi_launch_vpu_qpu(s, qpu_luma, qpu_chroma, &sync);
+
+        pthread_mutex_unlock(&wg->lock);
+
+        // Perform inter prediction
+        rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
+    }
+
+    if (arm_cost != 0) {
+        pthread_mutex_lock(&wg->lock);
+        wg->arm_load -= arm_cost;
+        pthread_mutex_unlock(&wg->lock);
+    }
 
     // Wait for transform completion
     vpu_qpu_wait(&sync);

@@ -119,6 +119,7 @@ typedef struct trace_time_wait_s
 typedef struct vq_wait_s
 {
   sem_t sem;
+  unsigned int cost;
   struct vq_wait_s * next;
 } vq_wait_t;
 
@@ -137,6 +138,7 @@ typedef struct gpu_env_s
   int open_count;
   int init_count;
   int mb;
+  unsigned int current_load;
   GPU_MEM_PTR_T code_gm_ptr;
   vq_wait_pool_t wait_pool;
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
@@ -347,6 +349,11 @@ static void gpu_unlock_unref(gpu_env_t * const ge)
   gpu_unlock();
 }
 
+static inline gpu_env_t * gpu_ptr(void)
+{
+  av_assert0(gpu != NULL);
+  return gpu;
+}
 
 // Public gpu fns
 
@@ -552,11 +559,13 @@ static void vq_wait_pool_deinit(vq_wait_pool_t * const wp)
 
 
 // If sem_init actually takes time then maybe we want a pool...
-static vq_wait_t * vq_wait_new(void)
+static vq_wait_t * vq_wait_new(const unsigned int cost)
 {
   gpu_env_t * const ge = gpu_lock_ref();
   vq_wait_t * const wait = ge->wait_pool.head;
   ge->wait_pool.head = wait->next;
+  ge->current_load += cost;
+  wait->cost = cost;
   wait->next = NULL;
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
@@ -578,7 +587,6 @@ static void vq_wait_delete(vq_wait_t * const wait)
     trace_time_wait_t * const ttw = &ge->ttw;
     const int64_t now = ns_time();
     ++ttw->jcount;
-    tto_end(&ttw->active, now);
     tto_end(&ttw->wait, now);
 
     if (ttw->start0 == 0)
@@ -598,22 +606,33 @@ static void vq_wait_delete(vq_wait_t * const wait)
 
 static void vq_wait_wait(vq_wait_t * const wait)
 {
-  int err;
-
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
   {
+      const int64_t now = ns_time();
       gpu_env_t * const ge = gpu_lock();
-      tto_start(&ge->ttw.wait, ns_time());
+      tto_start(&ge->ttw.wait, now);
       gpu_unlock();
   }
 #endif
 
-  while ((err = sem_wait(&wait->sem)) == -1 && errno == EINTR)
+  while (sem_wait(&wait->sem) == -1 && errno == EINTR)
     /* loop */;
 }
 
 static void vq_wait_post(vq_wait_t * const wait)
 {
+#if !RPI_TRACE_TIME_VPU_QPU_WAIT
+  if (wait->cost != 0)
+#endif
+  {
+    gpu_env_t *const ge = gpu_lock();
+    ge->current_load -= wait->cost;
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
+    tto_end(&ge->ttw.active, ns_time());
+#endif
+    gpu_unlock();
+  }
+
   sem_post(&wait->sem);
 }
 
@@ -628,6 +647,7 @@ typedef struct vpu_qpu_job_env_s
 {
   unsigned int n;
   unsigned int mask;
+  unsigned int cost;
   struct gpu_job_s j[VPU_QPU_JOB_MAX];
 } vpu_qpu_job_env_t;
 
@@ -669,11 +689,12 @@ static void vpu_qpu_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_co
 }
 
 // flags are QPU_FLAGS_xxx
-static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t flags, const uint32_t * const mail)
+static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t flags, const unsigned int cost, const uint32_t * const mail)
 {
   if (n != 0) {
     struct gpu_job_s *const j = new_job(vqj);
     vqj->mask |= VPU_QPU_MASK_QPU;
+    vqj->cost += cost;
 
     j->command = EXECUTE_QPU;
     j->u.q.jobs = n;
@@ -698,7 +719,7 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h 
   }
 
   // We are going to want a sync object
-  wait = vq_wait_new();
+  wait = vq_wait_new(vqj->cost);
 
   // There are 2 VPU Qs & 1 QPU Q so we can collapse sync
   // If we only posted one thing or only QPU jobs
@@ -720,6 +741,7 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h 
     j->callback.cookie = wait;
   }
 
+  vqj->cost = 0;
   vqj->mask = 0;
   *wait_h = wait;
 }
@@ -729,6 +751,10 @@ static int vpu_qpu_start(vpu_qpu_job_env_t * const vqj)
   return vqj->n == 0 ? 0 : vc_gpuserv_execute_code(vqj->n, vqj->j);
 }
 
+unsigned int vpu_qpu_current_load(void)
+{
+  return gpu_ptr()->current_load;
+}
 
 int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
     int qpu0_n, const uint32_t * qpu0_mail,
@@ -750,8 +776,8 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
 #endif
 
   vpu_qpu_add_vpu(vqj, vpu_code, r0, r1, r2, r3, r4, r5);
-  vpu_qpu_add_qpu(vqj, qpu0_n, QPU_FLAGS_NO_FLUSH_VPU, qpu0_mail);
-  vpu_qpu_add_qpu(vqj, qpu1_n, qpu_flags, qpu1_mail);
+  vpu_qpu_add_qpu(vqj, qpu0_n, QPU_FLAGS_NO_FLUSH_VPU, 2, qpu0_mail);
+  vpu_qpu_add_qpu(vqj, qpu1_n, qpu_flags, 4, qpu1_mail);
   if (wait_h != NULL)
     vpu_qpu_add_sync_this(vqj, wait_h);
   av_assert0(vpu_qpu_start(vqj) == 0);

@@ -180,6 +180,7 @@ int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2,
     vpu_qpu_wait_h * const wait_h);
 // Waits for previous post_codee to complete and Will null out *wait_h after use
 void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h);
+unsigned int vpu_qpu_current_load(void);
 int vpu_qpu_init(void);
 void vpu_qpu_term(void);
 
