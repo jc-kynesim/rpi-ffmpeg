@@ -64,6 +64,7 @@
 # ra28                                          next y
 # ra29                                          y for next texture access
 #
+# Use an even numbered register as a link register to avoid corrupting flags
 # ra30                                          next kernel address
 # ra31                                          chroma-B height+3; free otherwise
 
@@ -97,6 +98,8 @@
 .set rb_k255,                      rb22
 .set ra_k256,                      ra22
 
+.set ra_link,                      ra30
+
 # With shifts only the bottom 5 bits are considered so -16=16, -15=17 etc.
 .set i_shift16,                    -16
 .set i_shift21,                    -11
@@ -125,7 +128,7 @@
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_uv
-  mov tmurs, 1          ; mov ra30, unif        # No swap TMUs ; Next fn
+  mov tmurs, 1          ; mov ra_link, unif        # No swap TMUs ; Next fn
 
 # Load first request location
 add ra_x, unif, elem_num # Store x
@@ -193,7 +196,7 @@ m_calc_dma_regs rb28, rb27
 max r1, ra_y, 0
 min r1, r1, rb_frame_height_minus_1
 add ra_y, ra_y, 1
-bra -, ra30
+bra -, ra_link
 nop ; mul24 r1, r1, rb_pitch
 add t0s, r1, ra_x
 add t1s, r1, ra_frame_base
@@ -207,7 +210,7 @@ add t1s, r1, ra_frame_base
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 ::mc_filter_uv
-mov ra30, unif
+mov ra_link, unif
 
 # per-channel shifts were calculated on the *previous* invocation
 
@@ -324,7 +327,7 @@ max vpm, r1, 0         # Delay 3
 
 # DMA out for U & stash for V
   mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
-  bra -, ra30
+  bra -, ra_link
   mov vw_setup, rb29    ; mov ra10, rb29 # Stride
   mov vw_addr, unif     # u_dst_addr
   mov ra11, unif        # v_dst_addr
@@ -506,7 +509,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   mov.setf -, ra9       ; mov -, vw_wait  # Delayed V DMA
   brr.anyz -, r:uv_filter_b_1
 
-mov ra30, unif
+mov ra_link, unif
 
 # per-channel shifts were calculated on the *previous* invocation
 
@@ -614,7 +617,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # DMA out for U & stash for V
 
   mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
-  bra -, ra30
+  bra -, ra_link
   mov vw_setup, rb29    ; mov ra10, rb29 # Stride
   mov vw_addr, unif     # u_dst_addr
   mov ra11, unif        # v_dst_addr
@@ -642,18 +645,16 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 :exit_c_1
 
 ::mc_exit
-mov  -, vw_wait # wait on the VDW
+  ldtmu0
+  ldtmu1
+  ldtmu0
+  mov  -, vw_wait ; nop ; ldtmu1 # wait on the VDW
 
-mov -,srel(0)
+  mov -,srel(0)
 
-ldtmu0
-ldtmu1
-ldtmu0
-ldtmu1
-
-nop        ; nop ; thrend
-nop        ; nop # delay slot 1
-nop        ; nop # delay slot 2
+  nop        ; nop ; thrend
+  nop        ; nop # delay slot 1
+  nop        ; nop # delay slot 2
 
 # mc_interrupt_exit8()
 #::mc_interrupt_exit8
@@ -769,7 +770,7 @@ nop        ; nop # delay slot 2
 # P and B blocks share the same setup code to save on Icache space
 :per_block_setup
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-  mov ra30, unif
+  mov ra_link, unif
 
   mov ra1, unif  ; mov r1, elem_num  # y_x ; elem_num has implicit unpack??
 
@@ -857,12 +858,12 @@ nop        ; nop # delay slot 2
   mov rb6, ra3.8c
   mov.ifnz ra5, ra18
 
-  bra -, ra30
+  bra -, ra_link
 
   shl r0, ra5.16b, rb13      # Offset calc
   asr rb12, r0, 9            # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   mov r3, 0                  ; mov rb7, ra3.8d
-# >>> branch ra30
+# >>> branch ra_link
 #
 # r3 = 0
 # ra18.16a = weight L1
@@ -1100,23 +1101,10 @@ nop        ; nop # delay slot 2
 
 # mc_interrupt_exit12()
 ::mc_interrupt_exit12
-  mov  -, vw_wait # wait on the VDW
-
-  # Dummy wait to test instructions
-#  mov r3,1000000
-#:dummy_loop
-#  sub.setf r3, r3, 1
-#  nop
-#  nop
-#  brr.anynn -, r:dummy_loop
-#  nop
-#  nop
-#  nop
-
-  ldtmu0
   ldtmu0
   ldtmu1
-  ldtmu1
+  ldtmu0
+  mov  -, vw_wait ; nop ; ldtmu1  # wait on the VDW
 
   mov -,sacq(0) # 1
   mov -,sacq(0) # 2
