@@ -118,6 +118,11 @@ typedef struct worker_global_env_s
 {
     unsigned int arm_load;
     pthread_mutex_t lock;
+
+    unsigned int arm_y;
+    unsigned int arm_c;
+    unsigned int gpu_y;
+    unsigned int gpu_c;
 } worker_global_env_t;
 
 static worker_global_env_t worker_global_env =
@@ -134,27 +139,33 @@ static void worker_core(HEVCContext * const s)
 
     pthread_mutex_lock(&wg->lock);
     {
-#if 1
-        static int z = 0;
         const unsigned int gpu_load = vpu_qpu_current_load();
-
-        int qpu_chroma = (gpu_load < 8);
+        static int z = 0;
+#if 1
         int qpu_luma = (gpu_load < 6 && wg->arm_load >= 9);
+        int qpu_chroma = ((!qpu_luma && gpu_load < 8) || wg->arm_load >= 12);
 #else
         int qpu_chroma = 1;
-        int qpu_luma = 0;
+        int qpu_luma = 1;
 #endif
         arm_cost = (qpu_chroma ? 0 : 2) + (qpu_luma ? 0 : 3);
         wg->arm_load += arm_cost;
 
+        wg->gpu_c += qpu_chroma;
+        wg->gpu_y += qpu_luma;
+        wg->arm_c += !qpu_chroma;
+        wg->arm_y += !qpu_luma;
+
+
         if (++z > 1024) {
             z = 0;
-            printf("Arm load=%d, GPU=%d   \n", wg->arm_load, gpu_load);
+            printf("Arm load=%d, GPU=%d, chroma=%d/%d, luma=%d/%d    \n", wg->arm_load, gpu_load, wg->gpu_c, wg->arm_c, wg->gpu_y, wg->arm_y);
         }
 
         rpi_launch_vpu_qpu(s, qpu_luma, qpu_chroma, &sync);
 
         pthread_mutex_unlock(&wg->lock);
+
 
         // Perform inter prediction
         rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
@@ -348,6 +359,8 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     int job;
 
     av_assert0(sps);
+//    s->max_ctu_count = sps->ctb_width;
+//    printf("CTB with=%d\n", sps->ctb_width);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
     s->ctu_per_y_chan = s->max_ctu_count / QPU_N_Y;
     s->ctu_per_uv_chan = s->max_ctu_count / QPU_N_UV;
@@ -4006,13 +4019,15 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
           if ( s->ctu_count >= s->max_ctu_count ) {
 #ifdef RPI_WORKER
-            if (s->used_for_ref) {
+            if (s->used_for_ref)
+            {
 //              printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
 
                 worker_wait(s);
               // Split work load onto separate threads so we make as rapid progress as possible with this frame
               // Pass on this job to worker thread
               worker_submit_job(s);
+
               // Make sure we have space to prepare the next job
               worker_pass0_ready(s);
 
