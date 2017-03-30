@@ -3214,16 +3214,17 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
 }
 
 #ifdef RPI
-static void rpi_execute_dblk_cmds(HEVCContext *s)
+static void rpi_execute_dblk_cmds(HEVCContext *s, const int do_luma, const int do_chroma)
 {
     int n;
     int job = s->pass1_job;
     int ctb_size    = 1 << s->ps.sps->log2_ctb_size;
     int (*p)[2] = s->dblk_cmds[job];
     for(n = s->num_dblk_cmds[job]; n>0 ;n--,p++) {
-        ff_hevc_hls_filters(s, (*p)[0], (*p)[1], ctb_size);
+        ff_hevc_hls_filters(s, (*p)[0], (*p)[1], ctb_size, do_luma, do_chroma);
     }
-    s->num_dblk_cmds[job] = 0;
+    if (do_luma)
+        s->num_dblk_cmds[job] = 0;
 }
 
 #if 0
@@ -3257,7 +3258,7 @@ static void rpi_execute_transform(HEVCContext *s)
 
 // I-pred, transform_and_add for all blocks types done here
 // All ARM
-static void rpi_execute_pred_cmds(HEVCContext *s)
+static void rpi_execute_pred_cmds(HEVCContext * const s, const int do_chroma)
 {
   int i;
   int job = s->pass1_job;
@@ -3270,6 +3271,10 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
 
   for(i = s->num_pred_cmds[job]; i > 0; i--, cmd++) {
       //printf("i=%d cmd=%p job1=%d job0=%d\n",i,cmd,s->pass1_job,s->pass0_job);
+      if ((cmd->c_idx != 0) != do_chroma) {
+          continue;
+      }
+
       switch (cmd->type)
       {
           case RPI_PRED_INTRA:
@@ -3298,7 +3303,9 @@ static void rpi_execute_pred_cmds(HEVCContext *s)
               abort();
       }
   }
-  s->num_pred_cmds[job] = 0;
+  if (!do_chroma) {
+      s->num_pred_cmds[job] = 0;
+  }
 }
 
 // Do any inter-pred that we want to do in software
@@ -3754,6 +3761,7 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 #endif
 
 #ifdef RPI
+
 static void rpi_launch_vpu_qpu(HEVCContext * const s,
                                const int qpu_luma, const int qpu_chroma,
                                vpu_qpu_wait_h * const wait_h)
@@ -3861,41 +3869,135 @@ static void worker_core(HEVCContext * const s)
 {
     worker_global_env_t * const wg = &worker_global_env;
     unsigned int arm_cost = 0;
-    vpu_qpu_wait_h sync;
+    vpu_qpu_wait_h sync_c;
+    vpu_qpu_wait_h sync_y;
+    int qpu_luma = 0;
+    int qpu_chroma = 0;
+    unsigned int gpu_load;
+    static int z = 0;
 
+    const int job = s->pass1_job;
+    unsigned int flush_start = 0;
+    unsigned int flush_count = 0;
+
+    const vpu_qpu_job_h vqj = vpu_qpu_job_new();
+    rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
+
+    if (s->num_coeffs[job][3] + s->num_coeffs[job][2] != 0) {
+        vpu_qpu_job_add_vpu(vqj,
+            vpu_get_fn(),
+            vpu_get_constants(),
+            s->coeffs_buf_vc[job][2],
+            s->num_coeffs[job][2] >> 8,
+            s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
+            s->num_coeffs[job][3] >> 10,
+            0);
+
+        rpi_cache_flush_add_gm_ptr(rfe, s->coeffs_buf_accelerated + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+    }
+
+
+#if RPI_INTER
     pthread_mutex_lock(&wg->lock);
-    {
-        const unsigned int gpu_load = vpu_qpu_current_load();
-        static int z = 0;
-#if 1
-        int qpu_luma = (gpu_load < 6 && wg->arm_load >= 9);
-        int qpu_chroma = ((!qpu_luma && gpu_load < 8) || wg->arm_load >= 12);
+
+    ++z;
+    gpu_load = vpu_qpu_current_load();
+#if 0
+    qpu_luma = (gpu_load < 4);
+    qpu_chroma = (gpu_load < 8);
 #else
-        int qpu_chroma = (z & 2) != 0;
-        int qpu_luma = (z & 1) != 0;
+    qpu_chroma = 1;
+    qpu_luma = 1;
 #endif
-        arm_cost = (qpu_chroma ? 0 : 2) + (qpu_luma ? 0 : 3);
-        wg->arm_load += arm_cost;
 
-        wg->gpu_c += qpu_chroma;
-        wg->gpu_y += qpu_luma;
-        wg->arm_c += !qpu_chroma;
-        wg->arm_y += !qpu_luma;
+    arm_cost = (qpu_chroma ? 0 : 2) + (qpu_luma ? 0 : 3);
+    wg->arm_load += arm_cost;
+
+    wg->gpu_c += qpu_chroma;
+    wg->gpu_y += qpu_luma;
+    wg->arm_c += !qpu_chroma;
+    wg->arm_y += !qpu_luma;
 
 
-        if (++z > 1024) {
-            z = 0;
-            printf("Arm load=%d, GPU=%d, chroma=%d/%d, luma=%d/%d    \n", wg->arm_load, gpu_load, wg->gpu_c, wg->arm_c, wg->gpu_y, wg->arm_y);
+    if ((z & 511) == 0) {
+        printf("Arm load=%d, GPU=%d, chroma=%d/%d, luma=%d/%d    \n", wg->arm_load, gpu_load, wg->gpu_c, wg->arm_c, wg->gpu_y, wg->arm_y);
+    }
+
+
+    {
+        int (*d)[2] = s->dblk_cmds[job];
+        unsigned int high=(*d)[1];
+        int n;
+
+        flush_start = high;
+        for(n = s->num_dblk_cmds[job]; n>0 ;n--,d++) {
+            unsigned int y = (*d)[1];
+            flush_start = FFMIN(flush_start, y);
+            high=FFMAX(high,y);
+        }
+        flush_count = high+(1 << s->ps.sps->log2_ctb_size) - flush_start;
+    }
+
+    if (qpu_chroma && mc_terminate_uv(s, job) != 0)
+    {
+        uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
+        const uint32_t code = qpu_fn(mc_setup_uv);
+        uint32_t * p;
+        unsigned int i;
+        uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
+
+        for (p = mail_uv, i = 0; i != QPU_N_UV; ++i) {
+            *p++ = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
+            *p++ = code;
         }
 
-        rpi_launch_vpu_qpu(s, qpu_luma, qpu_chroma, &sync);
+        vpu_qpu_job_add_qpu(vqj, QPU_N_UV, 2, mail_uv);
 
-        pthread_mutex_unlock(&wg->lock);
-
-
-        // Perform inter prediction
-        rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
+#if RPI_CACHE_UNIF_MVS
+        rpi_cache_flush_add_gm_ptr(rfe, s->unif_mvs_ptr + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+#endif
+        rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+          flush_start, flush_count, s->ps.sps->vshift[1], 0, 1);
     }
+
+    vpu_qpu_job_add_sync_this(vqj, &sync_c);
+
+    if (qpu_luma && mc_terminate_y(s, job) != 0)
+    {
+        uint32_t * const y_unif_vc = (uint32_t *)s->y_unif_mvs_ptr[job].vc;
+        const uint32_t code = qpu_fn(mc_setup);
+        uint32_t * p;
+        unsigned int i;
+        uint32_t mail_y[QPU_N_Y * QPU_MAIL_EL_VALS];
+
+        for (p = mail_y, i = 0; i != QPU_N_Y; ++i) {
+            *p++ = (uint32_t)(y_unif_vc + (s->y_mvs_base[job][i] - (uint32_t*)s->y_unif_mvs_ptr[job].arm));
+            *p++ = code;
+        }
+
+        vpu_qpu_job_add_qpu(vqj, QPU_N_Y, 3, mail_y);
+
+#if RPI_CACHE_UNIF_MVS
+        rpi_cache_flush_add_gm_ptr(rfe, s->y_unif_mvs_ptr + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+#endif
+        rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+          flush_start, flush_count, s->ps.sps->vshift[1], 1, 0);
+    }
+
+    pthread_mutex_unlock(&wg->lock);
+
+#endif
+
+    vpu_qpu_job_add_sync_this(vqj, &sync_y);
+
+    // Having accumulated some commands - do them
+    rpi_cache_flush_finish(rfe);
+    vpu_qpu_job_finish(vqj);
+
+    memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));  //???? Surely we haven't done the smaller
+
+    // Perform inter prediction
+    rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
 
     if (arm_cost != 0) {
         pthread_mutex_lock(&wg->lock);
@@ -3904,12 +4006,16 @@ static void worker_core(HEVCContext * const s)
     }
 
     // Wait for transform completion
-    vpu_qpu_wait(&sync);
 
     // Perform intra prediction and residual reconstruction
-    rpi_execute_pred_cmds(s);
+    vpu_qpu_wait(&sync_c);
+    rpi_execute_pred_cmds(s, 1);
+    rpi_execute_dblk_cmds(s, 0, 1);
+    vpu_qpu_wait(&sync_y);
+    rpi_execute_pred_cmds(s, 0);
+
     // Perform deblocking for CTBs in this row
-    rpi_execute_dblk_cmds(s);
+    rpi_execute_dblk_cmds(s, 1, 0);
 }
 
 static void rpi_do_all_passes(HEVCContext *s)
@@ -4044,7 +4150,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         if (s->enable_rpi)
             continue;
 #endif
-        ff_hevc_hls_filters(s, x_ctb, y_ctb, ctb_size);
+        ff_hevc_hls_filters(s, x_ctb, y_ctb, ctb_size, 1, 1);
     }
 
 #ifdef RPI
@@ -4065,7 +4171,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
     if (x_ctb + ctb_size >= s->ps.sps->width &&
         y_ctb + ctb_size >= s->ps.sps->height)
-        ff_hevc_hls_filter(s, x_ctb, y_ctb, ctb_size);
+        ff_hevc_hls_filter(s, x_ctb, y_ctb, ctb_size, 1, 1);
 
     return ctb_addr_ts;
 }
@@ -4138,7 +4244,7 @@ static int hls_decode_entry_wpp(AVCodecContext *avctxt, void *input_ctb_row, int
 
         ff_hevc_save_states(s, ctb_addr_ts);
         ff_thread_report_progress2(s->avctx, ctb_row, thread, 1);
-        ff_hevc_hls_filters(s, x_ctb, y_ctb, ctb_size);
+        ff_hevc_hls_filters(s, x_ctb, y_ctb, ctb_size, 1, 1);
 
         if (!more_data && (x_ctb+ctb_size) < s->ps.sps->width && ctb_row != s->sh.num_entry_point_offsets) {
             avpriv_atomic_int_set(&s1->wpp_err,  1);
@@ -4147,7 +4253,7 @@ static int hls_decode_entry_wpp(AVCodecContext *avctxt, void *input_ctb_row, int
         }
 
         if ((x_ctb+ctb_size) >= s->ps.sps->width && (y_ctb+ctb_size) >= s->ps.sps->height ) {
-            ff_hevc_hls_filter(s, x_ctb, y_ctb, ctb_size);
+            ff_hevc_hls_filter(s, x_ctb, y_ctb, ctb_size, 1, 1);
             ff_thread_report_progress2(s->avctx, ctb_row , thread, SHIFT_CTB_WPP);
             return ctb_addr_ts;
         }

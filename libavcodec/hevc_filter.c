@@ -254,7 +254,7 @@ static void restore_tqb_pixels(HEVCContext *s,
 
 #define CTB(tab, x, y) ((tab)[(y) * s->ps.sps->ctb_width + (x)])
 
-static void sao_filter_CTB(HEVCContext *s, int x, int y)
+static void sao_filter_CTB(HEVCContext *s, int x, int y, const int do_luma, const int do_chroma)
 {
     static const uint8_t sao_tab[8] = { 0, 1, 2, 2, 3, 3, 4, 4 };
     HEVCLocalContext *lc = s->HEVClc;
@@ -318,7 +318,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         }
     }
 
-    for (c_idx = 0; c_idx < (s->ps.sps->chroma_format_idc ? 3 : 1); c_idx++) {
+    for (c_idx = do_luma ? 0 : 1; c_idx < ((do_chroma && s->ps.sps->chroma_format_idc) ? 3 : 1); c_idx++) {
         int x0       = x >> s->ps.sps->hshift[c_idx];
         int y0       = y >> s->ps.sps->vshift[c_idx];
         int stride_src = s->frame->linesize[c_idx];
@@ -488,7 +488,7 @@ static int get_pcm(HEVCContext *s, int x, int y)
                     (tc_offset >> 1 << 1),                              \
                     0, MAX_QP + DEFAULT_INTRA_TC_OFFSET)]
 
-static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
+static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0, const int do_luma, const int do_chroma)
 {
     uint8_t *src;
     int x, y;
@@ -540,6 +540,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     x_end2 = x_end;
     if (x_end2 != s->ps.sps->width)
         x_end2 -= 8;
+
+    if (do_luma) {
     for (y = y0; y < y_end; y += 8) {
         // vertical filtering luma
         for (x = x0 ? x0 : 8; x < x_end; x += 8) {
@@ -625,9 +627,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                        beta, tc, no_p, no_q);
             }
         }
-    }
+    }}
 
-    if (s->ps.sps->chroma_format_idc) {
+    if (do_chroma && s->ps.sps->chroma_format_idc) {
         for (chroma = 1; chroma <= 2; chroma++) {
             int h = 1 << s->ps.sps->hshift[chroma];
             int v = 1 << s->ps.sps->vshift[chroma];
@@ -949,14 +951,14 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 
 #endif
 
-void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
+void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size, int do_luma, int do_chroma)
 {
     int x_end = x >= s->ps.sps->width  - ctb_size;
 #ifdef RPI_DEBLOCK_VPU
     int done_deblock = 0;
 #endif
     if (s->avctx->skip_loop_filter < AVDISCARD_ALL)
-        deblocking_filter_CTB(s, x, y);
+        deblocking_filter_CTB(s, x, y, do_luma, do_chroma);
 #ifdef RPI_DEBLOCK_VPU
     if (s->enable_rpi_deblock && x_end)
     {
@@ -973,25 +975,27 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
     if (s->ps.sps->sao_enabled) {
         int y_end = y >= s->ps.sps->height - ctb_size;
         if (y && x)
-            sao_filter_CTB(s, x - ctb_size, y - ctb_size);
+            sao_filter_CTB(s, x - ctb_size, y - ctb_size, do_luma, do_chroma);
         if (x && y_end)
-            sao_filter_CTB(s, x - ctb_size, y);
+            sao_filter_CTB(s, x - ctb_size, y, do_luma, do_chroma);
         if (y && x_end) {
-            sao_filter_CTB(s, x, y - ctb_size);
+            sao_filter_CTB(s, x, y - ctb_size, do_luma, do_chroma);
             if (s->threads_type == FF_THREAD_FRAME ) {
 #if RPI_INTER
                 rpi_flush_ref_frame_progress(s,&s->ref->tf, y);
 #endif
-                ff_thread_report_progress(&s->ref->tf, y, 0);
+                if (do_luma)
+                    ff_thread_report_progress(&s->ref->tf, y, 0);
             }
         }
         if (x_end && y_end) {
-            sao_filter_CTB(s, x , y);
+            sao_filter_CTB(s, x , y, do_luma, do_chroma);
             if (s->threads_type == FF_THREAD_FRAME ) {
 #if RPI_INTER
                 rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size);
 #endif
-                ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
+                if (do_luma)
+                    ff_thread_report_progress(&s->ref->tf, y + ctb_size, 0);
             }
         }
     } else if (s->threads_type == FF_THREAD_FRAME && x_end) {
@@ -1008,26 +1012,28 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
 #if RPI_INTER
           rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
 #endif
-          ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
+          if (do_luma)
+              ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
         }
 #else
 #if RPI_INTER
         rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
         // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
 #endif
-        ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
+        if (do_luma)
+            ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
 #endif
     }
 }
 
-void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size)
+void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size, int do_luma, int do_chroma)
 {
     int x_end = x_ctb >= s->ps.sps->width  - ctb_size;
     int y_end = y_ctb >= s->ps.sps->height - ctb_size;
     if (y_ctb && x_ctb)
-        ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb - ctb_size, ctb_size);
+        ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb - ctb_size, ctb_size, do_luma, do_chroma);
     if (y_ctb && x_end)
-        ff_hevc_hls_filter(s, x_ctb, y_ctb - ctb_size, ctb_size);
+        ff_hevc_hls_filter(s, x_ctb, y_ctb - ctb_size, ctb_size, do_luma, do_chroma);
     if (x_ctb && y_end)
-        ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb, ctb_size);
+        ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb, ctb_size, do_luma, do_chroma);
 }

@@ -642,7 +642,7 @@ static void vq_wait_post(vq_wait_t * const wait)
 #define VPU_QPU_MASK_QPU  1
 #define VPU_QPU_MASK_VPU  2
 
-#define VPU_QPU_JOB_MAX 4
+#define VPU_QPU_JOB_MAX 6
 struct vpu_qpu_job_env_s
 {
   unsigned int n;

@@ -1252,8 +1252,8 @@ int ff_hevc_cu_qp_delta_sign_flag(HEVCContext *s);
 int ff_hevc_cu_qp_delta_abs(HEVCContext *s);
 int ff_hevc_cu_chroma_qp_offset_flag(HEVCContext *s);
 int ff_hevc_cu_chroma_qp_offset_idx(HEVCContext *s);
-void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size);
-void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size);
+void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size, int do_luma, int do_chroma);
+void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size, int do_luma, int do_chroma);
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                  int log2_trafo_size, enum ScanType scan_idx,
                                  int c_idx);
