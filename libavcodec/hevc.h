@@ -850,22 +850,22 @@ typedef struct HEVCLocalContext {
 
 // Command for inter prediction
 typedef struct HEVCMvCmd {
-    int cmd;
-    uint8_t *dst;
-    ptrdiff_t dststride;
-    uint8_t *src;
-    ptrdiff_t srcstride;
-    Mv mv;
-    int x_off;
-    int y_off;
-    int block_w;
-    int block_h;
-    int weight;
-    int offset;
-    uint8_t *src1;
-    ptrdiff_t srcstride1;
-    Mv mv1;
+    uint8_t cmd;
+    uint8_t block_w;
+    uint8_t block_h;
     int8_t ref_idx[2];
+    uint16_t dststride;
+    uint16_t srcstride;
+    uint16_t srcstride1;
+    int16_t weight;
+    int16_t offset;
+    int16_t x_off;
+    int16_t y_off;
+    uint8_t *src;
+    uint8_t *src1;
+    uint8_t *dst;
+    Mv mv;
+    Mv mv1;
 } HEVCMvCmd;
 
 

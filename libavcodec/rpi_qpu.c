@@ -23,7 +23,7 @@
 #pragma GCC diagnostic pop
 
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
-#define RPI_TRACE_TIME_VPU_QPU_WAIT     1
+#define RPI_TRACE_TIME_VPU_QPU_WAIT     0
 
 // QPU "noflush" flags
 // a mixture of flushing & profiling
