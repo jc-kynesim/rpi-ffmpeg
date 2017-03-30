@@ -168,16 +168,23 @@ struct vpu_qpu_wait_s;
 typedef struct vq_wait_s * vpu_qpu_wait_h;
 
 // VPU specific functions
+
+struct vpu_qpu_job_env_s;
+typedef struct vpu_qpu_job_env_s * vpu_qpu_job_h;
+
+vpu_qpu_job_h vpu_qpu_job_new(void);
+void vpu_qpu_job_delete(const vpu_qpu_job_h vqj);
+void vpu_qpu_job_add_vpu(const vpu_qpu_job_h vqj, const uint32_t vpu_code,
+  const unsigned r0, const unsigned r1, const unsigned r2, const unsigned r3, const unsigned r4, const unsigned r5);
+void vpu_qpu_job_add_qpu(const vpu_qpu_job_h vqj, const unsigned int n, const unsigned int cost, const uint32_t * const mail);
+void vpu_qpu_job_add_sync_this(const vpu_qpu_job_h vqj, vpu_qpu_wait_h * const wait_h);
+int vpu_qpu_job_start(const vpu_qpu_job_h vqj);
+int vpu_qpu_job_finish(const vpu_qpu_job_h vqj);
+
+
 extern unsigned int vpu_get_fn(void);
 extern unsigned int vpu_get_constants(void);
-// Packaged code poster.
-// If vpu_code == 0 then no vpu code will be posted
-// If qpuX_n == 0 then no qpu code will be posted
-// If wait_h == NULL then no sync will be requested
-int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
-    int qpu0_n, const uint32_t * qpu0_mail,
-    int qpu1_n, const uint32_t * qpu1_mail,
-    vpu_qpu_wait_h * const wait_h);
+
 // Waits for previous post_codee to complete and Will null out *wait_h after use
 void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h);
 unsigned int vpu_qpu_current_load(void);

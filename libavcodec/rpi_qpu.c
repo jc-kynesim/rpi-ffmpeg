@@ -432,7 +432,7 @@ void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe)
 
 int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
 {
-    int rc = vcsm_clean_invalid(&rfe->a);
+    int rc = (rfe->n == 0) ? 0 : vcsm_clean_invalid(&rfe->a);
 
     free(rfe);
 
@@ -643,21 +643,23 @@ static void vq_wait_post(vq_wait_t * const wait)
 #define VPU_QPU_MASK_VPU  2
 
 #define VPU_QPU_JOB_MAX 4
-typedef struct vpu_qpu_job_env_s
+struct vpu_qpu_job_env_s
 {
   unsigned int n;
   unsigned int mask;
   unsigned int cost;
   struct gpu_job_s j[VPU_QPU_JOB_MAX];
-} vpu_qpu_job_env_t;
+};
 
-static vpu_qpu_job_env_t * vpu_qpu_job_new(void)
+typedef struct vpu_qpu_job_env_s vpu_qpu_job_env_t;
+
+vpu_qpu_job_env_t * vpu_qpu_job_new(void)
 {
   vpu_qpu_job_env_t * vqj = calloc(1, sizeof(vpu_qpu_job_env_t));
   return vqj;
 }
 
-static void vpu_qpu_job_delete(vpu_qpu_job_env_t * const vqj)
+void vpu_qpu_job_delete(vpu_qpu_job_env_t * const vqj)
 {
   memset(vqj, 0, sizeof(*vqj));
   free(vqj);
@@ -670,7 +672,7 @@ static inline struct gpu_job_s * new_job(vpu_qpu_job_env_t * const vqj)
   return j;
 }
 
-static void vpu_qpu_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_code,
+void vpu_qpu_job_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_code,
   const unsigned r0, const unsigned r1, const unsigned r2, const unsigned r3, const unsigned r4, const unsigned r5)
 {
   if (vpu_code != 0) {
@@ -689,7 +691,7 @@ static void vpu_qpu_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_co
 }
 
 // flags are QPU_FLAGS_xxx
-static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t flags, const unsigned int cost, const uint32_t * const mail)
+void vpu_qpu_job_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const unsigned int cost, const uint32_t * const mail)
 {
   if (n != 0) {
     struct gpu_job_s *const j = new_job(vqj);
@@ -698,18 +700,19 @@ static void vpu_qpu_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n,
 
     j->command = EXECUTE_QPU;
     j->u.q.jobs = n;
-    j->u.q.noflush = flags;
+    j->u.q.noflush = QPU_FLAGS_NO_FLUSH_VPU;
     j->u.q.timeout = 5000;
     memcpy(j->u.q.control, mail, n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
   }
 }
 
-static void vpu_qpu_callback_wait(void * v)
+// Convert callback to sem post
+static void vpu_qpu_job_callback_wait(void * v)
 {
   vq_wait_post(v);
 }
 
-static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * const wait_h)
+void vpu_qpu_job_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * const wait_h)
 {
   vq_wait_t * wait;
 
@@ -728,7 +731,7 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h 
     struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
     av_assert0(j->callback.func == 0);
 
-    j->callback.func = vpu_qpu_callback_wait;
+    j->callback.func = vpu_qpu_job_callback_wait;
     j->callback.cookie = wait;
   }
   else
@@ -737,7 +740,7 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h 
 
     j->command = EXECUTE_SYNC;
     j->u.s.mask = vqj->mask;
-    j->callback.func = vpu_qpu_callback_wait;
+    j->callback.func = vpu_qpu_job_callback_wait;
     j->callback.cookie = wait;
   }
 
@@ -746,44 +749,23 @@ static void vpu_qpu_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h 
   *wait_h = wait;
 }
 
-static int vpu_qpu_start(vpu_qpu_job_env_t * const vqj)
+int vpu_qpu_job_start(vpu_qpu_job_env_t * const vqj)
 {
   return vqj->n == 0 ? 0 : vc_gpuserv_execute_code(vqj->n, vqj->j);
+}
+
+// Simple wrapper of start + delete
+int vpu_qpu_job_finish(vpu_qpu_job_env_t * const vqj)
+{
+  int rv;
+  rv = vpu_qpu_job_start(vqj);
+  vpu_qpu_job_delete(vqj);
+  return rv;
 }
 
 unsigned int vpu_qpu_current_load(void)
 {
   return gpu_ptr()->current_load;
-}
-
-int vpu_qpu_post_code2(unsigned vpu_code, unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned r4, unsigned r5,
-    int qpu0_n, const uint32_t * qpu0_mail,
-    int qpu1_n, const uint32_t * qpu1_mail,
-    vpu_qpu_wait_h * const wait_h)
-{
-  vpu_qpu_job_env_t * const vqj = vpu_qpu_job_new();
-
-  uint32_t qpu_flags = QPU_FLAGS_NO_FLUSH_VPU;
-#if 0
-  static int z = 0;
-  if (z == 0) {
-    z = 1;
-    qpu_flags |= QPU_FLAGS_PROF_CLEAR_AND_ENABLE;
-  }
-  else if ((z++ & 7) == 0) {
-    qpu_flags |= QPU_FLAGS_PROF_OUTPUT_COUNTS;
-  }
-#endif
-
-  vpu_qpu_add_vpu(vqj, vpu_code, r0, r1, r2, r3, r4, r5);
-  vpu_qpu_add_qpu(vqj, qpu0_n, QPU_FLAGS_NO_FLUSH_VPU, 2, qpu0_mail);
-  vpu_qpu_add_qpu(vqj, qpu1_n, qpu_flags, 4, qpu1_mail);
-  if (wait_h != NULL)
-    vpu_qpu_add_sync_this(vqj, wait_h);
-  av_assert0(vpu_qpu_start(vqj) == 0);
-  vpu_qpu_job_delete(vqj);
-
-  return 0;
 }
 
 void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h)
@@ -833,358 +815,5 @@ uint32_t qpu_fn(const int * const mc_fn)
 {
   return gpu->code_gm_ptr.vc + ((const char *)mc_fn - (const char *)rpi_shader) + offsetof(struct GPU, qpu_code);
 }
-
-#if 0
-typedef unsigned int uint32_t;
-
-typedef struct mvs_s {
-    GPU_MEM_PTR_T unif_mvs_ptr;
-    uint32_t *unif_mvs; // Base of memory for motion vector commands
-
-    // _base pointers are to the start of the row
-    uint32_t *mvs_base[8];
-    // these pointers are to the next free space
-    uint32_t *u_mvs[8];
-
-} HEVCContext;
-
-#define RPI_CHROMA_COMMAND_WORDS 12
-
-static void rpi_inter_clear(HEVCContext *s)
-{
-    int i;
-    for(i=0;i<8;i++) {
-        s->u_mvs[i] = s->mvs_base[i];
-        *s->u_mvs[i]++ = 0;
-        *s->u_mvs[i]++ = 0;
-        *s->u_mvs[i]++ = 0;
-        *s->u_mvs[i]++ = 0;
-        *s->u_mvs[i]++ = 0;
-        *s->u_mvs[i]++ = 128;  // w
-        *s->u_mvs[i]++ = 128;  // h
-        *s->u_mvs[i]++ = 128;  // stride u
-        *s->u_mvs[i]++ = 128;  // stride v
-        s->u_mvs[i] += 3;  // Padding words
-    }
-}
-
-static void rpi_execute_inter_qpu(HEVCContext *s)
-{
-    int k;
-    uint32_t *unif_vc = (uint32_t *)s->unif_mvs_ptr.vc;
-
-    for(k=0;k<8;k++) {
-        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_EXIT); // Add exit command
-        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+3] = qpu_get_fn(QPU_MC_SETUP); // A dummy texture location (maps to our code) - this is needed as the texture requests are pipelined
-        s->u_mvs[k][-RPI_CHROMA_COMMAND_WORDS+4] = qpu_get_fn(QPU_MC_SETUP); //  dummy location for V
-    }
-
-    s->u_mvs[8-1][-RPI_CHROMA_COMMAND_WORDS] = qpu_get_fn(QPU_MC_INTERRUPT_EXIT8); // This QPU will signal interrupt when all others are done and have acquired a semaphore
-
-    qpu_run_shader8(qpu_get_fn(QPU_MC_SETUP_UV),
-      (uint32_t)(unif_vc+(s->mvs_base[0 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
-      (uint32_t)(unif_vc+(s->mvs_base[1 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
-      (uint32_t)(unif_vc+(s->mvs_base[2 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
-      (uint32_t)(unif_vc+(s->mvs_base[3 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
-      (uint32_t)(unif_vc+(s->mvs_base[4 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
-      (uint32_t)(unif_vc+(s->mvs_base[5 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
-      (uint32_t)(unif_vc+(s->mvs_base[6 ] - (uint32_t*)s->unif_mvs_ptr.arm)),
-      (uint32_t)(unif_vc+(s->mvs_base[7 ] - (uint32_t*)s->unif_mvs_ptr.arm))
-      );
-}
-
-void rpi_test_qpu(void)
-{
-    HEVCContext mvs;
-    HEVCContext *s = &mvs;
-    int i;
-    int uv_commands_per_qpu = (1 + (256*64*2)/(4*4)) * RPI_CHROMA_COMMAND_WORDS;
-    uint32_t *p;
-    printf("Allocate memory\n");
-    gpu_malloc_uncached( 8 * uv_commands_per_qpu * sizeof(uint32_t), &s->unif_mvs_ptr );
-    s->unif_mvs = (uint32_t *) s->unif_mvs_ptr.arm;
-
-    // Set up initial locations for uniform streams
-    p = s->unif_mvs;
-    for(i = 0; i < 8; i++) {
-        s->mvs_base[i] = p;
-        p += uv_commands_per_qpu;
-    }
-    // Now run a simple program that should just quit immediately after a single texture fetch
-    rpi_inter_clear(s);
-    for(i=0;i<4;i++) {
-      printf("Launch QPUs\n");
-      rpi_execute_inter_qpu(s);
-      printf("Done\n");
-    }
-    printf("Free memory\n");
-    gpu_free(&s->unif_mvs_ptr);
-    return;
-}
-#endif
-
-#if 0
-
-int32_t hcoeffs[] = {-4, 10, -21, 70, 90, -24, 11, -4};
-//int32_t hcoeffs[] = {1, 1, 1, 1, 1, 1, 1, 1};
-int32_t vcoeffs[] = {-2, 6, -13, 37, 115, -20, 9, -4};
-//int32_t vcoeffs[] = {1, 1, 1, 1, 1, 1, 1, 1};
-
-#define ENCODE_COEFFS(c0, c1, c2, c3) (((c0-1) & 0xff) | ((c1-1) & 0xff) << 8 | ((c2-1) & 0xff) << 16 | ((c3-1) & 0xff) << 24);
-
-static uint8_t av_clip_uint8(int32_t a)
-{
-    if (a&(~255)) return (-a)>>31;
-    else          return a;
-}
-
-static int32_t filter8(const uint8_t *data, int pitch)
-{
-   int32_t vsum = 0;
-   int x, y;
-
-   for (y = 0; y < 8; y++) {
-      int32_t hsum = 0;
-
-      for (x = 0; x < 8; x++)
-         hsum += hcoeffs[x]*data[x + y * pitch];
-
-      vsum += vcoeffs[y]*av_clip_uint8( (hsum + 64) >> 7); // Added brackets to stop compiler warning
-   }
-
-   return av_clip_uint8( (vsum + 64) >> 7);
-}
-
-// Note regression changes coefficients so is not thread safe
-//#define REGRESSION
-#ifdef REGRESSION
-#define CMAX 100
-#else
-#define CMAX 2
-#endif
-#define YMAX 16
-
-int rpi_test_shader(void)
-{
-   int i, c;
-
-   uint32_t *unifs;
-
-   uint8_t *in_buffer;
-   uint8_t *out_buffer[2];
-
-   GPU_MEM_PTR_T unifs_ptr;
-   GPU_MEM_PTR_T in_buffer_ptr;
-   GPU_MEM_PTR_T out_buffer_ptr[2];
-
-   // Addresses in GPU memory of filter programs
-   uint32_t mc_setup = 0;
-   uint32_t mc_filter = 0;
-   uint32_t mc_exit = 0;
-
-   int pitch = 0x500;
-
-   if (gpu==NULL) {
-      gpu_lock();
-      gpu_unlock();
-   }
-
-   printf("This needs to change to reflect new assembler\n");
-   // Use table to compute locations of program start points
-   mc_setup = code[0] + gpu->vc;
-   mc_filter = code[1] + gpu->vc;
-   mc_exit = code[2] + gpu->vc;
-
-   if (!vcos_verify_ge0(gpu_malloc_uncached(4*64,&unifs_ptr))) {
-      return -2;
-   }
-   unifs = (uint32_t*)unifs_ptr.arm;
-
-   if (!vcos_verify_ge0(gpu_malloc_uncached(64*23,&in_buffer_ptr))) {
-      return -3;
-   }
-   in_buffer = (uint8_t*)in_buffer_ptr.arm;
-
-   if (!vcos_verify_ge0(gpu_malloc_uncached(16*pitch,&out_buffer_ptr[0])) || !vcos_verify_ge0(gpu_malloc_uncached(16*pitch,&out_buffer_ptr[1]))) {
-      return -4;
-   }
-   out_buffer[0] = (uint8_t*)out_buffer_ptr[0].arm;
-   out_buffer[1] = (uint8_t*)out_buffer_ptr[1].arm;
-
-   for (c = 0; c < CMAX; c++) {
-      int xo[] = {rand()&31, rand()&31};
-
-#ifdef REGRESSION
-      for (i = 0; i < 8; i++) {
-         hcoeffs[i] = (int8_t)rand();
-         vcoeffs[i] = (int8_t)rand();
-         if (hcoeffs[i]==-128)
-           hcoeffs[i]++;
-         if (vcoeffs[i]==-128)
-           vcoeffs[i]++;
-      }
-#endif
-
-      for (i = 0; i < 64*23; i++) {
-         //printf("%d %d %p\n",i,gpu->mb,&in_buffer[i]);
-         in_buffer[i] = rand();
-      }
-
-      // Clear output array
-      {
-        int b;
-        for(b=0;b<2;b++) {
-          for(i=0;i<16*16;i++) {
-            out_buffer[b][i] = 3;
-          }
-        }
-      }
-
-      unifs[0] = mc_filter;
-      unifs[1] = in_buffer_ptr.vc+xo[0]+16;
-      unifs[2] = 64; // src pitch
-      unifs[3] = pitch; // dst pitch
-      unifs[4] = 0; // Padding
-      unifs[5] = 0;
-      unifs[6] = 0;
-      unifs[7 ] = mc_filter;
-      unifs[8 ] = in_buffer_ptr.vc+xo[1]+16;
-      unifs[9 ] = ENCODE_COEFFS(hcoeffs[0], hcoeffs[1], hcoeffs[2], hcoeffs[3]);
-      unifs[10] = ENCODE_COEFFS(hcoeffs[4], hcoeffs[5], hcoeffs[6], hcoeffs[7]);
-      unifs[11] = ENCODE_COEFFS(vcoeffs[0], vcoeffs[1], vcoeffs[2], vcoeffs[3]);
-      unifs[12] = ENCODE_COEFFS(vcoeffs[4], vcoeffs[5], vcoeffs[6], vcoeffs[7]);
-      unifs[13] = out_buffer_ptr[0].vc;
-      unifs[14] = mc_exit;
-      unifs[15] = in_buffer_ptr.vc+xo[1]+16;        // dummy
-      unifs[16] = ENCODE_COEFFS(hcoeffs[0], hcoeffs[1], hcoeffs[2], hcoeffs[3]);
-      unifs[17] = ENCODE_COEFFS(hcoeffs[4], hcoeffs[5], hcoeffs[6], hcoeffs[7]);
-      unifs[18] = ENCODE_COEFFS(vcoeffs[0], vcoeffs[1], vcoeffs[2], vcoeffs[3]);
-      unifs[19] = ENCODE_COEFFS(vcoeffs[4], vcoeffs[5], vcoeffs[6], vcoeffs[7]);
-      unifs[20] = out_buffer_ptr[1].vc;
-
-      printf("Gpu->vc=%x Code=%x dst=%x\n",gpu->vc, mc_filter,out_buffer_ptr[1].vc);
-
-      // flush_dcache(); TODO is this needed on ARM side? - tried to use the direct alias to avoid this problem
-
-      //qpu_run_shader(mc_setup, unifs_ptr.vc);
-      //qpu_run_shader(gpu, gpu->vc, unifs_ptr.vc);
-      rpi_do_block(in_buffer_ptr.vc+xo[0]+16, 64, out_buffer_ptr[0].vc, pitch,out_buffer[0]);
-      rpi_do_block(in_buffer_ptr.vc+xo[1]+16, 64, out_buffer_ptr[1].vc, pitch,out_buffer[1]);
-
-      if (1)
-      {
-         int x, y, b;
-         int bad = 0;
-
-         for (b=0; b<2; ++b)
-            for (y=0; y<YMAX; ++y)
-               for (x=0; x<16; ++x) {
-                  int32_t ref = filter8(in_buffer+x+y*64+xo[b], 64);
-
-                  if (out_buffer[b][x+y*pitch] != ref) {
-                      bad = 1;
-//                     printf("%d, %d, %d, %d\n", c, b, x, y);
-                  }
-#ifndef REGRESSION
-                  //printf("%08x %08x\n", out_buffer[b][x+y*pitch], ref);
-#endif
-               }
-          if (bad)
-            printf("Failed dst=%x test=%d\n",out_buffer_ptr[1].vc,c);
-          else
-            printf("Passed dst=%x test=%d\n",out_buffer_ptr[1].vc,c);
-      }
-      //printf("%d\n", simpenrose_get_qpu_tick_count());
-   }
-
-   gpu_free(&out_buffer_ptr[0]);
-   gpu_free(&out_buffer_ptr[1]);
-   gpu_free(&in_buffer_ptr);
-   gpu_free(&unifs_ptr);
-
-   return 0;
-}
-
-void rpi_do_block_arm(const uint8_t *in_buffer, int src_pitch, uint8_t *dst, int dst_pitch)
-{
-  int x,y;
-  for (y=0; y<16; ++y) {
-    for (x=0; x<16; ++x) {
-       dst[x+y*dst_pitch] = filter8(in_buffer+x+y*src_pitch, src_pitch);
-    }
-  }
-}
-
-void rpi_do_block(const uint8_t *in_buffer_vc, int src_pitch, uint8_t *dst_vc, int dst_pitch, uint8_t *dst)
-{
-   uint32_t *unifs;
-
-   GPU_MEM_PTR_T unifs_ptr;
-   //uint8_t *out_buffer;
-   //GPU_MEM_PTR_T out_buffer_ptr;
-
-   // Addresses in GPU memory of filter programs
-   uint32_t mc_setup = 0;
-   uint32_t mc_filter = 0;
-   uint32_t mc_exit = 0;
-   //int x,y;
-
-   if (gpu==NULL) {
-      gpu_lock();
-      gpu_unlock();
-   }
-
-   // Use table to compute locations of program start points
-   mc_setup = code[0] + gpu->vc;
-   mc_filter = code[1] + gpu->vc;
-   mc_exit = code[2] + gpu->vc;
-
-   if (!vcos_verify_ge0(gpu_malloc_uncached(4*64,&unifs_ptr))) {
-      return;
-   }
-   //gpu_malloc_uncached(16*dst_pitch,&out_buffer_ptr);
-   //out_buffer = (uint8_t*)out_buffer_ptr.arm;
-
-   /*for (y=0; y<16; ++y) {
-      for (x=0; x<16; ++x) {
-         out_buffer[x+y*dst_pitch] = 7;
-      }
-    }*/
-
-   unifs = (uint32_t*)unifs_ptr.arm;
-
-    unifs[0] = mc_filter;
-    unifs[1] = (int)in_buffer_vc;
-    unifs[2] = src_pitch; // src pitch
-    unifs[3] = dst_pitch; // dst pitch
-    unifs[4] = 0; // Padding
-    unifs[5] = 0;
-    unifs[6] = 0;
-    unifs[7 ] = mc_exit;
-    unifs[8 ] = (int)in_buffer_vc;
-    unifs[9 ] = ENCODE_COEFFS(hcoeffs[0], hcoeffs[1], hcoeffs[2], hcoeffs[3]);
-    unifs[10] = ENCODE_COEFFS(hcoeffs[4], hcoeffs[5], hcoeffs[6], hcoeffs[7]);
-    unifs[11] = ENCODE_COEFFS(vcoeffs[0], vcoeffs[1], vcoeffs[2], vcoeffs[3]);
-    unifs[12] = ENCODE_COEFFS(vcoeffs[4], vcoeffs[5], vcoeffs[6], vcoeffs[7]);
-    unifs[13] = (int)dst_vc;
-    //unifs[13] = (int)out_buffer_ptr.vc;
-
-    //printf("Gpu->vc=%x Code=%x dst=%x\n",gpu->vc, mc_filter,out_buffer_ptr[1].vc);
-
-    qpu_run_shader(mc_setup, unifs_ptr.vc);
-
-    /*for (y=0; y<16; ++y) {
-      for (x=0; x<16; ++x) {
-         dst[x+y*dst_pitch] = out_buffer[x+y*dst_pitch];
-      }
-    }*/
-
-    gpu_free(&unifs_ptr);
-    //gpu_free(&out_buffer_ptr);
-}
-
-
-
-#endif
 
 #endif // RPI

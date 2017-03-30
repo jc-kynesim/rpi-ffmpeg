@@ -54,14 +54,7 @@
     #include "pthread.h"
   #endif
 
-  static void rpi_execute_dblk_cmds(HEVCContext *s);
-//  static void rpi_execute_transform(HEVCContext *s);
-  static void rpi_launch_vpu_qpu(HEVCContext *s, const int qpu_luma, const int qpu_chroma, vpu_qpu_wait_h * const sem);
-  static void rpi_execute_pred_cmds(HEVCContext *s);
-  static void rpi_execute_inter_cmds(HEVCContext *s, const int qpu_luma, const int qpu_chroma);
-  static void rpi_begin(HEVCContext *s);
-  static void flush_frame(HEVCContext *s,AVFrame *frame);
-  static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2, int job);
+  static void worker_core(HEVCContext * const s);
 #endif
 
 // #define DISABLE_MC
@@ -112,7 +105,7 @@ static const uint32_t rpi_filter_coefs[8] = {
 #endif
 
 
-#ifdef RPI
+#ifdef RPI_WORKER
 
 typedef struct worker_global_env_s
 {
@@ -130,64 +123,6 @@ static worker_global_env_t worker_global_env =
     .lock = PTHREAD_MUTEX_INITIALIZER
 };
 
-// Core execution tasks
-static void worker_core(HEVCContext * const s)
-{
-    worker_global_env_t * const wg = &worker_global_env;
-    unsigned int arm_cost = 0;
-    vpu_qpu_wait_h sync;
-
-    pthread_mutex_lock(&wg->lock);
-    {
-        const unsigned int gpu_load = vpu_qpu_current_load();
-        static int z = 0;
-#if 1
-        int qpu_luma = (gpu_load < 6 && wg->arm_load >= 9);
-        int qpu_chroma = ((!qpu_luma && gpu_load < 8) || wg->arm_load >= 12);
-#else
-        int qpu_chroma = 1;
-        int qpu_luma = 1;
-#endif
-        arm_cost = (qpu_chroma ? 0 : 2) + (qpu_luma ? 0 : 3);
-        wg->arm_load += arm_cost;
-
-        wg->gpu_c += qpu_chroma;
-        wg->gpu_y += qpu_luma;
-        wg->arm_c += !qpu_chroma;
-        wg->arm_y += !qpu_luma;
-
-
-        if (++z > 1024) {
-            z = 0;
-            printf("Arm load=%d, GPU=%d, chroma=%d/%d, luma=%d/%d    \n", wg->arm_load, gpu_load, wg->gpu_c, wg->arm_c, wg->gpu_y, wg->arm_y);
-        }
-
-        rpi_launch_vpu_qpu(s, qpu_luma, qpu_chroma, &sync);
-
-        pthread_mutex_unlock(&wg->lock);
-
-
-        // Perform inter prediction
-        rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
-    }
-
-    if (arm_cost != 0) {
-        pthread_mutex_lock(&wg->lock);
-        wg->arm_load -= arm_cost;
-        pthread_mutex_unlock(&wg->lock);
-    }
-
-    // Wait for transform completion
-    vpu_qpu_wait(&sync);
-
-    // Perform intra prediction and residual reconstruction
-    rpi_execute_pred_cmds(s);
-    // Perform deblocking for CTBs in this row
-    rpi_execute_dblk_cmds(s);
-}
-#endif
-
-#ifdef RPI_WORKER
 
 //#define LOG_ENTER printf("Enter %s: p0=%d p1=%d (%d jobs) %p\n", __func__,s->pass0_job,s->pass1_job,s->worker_tail-s->worker_head,s);
 //#define LOG_EXIT printf("Exit %s: p0=%d p1=%d (%d jobs) %p\n", __func__,s->pass0_job,s->pass1_job,s->worker_tail-s->worker_head,s);
@@ -3430,14 +3365,6 @@ static void rpi_execute_inter_cmds(HEVCContext *s, const int qpu_luma, const int
     s->num_mv_cmds_c[job] = 0;
 }
 
-static void rpi_do_all_passes(HEVCContext *s)
-{
-    // Do the various passes - common with the worker code
-    worker_core(s);
-    // Prepare next batch
-    rpi_begin(s);
-}
-
 #endif
 
 #ifdef RPI
@@ -3832,24 +3759,60 @@ static void rpi_launch_vpu_qpu(HEVCContext * const s,
                                vpu_qpu_wait_h * const wait_h)
 {
     const int job = s->pass1_job;
-    uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
-    unsigned int n_uv = 0;
-    uint32_t mail_y[QPU_N_Y * QPU_MAIL_EL_VALS];
-    unsigned int n_y = 0;
+    unsigned int flush_start = 0;
+    unsigned int flush_count = 0;
+
+    const vpu_qpu_job_h vqj = vpu_qpu_job_new();
+    rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
+
+    if (s->num_coeffs[job][3] + s->num_coeffs[job][2] != 0) {
+        vpu_qpu_job_add_vpu(vqj,
+            vpu_get_fn(),
+            vpu_get_constants(),
+            s->coeffs_buf_vc[job][2],
+            s->num_coeffs[job][2] >> 8,
+            s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
+            s->num_coeffs[job][3] >> 10,
+            0);
+
+        rpi_cache_flush_add_gm_ptr(rfe, s->coeffs_buf_accelerated + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+    }
 
 #if RPI_INTER
+    {
+        int (*d)[2] = s->dblk_cmds[job];
+        unsigned int high=(*d)[1];
+        int n;
+
+        flush_start = high;
+        for(n = s->num_dblk_cmds[job]; n>0 ;n--,d++) {
+            unsigned int y = (*d)[1];
+            flush_start = FFMIN(flush_start, y);
+            high=FFMAX(high,y);
+        }
+        flush_count = high+(1 << s->ps.sps->log2_ctb_size) - flush_start;
+    }
+
     if (qpu_chroma && mc_terminate_uv(s, job) != 0)
     {
         uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
         const uint32_t code = qpu_fn(mc_setup_uv);
         uint32_t * p;
         unsigned int i;
+        uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
 
         for (p = mail_uv, i = 0; i != QPU_N_UV; ++i) {
             *p++ = (uint32_t)(unif_vc + (s->mvs_base[job][i] - (uint32_t*)s->unif_mvs_ptr[job].arm));
             *p++ = code;
-            ++n_uv;
         }
+
+        vpu_qpu_job_add_qpu(vqj, QPU_N_UV, 2, mail_uv);
+
+#if RPI_CACHE_UNIF_MVS
+        rpi_cache_flush_add_gm_ptr(rfe, s->unif_mvs_ptr + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+#endif
+        rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+          flush_start, flush_count, s->ps.sps->vshift[1], 0, 1);
     }
 
     if (qpu_luma && mc_terminate_y(s, job) != 0)
@@ -3858,52 +3821,32 @@ static void rpi_launch_vpu_qpu(HEVCContext * const s,
         const uint32_t code = qpu_fn(mc_setup);
         uint32_t * p;
         unsigned int i;
+        uint32_t mail_y[QPU_N_Y * QPU_MAIL_EL_VALS];
 
         for (p = mail_y, i = 0; i != QPU_N_Y; ++i) {
             *p++ = (uint32_t)(y_unif_vc + (s->y_mvs_base[job][i] - (uint32_t*)s->y_unif_mvs_ptr[job].arm));
             *p++ = code;
-            ++n_y;
         }
-    }
-#endif
 
-    if (n_uv + n_y != 0) {
+        vpu_qpu_job_add_qpu(vqj, QPU_N_Y, 4, mail_y);
+
 #if RPI_CACHE_UNIF_MVS
-        flush_frame3(s, s->frame,&s->coeffs_buf_accelerated[job],&s->y_unif_mvs_ptr[job], &s->unif_mvs_ptr[job], job);
-#else
-        flush_frame3(s, s->frame, &s->coeffs_buf_accelerated[job], NULL, NULL, job);
+        rpi_cache_flush_add_gm_ptr(rfe, s->y_unif_mvs_ptr + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
 #endif
+        rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+          flush_start, flush_count, s->ps.sps->vshift[1], 1, 0);
     }
-    else
-    {
-        rpi_cache_flush_one_gm_ptr(&s->coeffs_buf_accelerated[job], RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
-    }
+#endif
 
-    s->vpu_id = vpu_qpu_post_code2(
-//        vpu_get_fn(),
-        (s->num_coeffs[job][3] + s->num_coeffs[job][2] == 0) ? 0 : vpu_get_fn(),
-        vpu_get_constants(),
-        s->coeffs_buf_vc[job][2],
-        s->num_coeffs[job][2] >> 8,
-        s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
-        s->num_coeffs[job][3] >> 10,
-        0,
-        // QPU job 1
-        n_uv,
-        mail_uv,
-        // QPU job 2
-        n_y,
-        mail_y,
-        // Sync
-        wait_h
-        );
+    vpu_qpu_job_add_sync_this(vqj, wait_h);
+
+    // Having accumulated some commands - do them
+    rpi_cache_flush_finish(rfe);
+    vpu_qpu_job_finish(vqj);
 
     memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));  //???? Surely we haven't done the smaller
 }
-#endif
 
-
-#ifdef RPI
 
 static void flush_frame(HEVCContext *s,AVFrame *frame)
 {
@@ -3912,29 +3855,72 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
   rpi_cache_flush_finish(rfe);
 }
 
-static void flush_frame3(HEVCContext *s,AVFrame *frame,GPU_MEM_PTR_T *p0,GPU_MEM_PTR_T *p1,GPU_MEM_PTR_T *p2, int job)
+
+// Core execution tasks
+static void worker_core(HEVCContext * const s)
 {
-  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init();
-  int (*d)[2] = s->dblk_cmds[job];
-  int low=(*d)[1];
-  int high=(*d)[1];
-  int n, curr_y;
-  for(n = s->num_dblk_cmds[job]; n>0 ;n--,d++) {
-      int y = (*d)[1];
-      low=FFMIN(low,y);
-      high=FFMAX(high,y);
-  }
-  curr_y = low;
-  n = high+(1 << s->ps.sps->log2_ctb_size);
+    worker_global_env_t * const wg = &worker_global_env;
+    unsigned int arm_cost = 0;
+    vpu_qpu_wait_h sync;
 
-  rpi_cache_flush_add_frame_lines(rfe, frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-    curr_y, n - curr_y, s->ps.sps->vshift[1], 1, 1);
+    pthread_mutex_lock(&wg->lock);
+    {
+        const unsigned int gpu_load = vpu_qpu_current_load();
+        static int z = 0;
+#if 1
+        int qpu_luma = (gpu_load < 6 && wg->arm_load >= 9);
+        int qpu_chroma = ((!qpu_luma && gpu_load < 8) || wg->arm_load >= 12);
+#else
+        int qpu_chroma = (z & 2) != 0;
+        int qpu_luma = (z & 1) != 0;
+#endif
+        arm_cost = (qpu_chroma ? 0 : 2) + (qpu_luma ? 0 : 3);
+        wg->arm_load += arm_cost;
 
-  rpi_cache_flush_add_gm_ptr(rfe, p0, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
-  rpi_cache_flush_add_gm_ptr(rfe, p1, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
-  rpi_cache_flush_add_gm_ptr(rfe, p2, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
-  rpi_cache_flush_finish(rfe);
+        wg->gpu_c += qpu_chroma;
+        wg->gpu_y += qpu_luma;
+        wg->arm_c += !qpu_chroma;
+        wg->arm_y += !qpu_luma;
+
+
+        if (++z > 1024) {
+            z = 0;
+            printf("Arm load=%d, GPU=%d, chroma=%d/%d, luma=%d/%d    \n", wg->arm_load, gpu_load, wg->gpu_c, wg->arm_c, wg->gpu_y, wg->arm_y);
+        }
+
+        rpi_launch_vpu_qpu(s, qpu_luma, qpu_chroma, &sync);
+
+        pthread_mutex_unlock(&wg->lock);
+
+
+        // Perform inter prediction
+        rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
+    }
+
+    if (arm_cost != 0) {
+        pthread_mutex_lock(&wg->lock);
+        wg->arm_load -= arm_cost;
+        pthread_mutex_unlock(&wg->lock);
+    }
+
+    // Wait for transform completion
+    vpu_qpu_wait(&sync);
+
+    // Perform intra prediction and residual reconstruction
+    rpi_execute_pred_cmds(s);
+    // Perform deblocking for CTBs in this row
+    rpi_execute_dblk_cmds(s);
 }
+
+static void rpi_do_all_passes(HEVCContext *s)
+{
+    // Do the various passes - common with the worker code
+    worker_core(s);
+    // Prepare next batch
+    rpi_begin(s);
+}
+
+
 
 #endif
 
