@@ -59,6 +59,7 @@
 
 // #define DISABLE_MC
 
+
 #define PACK2(hi,lo) (((hi) << 16) | ((lo) & 0xffff))
 
 #ifndef av_mod_uintp2
@@ -79,10 +80,61 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 // For each block of 64*64 the smallest block size is 8x4
 // We also need an extra command for the setup information
 
-#define RPI_CHROMA_COMMAND_WORDS 12
+#define RPI_CHROMA_COMMAND_WORDS 11
 #define UV_COMMANDS_PER_QPU ((1 + 3*RPI_NUM_CHUNKS*(64*64)*2/(8*4)) * RPI_CHROMA_COMMAND_WORDS)
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
+
+typedef struct qpu_mc_pred_c_s {
+    uint32_t next_fn;
+    int16_t next_src_y;
+    int16_t next_src_x;
+    uint32_t next_src_base_u;
+    uint32_t next_src_base_v;
+    union {
+        struct {
+            uint16_t h;
+            uint16_t w;
+            uint32_t coeffs_x;
+            uint32_t coeffs_y;
+            uint32_t wo_u;
+            uint32_t wo_v;
+            uint32_t dst_addr_u;
+            uint32_t dst_addr_v;
+        } p;
+        struct {
+            uint16_t h;
+            uint16_t w;
+            uint32_t coeffs_x;
+            uint32_t coeffs_y;
+            uint32_t weight_u;
+            uint32_t weight_v;
+            uint32_t dummy0;
+            uint32_t dummy1;
+        } b0;
+        struct {
+            uint32_t dummy0;
+            uint32_t coeffs_x;
+            uint32_t coeffs_y;
+            uint32_t wo_u;
+            uint32_t wo_v;
+            uint32_t dst_addr_u;
+            uint32_t dst_addr_v;
+        } b1;
+        struct {
+            uint32_t pic_w;
+            uint32_t pic_h;
+            uint32_t src_stride;
+            uint32_t dst_stride;
+            uint32_t wdenom;
+            uint32_t dummy0;
+            uint32_t dummy1;
+        } s;
+    };
+} qpu_mc_pred_c_t;
+
+
+static const char static_assert_qpu_mc_pred[sizeof(qpu_mc_pred_c_t) != RPI_CHROMA_COMMAND_WORDS * 4 ? -1 : 1] = {0};
 
 #define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
@@ -2334,58 +2386,6 @@ rpi_pred_y_b(HEVCContext * const s,
         s->curr_y_mvs = y;
     }
 }
-
-
-typedef struct qpu_mc_pred_c_s {
-    uint32_t next_fn;
-    int32_t next_src_x;
-    int32_t next_src_y;
-    uint32_t next_src_base_u;
-    uint32_t next_src_base_v;
-    union {
-        struct {
-            uint16_t h;
-            uint16_t w;
-            uint32_t coeffs_x;
-            uint32_t coeffs_y;
-            uint32_t wo_u;
-            uint32_t wo_v;
-            uint32_t dst_addr_u;
-            uint32_t dst_addr_v;
-        } p;
-        struct {
-            uint16_t h;
-            uint16_t w;
-            uint32_t coeffs_x;
-            uint32_t coeffs_y;
-            uint32_t weight_u;
-            uint32_t weight_v;
-            uint32_t dummy0;
-            uint32_t dummy1;
-        } b0;
-        struct {
-            uint32_t dummy0;
-            uint32_t coeffs_x;
-            uint32_t coeffs_y;
-            uint32_t wo_u;
-            uint32_t wo_v;
-            uint32_t dst_addr_u;
-            uint32_t dst_addr_v;
-        } b1;
-        struct {
-            uint32_t pic_w;
-            uint32_t pic_h;
-            uint32_t src_stride;
-            uint32_t dst_stride;
-            uint32_t wdenom;
-            uint32_t dummy0;
-            uint32_t dummy1;
-        } s;
-    };
-} qpu_mc_pred_c_t;
-
-
-static const char static_assert_qpu_mc_pred[sizeof(qpu_mc_pred_c_t) != RPI_CHROMA_COMMAND_WORDS * 4 ? -1 : 1] = {0};
 
 
 static void

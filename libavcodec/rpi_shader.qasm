@@ -131,8 +131,11 @@
   mov tmurs, 1          ; mov ra_link, unif        # No swap TMUs ; Next fn
 
 # Load first request location
-add ra_x, unif, elem_num # Store x
-mov ra_y, unif # Store y
+mov ra0, unif
+mov r0, elem_num
+
+add ra_x, ra0.16b, r0   # Store x
+mov ra_y, ra0.16a       # Store y
 mov ra_frame_base, unif # Store frame u base
 mov r1, vdw_setup_1(0)  # Merged with dst_stride shortly, delay slot for ra_frame_base
 sub ra_u2v_ref_offset, unif, ra_frame_base # Store offset to add to move from u to v in reference frame
@@ -215,15 +218,18 @@ mov ra_link, unif
 # per-channel shifts were calculated on the *previous* invocation
 
 # get base addresses and per-channel shifts for *next* invocation
-add r0, unif, elem_num    # x
-max r0, r0, 0         ; mov r1, unif # y
-min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # frame_base
+mov ra2, unif         # x_y
+mov r0, elem_num      ; mov r3, unif          # frame_base
+
+add r0, ra2.16b, r0   # x
+max r0, r0, 0
+min r0, r0, rb_frame_width_minus_1
 # compute offset from frame base u to frame base v
 sub r2, unif, r3      ; mov ra_xshift, ra_xshift_next
 shl ra_xshift_next, r0, 3
 add r0, r0, r3        ; mov ra1, unif  # ; width_height
 and rb_x_next, r0, ~3 ; mov ra0, unif  # H filter coeffs
-mov ra_y_next, r1     ; mov vw_setup, rb28
+mov ra_y_next, ra2.16a ; mov vw_setup, rb28
 
 add ra_frame_base_next, rb_x_next, r2
 
@@ -345,14 +351,18 @@ mov -, unif                  # Ignore chain address - always "b"
 # per-channel shifts were calculated on the *previous* invocation
 
 # get base addresses and per-channel shifts for *next* invocation
-add r0, unif, elem_num       # x
-max r0, r0, 0                ; mov r1, unif    # ; y
-min r0, r0, rb_frame_width_minus_1 ; mov r3, unif # ; frame_u_base
-sub r2, unif, r3             ; mov ra_xshift, ra_xshift_next # frame_v_base ;
+mov ra2, unif         # x_y
+mov r0, elem_num      ; mov r3, unif          # frame_base
+
+add r0, ra2.16b, r0   # x
+max r0, r0, 0
+min r0, r0, rb_frame_width_minus_1
+# compute offset from frame base u to frame base v
+sub r2, unif, r3      ; mov ra_xshift, ra_xshift_next
 shl ra_xshift_next, r0, 3
-add r0, r0, r3               ; mov ra1, unif   # ; width_height
-and rb_x_next, r0, ~3        ; mov ra0, unif   # ; H filter coeffs
-mov ra_y_next, r1
+add r0, r0, r3        ; mov ra1, unif  # ; width_height
+and rb_x_next, r0, ~3 ; mov ra0, unif  # H filter coeffs
+mov ra_y_next, ra2.16a
 
 add ra_frame_base_next, rb_x_next, r2
 
@@ -506,10 +516,11 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 
 ::mc_filter_uv_b
 
+  mov ra_link, unif
   mov.setf -, ra9       ; mov -, vw_wait  # Delayed V DMA
   brr.anyz -, r:uv_filter_b_1
 
-mov ra_link, unif
+  mov ra0, unif         ; mov r0, elem_num
 
 # per-channel shifts were calculated on the *previous* invocation
 
@@ -517,14 +528,14 @@ mov ra_link, unif
 mov ra_xshift, ra_xshift_next      ; mov vw_setup, rb28
 
 # get base addresses and per-channel shifts for *next* invocation
-add r0, unif, elem_num    # x
+add r0, ra0.16b, r0    # x
 # >>>
   sub vw_setup, ra9, -16
   mov vw_setup, ra10
   mov vw_addr, ra11
 :uv_filter_b_1
 
-max r0, r0, 0                      ; mov ra_y_next, unif # y
+max r0, r0, 0                      ; mov ra_y_next, ra0.16a # y
 min r0, r0, rb_frame_width_minus_1 ; mov r3, unif        # V frame_base
 # compute offset from frame base u to frame base v
 sub r2, unif, r3                   ; mul24 ra_xshift_next, r0, 8 # U frame_base
