@@ -81,7 +81,7 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 // We also need an extra command for the setup information
 
 #define RPI_CHROMA_COMMAND_WORDS 11
-#define UV_COMMANDS_PER_QPU ((1 + 3*RPI_NUM_CHUNKS*(64*64)*2/(8*4)) * RPI_CHROMA_COMMAND_WORDS)
+#define UV_COMMANDS_PER_QPU ((1 + RPI_NUM_CHUNKS*(64*64)*2/(8*4)) * RPI_CHROMA_COMMAND_WORDS)
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
 
@@ -153,7 +153,7 @@ static const uint32_t rpi_filter_coefs[8] = {
 };
 
 #define RPI_LUMA_COMMAND_WORDS 10
-#define Y_COMMANDS_PER_QPU ((1+2*RPI_NUM_CHUNKS*(64*64)/(8*4)) * RPI_LUMA_COMMAND_WORDS)
+#define Y_COMMANDS_PER_QPU ((1+RPI_NUM_CHUNKS*(64*64)/(8*4)) * RPI_LUMA_COMMAND_WORDS)
 #endif
 
 
@@ -339,18 +339,20 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     int min_pu_size      = sps->min_pu_width * sps->min_pu_height;
 
 #ifdef RPI
-    int coefs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
-    int coefs_per_luma = 64*64*24*RPI_NUM_CHUNKS;
-    int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
-    int coefs_per_row = coefs_per_luma + coefs_per_chroma;
+    const int coefs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
+    const int coefs_per_luma = 64*64*RPI_CHUNK_SIZE*RPI_NUM_CHUNKS;
+    const int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
+    const int coefs_per_row = coefs_per_luma + coefs_per_chroma;
     int job;
 
     av_assert0(sps);
 //    s->max_ctu_count = sps->ctb_width;
 //    printf("CTB with=%d\n", sps->ctb_width);
-    s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
+//    s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
+    s->max_ctu_count = FFMIN(coefs_per_luma / coefs_in_ctb, sps->ctb_width);
     s->ctu_per_y_chan = s->max_ctu_count / QPU_N_Y;
     s->ctu_per_uv_chan = s->max_ctu_count / QPU_N_UV;
+
     for(job=0;job<RPI_MAX_JOBS;job++) {
       for(job=0;job<RPI_MAX_JOBS;job++) {
         gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
@@ -4017,7 +4019,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             {
 //              printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
 
-                worker_wait(s);
+//                worker_wait(s);
               // Split work load onto separate threads so we make as rapid progress as possible with this frame
               // Pass on this job to worker thread
               worker_submit_job(s);
