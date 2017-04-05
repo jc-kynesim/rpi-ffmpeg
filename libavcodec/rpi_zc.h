@@ -52,6 +52,11 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
 // Get the vc_handle from the frame ref
 // Returns -1 if ref doesn't look valid
 int av_rpi_zc_vc_handle(const AVRpiZcRefPtr fr_ref);
+// Get offset from the start of the memory referenced
+// by the vc_handle to valid data
+int av_rpi_zc_offset(const AVRpiZcRefPtr fr_ref);
+// Length of buffer data
+int av_rpi_zc_length(const AVRpiZcRefPtr fr_ref);
 // Get the number of bytes allocated from the frame ref
 // Returns 0 if ref doesn't look valid
 int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref);

@@ -294,11 +294,16 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 #ifdef RPI_ZERO_COPY
 {
     const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
+    if (fr_buf == NULL) {
+        mmal_buffer_header_release(buf);
+        return;
+    }
 
     buf->user_data = fr_buf;
     buf->data = av_rpi_zc_vc_handle(fr_buf);
-    buf->alloc_size =
-        buf->length = av_rpi_zc_numbytes(fr_buf);
+    buf->offset = av_rpi_zc_offset(fr_buf);
+    buf->length = av_rpi_zc_length(fr_buf);
+    buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
 
     ++rpi_display_count;
 }

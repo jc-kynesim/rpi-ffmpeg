@@ -59,29 +59,31 @@ static inline GPU_MEM_PTR_T * gpu_buf1_gmem(const AVFrame * const frame)
     return av_buffer_get_opaque(frame->buf[0]);
 }
 
-static inline GPU_MEM_PTR_T * gpu_buf3_gmem(const AVFrame * const frame, const int n)
+static inline GPU_MEM_PTR_T * gpu_buf3_gmem(const AVFrame * const frame, const unsigned int n)
 {
     return av_buffer_pool_opaque(frame->buf[n]);
 }
 
+static inline uint32_t get_vc_address3(const AVFrame * const frame, const unsigned int n)
+{
+    const GPU_MEM_PTR_T * const gm = gpu_is_buf1(frame) ? gpu_buf1_gmem(frame) : gpu_buf3_gmem(frame, n);
+    return gm->vc + (frame->data[n] - gm->arm);
+}
+
 
 static inline uint32_t get_vc_address_y(const AVFrame * const frame) {
-    return gpu_is_buf1(frame) ? gpu_buf1_gmem(frame)->vc : gpu_buf3_gmem(frame, 0)->vc;
+    return get_vc_address3(frame, 0);
 }
 
 static inline uint32_t get_vc_address_u(const AVFrame * const frame) {
-    return gpu_is_buf1(frame) ?
-        gpu_buf1_gmem(frame)->vc + frame->data[1] - frame->data[0] :
-        gpu_buf3_gmem(frame, 1)->vc;
+    return get_vc_address3(frame, 1);
 }
 
 static inline uint32_t get_vc_address_v(const AVFrame * const frame) {
-    return gpu_is_buf1(frame) ?
-        gpu_buf1_gmem(frame)->vc + frame->data[2] - frame->data[0] :
-        gpu_buf3_gmem(frame, 2)->vc;
+    return get_vc_address3(frame, 2);
 }
 
-
+#if 0
 static inline GPU_MEM_PTR_T get_gpu_mem_ptr_y(const AVFrame * const frame) {
     if (gpu_is_buf1(frame))
     {
@@ -118,7 +120,7 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
     else
         return *gpu_buf3_gmem(frame, 2);
 }
-
+#endif
 #endif
 
 // Cache flush stuff

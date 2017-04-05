@@ -10,6 +10,7 @@ struct ZcPoolEnt;
 typedef struct ZcPool
 {
     int numbytes;
+    unsigned int n;
     struct ZcPoolEnt * head;
     pthread_mutex_t lock;
 } ZcPool;
@@ -18,27 +19,48 @@ typedef struct ZcPoolEnt
 {
     // It is important that we start with gmem as other bits of code will expect to see that
     GPU_MEM_PTR_T gmem;
+    unsigned int n;
     struct ZcPoolEnt * next;
     struct ZcPool * pool;
 } ZcPoolEnt;
 
-static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const int size)
+#if 1
+//#define ALLOC_PAD       0x1000
+#define ALLOC_PAD       0
+#define ALLOC_ROUND     0x1000
+//#define ALLOC_N_OFFSET  0x100
+#define ALLOC_N_OFFSET  0
+#define STRIDE_ROUND    0x80
+#define STRIDE_OR       0x80
+#else
+#define ALLOC_PAD       0
+#define ALLOC_ROUND     0x1000
+#define ALLOC_N_OFFSET  0
+#define STRIDE_ROUND    32
+#define STRIDE_OR       0
+#endif
+
+static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)
 {
     ZcPoolEnt * const zp = av_malloc(sizeof(ZcPoolEnt));
+
+    // Round up to 4k & add 4k
+    const unsigned int alloc_size = (req_size + ALLOC_PAD + ALLOC_ROUND - 1) & ~(ALLOC_ROUND - 1);
 
     if (zp == NULL) {
         av_log(NULL, AV_LOG_ERROR, "av_malloc(ZcPoolEnt) failed\n");
         goto fail0;
     }
 
-    if (gpu_malloc_cached(size, &zp->gmem) != 0)
+    if (gpu_malloc_cached(alloc_size, &zp->gmem) != 0)
     {
-        av_log(NULL, AV_LOG_ERROR, "av_gpu_malloc_cached(%d) failed\n", size);
+        av_log(NULL, AV_LOG_ERROR, "av_gpu_malloc_cached(%d) failed\n", alloc_size);
         goto fail1;
     }
 
     zp->next = NULL;
     zp->pool = pool;
+    zp->n = pool->n++;
     return zp;
 
 fail1:
@@ -156,7 +178,8 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
     const unsigned int video_width, const unsigned int video_height)
 {
     AVRpiZcFrameGeometry geo;
-    geo.stride_y = (video_width + 32 + 31) & ~31;
+    geo.stride_y = ((video_width + 32 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
+//    geo.stride_y = ((video_width + 32 + 31) & ~31);
     geo.stride_c = geo.stride_y / 2;
 //    geo.height_y = (video_height + 15) & ~15;
     geo.height_y = (video_height + 32 + 31) & ~31;
@@ -168,13 +191,21 @@ static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
 {
     ZcPoolEnt *const zp = zc_pool_alloc(pool, size);
     AVBufferRef * buf;
+    intptr_t idata = (intptr_t)zp->gmem.arm;
+#if ALLOC_N_OFFSET != 0
+    intptr_t noff = (zp->n * ALLOC_N_OFFSET) & (ALLOC_PAD - 1);
+#endif
 
     if (zp == NULL) {
         av_log(NULL, AV_LOG_ERROR, "zc_pool_alloc(%d) failed\n", size);
         goto fail0;
     }
 
-    if ((buf = av_buffer_create(zp->gmem.arm, size, rpi_free_display_buffer, zp, AV_BUFFER_FLAG_READONLY)) == NULL)
+#if ALLOC_N_OFFSET != 0
+    idata = ((idata & ~(ALLOC_PAD - 1)) | noff) + (((idata & (ALLOC_PAD - 1)) > noff) ? ALLOC_PAD : 0);
+#endif
+
+    if ((buf = av_buffer_create((void *)idata, size, rpi_free_display_buffer, zp, AV_BUFFER_FLAG_READONLY)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "av_buffer_create() failed\n");
         goto fail2;
@@ -345,6 +376,18 @@ int av_rpi_zc_vc_handle(const AVRpiZcRefPtr fr_ref)
     const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
     return p == NULL ? -1 : p->vc_handle;
 }
+
+int av_rpi_zc_offset(const AVRpiZcRefPtr fr_ref)
+{
+    const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
+    return p == NULL ? 0 : fr_ref->data - p->arm;
+}
+
+int av_rpi_zc_length(const AVRpiZcRefPtr fr_ref)
+{
+    return fr_ref == NULL ? 0 : fr_ref->size;
+}
+
 
 int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref)
 {

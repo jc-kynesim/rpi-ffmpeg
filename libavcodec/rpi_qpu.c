@@ -504,11 +504,11 @@ void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AV
   if (gpu_is_buf1(frame)) {
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
     if (do_luma) {
-      rpi_cache_flush_add_gm_range(rfe, gm, mode, y_offset, y_size);
+      rpi_cache_flush_add_gm_range(rfe, gm, mode, (frame->data[0] - gm->arm) + y_offset, y_size);
     }
     if (do_chroma) {
-      rpi_cache_flush_add_gm_range(rfe, gm, mode, frame->data[1] - frame->data[0] + uv_offset, uv_size);
-      rpi_cache_flush_add_gm_range(rfe, gm, mode, frame->data[2] - frame->data[0] + uv_offset, uv_size);
+      rpi_cache_flush_add_gm_range(rfe, gm, mode, (frame->data[1] - gm->arm) + uv_offset, uv_size);
+      rpi_cache_flush_add_gm_range(rfe, gm, mode, (frame->data[2] - gm->arm) + uv_offset, uv_size);
     }
   }
   else
