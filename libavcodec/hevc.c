@@ -70,6 +70,8 @@ static av_always_inline av_const unsigned av_mod_uintp2_c(unsigned a, unsigned p
 #   define av_mod_uintp2   av_mod_uintp2_c
 #endif
 
+#define Y_B_ONLY 1
+
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
 
@@ -2343,7 +2345,7 @@ rpi_pred_y_b(HEVCContext * const s,
     rpi_luma_mc_bi(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
            mv, x0, y0, nPbW, nPbH,
            src_frame2, mv2, mv_field);
-
+#if !Y_B_ONLY
     {
         const unsigned int mx          = mv->x & 3;
         const unsigned int my          = mv->y & 3;
@@ -2387,6 +2389,7 @@ rpi_pred_y_b(HEVCContext * const s,
         }
         s->curr_y_mvs = y;
     }
+#endif
 }
 
 
@@ -3307,7 +3310,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
 // Do any inter-pred that we want to do in software
 // With both RPI_INTER_QPU && RPI_LUMA_QPU defined we should do nothing here
 // All ARM
-static void do_yc_inter_cmds(HEVCContext * const s, const HEVCMvCmd *cmd, unsigned int n)
+static void do_yc_inter_cmds(HEVCContext * const s, const HEVCMvCmd *cmd, unsigned int n, const int b_only)
 {
     unsigned int cidx;
     AVFrame myref;
@@ -3317,6 +3320,8 @@ static void do_yc_inter_cmds(HEVCContext * const s, const HEVCMvCmd *cmd, unsign
     for(; n>0 ; n--, cmd++) {
         switch(cmd->cmd) {
         case RPI_CMD_LUMA_UNI:
+            if (b_only)
+                break;
             myref.data[0] = cmd->src;
             myref.linesize[0] = cmd->srcstride;
             luma_mc_uni(s, cmd->dst, cmd->dststride, &myref, &cmd->mv, cmd->x_off, cmd->y_off, cmd->block_w, cmd->block_h, cmd->weight, cmd->offset);
@@ -3333,6 +3338,8 @@ static void do_yc_inter_cmds(HEVCContext * const s, const HEVCMvCmd *cmd, unsign
                        &myref1, &cmd->mv1, &mymv);
             break;
         case RPI_CMD_CHROMA_UNI:
+            if (b_only)
+                break;
             mymv.mv[0] = cmd->mv;
             chroma_mc_uni(s, cmd->dst,
                           cmd->dststride, cmd->src, cmd->srcstride, 0,
@@ -3356,15 +3363,15 @@ static void do_yc_inter_cmds(HEVCContext * const s, const HEVCMvCmd *cmd, unsign
     }
 }
 
-static void rpi_execute_inter_cmds(HEVCContext *s, const int qpu_luma, const int qpu_chroma)
+static void rpi_execute_inter_cmds(HEVCContext *s, const int qpu_luma, const int qpu_chroma, const int luma_b_only, const int chroma_b_only)
 {
     const int job = s->pass1_job;
 
-    if (!qpu_luma)
-        do_yc_inter_cmds(s, s->unif_mv_cmds_y[job], s->num_mv_cmds_y[job]);
+    if (!qpu_luma || luma_b_only)
+        do_yc_inter_cmds(s, s->unif_mv_cmds_y[job], s->num_mv_cmds_y[job], qpu_luma);
     s->num_mv_cmds_y[job] = 0;
-    if (!qpu_chroma)
-        do_yc_inter_cmds(s, s->unif_mv_cmds_c[job], s->num_mv_cmds_c[job]);
+    if (!qpu_chroma || chroma_b_only)
+        do_yc_inter_cmds(s, s->unif_mv_cmds_c[job], s->num_mv_cmds_c[job], qpu_chroma);
     s->num_mv_cmds_c[job] = 0;
 }
 
@@ -3780,7 +3787,7 @@ static void worker_core(HEVCContext * const s)
     int arm_load;
     static const int arm_const_cost = 2;
 
-    static int z = 0;
+//    static int z = 0;
 
     const int job = s->pass1_job;
     unsigned int flush_start = 0;
@@ -3806,11 +3813,14 @@ static void worker_core(HEVCContext * const s)
 #if RPI_INTER
     pthread_mutex_lock(&wg->lock);
 
-    ++z;
+//    ++z;
     gpu_load = vpu_qpu_current_load();
     arm_load = avpriv_atomic_int_get(&wg->arm_load);
-#if 1
+#if !Y_B_ONLY
     qpu_luma =  gpu_load + 2 < arm_load;
+    qpu_chroma = gpu_load < arm_load + 8;
+#elif 1
+    qpu_luma =  gpu_load < arm_load + 2;
     qpu_chroma = gpu_load < arm_load + 8;
 #else
     qpu_chroma = 1;
@@ -3826,9 +3836,9 @@ static void worker_core(HEVCContext * const s)
     wg->arm_y += !qpu_luma;
 
 
-    if ((z & 511) == 0) {
-        printf("Arm load=%d, GPU=%d, chroma=%d/%d, luma=%d/%d    \n", arm_load, gpu_load, wg->gpu_c, wg->arm_c, wg->gpu_y, wg->arm_y);
-    }
+//    if ((z & 511) == 0) {
+//        printf("Arm load=%d, GPU=%d, chroma=%d/%d, luma=%d/%d    \n", arm_load, gpu_load, wg->gpu_c, wg->arm_c, wg->gpu_y, wg->arm_y);
+//    }
 
 
     {
@@ -3905,15 +3915,19 @@ static void worker_core(HEVCContext * const s)
 
     memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));  //???? Surely we haven't done the smaller
 
+#if Y_B_ONLY
+    vpu_qpu_wait(&sync_y);
+#endif
     // Perform inter prediction
-    rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma);
+    rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma, Y_B_ONLY, 0);
 
     // Wait for transform completion
 
     // Perform intra prediction and residual reconstruction
     avpriv_atomic_int_add_and_fetch(&wg->arm_load, -arm_cost);
-
+#if !Y_B_ONLY
     vpu_qpu_wait(&sync_y);
+#endif
     rpi_execute_pred_cmds(s);
 
     // Perform deblocking for CTBs in this row
