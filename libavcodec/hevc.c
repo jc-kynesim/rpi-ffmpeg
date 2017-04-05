@@ -3916,7 +3916,8 @@ static void worker_core(HEVCContext * const s)
     memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));  //???? Surely we haven't done the smaller
 
 #if Y_B_ONLY
-    vpu_qpu_wait(&sync_y);
+    if (qpu_luma)
+        vpu_qpu_wait(&sync_y);
 #endif
     // Perform inter prediction
     rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma, Y_B_ONLY, 0);
@@ -3925,7 +3926,10 @@ static void worker_core(HEVCContext * const s)
 
     // Perform intra prediction and residual reconstruction
     avpriv_atomic_int_add_and_fetch(&wg->arm_load, -arm_cost);
-#if !Y_B_ONLY
+#if Y_B_ONLY
+    if (!qpu_luma)
+        vpu_qpu_wait(&sync_y);
+#else
     vpu_qpu_wait(&sync_y);
 #endif
     rpi_execute_pred_cmds(s);
