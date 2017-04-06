@@ -70,7 +70,7 @@ static av_always_inline av_const unsigned av_mod_uintp2_c(unsigned a, unsigned p
 #   define av_mod_uintp2   av_mod_uintp2_c
 #endif
 
-#define Y_B_ONLY 1
+#define Y_B_ONLY 0
 
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
@@ -3398,7 +3398,7 @@ static void rpi_begin(HEVCContext *s)
         u->next_src_base_v = 0;
         u->s.pic_w = pic_width;
         u->s.pic_h = pic_height;
-        u->s.src_stride = s->frame->linesize[1];
+        u->s.src_stride = pic_height * 3 * 64;
         u->s.dst_stride = s->frame->linesize[1];
         u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
         u->s.dummy0 = 0;
@@ -3819,7 +3819,7 @@ static void worker_core(HEVCContext * const s)
 #if !Y_B_ONLY
     qpu_luma =  gpu_load + 2 < arm_load;
     qpu_chroma = gpu_load < arm_load + 8;
-#elif 1
+#elif 0
     qpu_luma =  gpu_load < arm_load + 2;
     qpu_chroma = gpu_load < arm_load + 8;
 #else
