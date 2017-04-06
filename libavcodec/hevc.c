@@ -3419,7 +3419,7 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = 0; // ref_y2_base
         *s->y_mvs[job][i]++ = (s->ps.sps->width << 16) + s->ps.sps->height;
         *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
-        *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst_pitch
+        *s->y_mvs[job][i]++ = pic_height * 3 * 64;
         *s->y_mvs[job][i]++ = s->sh.luma_log2_weight_denom + 6;  // weight demon + 6
         *s->y_mvs[job][i]++ = 0; // Unused - alignment with per-block
         *s->y_mvs[job][i]++ = 0; // Next kernel

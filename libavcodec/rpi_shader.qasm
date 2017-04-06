@@ -81,7 +81,7 @@
 .set ra_y2_next,                   ra21.16b
 
 .set rb_x_next,                    rb19
-.set rx_frame_base2_next,          rb19
+.set rb_frame_base2_next,          rb19
 
 .set ra_frame_base,                ra24
 .set ra_frame_base_next,           ra26
@@ -892,7 +892,12 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # Read image dimensions
   mov ra3, unif         # width_height
+.if SRC_RASTER
   mov rb_pitch, unif    # src_pitch [ra3 delay]
+.else
+  mov rb_pitch, SRC_STRIPE_WIDTH
+  mov rb_xpitch, unif    # src_pitch [ra3 delay]
+.endif
   sub rb_frame_width_minus_1, ra3.16b, 1
   sub rb_frame_height_minus_1, ra3.16a, 1
 
@@ -906,6 +911,8 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
   shl ra_xshift_next, r0, 3 # Compute shifts
+
+.if SRC_RASTER
   add ra_y, ra8.16b, 1
   and r0, r0, ~3        # r0 gives the clipped and aligned x coordinate
   add r2, ra9, r0       # ra9 is address for frame0 (not including y offset)
@@ -913,12 +920,33 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   min r1, r1, rb_frame_height_minus_1
   nop                   ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
   add t0s, r2, r1       ; mov ra_frame_base, r2
+.else
+
+# In a single 32 bit word we get 4 Y Pels so mask 2 bottom bits of xs
+  mov r2, SRC_STRIPE_WIDTH - 4
+  shr r1, r0, SRC_STRIPE_SHIFT
+  and r0, r0, r2 ; mul24 r1, r1, rb_xpitch
+  add r0, r0, r1        # Add stripe offsets
+  add ra_frame_base, ra9, r0
+
+  mov r1, ra8.16b       # Load y
+  add ra_y, r1, 1       # Set for next
+  max r1, r1, 0
+  min r1, r1, rb_frame_height_minus_1
+
+# submit texture requests for first line
+  nop                   ; mul24 r1, r1, rb_pitch
+  add t0s, ra_frame_base, r1
+
+.endif
 
   # r3 still contains elem_num
   add r0, ra10.16a, r3  # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
   shl rx_xshift2_next, r0, 3 # Compute shifts
+
+.if SRC_RASTER
   add ra_y2, ra10.16b, 1
   and r0, r0, ~3        # r0 gives the clipped and aligned x coordinate
   add r2, ra11, r0      # r2 is address for frame1 (not including y offset)
@@ -926,6 +954,24 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   min r1, r1, rb_frame_height_minus_1
   nop                   ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
   add t1s, r2, r1       ; mov ra_frame_base2, r2
+.else
+
+  # r2 still contains mask
+  shr r1, r0, SRC_STRIPE_SHIFT
+  and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
+  add r0, r0, r1        # Add stripe offsets
+  add ra_frame_base2, ra11, r0
+
+  mov r1, ra10.16b       # Load y
+  add ra_y2, r1, 1       # Set for next
+  max r1, r1, 0
+  min r1, r1, rb_frame_height_minus_1
+
+# submit texture requests for first line
+  nop                   ; mul24 r1, r1, rb_pitch
+  add t1s, ra_frame_base2, r1
+
+.endif
 
 # load constants
 
@@ -967,7 +1013,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov ra_link, unif
 
-  mov ra1, unif  ; mov r1, elem_num  # y_x ; elem_num has implicit unpack??
+  mov ra1, unif  ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
 
 # per-channel shifts were calculated on the *previous* invocation
   mov ra_xshift, ra_xshift_next
@@ -975,7 +1021,8 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # get base addresses and per-channel shifts for *next* invocation
 
-  add r0, ra1.16a, r1 # Load x
+.if SRC_RASTER
+  add r0, ra1.16a, r3 # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl ra_xshift_next, r0, 3 # Compute shifts
@@ -983,13 +1030,38 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   and r0, r0, ~3                     ; mov ra1, unif # y2_x2
   add ra_frame_base_next, r2, r0
 
-  add r0, ra1.16a, r1 # Load x
+  add r0, ra1.16a, r3 # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl rx_xshift2_next, r0, 3         # Compute shifts
   mov ra_y2_next, ra1.16b
   and r0, r0, ~3                     ; mov ra1, unif  # width_height ; r0 gives the clipped and aligned x coordinate
-  add rx_frame_base2_next, r2, r0    # r2 is address for frame1 (not including y offset)
+  add rb_frame_base2_next, r2, r0    # r2 is address for frame1 (not including y offset)
+.else
+  add r0, ra1.16a, r3 # Load x
+  max r0, r0, 0
+  min r0, r0, rb_frame_width_minus_1
+
+  mov r2, SRC_STRIPE_WIDTH - 4
+  shr r1, r0, SRC_STRIPE_SHIFT
+  and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
+  add r0, r0, r1        # Add stripe offsets
+  add ra_frame_base_next, unif, r0              # Base1
+  mov ra1, unif         # x2_y2
+  mov ra_y_next, ra1.16b                      # Load y
+
+  add r0, ra1.16a, r3   # Load x
+  max r0, r0, 0
+  min r0, r0, rb_frame_width_minus_1
+
+  shr r1, r0, SRC_STRIPE_SHIFT
+  and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
+  add r0, r0, r1        # Add stripe offsets
+  add rb_frame_base2_next, unif, r0              # Base1
+  mov ra1, unif         # width_height
+  mov ra_y2_next, ra1.16b                      # Load y
+
+.endif
 
 # set up VPM write
   mov vw_setup, rb28
@@ -1092,7 +1164,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # might be B where y != y2 so we must do full processing on both y and y2
 
   sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
-  shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
+  shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rb_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
   shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
@@ -1200,7 +1272,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # Perhaps we could add on the pitch and clip using larger values?
 
   sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
-  shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rx_frame_base2_next    ; ldtmu1
+  shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rb_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
   shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
