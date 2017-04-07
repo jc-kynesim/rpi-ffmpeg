@@ -719,6 +719,13 @@ static void p010BEToUV_c(uint8_t *dstU, uint8_t *dstV,
     }
 }
 
+static void sand128ToUV_c(uint8_t *dstU, uint8_t *dstV,
+                       const uint8_t *unused0, const uint8_t *src1, const uint8_t *src2,
+                       int width, uint32_t *unused)
+{
+    // NIF
+}
+
 #define input_pixel(pos) (isBE(origin) ? AV_RB16(pos) : AV_RL16(pos))
 
 static void bgr24ToY_c(uint8_t *_dst, const uint8_t *src, const uint8_t *unused1, const uint8_t *unused2,
@@ -1084,6 +1091,9 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
         break;
     case AV_PIX_FMT_P010BE:
         c->chrToYV12 = p010BEToUV_c;
+        break;
+    case AV_PIX_FMT_SAND128:
+        c->chrToYV12 = sand128ToUV_c;
         break;
     }
     if (c->chrSrcHSubSample) {

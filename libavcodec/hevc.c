@@ -685,7 +685,7 @@ static void export_stream_params(AVCodecContext *avctx, const HEVCParamSets *ps,
 static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fmt)
 {
     #define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + CONFIG_HEVC_D3D11VA_HWACCEL + CONFIG_HEVC_VAAPI_HWACCEL + CONFIG_HEVC_VDPAU_HWACCEL)
-    enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmt = pix_fmts;
+    enum AVPixelFormat pix_fmts[HWACCEL_MAX + 4], *fmt = pix_fmts;
     int ret, i;
 
     pic_arrays_free(s);
@@ -704,6 +704,9 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
     switch (sps->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
+#ifdef RPI
+        *fmt++ = AV_PIX_FMT_SAND128;
+#endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
 #endif
@@ -3962,8 +3965,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
-    s->enable_rpi = s->ps.sps->bit_depth == 8
-                    && !s->ps.pps->cross_component_prediction_enabled_flag;
+    s->enable_rpi = s->ps.sps->bit_depth == 8 &&
+        s->frame->format == AV_PIX_FMT_SAND128 &&
+        !s->ps.pps->cross_component_prediction_enabled_flag;
 
     if (!s->enable_rpi) {
       if (s->ps.pps->cross_component_prediction_enabled_flag)

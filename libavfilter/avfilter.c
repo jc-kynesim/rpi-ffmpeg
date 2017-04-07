@@ -915,6 +915,7 @@ int avfilter_init_str(AVFilterContext *filter, const char *args)
                    "options, but options were provided: %s.\n", args);
             return AVERROR(EINVAL);
         }
+        printf("=== args='%s'\n", args);
 
 #if FF_API_OLD_FILTER_OPTS || FF_API_OLD_FILTER_OPTS_ERROR
             if (   !strcmp(filter->filter->name, "format")     ||
