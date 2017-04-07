@@ -11,6 +11,8 @@
 #include <pthread.h>
 #include <time.h>
 
+#include <interface/vcsm/user-vcsm.h>
+
 #include "rpi_mailbox.h"
 #include "rpi_qpu.h"
 #include "rpi_shader.h"
@@ -97,6 +99,10 @@ struct GPU
   short transMatrix2even[16*16*2];
 };
 
+struct rpi_cache_flush_env_s {
+    unsigned int n;
+    struct vcsm_user_clean_invalid_s a;
+};
 
 #define WAIT_COUNT_MAX 16
 
