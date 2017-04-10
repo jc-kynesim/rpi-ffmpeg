@@ -305,6 +305,13 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
     buf->length = av_rpi_zc_length(fr_buf);
     buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
 
+    {
+        unsigned int n;
+        for (n = 0; n < fr->width; n += 128) {
+            memset(fr->data[1] + n * fr->linesize[3], 0x80, 128 * fr->height / 2);
+        }
+    }
+
     ++rpi_display_count;
 }
 #else
@@ -339,6 +346,7 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 
 static void display_exit(MMAL_COMPONENT_T* display)
 {
+    sleep(20);
     if (display) {
         mmal_component_destroy(display);
     }

@@ -84,15 +84,21 @@ do {                                  \
     int size_in_tbs_h  = size_in_luma_h >> s->ps.sps->log2_min_tb_size;
     int size_in_luma_v = size << vshift;
     int size_in_tbs_v  = size_in_luma_v >> s->ps.sps->log2_min_tb_size;
-    int x = x0 >> hshift;
-    int y = y0 >> vshift;
+    const int x = x0 >> hshift;
+    const int y = y0 >> vshift;
     int x_tb = (x0 >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask;
     int y_tb = (y0 >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask;
 
     int cur_tb_addr = MIN_TB_ADDR_ZS(x_tb, y_tb);
 
-    ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
+    const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
+#if defined(RPI) && BIT_DEPTH == 8
+    pixel *const src = s->frame->format == AV_PIX_FMT_SAND128 && c_idx == 0 ?
+        s->frame->data[0] + rpi_sliced_frame_off_y(s->frame, x, y):
+        (pixel*)s->frame->data[c_idx] + x + y * stride;
+#else
     pixel *src = (pixel*)s->frame->data[c_idx] + x + y * stride;
+#endif
 
     int min_pu_width = s->ps.sps->min_pu_width;
 
@@ -119,8 +125,24 @@ do {                                  \
     int top_right_size   = (FFMIN(x0 + 2 * size_in_luma_h, s->ps.sps->width) -
                            (x0 + size_in_luma_h)) >> hshift;
 
+    pixel * src_l = src - 1;
+    pixel * src_u = src - stride;
+    pixel * src_ur = src_u + size;
+
 #ifdef DISABLE_INTRA
     return;
+#endif
+
+#if defined(RPI) && BIT_DEPTH == 8
+    if (s->frame->format == AV_PIX_FMT_SAND128 && c_idx == 0) {
+        const AVFrame * const frame = s->frame;
+        const unsigned int mask = stride - 1;
+        const unsigned int stripe_adj = (frame->linesize[3] - 1) * stride;
+        if ((x & mask) == 0)
+            src_l -= stripe_adj;
+        if (((x + size) & mask) == 0)
+            src_ur += stripe_adj;
+    }
 #endif
 
     if (s->ps.pps->constrained_intra_pred_flag == 1) {
@@ -172,23 +194,24 @@ do {                                  \
         top[-1] = 128;
     }
     if (cand_up_left) {
-        left[-1] = POS(-1, -1);
+        left[-1] = src_l[-stride];
         top[-1]  = left[-1];
     }
     if (cand_up)
-        memcpy(top, src - stride, size * sizeof(pixel));
+        // Always good - even with sand
+        memcpy(top, src_u, size * sizeof(pixel));
     if (cand_up_right) {
-        memcpy(top + size, src - stride + size, size * sizeof(pixel));
-        EXTEND(top + size + top_right_size, POS(size + top_right_size - 1, -1),
+        memcpy(top + size, src_ur, top_right_size * sizeof(pixel));
+        EXTEND(top + size + top_right_size, top[size + top_right_size - 1],
                size - top_right_size);
     }
     if (cand_left)
         for (i = 0; i < size; i++)
-            left[i] = POS(-1, i);
+            left[i] = src_l[stride * i];
     if (cand_bottom_left) {
         for (i = size; i < size + bottom_left_size; i++)
-            left[i] = POS(-1, i);
-        EXTEND(left + size + bottom_left_size, POS(-1, size + bottom_left_size - 1),
+            left[i] = src_l[stride * i];
+        EXTEND(left + size + bottom_left_size, left[size + bottom_left_size - 1],
                size - bottom_left_size);
     }
 

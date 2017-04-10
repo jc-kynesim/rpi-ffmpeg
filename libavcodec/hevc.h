@@ -1289,6 +1289,18 @@ extern const uint8_t ff_hevc_diag_scan8x8_y[64];
 
 #ifdef RPI
 int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n);
+
+
+static inline unsigned int rpi_sliced_frame_off_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
+{
+    const unsigned int stride1 = frame->linesize[0];
+    const unsigned int stride2 = frame->linesize[3];
+    const unsigned int x1 = x & (stride1 - 1);
+    const unsigned int x2 = x ^ x1;
+
+    return x1 + stride1 * y + stride2 * x2;
+}
+
 #endif
 
 #endif /* AVCODEC_HEVC_H */

@@ -276,7 +276,8 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     frame->linesize[0] = geo.stride_y;
     frame->linesize[1] = geo.stride_c;
     frame->linesize[2] = geo.stride_c;
-    frame->linesize[3] = size_y + size_c;      // abuse: linesize[3] = stripe stride
+    if (geo.stripes > 1)
+        frame->linesize[3] = geo.height_y + geo.height_c;      // abuse: linesize[3] = stripe stride
 
     frame->data[0] = buf->data;
     frame->data[1] = frame->data[0] + size_y;
@@ -313,9 +314,9 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
     }
 
 #if 1
-    printf("%s: fmt:%d, %dx%d lsize=%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
+    printf("%s: fmt:%d, %dx%d lsize=%d/%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
         frame->format, frame->width, frame->height,
-        frame->linesize[0], frame->linesize[1], frame->linesize[2],
+        frame->linesize[0], frame->linesize[1], frame->linesize[2], frame->linesize[3],
         frame->data[0], frame->data[1], frame->data[2],
         frame->buf[0], frame->buf[1], frame->buf[2],
         av_buffer_get_opaque(frame->buf[0]));

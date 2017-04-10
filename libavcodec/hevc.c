@@ -2259,6 +2259,7 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
 
 
 #if RPI_INTER
+
 static void
 rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
            const int nPbW, const int nPbH,
@@ -2267,7 +2268,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
            const int weight_offset,
            AVFrame *const src_frame)
 {
-    const unsigned int y_off = x0 + y0 * s->frame->linesize[0];
+    const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
 
     rpi_luma_mc_uni(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
                     mv, x0, y0, nPbW, nPbH,
@@ -2341,7 +2342,7 @@ rpi_pred_y_b(HEVCContext * const s,
            AVFrame *const src_frame,
            AVFrame *const src_frame2)
 {
-    const unsigned int y_off = x0 + y0 * s->frame->linesize[0];
+    const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
     const Mv * const mv  = mv_field->mv + 0;
     const Mv * const mv2 = mv_field->mv + 1;
 
@@ -4523,6 +4524,11 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
                         s->nal_unit_type == NAL_STSA_N  ||
                         s->nal_unit_type == NAL_RADL_N  ||
                         s->nal_unit_type == NAL_RASL_N);
+
+        if (!(s->nal_unit_type == NAL_IDR_W_RADL || s->nal_unit_type == NAL_IDR_N_LP)) {
+            s->is_decoded = 0;
+            break;
+        }
 
         if (!s->used_for_ref && s->avctx->skip_frame >= AVDISCARD_NONREF) {
             s->is_decoded = 0;
