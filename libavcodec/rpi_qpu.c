@@ -466,6 +466,8 @@ void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_M
         return;
 
     av_assert0(rfe->n < sizeof(rfe->a.s) / sizeof(rfe->a.s[0]));
+    av_assert0(offset <= gm->numbytes);
+    av_assert0(size <= gm->numbytes);
     av_assert0(offset + size <= gm->numbytes);
 
     rfe->a.s[rfe->n].cmd = mode;
@@ -500,6 +502,12 @@ void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AV
   const unsigned int uv_rnd = (1U << uv_shift) >> 1;
   const unsigned int uv_offset = frame->linesize[1] * (start_line >> uv_shift);
   const unsigned int uv_size = frame->linesize[1] * ((start_line + n + uv_rnd) >> uv_shift) - uv_offset;
+
+  // As all unsigned they will also reject -ve
+  // Test individually as well as added to reject overflow
+  av_assert0(start_line <= (unsigned int)frame->height);
+  av_assert0(n <= (unsigned int)frame->height);
+  av_assert0(start_line + n <= (unsigned int)frame->height);
 
   if (gpu_is_buf1(frame)) {
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);

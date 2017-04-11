@@ -1260,7 +1260,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                  int c_idx);
 
 #if RPI_INTER
-extern void rpi_flush_ref_frame_progress(HEVCContext *s, ThreadFrame *f, int n);
+extern void rpi_flush_ref_frame_progress(HEVCContext * const s, ThreadFrame * const f, const unsigned int n);
 #endif
 
 void ff_hevc_hls_mvd_coding(HEVCContext *s, int x0, int y0, int log2_cb_size);
