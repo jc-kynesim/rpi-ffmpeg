@@ -897,8 +897,6 @@ void rpi_flush_ref_frame_progress(HEVCContext * const s, ThreadFrame * const f, 
         const int d0 = ((int *)f->progress->data)[0];
         const unsigned int curr_y = d0 == -1 ? 0 : d0;  // At start of time progress is -1
 
-        printf("%d,%d\n", curr_y, n);
-
         if (curr_y < (unsigned int)f->f->height) {
             rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
             rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
