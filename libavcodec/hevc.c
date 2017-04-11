@@ -3402,7 +3402,7 @@ static void rpi_begin(HEVCContext *s)
         u->next_src_base_v = 0;
         u->s.pic_w = pic_width;
         u->s.pic_h = pic_height;
-        u->s.src_stride = pic_height * 3 * 64;
+        u->s.src_stride = s->frame->linesize[3];
         u->s.dst_stride = s->frame->linesize[1];
         u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
         u->s.dummy0 = 0;
@@ -3422,8 +3422,8 @@ static void rpi_begin(HEVCContext *s)
         *s->y_mvs[job][i]++ = 0; // y2_x2
         *s->y_mvs[job][i]++ = 0; // ref_y2_base
         *s->y_mvs[job][i]++ = (s->ps.sps->width << 16) + s->ps.sps->height;
-        *s->y_mvs[job][i]++ = s->frame->linesize[0]; // pitch
-        *s->y_mvs[job][i]++ = pic_height * 3 * 64;
+        *s->y_mvs[job][i]++ = s->frame->linesize[3]; // src pitch
+        *s->y_mvs[job][i]++ = s->frame->linesize[0]; // dst pitch
         *s->y_mvs[job][i]++ = s->sh.luma_log2_weight_denom + 6;  // weight demon + 6
         *s->y_mvs[job][i]++ = 0; // Unused - alignment with per-block
         *s->y_mvs[job][i]++ = 0; // Next kernel
@@ -4524,11 +4524,6 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
                         s->nal_unit_type == NAL_STSA_N  ||
                         s->nal_unit_type == NAL_RADL_N  ||
                         s->nal_unit_type == NAL_RASL_N);
-
-        if (!(s->nal_unit_type == NAL_IDR_W_RADL || s->nal_unit_type == NAL_IDR_N_LP)) {
-            s->is_decoded = 0;
-            break;
-        }
 
         if (!s->used_for_ref && s->avctx->skip_frame >= AVDISCARD_NONREF) {
             s->is_decoded = 0;

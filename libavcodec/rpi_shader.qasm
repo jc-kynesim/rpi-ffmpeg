@@ -230,11 +230,12 @@ add t1s, r1, ra_frame_base
   shl ra_xshift_next, r1, 4
 
 # In a single 32 bit word we get 2 UV pairs so mask bottom bit of xs
-  mov r2, SRC_STRIPE_WIDTH - 2
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2 ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r0        # x * 2 (we have UV pairs)
-  add r0, r0, r1        # Add stripe offsets
+
+  and r0, r0, -2
+  add r0, r0, r0        ; v8subs r1, r1, r1
+  sub r1, r1, rb_pitch
+  and r1, r0, r1
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add ra_x, ra_frame_base, r0
 
   mov r1, ra_y          # Load y
@@ -306,10 +307,11 @@ add ra_frame_base_next, rb_x_next, r2
   mov ra_xshift, ra_xshift_next
   shl ra_xshift_next, r0, 4
 
-  mov r2, SRC_STRIPE_WIDTH - 2
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2 ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r0        # x * 2 (we have UV pairs)
+  and r0, r0, -2
+  add r0, r0, r0        ; v8subs r1, r1, r1
+  sub r1, r1, rb_pitch
+  and r1, r0, r1
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add rb_x_next, r3, r0
 
@@ -477,10 +479,11 @@ add ra_frame_base_next, rb_x_next, r2
   mov ra_xshift, ra_xshift_next
   shl ra_xshift_next, r0, 4
 
-  mov r2, SRC_STRIPE_WIDTH - 2
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2 ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r0        # x * 2 (we have UV pairs)
+  and r0, r0, -2
+  add r0, r0, r0        ; v8subs  r1, r1, r1
+  sub r1, r1, rb_pitch
+  and r1, r0, r1
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add rb_x_next, r3, r0
 
@@ -690,10 +693,11 @@ and rb_x_next, r0, ~3              ; mov ra0, unif       # H filter coeffs
   mov ra_xshift, ra_xshift_next      ; mov -, unif         # V base
   shl ra_xshift_next, r0, 4
 
-  mov r2, SRC_STRIPE_WIDTH - 2
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2 ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r0        # x * 2 (we have UV pairs)
+  and r0, r0, -2
+  add r0, r0, r0        ; v8subs r1, r1, r1
+  sub r1, r1, rb_pitch
+  and r1, r0, r1
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add rb_x_next, r3, r0
 
@@ -923,9 +927,11 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 .else
 
 # In a single 32 bit word we get 4 Y Pels so mask 2 bottom bits of xs
-  mov r2, SRC_STRIPE_WIDTH - 4
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2 ; mul24 r1, r1, rb_xpitch
+
+  and r0, r0, -4        ; v8subs r2, r2, r2
+  sub r2, r2, rb_pitch
+  and r1, r0, r2
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add ra_frame_base, ra9, r0
 
@@ -957,8 +963,9 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 .else
 
   # r2 still contains mask
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
+  and r0, r0, -4
+  and r1, r0, r2
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add ra_frame_base2, ra11, r0
 
