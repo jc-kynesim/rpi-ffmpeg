@@ -1054,8 +1054,9 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add ra_frame_base_next, unif, r0              # Base1
-  mov ra1, unif         # x2_y2
   mov ra_y_next, ra1.16b                      # Load y
+  mov ra1, unif         # x2_y2
+  nop                   # ra1 delay
 
   add r0, ra1.16a, r3   # Load x
   max r0, r0, 0
@@ -1065,8 +1066,8 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add rb_frame_base2_next, unif, r0              # Base1
-  mov ra1, unif         # width_height
   mov ra_y2_next, ra1.16b                      # Load y
+  mov ra1, unif         # width_height
 
 .endif
 
