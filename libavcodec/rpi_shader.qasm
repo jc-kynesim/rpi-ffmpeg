@@ -1020,7 +1020,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov ra_link, unif
 
-  mov ra1, unif  ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
+  mov ra1, unif         ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
 
 # per-channel shifts were calculated on the *previous* invocation
   mov ra_xshift, ra_xshift_next
@@ -1037,7 +1037,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   and r0, r0, ~3                     ; mov ra1, unif # y2_x2
   add ra_frame_base_next, r2, r0
 
-  add r0, ra1.16a, r3 # Load x
+  add r0, ra1.16a, r3   # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
   shl rx_xshift2_next, r0, 3         # Compute shifts
@@ -1045,25 +1045,29 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   and r0, r0, ~3                     ; mov ra1, unif  # width_height ; r0 gives the clipped and aligned x coordinate
   add rb_frame_base2_next, r2, r0    # r2 is address for frame1 (not including y offset)
 .else
-  add r0, ra1.16a, r3 # Load x
+  add r0, ra1.16a, r3   # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
 
-  mov r2, SRC_STRIPE_WIDTH - 4
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
+  shl ra_xshift_next, r0, 3         # Compute shifts
+  and r0, r0, -4        ; v8subs r2, r2, r2
+  sub r2, r2, rb_pitch
+  and r1, r0, r2
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add ra_frame_base_next, unif, r0              # Base1
   mov ra_y_next, ra1.16b                      # Load y
   mov ra1, unif         # x2_y2
   nop                   # ra1 delay
 
-  add r0, ra1.16a, r3   # Load x
+  add r0, ra1.16a, r3   # Load x2
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
 
-  shr r1, r0, SRC_STRIPE_SHIFT
-  and r0, r0, r2        ; mul24 r1, r1, rb_xpitch
+  shl rx_xshift2_next, r0, 3         # Compute shifts
+  and r0, r0, -4
+  and r1, r0, r2
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add rb_frame_base2_next, unif, r0              # Base1
   mov ra_y2_next, ra1.16b                      # Load y
