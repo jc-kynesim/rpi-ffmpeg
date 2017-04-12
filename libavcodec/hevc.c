@@ -3586,7 +3586,8 @@ static void worker_core(HEVCContext * const s)
             flush_start = FFMIN(flush_start, y);
             high=FFMAX(high,y);
         }
-        flush_count = high+(1 << s->ps.sps->log2_ctb_size) - flush_start;
+        // Avoid flushing past end of frame
+        flush_count = FFMIN(high + (1 << s->ps.sps->log2_ctb_size), s->frame->height) - flush_start;
     }
 
 #if !DISABLE_CHROMA

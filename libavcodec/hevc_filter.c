@@ -891,14 +891,18 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
 #if RPI_INTER
 
 // Flush some lines of a reference frames
-void rpi_flush_ref_frame_progress(HEVCContext *s, ThreadFrame *f, int n)
+void rpi_flush_ref_frame_progress(HEVCContext * const s, ThreadFrame * const f, const unsigned int n)
 {
     if (s->enable_rpi && s->used_for_ref) {
-        const int curr_y = ((int *)f->progress->data)[0];
-        rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
-        rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-          curr_y, n - curr_y, s->ps.sps->vshift[1], 1, 1);
-        rpi_cache_flush_finish(rfe);
+        const int d0 = ((int *)f->progress->data)[0];
+        const unsigned int curr_y = d0 == -1 ? 0 : d0;  // At start of time progress is -1
+
+        if (curr_y < (unsigned int)f->f->height) {
+            rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
+            rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+              curr_y, FFMIN(n, (unsigned int)f->f->height) - curr_y, s->ps.sps->vshift[1], 1, 1);
+            rpi_cache_flush_finish(rfe);
+        }
     }
 }
 #endif
