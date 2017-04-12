@@ -346,7 +346,7 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 
 static void display_exit(MMAL_COMPONENT_T* display)
 {
-    sleep(20);
+    sleep(120);
     if (display) {
         mmal_component_destroy(display);
     }

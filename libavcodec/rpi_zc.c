@@ -40,6 +40,9 @@ typedef struct ZcPoolEnt
 #define STRIDE_OR       0
 #endif
 
+#define DEBUG_ZAP0_BUFFERS 0
+
+
 static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)
 {
     ZcPoolEnt * const zp = av_malloc(sizeof(ZcPoolEnt));
@@ -233,6 +236,10 @@ static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
     idata = ((idata & ~(ALLOC_PAD - 1)) | noff) + (((idata & (ALLOC_PAD - 1)) > noff) ? ALLOC_PAD : 0);
 #endif
 
+#if DEBUG_ZAP0_BUFFERS
+    memset((void*)idata, 0, size);
+#endif
+
     if ((buf = av_buffer_create((void *)idata, size, rpi_free_display_buffer, zp, AV_BUFFER_FLAG_READONLY)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "av_buffer_create() failed\n");
@@ -314,7 +321,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
         rv = avcodec_default_get_buffer2(s, frame, flags);
     }
 
-#if 1
+#if 0
     printf("%s: fmt:%d, %dx%d lsize=%d/%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
         frame->format, frame->width, frame->height,
         frame->linesize[0], frame->linesize[1], frame->linesize[2], frame->linesize[3],

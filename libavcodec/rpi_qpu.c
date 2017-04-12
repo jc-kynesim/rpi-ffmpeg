@@ -502,6 +502,10 @@ void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame 
 void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
   const unsigned int start_line, const unsigned int n, const unsigned int uv_shift, const int do_luma, const int do_chroma)
 {
+#if 1
+  // Argh.. sand frames!
+  rpi_cache_flush_add_frame(rfe, frame, mode);
+#else
   const unsigned int y_offset = frame->linesize[0] * start_line;
   const unsigned int y_size = frame->linesize[0] * n;
   // Round UV up/down to get everything
@@ -535,6 +539,7 @@ void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AV
       rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
     }
   }
+#endif
 }
 
 // Call this to clean and invalidate a region of memory

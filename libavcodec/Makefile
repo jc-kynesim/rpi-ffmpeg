@@ -7,6 +7,7 @@ HEADERS = avcodec.h                                                     \
           avfft.h                                                       \
           rpi_qpu.h                                                     \
           rpi_shader.h                                                  \
+	  rpi_shader_cmd.h                                              \
           rpi_mailbox.h                                                 \
           rpi_hevc_transform.h                                          \
           rpi_zc.h                                                      \
@@ -1090,12 +1091,12 @@ endif
 
 QASM := $(SUBDIR)../pi-util/qasm.py
 
-#ifneq ("$(wildcard $(QASM))","")
+ifneq ("$(wildcard $(QASM))","")
 $(SUBDIR)rpi_shader.c: $(SUBDIR)rpi_shader.qasm
 	python $(QASM) -mc_c:rpi_shader,rpi_shader,rpi_shader $< > $@
 
 $(SUBDIR)rpi_shader.h: $(SUBDIR)rpi_shader.qasm
 	python $(QASM) -mc_h:rpi_shader,rpi_shader,rpi_shader $< > $@
-#endif
+endif
 
 $(SUBDIR)rpi_qpu.o $(SUBDIR)hevc.o: $(SUBDIR)rpi_shader.h
