@@ -93,9 +93,11 @@ do {                                  \
 
     const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
 #if defined(RPI) && BIT_DEPTH == 8
-    pixel *const src = s->frame->format == AV_PIX_FMT_SAND128 && c_idx == 0 ?
-        s->frame->data[0] + rpi_sliced_frame_off_y(s->frame, x, y):
-        (pixel*)s->frame->data[c_idx] + x + y * stride;
+    pixel *const src = s->frame->format != AV_PIX_FMT_SAND128 ?
+            (pixel*)s->frame->data[c_idx] + x + y * stride :
+        c_idx == 0 ?
+            rpi_sliced_frame_pos_y(s->frame, x, y) :
+            rpi_sliced_frame_pos_c(s->frame, x, y);
 #else
     pixel *src = (pixel*)s->frame->data[c_idx] + x + y * stride;
 #endif
@@ -134,9 +136,9 @@ do {                                  \
 #endif
 
 #if defined(RPI) && BIT_DEPTH == 8
-    if (s->frame->format == AV_PIX_FMT_SAND128 && c_idx == 0) {
+    if (s->frame->format == AV_PIX_FMT_SAND128) {
         const AVFrame * const frame = s->frame;
-        const unsigned int mask = stride - 1;
+        const unsigned int mask = c_idx == 0 ? stride - 1 : stride / 2 - 1;  //?? hshift would do the job ??
         const unsigned int stripe_adj = (frame->linesize[3] - 1) * stride;
         if ((x & mask) == 0)
             src_l -= stripe_adj;

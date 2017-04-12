@@ -1301,6 +1301,27 @@ static inline unsigned int rpi_sliced_frame_off_y(const AVFrame * const frame, c
     return x1 + stride1 * y + stride2 * x2;
 }
 
+static inline unsigned int rpi_sliced_frame_off_c(const AVFrame * const frame, const unsigned int x_c, const unsigned int y_c)
+{
+    const unsigned int stride1 = frame->linesize[0];
+    const unsigned int stride2 = frame->linesize[3];
+    const unsigned int x = x_c * 2;
+    const unsigned int x1 = x & (stride1 - 1);
+    const unsigned int x2 = x ^ x1;
+
+    return x1 + stride1 * y_c + stride2 * x2;
+}
+
+static inline uint8_t * rpi_sliced_frame_pos_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
+{
+    return frame->data[0] + rpi_sliced_frame_off_y(frame, x, y);
+}
+
+static inline uint8_t * rpi_sliced_frame_pos_c(const AVFrame * const frame, const unsigned int x, const unsigned int y)
+{
+    return frame->data[1] + rpi_sliced_frame_off_c(frame, x, y);
+}
+
 #endif
 
 #endif /* AVCODEC_HEVC_H */

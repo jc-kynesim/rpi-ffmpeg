@@ -2135,18 +2135,19 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     }
 #ifdef RPI
     if (s->enable_rpi) {
-        HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
 
         // *** Chroma is going to need some work
         if (c_idx == 0) {
+            HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
             cmd->type = RPI_PRED_TRANSFORM_ADD;
             cmd->size = log2_trafo_size;
             cmd->ta.buf = coeffs;
             cmd->ta.dst = s->frame->data[0] + rpi_sliced_frame_off_y(s->frame, x0, y0);
             cmd->ta.stride = stride;
         }
-        else
+        else if (0)
         {
+            HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
             cmd->type = RPI_PRED_TRANSFORM_ADD;
             cmd->size = log2_trafo_size;
             cmd->ta.buf = coeffs;

@@ -2096,8 +2096,7 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .comp = {
             { 0, 1, 0, 0, 8, 0, 7, 1 },        /* Y */
             { 1, 2, 0, 0, 8, 1, 7, 1 },        /* U */
-//            { 1, 2, 1, 0, 8, 1, 7, 2 },        /* V */
-            { 2, 2, 0, 0, 8, 1, 7, 1 },        /* V */
+            { 1, 2, 1, 0, 8, 1, 7, 2 },        /* V */
         },
         .flags = 0,
     }

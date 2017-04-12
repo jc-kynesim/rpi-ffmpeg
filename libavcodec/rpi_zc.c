@@ -281,7 +281,8 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
 
     frame->data[0] = buf->data;
     frame->data[1] = frame->data[0] + size_y;
-    frame->data[2] = frame->data[1] + (geo.planes_c == 1 ? 1 : size_c);
+    if (geo.planes_c > 1)
+        frame->data[2] = frame->data[1] + size_c;
 
     frame->extended_data = frame->data;
     // Leave extended buf alone
