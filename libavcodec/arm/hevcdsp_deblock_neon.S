@@ -383,3 +383,127 @@ function ff_hevc_h_loop_filter_chroma_neon, export=1
         vst1.8   {d4}, [r0]
         bx       lr
 endfunc
+
+/* ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,
+ *                                            int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
+ *                                            MvField *curr, MvField *neigh, uint8_t *bs)
+ */
+function ff_hevc_deblocking_boundary_strengths_neon, export=1
+        add         ip, sp, #4*4
+        push        {a2-a4,v1-v8,lr}
+        ldmia       ip, {v5-v7}
+1:      ldmdb       ip, {v1-v4}
+        ldrsb       a3, [v5, #8]    @ curr->ref_idx
+        ldrsb       v8, [v5, #9]
+        ldrsb       ip, [v6, #8]    @ neigh->ref_idx
+        ldrsb       lr, [v6, #9]
+        ldr         v1, [v1, a3, lsl #2]
+        ldrb        a3, [v5, #10]   @ curr->pred_flag
+        ldr         v2, [v2, v8, lsl #2]
+        ldrb        v8, [v6, #10]   @ neigh->pred_flag
+        ldr         v3, [v3, ip, lsl #2]
+        ldr         v4, [v4, lr, lsl #2]
+        teq         a3, #3
+        beq         20f
+        teq         v8, #3
+        beq         90f
+
+        tst         a3, #1
+        itee        ne
+        ldrne       a3, [v5, #0]    @ curr->mv[0]
+        ldreq       a3, [v5, #4]    @ curr->mv[1]
+        moveq       v1, v2
+        tst         v8, #1
+        itee        ne
+        ldrne       v8, [v6, #0]    @ neigh->mv[0]
+        ldreq       v8, [v6, #4]    @ neigh->mv[1]
+        moveq       v3, v4
+        teq         v1, v3
+        bne         10f
+        ldr         lr, =0xFFFCFFFC
+        ssub16      ip, v8, a3
+        ssub16      a3, a3, v8
+        sel         a3, a3, ip
+        ands        a3, a3, lr
+        @ drop through
+10:     it          ne
+        movne       a3, #1
+11:     subs        a2, a2, #1
+12:
+A       strbhs      a3, [v7], a4
+T       itt         hs
+T       strbhs      a3, [v7]
+T       addhs       v7, v7, a4
+        subs        a2, a2, #1
+        bhs         12b
+
+        ldm         sp, {a2, a3}
+        add         ip, sp, #16*4
+        subs        a1, a1, #1
+        add         v5, v5, a3
+        add         v6, v6, a3
+        bhi         1b
+        pop         {a2-a4,v1-v8,pc}
+
+20:     teq         v8, #3
+        bne         10b
+
+        teq         v1, v3
+        it          eq
+        teqeq       v2, v4
+        bne         40f
+        teq         v1, v2
+        bne         30f
+
+        ldrd        v1, v2, [v5]    @ curr->mv
+        ldrd        v3, v4, [v6]    @ neigh->mv
+        ldr         lr, =0xFFFCFFFC
+        ssub16      ip, v3, v1
+        ssub16      a3, v1, v3
+        sel         a3, a3, ip
+        ands        a3, a3, lr
+        bne         25f
+        ssub16      ip, v4, v2
+        ssub16      a3, v2, v4
+        sel         a3, a3, ip
+        ands        a3, a3, lr
+        beq         11b
+        @ drop through
+25:     ssub16      ip, v4, v1
+        ssub16      a3, v1, v4
+        sel         a3, a3, ip
+        ands        a3, a3, lr
+        bne         10b
+        ssub16      ip, v3, v2
+        ssub16      a3, v2, v3
+        sel         a3, a3, ip
+        ands        a3, a3, lr
+        b           10b
+
+30:     ldrd        v1, v2, [v5]    @ curr->mv
+        ldrd        v3, v4, [v6]    @ neigh->mv
+        ldr         lr, =0xFFFCFFFC
+        ssub16      ip, v3, v1
+        ssub16      a3, v1, v3
+        sel         a3, a3, ip
+        ands        a3, a3, lr
+        bne         10b
+        ssub16      ip, v4, v2
+        ssub16      a3, v2, v4
+        sel         a3, a3, ip
+        ands        a3, a3, lr
+        b           10b
+
+40:     teq         v1, v4
+        ite         eq
+        teqeq       v2, v3
+        bne         10b
+
+        ldrd        v1, v2, [v5]    @ curr->mv
+        ldrd        v3, v4, [v6]    @ neigh->mv
+        ldr         lr, =0xFFFCFFFC
+        b           25b
+
+90:     mov         a3, #1
+        b           11b
+endfunc

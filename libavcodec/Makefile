@@ -5,6 +5,11 @@ NAME = avcodec
 HEADERS = avcodec.h                                                     \
           avdct.h                                                       \
           avfft.h                                                       \
+          rpi_qpu.h                                                     \
+          rpi_shader.h                                                  \
+          rpi_mailbox.h                                                 \
+          rpi_hevc_transform.h                                          \
+          rpi_zc.h                                                      \
           d3d11va.h                                                     \
           dirac.h                                                       \
           dv_profile.h                                                  \
@@ -43,6 +48,10 @@ OBJS = allcodecs.o                                                      \
        resample.o                                                       \
        resample2.o                                                      \
        utils.o                                                          \
+       rpi_qpu.o                                                        \
+       rpi_shader.o                                                     \
+       rpi_mailbox.o                                                    \
+       rpi_zc.o                                                         \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 
@@ -1078,3 +1087,15 @@ $(SUBDIR)qdm2.o: $(SUBDIR)qdm2_tables.h
 $(SUBDIR)sinewin.o: $(SUBDIR)sinewin_tables.h
 $(SUBDIR)sinewin_fixed.o: $(SUBDIR)sinewin_fixed_tables.h
 endif
+
+QASM := $(SUBDIR)../pi-util/qasm.py
+
+ifneq ("$(wildcard $(QASM))","")
+$(SUBDIR)rpi_shader.c: $(SUBDIR)rpi_shader.qasm
+	python $(QASM) -mc_c:rpi_shader,rpi_shader,rpi_shader $< > $@
+
+$(SUBDIR)rpi_shader.h: $(SUBDIR)rpi_shader.qasm
+	python $(QASM) -mc_h:rpi_shader,rpi_shader,rpi_shader $< > $@
+endif
+
+$(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_shader.h

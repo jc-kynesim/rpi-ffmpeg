@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+//#define DISABLE_INTRA
+
 #include "libavutil/pixdesc.h"
 
 #include "bit_depth_template.c"
@@ -69,8 +71,11 @@ do {                                  \
                 AV_WN4P(&ptr[i], a);                                           \
             else                                                               \
                 a = PIXEL_SPLAT_X4(ptr[i + 3])
-
+#ifdef RPI_WORKER
+    HEVCLocalContextIntra *lc = (s->enable_rpi) ? &s->HEVClcIntra : (HEVCLocalContextIntra *)s->HEVClc ;
+#else
     HEVCLocalContext *lc = s->HEVClc;
+#endif
     int i;
     int hshift = s->ps.sps->hshift[c_idx];
     int vshift = s->ps.sps->vshift[c_idx];
@@ -113,6 +118,10 @@ do {                                  \
                            (y0 + size_in_luma_v)) >> vshift;
     int top_right_size   = (FFMIN(x0 + 2 * size_in_luma_h, s->ps.sps->width) -
                            (x0 + size_in_luma_h)) >> hshift;
+
+#ifdef DISABLE_INTRA
+    return;
+#endif
 
     if (s->ps.pps->constrained_intra_pred_flag == 1) {
         int size_in_luma_pu_v = PU(size_in_luma_v);
