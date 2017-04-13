@@ -22,9 +22,9 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-//#define DISABLE_SAO
-//#define DISABLE_DEBLOCK
-//#define DISABLE_STRENGTHS
+#define DISABLE_SAO
+#define DISABLE_DEBLOCK
+#define DISABLE_STRENGTHS
 // define DISABLE_DEBLOCK_NONREF for a 6% speed boost (by skipping deblocking on unimportant frames)
 //#define DISABLE_DEBLOCK_NONREF
 

@@ -1,8 +1,6 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
-#include <interface/vcsm/user-vcsm.h>
-
 #define RPI_ONE_BUF 1
 
 typedef struct gpu_mem_ptr_s {
@@ -125,10 +123,8 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
 
 // Cache flush stuff
 
-typedef struct rpi_flush_envss {
-    unsigned int n;
-    struct vcsm_user_clean_invalid_s a;
-} rpi_cache_flush_env_t;
+struct rpi_cache_flush_env_s;
+typedef struct rpi_cache_flush_env_s rpi_cache_flush_env_t;
 
 rpi_cache_flush_env_t * rpi_cache_flush_init(void);
 // Free env without flushing
