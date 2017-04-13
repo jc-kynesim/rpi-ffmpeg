@@ -391,7 +391,7 @@ static int mxf_get_stream_index(AVFormatContext *s, KLVPacket *klv)
     for (i = 0; i < s->nb_streams; i++) {
         MXFTrack *track = s->streams[i]->priv_data;
         /* SMPTE 379M 7.3 */
-        if (!memcmp(klv->key + sizeof(mxf_essence_element_key), track->track_number, sizeof(track->track_number)))
+        if (track && !memcmp(klv->key + sizeof(mxf_essence_element_key), track->track_number, sizeof(track->track_number)))
             return i;
     }
     /* return 0 if only one stream, for OP Atom files with 0 as track number */
@@ -2590,7 +2590,7 @@ static int mxf_parse_handle_essence(MXFContext *mxf)
         /* remember where we were so we don't end up seeking further back than this */
         mxf->last_forward_tell = avio_tell(pb);
 
-        if (!pb->seekable) {
+        if (!(pb->seekable & AVIO_SEEKABLE_NORMAL)) {
             av_log(mxf->fc, AV_LOG_INFO, "file is not seekable - not parsing FooterPartition\n");
             return -1;
         }
@@ -2777,7 +2777,7 @@ static void mxf_read_random_index_pack(AVFormatContext *s)
     int64_t file_size, max_rip_length, min_rip_length;
     KLVPacket klv;
 
-    if (!s->pb->seekable)
+    if (!(s->pb->seekable & AVIO_SEEKABLE_NORMAL))
         return;
 
     file_size = avio_size(s->pb);
@@ -3135,7 +3135,7 @@ static int mxf_read_packet_old(AVFormatContext *s, AVPacket *pkt)
                 if (mxf->nb_index_tables >= 1 && mxf->current_edit_unit < t->nb_ptses) {
                     pkt->dts = mxf->current_edit_unit + t->first_dts;
                     pkt->pts = t->ptses[mxf->current_edit_unit];
-                } else if (track->intra_only) {
+                } else if (track && track->intra_only) {
                     /* intra-only -> PTS = EditUnit.
                      * let utils.c figure out DTS since it can be < PTS if low_delay = 0 (Sony IMX30) */
                     pkt->pts = mxf->current_edit_unit;

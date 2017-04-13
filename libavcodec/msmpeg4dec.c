@@ -414,13 +414,6 @@ int ff_msmpeg4_decode_picture_header(MpegEncContext * s)
         av_log(s->avctx, AV_LOG_ERROR, "invalid picture type\n");
         return -1;
     }
-#if 0
-{
-    static int had_i=0;
-    if(s->pict_type == AV_PICTURE_TYPE_I) had_i=1;
-    if(!had_i) return -1;
-}
-#endif
     s->chroma_qscale= s->qscale = get_bits(&s->gb, 5);
     if(s->qscale==0){
         av_log(s->avctx, AV_LOG_ERROR, "invalid qscale\n");
@@ -873,6 +866,7 @@ AVCodec ff_msmpeg4v1_decoder = {
     .close          = ff_h263_decode_end,
     .decode         = ff_h263_decode_frame,
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .max_lowres     = 3,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,
@@ -890,6 +884,7 @@ AVCodec ff_msmpeg4v2_decoder = {
     .close          = ff_h263_decode_end,
     .decode         = ff_h263_decode_frame,
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .max_lowres     = 3,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,
@@ -907,6 +902,7 @@ AVCodec ff_msmpeg4v3_decoder = {
     .close          = ff_h263_decode_end,
     .decode         = ff_h263_decode_frame,
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .max_lowres     = 3,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,
@@ -924,6 +920,7 @@ AVCodec ff_wmv1_decoder = {
     .close          = ff_h263_decode_end,
     .decode         = ff_h263_decode_frame,
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .max_lowres     = 3,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,

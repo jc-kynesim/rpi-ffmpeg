@@ -143,8 +143,8 @@ typedef struct VP8Context {
 
     uint16_t mb_width;   /* number of horizontal MB */
     uint16_t mb_height;  /* number of vertical MB */
-    int linesize;
-    int uvlinesize;
+    ptrdiff_t linesize;
+    ptrdiff_t uvlinesize;
 
     uint8_t keyframe;
     uint8_t deblock_filter;
@@ -275,7 +275,7 @@ typedef struct VP8Context {
      */
     int mb_layout;
 
-    void (*decode_mb_row_no_filter)(AVCodecContext *avctx, void *tdata, int jobnr, int threadnr);
+    int (*decode_mb_row_no_filter)(AVCodecContext *avctx, void *tdata, int jobnr, int threadnr);
     void (*filter_mb_row)(AVCodecContext *avctx, void *tdata, int jobnr, int threadnr);
 
     int vp7;

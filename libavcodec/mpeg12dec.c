@@ -497,7 +497,7 @@ static inline int mpeg2_decode_block_intra(MpegEncContext *s,
     dc  = s->last_dc[component];
     dc += diff;
     s->last_dc[component] = dc;
-    block[0] = dc << (3 - s->intra_dc_precision);
+    block[0] = dc * (1 << (3 - s->intra_dc_precision));
     ff_tlog(s->avctx, "dc=%d\n", block[0]);
     mismatch = block[0] ^ 1;
     i = 0;
@@ -865,8 +865,8 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                                                    s->last_mv[i][0][1]);
                             /* full_pel: only for MPEG-1 */
                             if (s->full_pel[i]) {
-                                s->mv[i][0][0] <<= 1;
-                                s->mv[i][0][1] <<= 1;
+                                s->mv[i][0][0] *= 2;
+                                s->mv[i][0][1] *= 2;
                             }
                         }
                     }
@@ -948,8 +948,8 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                         dmy = get_dmv(s);
 
 
-                        s->last_mv[i][0][1] = my << my_shift;
-                        s->last_mv[i][1][1] = my << my_shift;
+                        s->last_mv[i][0][1] = my * (1 << my_shift);
+                        s->last_mv[i][1][1] = my * (1 << my_shift);
 
                         s->mv[i][0][0] = mx;
                         s->mv[i][0][1] = my;
@@ -994,7 +994,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
 
             cbp = get_vlc2(&s->gb, ff_mb_pat_vlc.table, MB_PAT_VLC_BITS, 1);
             if (mb_block_count > 6) {
-                cbp <<= mb_block_count - 6;
+                cbp *= 1 << mb_block_count - 6;
                 cbp  |= get_bits(&s->gb, mb_block_count - 6);
                 s->bdsp.clear_blocks(s->block[6]);
             }
@@ -1655,7 +1655,6 @@ static int mpeg_field_start(MpegEncContext *s, const uint8_t *buf, int buf_size)
             if (sd)
                 memcpy(sd->data, s1->a53_caption, s1->a53_caption_size);
             av_freep(&s1->a53_caption);
-            avctx->properties |= FF_CODEC_PROPERTY_CLOSED_CAPTIONS;
         }
 
         if (s1->has_stereo3d) {
@@ -2258,6 +2257,7 @@ static int mpeg_decode_a53_cc(AVCodecContext *avctx,
             s1->a53_caption      = av_malloc(s1->a53_caption_size);
             if (s1->a53_caption)
                 memcpy(s1->a53_caption, p + 7, s1->a53_caption_size);
+            avctx->properties |= FF_CODEC_PROPERTY_CLOSED_CAPTIONS;
         }
         return 1;
     } else if (buf_size >= 11 &&
@@ -2313,6 +2313,7 @@ static int mpeg_decode_a53_cc(AVCodecContext *avctx,
                     p += 6;
                 }
             }
+            avctx->properties |= FF_CODEC_PROPERTY_CLOSED_CAPTIONS;
         }
         return 1;
     }
@@ -2659,6 +2660,8 @@ static int decode_chunks(AVCodecContext *avctx, AVFrame *picture,
                     if (s2->pict_type == AV_PICTURE_TYPE_B) {
                         if (!s2->closed_gop) {
                             skip_frame = 1;
+                            av_log(s2->avctx, AV_LOG_DEBUG,
+                                   "Skipping B slice due to open GOP\n");
                             break;
                         }
                     }
@@ -2670,6 +2673,8 @@ static int decode_chunks(AVCodecContext *avctx, AVFrame *picture,
                      * we have an invalid header. */
                     if (s2->pict_type == AV_PICTURE_TYPE_P && !s->sync) {
                         skip_frame = 1;
+                        av_log(s2->avctx, AV_LOG_DEBUG,
+                               "Skipping P slice due to !sync\n");
                         break;
                     }
                 }
@@ -2868,6 +2873,7 @@ AVCodec ff_mpeg1video_decoder = {
     .capabilities          = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 |
                              AV_CODEC_CAP_TRUNCATED | AV_CODEC_CAP_DELAY |
                              AV_CODEC_CAP_SLICE_THREADS,
+    .caps_internal         = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush                 = flush,
     .max_lowres            = 3,
     .update_thread_context = ONLY_IF_THREADS_ENABLED(mpeg_decode_update_thread_context)
@@ -2885,6 +2891,7 @@ AVCodec ff_mpeg2video_decoder = {
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 |
                       AV_CODEC_CAP_TRUNCATED | AV_CODEC_CAP_DELAY |
                       AV_CODEC_CAP_SLICE_THREADS,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush          = flush,
     .max_lowres     = 3,
     .profiles       = NULL_IF_CONFIG_SMALL(ff_mpeg2_video_profiles),
@@ -2901,6 +2908,7 @@ AVCodec ff_mpegvideo_decoder = {
     .close          = mpeg_decode_end,
     .decode         = mpeg_decode_frame,
     .capabilities   = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_TRUNCATED | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
+    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush          = flush,
     .max_lowres     = 3,
 };

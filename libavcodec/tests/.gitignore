@@ -1,4 +1,5 @@
 /avfft
+/avpacket
 /cabac
 /dct
 /fft
@@ -9,6 +10,7 @@
 /imgconvert
 /jpeg2000dwt
 /mathops
+/mjpegenc_huffman
 /motion
 /options
 /rangecoder

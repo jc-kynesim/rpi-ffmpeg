@@ -283,12 +283,12 @@ static int mpeg4_decode_sprite_trajectory(Mpeg4DecContext *ctx, GetBitContext *g
         ctx->sprite_shift[1]   = 0;
         break;
     case 2:
-        s->sprite_offset[0][0] = (sprite_ref[0][0] << (alpha + rho)) +
+        s->sprite_offset[0][0] = (sprite_ref[0][0] * (1 << alpha + rho)) +
                                  (-r * sprite_ref[0][0] + virtual_ref[0][0]) *
                                  (-vop_ref[0][0]) +
                                  (r * sprite_ref[0][1] - virtual_ref[0][1]) *
                                  (-vop_ref[0][1]) + (1 << (alpha + rho - 1));
-        s->sprite_offset[0][1] = (sprite_ref[0][1] << (alpha + rho)) +
+        s->sprite_offset[0][1] = (sprite_ref[0][1] * (1 << alpha + rho)) +
                                  (-r * sprite_ref[0][1] + virtual_ref[0][1]) *
                                  (-vop_ref[0][0]) +
                                  (-r * sprite_ref[0][0] + virtual_ref[0][0]) *
@@ -315,13 +315,13 @@ static int mpeg4_decode_sprite_trajectory(Mpeg4DecContext *ctx, GetBitContext *g
         min_ab = FFMIN(alpha, beta);
         w3     = w2 >> min_ab;
         h3     = h2 >> min_ab;
-        s->sprite_offset[0][0] = (sprite_ref[0][0] << (alpha + beta + rho - min_ab)) +
+        s->sprite_offset[0][0] = (sprite_ref[0][0] * (1<<(alpha + beta + rho - min_ab))) +
                                  (-r * sprite_ref[0][0] + virtual_ref[0][0]) *
                                  h3 * (-vop_ref[0][0]) +
                                  (-r * sprite_ref[0][0] + virtual_ref[1][0]) *
                                  w3 * (-vop_ref[0][1]) +
                                  (1 << (alpha + beta + rho - min_ab - 1));
-        s->sprite_offset[0][1] = (sprite_ref[0][1] << (alpha + beta + rho - min_ab)) +
+        s->sprite_offset[0][1] = (sprite_ref[0][1] * (1 << (alpha + beta + rho - min_ab))) +
                                  (-r * sprite_ref[0][1] + virtual_ref[0][1]) *
                                  h3 * (-vop_ref[0][0]) +
                                  (-r * sprite_ref[0][1] + virtual_ref[1][1]) *
@@ -367,17 +367,54 @@ static int mpeg4_decode_sprite_trajectory(Mpeg4DecContext *ctx, GetBitContext *g
     } else {
         int shift_y = 16 - ctx->sprite_shift[0];
         int shift_c = 16 - ctx->sprite_shift[1];
+
+        if (shift_c < 0 || shift_y < 0 ||
+            FFABS(s->sprite_offset[0][0]) >= INT_MAX >> shift_y  ||
+            FFABS(s->sprite_offset[1][0]) >= INT_MAX >> shift_c  ||
+            FFABS(s->sprite_offset[0][1]) >= INT_MAX >> shift_y  ||
+            FFABS(s->sprite_offset[1][1]) >= INT_MAX >> shift_c
+        ) {
+            avpriv_request_sample(s->avctx, "Too large sprite shift or offset");
+            goto overflow;
+        }
+
         for (i = 0; i < 2; i++) {
-            s->sprite_offset[0][i] <<= shift_y;
-            s->sprite_offset[1][i] <<= shift_c;
-            s->sprite_delta[0][i]  <<= shift_y;
-            s->sprite_delta[1][i]  <<= shift_y;
+            s->sprite_offset[0][i] *= 1 << shift_y;
+            s->sprite_offset[1][i] *= 1 << shift_c;
+            s->sprite_delta[0][i]  *= 1 << shift_y;
+            s->sprite_delta[1][i]  *= 1 << shift_y;
             ctx->sprite_shift[i]     = 16;
+
+        }
+        for (i = 0; i < 2; i++) {
+            int64_t sd[2] = {
+                s->sprite_delta[i][0] - a * (1LL<<16),
+                s->sprite_delta[i][1] - a * (1LL<<16)
+            };
+
+            if (llabs(s->sprite_offset[0][i] + s->sprite_delta[i][0] * (w+16LL)) >= INT_MAX ||
+                llabs(s->sprite_offset[0][i] + s->sprite_delta[i][1] * (h+16LL)) >= INT_MAX ||
+                llabs(s->sprite_offset[0][i] + s->sprite_delta[i][0] * (w+16LL) + s->sprite_delta[i][1] * (h+16LL)) >= INT_MAX ||
+                llabs(s->sprite_delta[i][0] * (w+16LL)) >= INT_MAX ||
+                llabs(s->sprite_delta[i][1] * (w+16LL)) >= INT_MAX ||
+                llabs(sd[0]) >= INT_MAX ||
+                llabs(sd[1]) >= INT_MAX ||
+                llabs(s->sprite_offset[0][i] + sd[0] * (w+16LL)) >= INT_MAX ||
+                llabs(s->sprite_offset[0][i] + sd[1] * (h+16LL)) >= INT_MAX ||
+                llabs(s->sprite_offset[0][i] + sd[0] * (w+16LL) + sd[1] * (h+16LL)) >= INT_MAX
+            ) {
+                avpriv_request_sample(s->avctx, "Overflow on sprite points");
+                goto overflow;
+            }
         }
         s->real_sprite_warping_points = ctx->num_sprite_warping_points;
     }
 
     return 0;
+overflow:
+    memset(s->sprite_offset, 0, sizeof(s->sprite_offset));
+    memset(s->sprite_delta, 0, sizeof(s->sprite_delta));
+    return AVERROR_PATCHWELCOME;
 }
 
 static int decode_new_pred(Mpeg4DecContext *ctx, GetBitContext *gb) {
@@ -504,7 +541,7 @@ static inline int get_amv(Mpeg4DecContext *ctx, int n)
         if (ctx->divx_version == 500 && ctx->divx_build == 413)
             sum = s->sprite_offset[0][n] / (1 << (a - s->quarter_sample));
         else
-            sum = RSHIFT(s->sprite_offset[0][n] << s->quarter_sample, a);
+            sum = RSHIFT(s->sprite_offset[0][n] * (1 << s->quarter_sample), a);
     } else {
         dx    = s->sprite_delta[n][0];
         dy    = s->sprite_delta[n][1];
@@ -2195,6 +2232,13 @@ int ff_mpeg4_workaround_bugs(AVCodecContext *avctx)
         if (ctx->lavc_build <= 4712U)
             s->workaround_bugs |= FF_BUG_DC_CLIP;
 
+        if ((ctx->lavc_build&0xFF) >= 100) {
+            if (ctx->lavc_build > 3621476 && ctx->lavc_build < 3752552 &&
+               (ctx->lavc_build < 3752037 || ctx->lavc_build > 3752191) // 3.2.1+
+            )
+                s->workaround_bugs |= FF_BUG_IEDGE;
+        }
+
         if (ctx->divx_version >= 0)
             s->workaround_bugs |= FF_BUG_DIRECT_BLOCKSIZE;
         if (ctx->divx_version == 501 && ctx->divx_build == 20020416)
@@ -2785,6 +2829,7 @@ AVCodec ff_mpeg4_decoder = {
     .capabilities          = AV_CODEC_CAP_DRAW_HORIZ_BAND | AV_CODEC_CAP_DR1 |
                              AV_CODEC_CAP_TRUNCATED | AV_CODEC_CAP_DELAY |
                              AV_CODEC_CAP_FRAME_THREADS,
+    .caps_internal         = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush                 = ff_mpeg_flush,
     .max_lowres            = 3,
     .pix_fmts              = ff_h263_hwaccel_pixfmt_list_420,

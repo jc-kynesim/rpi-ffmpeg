@@ -295,16 +295,17 @@ FF_ENABLE_DEPRECATION_WARNINGS
 int av_packet_add_side_data(AVPacket *pkt, enum AVPacketSideDataType type,
                             uint8_t *data, size_t size)
 {
+    AVPacketSideData *tmp;
     int elems = pkt->side_data_elems;
 
     if ((unsigned)elems + 1 > INT_MAX / sizeof(*pkt->side_data))
         return AVERROR(ERANGE);
 
-    pkt->side_data = av_realloc(pkt->side_data,
-                                (elems + 1) * sizeof(*pkt->side_data));
-    if (!pkt->side_data)
+    tmp = av_realloc(pkt->side_data, (elems + 1) * sizeof(*tmp));
+    if (!tmp)
         return AVERROR(ENOMEM);
 
+    pkt->side_data = tmp;
     pkt->side_data[elems].data = data;
     pkt->side_data[elems].size = size;
     pkt->side_data[elems].type = type;
@@ -335,7 +336,7 @@ uint8_t *av_packet_new_side_data(AVPacket *pkt, enum AVPacketSideDataType type,
     return data;
 }
 
-uint8_t *av_packet_get_side_data(AVPacket *pkt, enum AVPacketSideDataType type,
+uint8_t *av_packet_get_side_data(const AVPacket *pkt, enum AVPacketSideDataType type,
                                  int *size)
 {
     int i;
@@ -347,6 +348,8 @@ uint8_t *av_packet_get_side_data(AVPacket *pkt, enum AVPacketSideDataType type,
             return pkt->side_data[i].data;
         }
     }
+    if (size)
+        *size = 0;
     return NULL;
 }
 
@@ -371,9 +374,12 @@ const char *av_packet_side_data_name(enum AVPacketSideDataType type)
     case AV_PKT_DATA_METADATA_UPDATE:            return "Metadata Update";
     case AV_PKT_DATA_MPEGTS_STREAM_ID:           return "MPEGTS Stream ID";
     case AV_PKT_DATA_MASTERING_DISPLAY_METADATA: return "Mastering display metadata";
+    case AV_PKT_DATA_SPHERICAL:                  return "Spherical Mapping";
     }
     return NULL;
 }
+
+#if FF_API_MERGE_SD_API
 
 #define FF_MERGE_MARKER 0x8c4d9d108e25e9feULL
 
@@ -456,6 +462,8 @@ int av_packet_split_side_data(AVPacket *pkt){
     return 0;
 }
 
+#endif
+
 uint8_t *av_packet_pack_dictionary(AVDictionary *dict, int *size)
 {
     AVDictionaryEntry *t = NULL;
@@ -504,7 +512,7 @@ int av_packet_unpack_dictionary(const uint8_t *data, int size, AVDictionary **di
         const uint8_t *key = data;
         const uint8_t *val = data + strlen(key) + 1;
 
-        if (val >= end)
+        if (val >= end || !*key)
             return AVERROR_INVALIDDATA;
 
         ret = av_dict_set(dict, key, val, 0);
@@ -606,7 +614,7 @@ fail:
     return ret;
 }
 
-AVPacket *av_packet_clone(AVPacket *src)
+AVPacket *av_packet_clone(const AVPacket *src)
 {
     AVPacket *ret = av_packet_alloc();
 

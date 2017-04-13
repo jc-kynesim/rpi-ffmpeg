@@ -261,6 +261,7 @@ static int setup_partitions(VP8Context *s, const uint8_t *buf, int buf_size)
 {
     const uint8_t *sizes = buf;
     int i;
+    int ret;
 
     s->num_coeff_partitions = 1 << vp8_rac_get_uint(&s->c, 2);
 
@@ -274,13 +275,13 @@ static int setup_partitions(VP8Context *s, const uint8_t *buf, int buf_size)
         if (buf_size - size < 0)
             return -1;
 
-        ff_vp56_init_range_decoder(&s->coeff_partition[i], buf, size);
+        ret = ff_vp56_init_range_decoder(&s->coeff_partition[i], buf, size);
+        if (ret < 0)
+            return ret;
         buf      += size;
         buf_size -= size;
     }
-    ff_vp56_init_range_decoder(&s->coeff_partition[i], buf, buf_size);
-
-    return 0;
+    return ff_vp56_init_range_decoder(&s->coeff_partition[i], buf, buf_size);
 }
 
 static void vp7_get_quants(VP8Context *s)
@@ -434,8 +435,8 @@ static void copy_chroma(AVFrame *dst, AVFrame *src, int width, int height)
     }
 }
 
-static void fade(uint8_t *dst, int dst_linesize,
-                 const uint8_t *src, int src_linesize,
+static void fade(uint8_t *dst, ptrdiff_t dst_linesize,
+                 const uint8_t *src, ptrdiff_t src_linesize,
                  int width, int height,
                  int alpha, int beta)
 {
@@ -518,7 +519,9 @@ static int vp7_decode_frame_header(VP8Context *s, const uint8_t *buf, int buf_si
 
     memcpy(s->put_pixels_tab, s->vp8dsp.put_vp8_epel_pixels_tab, sizeof(s->put_pixels_tab));
 
-    ff_vp56_init_range_decoder(c, buf, part1_size);
+    ret = ff_vp56_init_range_decoder(c, buf, part1_size);
+    if (ret < 0)
+        return ret;
     buf      += part1_size;
     buf_size -= part1_size;
 
@@ -570,7 +573,9 @@ static int vp7_decode_frame_header(VP8Context *s, const uint8_t *buf, int buf_si
     s->lf_delta.enabled        = 0;
 
     s->num_coeff_partitions = 1;
-    ff_vp56_init_range_decoder(&s->coeff_partition[0], buf, buf_size);
+    ret = ff_vp56_init_range_decoder(&s->coeff_partition[0], buf, buf_size);
+    if (ret < 0)
+        return ret;
 
     if (!s->macroblocks_base || /* first frame */
         width != s->avctx->width || height != s->avctx->height ||
@@ -699,7 +704,9 @@ static int vp8_decode_frame_header(VP8Context *s, const uint8_t *buf, int buf_si
         memset(&s->lf_delta, 0, sizeof(s->lf_delta));
     }
 
-    ff_vp56_init_range_decoder(c, buf, header_size);
+    ret = ff_vp56_init_range_decoder(c, buf, header_size);
+    if (ret < 0)
+        return ret;
     buf      += header_size;
     buf_size -= header_size;
 
@@ -1461,7 +1468,7 @@ void decode_mb_coeffs(VP8Context *s, VP8ThreadData *td, VP56RangeCoder *c,
 static av_always_inline
 void backup_mb_border(uint8_t *top_border, uint8_t *src_y,
                       uint8_t *src_cb, uint8_t *src_cr,
-                      int linesize, int uvlinesize, int simple)
+                      ptrdiff_t linesize, ptrdiff_t uvlinesize, int simple)
 {
     AV_COPY128(top_border, src_y + 15 * linesize);
     if (!simple) {
@@ -1472,7 +1479,7 @@ void backup_mb_border(uint8_t *top_border, uint8_t *src_y,
 
 static av_always_inline
 void xchg_mb_border(uint8_t *top_border, uint8_t *src_y, uint8_t *src_cb,
-                    uint8_t *src_cr, int linesize, int uvlinesize, int mb_x,
+                    uint8_t *src_cr, ptrdiff_t linesize, ptrdiff_t uvlinesize, int mb_x,
                     int mb_y, int mb_width, int simple, int xchg)
 {
     uint8_t *top_border_m1 = top_border - 32;     // for TL prediction
@@ -1625,7 +1632,8 @@ void intra_predict(VP8Context *s, VP8ThreadData *td, uint8_t *dst[3],
         for (y = 0; y < 4; y++) {
             uint8_t *topright = ptr + 4 - s->linesize;
             for (x = 0; x < 4; x++) {
-                int copy = 0, linesize = s->linesize;
+                int copy = 0;
+                ptrdiff_t linesize = s->linesize;
                 uint8_t *dst = ptr + 4 * x;
                 LOCAL_ALIGNED(4, uint8_t, copy_dst, [5 * 8]);
 
@@ -1731,7 +1739,7 @@ void vp8_mc_luma(VP8Context *s, VP8ThreadData *td, uint8_t *dst,
     uint8_t *src = ref->f->data[0];
 
     if (AV_RN32A(mv)) {
-        int src_linesize = linesize;
+        ptrdiff_t src_linesize = linesize;
 
         int mx = (mv->x * 2) & 7, mx_idx = subpel_idx[0][mx];
         int my = (mv->y * 2) & 7, my_idx = subpel_idx[0][my];
@@ -2077,8 +2085,8 @@ void filter_mb(VP8Context *s, uint8_t *dst[3], VP8FilterStrength *f,
     int filter_level = f->filter_level;
     int inner_limit = f->inner_limit;
     int inner_filter = f->inner_filter;
-    int linesize = s->linesize;
-    int uvlinesize = s->uvlinesize;
+    ptrdiff_t linesize   = s->linesize;
+    ptrdiff_t uvlinesize = s->uvlinesize;
     static const uint8_t hev_thresh_lut[2][64] = {
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
           2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -2164,7 +2172,7 @@ void filter_mb_simple(VP8Context *s, uint8_t *dst, VP8FilterStrength *f,
     int filter_level = f->filter_level;
     int inner_limit  = f->inner_limit;
     int inner_filter = f->inner_filter;
-    int linesize     = s->linesize;
+    ptrdiff_t linesize = s->linesize;
 
     if (!filter_level)
         return;
@@ -2275,7 +2283,7 @@ static void vp8_decode_mv_mb_modes(AVCodecContext *avctx, VP8Frame *cur_frame,
 #define update_pos(td, mb_y, mb_x) while(0)
 #endif
 
-static av_always_inline void decode_mb_row_no_filter(AVCodecContext *avctx, void *tdata,
+static av_always_inline int decode_mb_row_no_filter(AVCodecContext *avctx, void *tdata,
                                         int jobnr, int threadnr, int is_vp7)
 {
     VP8Context *s = avctx->priv_data;
@@ -2291,6 +2299,10 @@ static av_always_inline void decode_mb_row_no_filter(AVCodecContext *avctx, void
         curframe->tf.f->data[1] +  8 * mb_y * s->uvlinesize,
         curframe->tf.f->data[2] +  8 * mb_y * s->uvlinesize
     };
+
+    if (c->end <= c->buffer && c->bits >= 0)
+         return AVERROR_INVALIDDATA;
+
     if (mb_y == 0)
         prev_td = td;
     else
@@ -2319,6 +2331,8 @@ static av_always_inline void decode_mb_row_no_filter(AVCodecContext *avctx, void
     s->mv_max.x = ((s->mb_width - 1) << 6) + MARGIN;
 
     for (mb_x = 0; mb_x < s->mb_width; mb_x++, mb_xy++, mb++) {
+        if (c->end <= c->buffer && c->bits >= 0)
+            return AVERROR_INVALIDDATA;
         // Wait for previous thread to read mb_x+2, and reach mb_y-1.
         if (prev_td != td) {
             if (threadnr != 0) {
@@ -2394,18 +2408,19 @@ static av_always_inline void decode_mb_row_no_filter(AVCodecContext *avctx, void
             update_pos(td, mb_y, mb_x);
         }
     }
+    return 0;
 }
 
-static void vp7_decode_mb_row_no_filter(AVCodecContext *avctx, void *tdata,
+static int vp7_decode_mb_row_no_filter(AVCodecContext *avctx, void *tdata,
                                         int jobnr, int threadnr)
 {
-    decode_mb_row_no_filter(avctx, tdata, jobnr, threadnr, 1);
+    return decode_mb_row_no_filter(avctx, tdata, jobnr, threadnr, 1);
 }
 
-static void vp8_decode_mb_row_no_filter(AVCodecContext *avctx, void *tdata,
+static int vp8_decode_mb_row_no_filter(AVCodecContext *avctx, void *tdata,
                                         int jobnr, int threadnr)
 {
-    decode_mb_row_no_filter(avctx, tdata, jobnr, threadnr, 0);
+    return decode_mb_row_no_filter(avctx, tdata, jobnr, threadnr, 0);
 }
 
 static av_always_inline void filter_mb_row(AVCodecContext *avctx, void *tdata,
@@ -2488,13 +2503,16 @@ int vp78_decode_mb_row_sliced(AVCodecContext *avctx, void *tdata, int jobnr,
     VP8ThreadData *next_td = NULL, *prev_td = NULL;
     VP8Frame *curframe = s->curframe;
     int mb_y, num_jobs = s->num_jobs;
+    int ret;
 
     td->thread_nr = threadnr;
     for (mb_y = jobnr; mb_y < s->mb_height; mb_y += num_jobs) {
-        if (mb_y >= s->mb_height)
-            break;
         td->thread_mb_pos = mb_y << 16;
-        s->decode_mb_row_no_filter(avctx, tdata, jobnr, threadnr);
+        ret = s->decode_mb_row_no_filter(avctx, tdata, jobnr, threadnr);
+        if (ret < 0) {
+            update_pos(td, s->mb_height, INT_MAX & 0xFFFF);
+            return ret;
+        }
         if (s->deblock_filter)
             s->filter_mb_row(avctx, tdata, jobnr, threadnr);
         update_pos(td, mb_y, INT_MAX & 0xFFFF);
