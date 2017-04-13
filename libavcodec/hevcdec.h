@@ -418,6 +418,9 @@ typedef struct HEVCLocalContextIntra {
 #endif
 
 typedef struct HEVCLocalContext {
+    TransformUnit tu;  // Moved to start to match HEVCLocalContextIntra (yuk!)
+    NeighbourAvailable na;
+
     uint8_t cabac_state[HEVC_CONTEXTS];
 
     uint8_t stat_coeff[4];
@@ -431,8 +434,6 @@ typedef struct HEVCLocalContext {
     int8_t curr_qp_y;
 
     int qPy_pred;
-
-    TransformUnit tu;
 
     uint8_t ctb_left_flag;
     uint8_t ctb_up_flag;
@@ -449,7 +450,6 @@ typedef struct HEVCLocalContext {
     int ct_depth;
     CodingUnit cu;
     PredictionUnit pu;
-    NeighbourAvailable na;
 
 #define BOUNDARY_LEFT_SLICE     (1 << 0)
 #define BOUNDARY_LEFT_TILE      (1 << 1)
