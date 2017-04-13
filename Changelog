@@ -1,7 +1,43 @@
 Entries are sorted chronologically from oldest to youngest within each release,
 releases are sorted from youngest to oldest.
 
-version <next>:
+version 3.2:
+- libopenmpt demuxer
+- tee protocol
+- Changed metadata print option to accept general urls
+- Alias muxer for Ogg Video (.ogv)
+- VP8 in Ogg muxing
+- curves filter doesn't automatically insert points at x=0 and x=1 anymore
+- 16-bit support in curves filter and selectivecolor filter
+- OpenH264 decoder wrapper
+- MediaCodec H.264/HEVC/MPEG-4/VP8/VP9 hwaccel
+- True Audio (TTA) muxer
+- crystalizer audio filter
+- acrusher audio filter
+- bitplanenoise video filter
+- floating point support in als decoder
+- fifo muxer
+- maskedclamp filter
+- hysteresis filter
+- lut2 filter
+- yuvtestsrc filter
+- CUDA CUVID H.263/VP8/VP9/10 bit HEVC (Dithered) Decoding
+- vaguedenoiser filter
+- added threads option per filter instance
+- weave filter
+- gblur filter
+- avgblur filter
+- sobel and prewitt filter
+- MediaCodec HEVC/MPEG-4/VP8/VP9 decoding
+- Meridian Lossless Packing (MLP) / TrueHD encoder
+- Non-Local Means (nlmeans) denoising filter
+- sdl2 output device and ffplay support
+- sdl1 output device and sdl1 support removed
+- extended mov edit list support
+- libfaac encoder removed
+- Matroska muxer now writes CRC32 elements by default in all Level 1 elements
+- sidedata video and asidedata audio filter
+- Changed mapping of rtp MIME type G726 to codec g726le.
 
 
 version 3.1:
@@ -48,6 +84,7 @@ version 3.1:
 - 10-bit depth support in native utvideo decoder
 - libutvideo wrapper removed
 - YUY2 Lossless Codec decoder
+- VideoToolbox H.264 encoder
 
 
 version 3.0:

@@ -32,7 +32,6 @@
 #include "libavutil/internal.h"
 
 #include "cabac_functions.h"
-#include "golomb.h"
 #include "hevc.h"
 
 #include "bit_depth_template.c"

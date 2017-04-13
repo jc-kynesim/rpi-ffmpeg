@@ -344,14 +344,14 @@ static void avi_metadata_creation_time(AVDictionary **metadata, char *date)
 
 static void avi_read_nikon(AVFormatContext *s, uint64_t end)
 {
-    while (avio_tell(s->pb) < end) {
+    while (avio_tell(s->pb) < end && !avio_feof(s->pb)) {
         uint32_t tag  = avio_rl32(s->pb);
         uint32_t size = avio_rl32(s->pb);
         switch (tag) {
         case MKTAG('n', 'c', 't', 'g'):  /* Nikon Tags */
         {
             uint64_t tag_end = avio_tell(s->pb) + size;
-            while (avio_tell(s->pb) < tag_end) {
+            while (avio_tell(s->pb) < tag_end && !avio_feof(s->pb)) {
                 uint16_t tag     = avio_rl16(s->pb);
                 uint16_t size    = avio_rl16(s->pb);
                 const char *name = NULL;
@@ -605,9 +605,17 @@ static int avi_read_header(AVFormatContext *s)
                 ast = s->streams[0]->priv_data;
                 av_freep(&s->streams[0]->codecpar->extradata);
                 av_freep(&s->streams[0]->codecpar);
+#if FF_API_LAVF_AVCTX
+FF_DISABLE_DEPRECATION_WARNINGS
+                av_freep(&s->streams[0]->codec);
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
                 if (s->streams[0]->info)
                     av_freep(&s->streams[0]->info->duration_error);
                 av_freep(&s->streams[0]->info);
+                if (s->streams[0]->internal)
+                    av_freep(&s->streams[0]->internal->avctx);
+                av_freep(&s->streams[0]->internal);
                 av_freep(&s->streams[0]);
                 s->nb_streams = 0;
                 if (CONFIG_DV_DEMUXER) {
@@ -976,15 +984,21 @@ static int avi_read_header(AVFormatContext *s)
             }
         default:
             if (size > 1000000) {
+                char tag_buf[32];
+                av_get_codec_tag_string(tag_buf, sizeof(tag_buf), tag);
                 av_log(s, AV_LOG_ERROR,
                        "Something went wrong during header parsing, "
-                       "I will ignore it and try to continue anyway.\n");
+                       "tag %s has size %u, "
+                       "I will ignore it and try to continue anyway.\n",
+                       tag_buf, size);
                 if (s->error_recognition & AV_EF_EXPLODE)
                     goto fail;
                 avi->movi_list = avio_tell(pb) - 4;
                 avi->movi_end  = avi->fsize;
                 goto end_of_header;
             }
+        /* Do not fail for very large idx1 tags */
+        case MKTAG('i', 'd', 'x', '1'):
             /* skip tag */
             size += (size & 1);
             avio_skip(pb, size);
@@ -1093,6 +1107,8 @@ static int read_gab2_sub(AVFormatContext *s, AVStream *st, AVPacket *pkt)
             goto error;
 
         if (!avformat_open_input(&ast->sub_ctx, "", sub_demuxer, NULL)) {
+            if (ast->sub_ctx->nb_streams != 1)
+                goto error;
             ff_read_packet(ast->sub_ctx, &ast->sub_pkt);
             avcodec_parameters_copy(st->codecpar, ast->sub_ctx->streams[0]->codecpar);
             time_base = ast->sub_ctx->streams[0]->time_base;
@@ -1849,7 +1865,6 @@ static int avi_read_seek(AVFormatContext *s, int stream_index,
             continue;
 
 //        av_assert1(st2->codecpar->block_align);
-        av_assert0(fabs(av_q2d(st2->time_base) - ast2->scale / (double)ast2->rate) < av_q2d(st2->time_base) * 0.00000001);
         index = av_index_search_timestamp(st2,
                                           av_rescale_q(timestamp,
                                                        st->time_base,

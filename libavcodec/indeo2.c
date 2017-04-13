@@ -24,8 +24,9 @@
  * Intel Indeo 2 decoder.
  */
 
-#define BITSTREAM_READER_LE
 #include "libavutil/attributes.h"
+
+#define BITSTREAM_READER_LE
 #include "avcodec.h"
 #include "get_bits.h"
 #include "indeo2data.h"
@@ -171,6 +172,12 @@ static int ir2_decode_frame(AVCodecContext *avctx,
 
     ltab = buf[0x22] & 3;
     ctab = buf[0x22] >> 2;
+
+    if (ctab > 3) {
+        av_log(avctx, AV_LOG_ERROR, "ctab %d is invalid\n", ctab);
+        return AVERROR_INVALIDDATA;
+    }
+
     if (s->decode_delta) { /* intraframe */
         if ((ret = ir2_decode_plane(s, avctx->width, avctx->height,
                                     p->data[0], p->linesize[0],

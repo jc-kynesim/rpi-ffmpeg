@@ -868,7 +868,10 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
 
         vpic->pic_fields.bits.screen_content_flag = 0;
         vpic->pic_fields.bits.enable_gpu_weighted_prediction = 0;
-        vpic->pic_fields.bits.cu_qp_delta_enabled_flag = 1;
+
+        // Per-CU QP changes are required for non-constant-QP modes.
+        vpic->pic_fields.bits.cu_qp_delta_enabled_flag =
+            ctx->va_rc_mode != VA_RC_CQP;
     }
 
     {
@@ -1338,10 +1341,10 @@ static const AVCodecDefault vaapi_encode_h265_defaults[] = {
     { "b",              "0"   },
     { "bf",             "2"   },
     { "g",              "120" },
-    { "i_qfactor",      "1.0" },
-    { "i_qoffset",      "0.0" },
-    { "b_qfactor",      "1.2" },
-    { "b_qoffset",      "0.0" },
+    { "i_qfactor",      "1"   },
+    { "i_qoffset",      "0"   },
+    { "b_qfactor",      "6/5" },
+    { "b_qoffset",      "0"   },
     { NULL },
 };
 
