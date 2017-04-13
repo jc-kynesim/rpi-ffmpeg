@@ -989,6 +989,8 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
     sps->amp_enabled_flag = get_bits1(gb);
     sps->sao_enabled      = get_bits1(gb);
 
+    av_log(avctx, AV_LOG_INFO, "sao_enabled=%d\n", sps->sao_enabled);
+
     sps->pcm_enabled_flag = get_bits1(gb);
     if (sps->pcm_enabled_flag) {
         sps->pcm.bit_depth   = get_bits(gb, 4) + 1;
