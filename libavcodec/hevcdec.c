@@ -46,6 +46,7 @@
   #include "rpi_qpu.h"
   #include "rpi_shader.h"
   #include "rpi_shader_cmd.h"
+  #include "rpi_zc.h"
 
   // Define RPI_CACHE_UNIF_MVS to write motion vector uniform stream to cached memory
   #define RPI_CACHE_UNIF_MVS  1

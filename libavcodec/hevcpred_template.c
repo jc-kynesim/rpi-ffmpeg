@@ -27,6 +27,10 @@
 #include "bit_depth_template.c"
 #include "hevcpred.h"
 
+#ifdef RPI
+#include "rpi_zc.h"
+#endif
+
 #define POS(x, y) src[(x) + stride * (y)]
 
 static av_always_inline void FUNC(intra_pred)(HEVCContext *s, int x0, int y0,

@@ -31,6 +31,10 @@
 #include "hevc.h"
 #include "hevcdec.h"
 
+#ifdef RPI
+#include "rpi_zc.h"
+#endif
+
 // BY22 is probably faster than simple bypass if the processor has
 // either a fast 32-bit divide or a fast 32x32->64[63:32] instruction
 // x86 has fast int divide
