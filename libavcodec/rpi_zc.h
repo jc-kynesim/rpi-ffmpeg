@@ -23,10 +23,13 @@ typedef struct AVRpiZcFrameGeometry
     unsigned int height_y;
     unsigned int stride_c;
     unsigned int height_c;
+    unsigned int planes_c;
+    unsigned int stripes;
 } AVRpiZcFrameGeometry;
 
 
 AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
+    const int format,
     const unsigned int video_width, const unsigned int video_height);
 
 // Replacement fn for avctx->get_buffer2
@@ -35,7 +38,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
 // N.B. in addition to to setting avctx->get_buffer2, avctx->refcounted_frames
 // must be set to 1 as otherwise the buffer info is killed before being returned
 // by avcodec_decode_video2.  Note also that this means that the AVFrame that is
-// return must be manually derefed with av_frame_unref.  This should be done
+// returned must be manually derefed with av_frame_unref.  This should be done
 // after av_rpi_zc_ref has been called.
 int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 

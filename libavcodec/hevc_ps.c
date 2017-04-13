@@ -780,7 +780,12 @@ static int map_pixel_format(AVCodecContext *avctx, HEVCSPS *sps)
     switch (sps->bit_depth) {
     case 8:
         if (sps->chroma_format_idc == 0) sps->pix_fmt = AV_PIX_FMT_GRAY8;
+#ifdef RPI
+        // *** Horrid kludge s.t. we start out with sand format
+        if (sps->chroma_format_idc == 1) sps->pix_fmt = AV_PIX_FMT_SAND128;
+#else
         if (sps->chroma_format_idc == 1) sps->pix_fmt = AV_PIX_FMT_YUV420P;
+#endif
         if (sps->chroma_format_idc == 2) sps->pix_fmt = AV_PIX_FMT_YUV422P;
         if (sps->chroma_format_idc == 3) sps->pix_fmt = AV_PIX_FMT_YUV444P;
        break;

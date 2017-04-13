@@ -2,7 +2,7 @@
 #ifdef RPI
 #include "rpi_qpu.h"
 #include "rpi_zc.h"
-
+#include "libavutil/avassert.h"
 #include "libavutil/buffer_internal.h"
 
 struct ZcPoolEnt;
@@ -39,6 +39,9 @@ typedef struct ZcPoolEnt
 #define STRIDE_ROUND    32
 #define STRIDE_OR       0
 #endif
+
+#define DEBUG_ZAP0_BUFFERS 0
+
 
 static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)
 {
@@ -175,17 +178,45 @@ static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
 }
 
 AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
-    const unsigned int video_width, const unsigned int video_height)
+    const int format, const unsigned int video_width, const unsigned int video_height)
 {
     AVRpiZcFrameGeometry geo;
-    geo.stride_y = ((video_width + 32 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
-//    geo.stride_y = ((video_width + 32 + 31) & ~31);
-    geo.stride_c = geo.stride_y / 2;
-//    geo.height_y = (video_height + 15) & ~15;
-    geo.height_y = (video_height + 32 + 31) & ~31;
-    geo.height_c = geo.height_y / 2;
+
+    switch (format)
+    {
+        case AV_PIX_FMT_YUV420P:
+            geo.stride_y = ((video_width + 32 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
+        //    geo.stride_y = ((video_width + 32 + 31) & ~31);
+            geo.stride_c = geo.stride_y / 2;
+        //    geo.height_y = (video_height + 15) & ~15;
+            geo.height_y = (video_height + 32 + 31) & ~31;
+            geo.height_c = geo.height_y / 2;
+            geo.planes_c = 2;
+            geo.stripes = 1;
+            break;
+
+        case AV_PIX_FMT_SAND128:
+        {
+            const unsigned int stripe_w = 128;
+
+            av_assert0(video_width == 1920 && video_height == 1080);
+
+            geo.stride_y = stripe_w;
+            geo.stride_c = stripe_w;
+            geo.height_y = 0x23000 / stripe_w;
+            geo.height_c = (0x35800 - 0x23000) / stripe_w;
+            geo.planes_c = 1;
+            geo.stripes = (video_width + stripe_w - 1) / stripe_w;
+            break;
+        }
+
+        default:
+            memset(&geo, 0, sizeof(geo));
+            break;
+    }
     return geo;
 }
+
 
 static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
 {
@@ -205,6 +236,10 @@ static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
     idata = ((idata & ~(ALLOC_PAD - 1)) | noff) + (((idata & (ALLOC_PAD - 1)) > noff) ? ALLOC_PAD : 0);
 #endif
 
+#if DEBUG_ZAP0_BUFFERS
+    memset((void*)idata, 0, size);
+#endif
+
     if ((buf = av_buffer_create((void *)idata, size, rpi_free_display_buffer, zp, AV_BUFFER_FLAG_READONLY)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "av_buffer_create() failed\n");
@@ -222,10 +257,10 @@ fail0:
 static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * const frame)
 {
     ZcEnv *const zc = s->get_buffer_context;
-    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->width, frame->height);
+    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->format, frame->width, frame->height);
     const unsigned int size_y = geo.stride_y * geo.height_y;
     const unsigned int size_c = geo.stride_c * geo.height_c;
-    const unsigned int size_pic = size_y + size_c * 2;
+    const unsigned int size_pic = (size_y + size_c * geo.planes_c) * geo.stripes;
     AVBufferRef * buf;
     unsigned int i;
 
@@ -244,18 +279,23 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     }
 
     frame->buf[0] = buf;
+
     frame->linesize[0] = geo.stride_y;
     frame->linesize[1] = geo.stride_c;
     frame->linesize[2] = geo.stride_c;
+    if (geo.stripes > 1)
+        frame->linesize[3] = geo.height_y + geo.height_c;      // abuse: linesize[3] = stripe stride
+
     frame->data[0] = buf->data;
     frame->data[1] = frame->data[0] + size_y;
-    frame->data[2] = frame->data[1] + size_c;
+    if (geo.planes_c > 1)
+        frame->data[2] = frame->data[1] + size_c;
+
     frame->extended_data = frame->data;
     // Leave extended buf alone
 
     return 0;
 }
-
 
 #define RPI_GET_BUFFER2 1
 
@@ -266,21 +306,25 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
 #else
     int rv;
 
-    if ((s->codec->capabilities & AV_CODEC_CAP_DR1) == 0 ||
-        frame->format != AV_PIX_FMT_YUV420P)
+    if ((s->codec->capabilities & AV_CODEC_CAP_DR1) == 0)
     {
 //        printf("Do default alloc: format=%#x\n", frame->format);
         rv = avcodec_default_get_buffer2(s, frame, flags);
     }
-    else
+    else if (frame->format == AV_PIX_FMT_YUV420P ||
+             frame->format == AV_PIX_FMT_SAND128)
     {
         rv = rpi_get_display_buffer(s, frame);
     }
+    else
+    {
+        rv = avcodec_default_get_buffer2(s, frame, flags);
+    }
 
 #if 0
-    printf("%s: %dx%d lsize=%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
-        frame->width, frame->height,
-        frame->linesize[0], frame->linesize[1], frame->linesize[2],
+    printf("%s: fmt:%d, %dx%d lsize=%d/%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
+        frame->format, frame->width, frame->height,
+        frame->linesize[0], frame->linesize[1], frame->linesize[2], frame->linesize[3],
         frame->data[0], frame->data[1], frame->data[2],
         frame->buf[0], frame->buf[1], frame->buf[2],
         av_buffer_get_opaque(frame->buf[0]));
@@ -334,14 +378,16 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
 {
     assert(s != NULL);
 
-    if (frame->format != AV_PIX_FMT_YUV420P)
+    if (frame->format != AV_PIX_FMT_YUV420P &&
+        frame->format != AV_PIX_FMT_SAND128)
     {
-        av_log(s, AV_LOG_WARNING, "%s: *** Format not YUV420P: %d\n", __func__, frame->format);
+        av_log(s, AV_LOG_WARNING, "%s: *** Format not SAND/YUV420P: %d\n", __func__, frame->format);
         return NULL;
     }
 
     if (frame->buf[1] != NULL)
     {
+        av_assert0(frame->format == AV_PIX_FMT_YUV420P);
         if (maycopy)
         {
             av_log(s, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);

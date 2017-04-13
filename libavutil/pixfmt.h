@@ -314,6 +314,10 @@ enum AVPixelFormat {
     AV_PIX_FMT_P016LE, ///< like NV12, with 16bpp per component, little-endian
     AV_PIX_FMT_P016BE, ///< like NV12, with 16bpp per component, big-endian
 
+#ifdef RPI
+    AV_PIX_FMT_SAND128,   ///< 4:2:0 128x*Y stripe, 64x*UV stripe, then next x stripe, mysterious padding
+#endif
+
     AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };
 
