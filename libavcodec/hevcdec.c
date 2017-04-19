@@ -4531,6 +4531,12 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
             s->is_decoded = 0;
             break;
         }
+#if 1
+        if (!IS_IDR(s)) {
+            s->is_decoded = 0;
+            break;
+        }
+#endif
         if (s->max_ra == INT_MAX) {
             if (s->nal_unit_type == HEVC_NAL_CRA_NUT || IS_BLA(s)) {
                 s->max_ra = s->poc;

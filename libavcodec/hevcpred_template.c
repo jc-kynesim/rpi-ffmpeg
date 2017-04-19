@@ -29,6 +29,21 @@
 
 #define POS(x, y) src[(x) + stride * (y)]
 
+
+#ifndef DEBUG_ONCE
+#define DEBUG_ONCE
+static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const unsigned int size)
+{
+    for (unsigned int y = 0; y != size; y++, data += stride) {
+        for (unsigned int x = 0; x != size; x++) {
+            printf("%4d", data[x]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+#endif
+
 static av_always_inline void FUNC(intra_pred)(HEVCContext *s, int x0, int y0,
                                               int log2_size, int c_idx)
 {
@@ -351,6 +366,16 @@ do {                                  \
                                            mode);
         break;
     }
+
+    if (c_idx == 1){
+        printf("U pred @ %d, %d: mode=%d\n", x, y, mode);
+        dump_pred_uv((uint8_t *)src, stride, 1 << log2_size);
+    }
+    if (c_idx == 2){
+        printf("V pred @ %d, %d: mode=%d\n", x, y, mode);
+        dump_pred_uv((uint8_t *)src, stride, 1 << log2_size);
+    }
+
 }
 
 #define INTRA_PRED(size)                                                            \
