@@ -51,6 +51,20 @@ typedef const uint8_t (* c8_src_ptr_t)[2];
 
 #endif
 
+#ifndef DEBUG_ONCE
+#define DEBUG_ONCE
+static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const unsigned int size)
+{
+    for (unsigned int y = 0; y != size; y++, data += stride * 2) {
+        for (unsigned int x = 0; x != size; x++) {
+            printf("%4d", data[x * 2]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+#endif
+
 static av_always_inline void FUNC(intra_pred)(HEVCContext *s, int x0, int y0,
                                               int log2_size, int c_idx)
 {
@@ -164,6 +178,8 @@ do {                                  \
 #endif
 
 #if defined(RPI)
+    printf("%d,%d/%d @ %d, mode=%d, psize=%d\n", x, y, c_idx, size, mode, sizeof(pixel));
+
     if (s->frame->format == AV_PIX_FMT_SAND128) {
         const AVFrame * const frame = s->frame;
         const unsigned int mask = stride - 1; // For chroma pixel=uint16 so stride_c is stride_y / 2
@@ -395,7 +411,6 @@ do {                                  \
             }
         }
     }
-#endif
 
     switch (mode) {
     case INTRA_PLANAR:
@@ -412,6 +427,27 @@ do {                                  \
                                            mode);
         break;
     }
+#else
+    switch (mode) {
+    case INTRA_PLANAR:
+        s->hpc.pred_planar_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                          (uint8_t *)left, stride);
+        break;
+    case INTRA_DC:
+        s->hpc.pred_dc_c((uint8_t *)src, (uint8_t *)top,
+                       (uint8_t *)left, stride, log2_size, c_idx);
+        break;
+    default:
+        s->hpc.pred_angular_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                           (uint8_t *)left, stride, c_idx,
+                                           mode);
+        break;
+    }
+    printf("U pred @ %d, %d: stride=%d\n", x, y, stride);
+    dump_pred_uv((uint8_t *)src, stride, 1 << log2_size);
+    printf("V pred @ %d, %d: stride=%d\n", x, y, stride);
+    dump_pred_uv((uint8_t *)src + 1, stride, 1 << log2_size);
+#endif
 }
 
 #if !PRED_C || BIT_DEPTH == 16
@@ -424,7 +460,7 @@ static void FUNC(intra_pred_ ## size)(HEVCContext *s, int x0, int y0, int c_idx)
 #define INTRA_PRED(size)                                                            \
 static void FUNC(intra_pred_ ## size)(HEVCContext *s, int x0, int y0, int c_idx)    \
 {                                                                                   \
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                                \
+    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
     abort();                                                                        \
 }
 #endif
@@ -551,6 +587,8 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
 
     dc0 >>= log2_size + 1;
     dc1 >>= log2_size + 1;
+
+    printf("dc: %d,%d\n", dc0, dc1);
 
     for (i = 0; i < size; i++, src += stride)
     {

@@ -1527,9 +1527,9 @@ static void rpi_add_residual(HEVCContext * const s,
             rpi_sliced_frame_pos_y(frame, x, y) :
             rpi_sliced_frame_pos_c(frame, x, y);
 
-    if (c_idx != 0) {
-        return;
-    }
+//    if (c_idx != 0) {
+//        return;
+//    }
     if (s->enable_rpi) {
         HEVCPredCmd * const cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
         cmd->type = RPI_PRED_TRANSFORM_ADD + (is_sliced ? c_idx : 0);

@@ -3248,6 +3248,7 @@ static void rpi_execute_transform(HEVCContext *s)
 }
 #endif
 
+
 // I-pred, transform_and_add for all blocks types done here
 // All ARM
 static void rpi_execute_pred_cmds(HEVCContext * const s)
@@ -3273,7 +3274,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
               lc->na.cand_up_left      = (cmd->na >> 2) & 1;
               lc->na.cand_up           = (cmd->na >> 1) & 1;
               lc->na.cand_up_right     = (cmd->na >> 0) & 1;
-              if (!rpi_sliced_frame(s->frame) || cmd->c_idx != 0)
+              if (!rpi_sliced_frame(s->frame) || cmd->c_idx == 0)
                   s->hpc.intra_pred[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
               else
                   s->hpc.intra_pred_c[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
@@ -5082,9 +5083,9 @@ AVCodec ff_hevc_decoder = {
     .update_thread_context = hevc_update_thread_context,
     .init_thread_copy      = hevc_init_thread_copy,
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
-//                             0,
+                             0,
 //                             AV_CODEC_CAP_FRAME_THREADS,
-                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+//                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };

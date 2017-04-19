@@ -310,14 +310,14 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
     buf->offset = av_rpi_zc_offset(fr_buf);
     buf->length = av_rpi_zc_length(fr_buf);
     buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
-
+#if 0
     {
         unsigned int n;
         for (n = 0; n < fr->width; n += 128) {
             memset(fr->data[1] + n * fr->linesize[3], 0x80, 128 * fr->height / 2);
         }
     }
-
+#endif
     ++rpi_display_count;
 }
 #else
