@@ -3263,7 +3263,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
 #endif
 
   for(i = s->num_pred_cmds[job]; i > 0; i--, cmd++) {
-      //printf("i=%d cmd=%p job1=%d job0=%d\n",i,cmd,s->pass1_job,s->pass0_job);
+      printf("i=%d cmd=%p job1=%d job0=%d\n",i,cmd,s->pass1_job,s->pass0_job);
 
       switch (cmd->type)
       {

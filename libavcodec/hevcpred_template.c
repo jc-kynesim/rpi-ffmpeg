@@ -31,6 +31,8 @@
 #include "rpi_zc.h"
 #endif
 
+#define DUMP_PRED 0
+
 #define POS(x, y) src[(x) + stride * (y)]
 
 #if PRED_C
@@ -51,6 +53,7 @@ typedef const uint8_t (* c8_src_ptr_t)[2];
 
 #endif
 
+#if DUMP_PRED
 #ifndef DEBUG_ONCE
 #define DEBUG_ONCE
 static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const unsigned int size)
@@ -63,6 +66,7 @@ static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const 
     }
     printf("\n");
 }
+#endif
 #endif
 
 static av_always_inline void FUNC(intra_pred)(HEVCContext *s, int x0, int y0,
@@ -178,8 +182,6 @@ do {                                  \
 #endif
 
 #if defined(RPI)
-    printf("%d,%d/%d @ %d, mode=%d, psize=%d\n", x, y, c_idx, size, mode, sizeof(pixel));
-
     if (s->frame->format == AV_PIX_FMT_SAND128) {
         const AVFrame * const frame = s->frame;
         const unsigned int mask = stride - 1; // For chroma pixel=uint16 so stride_c is stride_y / 2
@@ -443,10 +445,13 @@ do {                                  \
                                            mode);
         break;
     }
-    printf("U pred @ %d, %d: stride=%d\n", x, y, stride);
+
+#if DUMP_PRED
+    printf("U pred @ %d, %d: mode=%d\n", x, y, mode);
     dump_pred_uv((uint8_t *)src, stride, 1 << log2_size);
-    printf("V pred @ %d, %d: stride=%d\n", x, y, stride);
+    printf("V pred @ %d, %d: mode=%d\n", x, y, mode);
     dump_pred_uv((uint8_t *)src + 1, stride, 1 << log2_size);
+#endif
 #endif
 }
 
@@ -576,8 +581,8 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
     c8_dst_ptr_t src = (c8_dst_ptr_t)_src;
     const c8_src_ptr_t top = (c8_src_ptr_t)_top;
     const c8_src_ptr_t left = (c8_src_ptr_t)_left;
-    unsigned int dc0 = 0;
-    unsigned int dc1 = 0;
+    unsigned int dc0 = size;
+    unsigned int dc1 = size;
 
     for (i = 0; i < size; i++)
     {
@@ -587,8 +592,6 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
 
     dc0 >>= log2_size + 1;
     dc1 >>= log2_size + 1;
-
-    printf("dc: %d,%d\n", dc0, dc1);
 
     for (i = 0; i < size; i++, src += stride)
     {
