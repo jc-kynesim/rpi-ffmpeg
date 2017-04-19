@@ -512,9 +512,15 @@ typedef struct HEVCMvCmd {
 
 
 // Command for intra prediction and transform_add of predictions to coefficients
-#define RPI_PRED_TRANSFORM_ADD 0
-#define RPI_PRED_INTRA 1
-#define RPI_PRED_I_PCM 2
+enum rpi_pred_cmd_e
+{
+    RPI_PRED_TRANSFORM_ADD,
+    RPI_PRED_TRANSFORM_ADD_U, // = RPI_PRED_TRANSFORM_ADD + c_idx
+    RPI_PRED_TRANSFORM_ADD_V, // = RPI_PRED_TRANSFORM_ADD + c_idx
+    RPI_PRED_INTRA,
+    RPI_PRED_I_PCM,
+    RPI_PRED_CMD_MAX
+};
 
 typedef struct HEVCPredCmd {
     uint8_t type;

@@ -1511,6 +1511,44 @@ static inline int next_subset(HEVCContext * const s, int i, const int c_idx_nz,
     return i;
 }
 
+#ifdef RPI
+static void rpi_add_residual(HEVCContext * const s,
+    const unsigned int log2_trafo_size, const unsigned int c_idx,
+    const unsigned int x0, const unsigned int y0, const int16_t * const coeffs)
+{
+    const AVFrame * const frame = s->frame;
+    unsigned int stride = frame->linesize[c_idx];
+    unsigned int x = x0 >> s->ps.sps->hshift[c_idx];
+    unsigned int y = y0 >> s->ps.sps->vshift[c_idx];
+    const int is_sliced = rpi_sliced_frame(frame);
+    uint8_t * dst = !is_sliced ?
+            s->frame->data[c_idx] + y * stride + (x << s->ps.sps->pixel_shift) :
+        c_idx == 0 ?
+            rpi_sliced_frame_pos_y(frame, x, y) :
+            rpi_sliced_frame_pos_c(frame, x, y);
+
+    if (c_idx != 0) {
+        return;
+    }
+    if (s->enable_rpi) {
+        HEVCPredCmd * const cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
+        cmd->type = RPI_PRED_TRANSFORM_ADD + (is_sliced ? c_idx : 0);
+        cmd->size = log2_trafo_size;
+        cmd->ta.buf = coeffs;
+        cmd->ta.dst = dst;
+        cmd->ta.stride = stride;
+    }
+    else if (!is_sliced || c_idx == 0) {
+        s->hevcdsp.add_residual[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
+    }
+    else if (c_idx == 1) {
+        s->hevcdsp.add_residual_u[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
+    }
+    else {
+        s->hevcdsp.add_residual_v[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
+    }
+}
+#endif
 
 void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                                 int log2_trafo_size, enum ScanType scan_idx,
@@ -1529,11 +1567,13 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     const uint8_t *scan_x_cg, *scan_y_cg;
     const xy_off_t * scan_xy_off;
 
+#ifndef RPI
     ptrdiff_t stride = s->frame->linesize[c_idx];
     int hshift = s->ps.sps->hshift[c_idx];
     int vshift = s->ps.sps->vshift[c_idx];
     uint8_t * const dst = &s->frame->data[c_idx][(y0 >> vshift) * stride +
                                           ((x0 >> hshift) << s->ps.sps->pixel_shift)];
+#endif
 #ifdef RPI
     int use_vpu;
 #endif
@@ -2141,30 +2181,10 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         }
     }
 #ifdef RPI
-    if (s->enable_rpi) {
-
-        // *** Chroma is going to need some work
-        if (c_idx == 0) {
-            HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
-            cmd->type = RPI_PRED_TRANSFORM_ADD;
-            cmd->size = log2_trafo_size;
-            cmd->ta.buf = coeffs;
-            cmd->ta.dst = s->frame->data[0] + rpi_sliced_frame_off_y(s->frame, x0, y0);
-            cmd->ta.stride = stride;
-        }
-        else if (0)
-        {
-            HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
-            cmd->type = RPI_PRED_TRANSFORM_ADD;
-            cmd->size = log2_trafo_size;
-            cmd->ta.buf = coeffs;
-            cmd->ta.dst = dst;
-            cmd->ta.stride = stride;
-        }
-        return;
-    }
-#endif
+    rpi_add_residual(s, log2_trafo_size, c_idx, x0, y0, coeffs);
+#else
     s->hevcdsp.add_residual[log2_trafo_size-2](dst, coeffs, stride);
+#endif
 }
 
 void ff_hevc_hls_mvd_coding(HEVCContext *s, int x0, int y0, int log2_cb_size)

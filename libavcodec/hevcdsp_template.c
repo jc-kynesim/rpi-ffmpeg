@@ -62,6 +62,24 @@ static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
     }
 }
 
+static av_always_inline void FUNC(add_residual_uv)(uint8_t *_dst, int16_t *res,
+                                                ptrdiff_t stride, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + *res);
+            res++;
+        }
+        dst += stride;
+    }
+}
+
+
 static void FUNC(add_residual4x4)(uint8_t *_dst, int16_t *res,
                                   ptrdiff_t stride)
 {
@@ -85,6 +103,60 @@ static void FUNC(add_residual32x32)(uint8_t *_dst, int16_t *res,
 {
     FUNC(add_residual)(_dst, res, stride, 32);
 }
+
+// -- U -- (plaited)
+
+static void FUNC(add_residual4x4_u)(uint8_t *_dst, int16_t *res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst, res, stride, 4);
+}
+
+static void FUNC(add_residual8x8_u)(uint8_t *_dst, int16_t *res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst, res, stride, 8);
+}
+
+static void FUNC(add_residual16x16_u)(uint8_t *_dst, int16_t *res,
+                                    ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst, res, stride, 16);
+}
+
+static void FUNC(add_residual32x32_u)(uint8_t *_dst, int16_t *res,
+                                    ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst, res, stride, 32);
+}
+
+// -- V -- (plaited)
+
+static void FUNC(add_residual4x4_v)(uint8_t *_dst, int16_t *res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst + 1, res, stride, 4);
+}
+
+static void FUNC(add_residual8x8_v)(uint8_t *_dst, int16_t *res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst + 1, res, stride, 8);
+}
+
+static void FUNC(add_residual16x16_v)(uint8_t *_dst, int16_t *res,
+                                    ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst + 1, res, stride, 16);
+}
+
+static void FUNC(add_residual32x32_v)(uint8_t *_dst, int16_t *res,
+                                    ptrdiff_t stride)
+{
+    FUNC(add_residual_uv)(_dst + 1, res, stride, 32);
+}
+
+
 
 static void FUNC(transform_rdpcm)(int16_t *_coeffs, int16_t log2_size, int mode)
 {

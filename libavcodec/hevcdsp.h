@@ -58,6 +58,8 @@ typedef struct HEVCDSPContext {
                     struct GetBitContext *gb, int pcm_bit_depth);
 
     void (*add_residual[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
+    void (*add_residual_u[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
+    void (*add_residual_v[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
 
     void (*dequant)(int16_t *coeffs, int16_t log2_size);
 

@@ -1256,6 +1256,10 @@ static int hls_cross_component_pred(HEVCContext *s, int idx) {
 #ifdef RPI
 static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, int c_idx)
 {
+    // U & V done on U call in the case of sliced frames
+    if (rpi_sliced_frame(s->frame) && c_idx > 1)
+        return;
+
     if (s->enable_rpi) {
         HEVCLocalContext *lc = s->HEVClc;
         HEVCPredCmd *cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
@@ -1266,9 +1270,14 @@ static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, 
         cmd->i_pred.x = x0;
         cmd->i_pred.y = y0;
         cmd->i_pred.mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
-    } else {
+    }
+    else if (rpi_sliced_frame(s->frame) && c_idx != 0) {
+        s->hpc.intra_pred_c[log2_trafo_size - 2](s, x0, y0, c_idx);
+    }
+    else {
         s->hpc.intra_pred[log2_trafo_size - 2](s, x0, y0, c_idx);
     }
+
 }
 #endif
 
@@ -3264,7 +3273,10 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
               lc->na.cand_up_left      = (cmd->na >> 2) & 1;
               lc->na.cand_up           = (cmd->na >> 1) & 1;
               lc->na.cand_up_right     = (cmd->na >> 0) & 1;
-              s->hpc.intra_pred[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
+              if (!rpi_sliced_frame(s->frame) || cmd->c_idx != 0)
+                  s->hpc.intra_pred[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
+              else
+                  s->hpc.intra_pred_c[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
               break;
 
           case RPI_PRED_TRANSFORM_ADD:
@@ -3272,6 +3284,12 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
 #ifdef RPI_PRECLEAR
               memset(cmd->buf, 0, sizeof(int16_t) << (cmd->size * 2)); // Clear coefficients here while they are in the cache
 #endif
+              break;
+          case RPI_PRED_TRANSFORM_ADD_U:
+              s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
+              break;
+          case RPI_PRED_TRANSFORM_ADD_V:
+              s->hevcdsp.add_residual_v[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
 
           case RPI_PRED_I_PCM:
@@ -4240,7 +4258,7 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_RADL_N  ||
                         s->nal_unit_type == HEVC_NAL_RASL_N);
 
-#if 0
+#if 1
         {
             static int z = 0;
             if (IS_IDR(s)) {

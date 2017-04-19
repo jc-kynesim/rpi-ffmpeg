@@ -313,6 +313,14 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->add_residual[1]        = FUNC(add_residual8x8, depth);         \
     hevcdsp->add_residual[2]        = FUNC(add_residual16x16, depth);       \
     hevcdsp->add_residual[3]        = FUNC(add_residual32x32, depth);       \
+    hevcdsp->add_residual_u[0]      = FUNC(add_residual4x4_u, depth);         \
+    hevcdsp->add_residual_u[1]      = FUNC(add_residual8x8_u, depth);         \
+    hevcdsp->add_residual_u[2]      = FUNC(add_residual16x16_u, depth);       \
+    hevcdsp->add_residual_u[3]      = FUNC(add_residual32x32_u, depth);       \
+    hevcdsp->add_residual_v[0]      = FUNC(add_residual4x4_v, depth);         \
+    hevcdsp->add_residual_v[1]      = FUNC(add_residual8x8_v, depth);         \
+    hevcdsp->add_residual_v[2]      = FUNC(add_residual16x16_v, depth);       \
+    hevcdsp->add_residual_v[3]      = FUNC(add_residual32x32_v, depth);       \
     hevcdsp->dequant                = FUNC(dequant, depth);                 \
     hevcdsp->transform_rdpcm        = FUNC(transform_rdpcm, depth);         \
     hevcdsp->transform_4x4_luma     = FUNC(transform_4x4_luma, depth);      \
