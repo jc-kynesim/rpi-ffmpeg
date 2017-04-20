@@ -153,7 +153,7 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T * const p, const rpi_cache_f
 // QPU specific functions
 uint32_t qpu_fn(const int * const mc_fn);
 
-#define QPU_N_UV   12
+#define QPU_N_UV   8
 #define QPU_N_Y    12
 #define QPU_N_MAX  16
 
