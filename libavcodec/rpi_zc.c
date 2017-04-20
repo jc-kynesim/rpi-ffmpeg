@@ -40,7 +40,7 @@ typedef struct ZcPoolEnt
 #define STRIDE_OR       0
 #endif
 
-#define DEBUG_ZAP0_BUFFERS 0
+#define DEBUG_ZAP0_BUFFERS 1
 
 
 static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)

@@ -1253,6 +1253,20 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 ################################################################################
 
+::mc_interrupt_exit6c
+  ldtmu0
+  mov  -, vw_wait ; nop ; ldtmu0  # wait on the VDW
+
+  mov -,sacq(0) # 1
+  mov -,sacq(0) # 2
+  mov -,sacq(0) # 3
+  mov -,sacq(0) # 4
+  mov -,sacq(0) # 5
+
+  nop        ; nop ; thrend
+  mov interrupt, 1; nop # delay slot 1
+  nop        ; nop # delay slot 2
+
 ::mc_interrupt_exit8c
   ldtmu0
   mov  -, vw_wait ; nop ; ldtmu0  # wait on the VDW
@@ -1264,7 +1278,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   mov -,sacq(0) # 5
   mov -,sacq(0) # 6
   mov -,sacq(0) # 7
-  mov -,sacq(0) # 8
+#  mov -,sacq(0) # 8
 #  mov -,sacq(0) # 9
 #  mov -,sacq(0) # 10
 #  mov -,sacq(0) # 11
