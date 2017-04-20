@@ -64,7 +64,8 @@
 
 // #define DISABLE_MC
 
-#define DISABLE_CHROMA 1
+#define DISABLE_CHROMA 0
+#define DEBUG_DECODE_N 0   // 0 = do all, n = frames idr onwards
 
 #define PACK2(hi,lo) (((hi) << 16) | ((lo) & 0xffff))
 
@@ -2390,7 +2391,8 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame)
 {
 
-    const unsigned int c_off = x0_c + y0_c * s->frame->linesize[1];
+    const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
+#if 0
     av_assert0(s->frame->linesize[1] == s->frame->linesize[2]);
 
     rpi_chroma_mc_uni(s, s->frame->data[1] + c_off, s->frame->linesize[1], src_frame->data[1], src_frame->linesize[1],
@@ -2400,7 +2402,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
     rpi_chroma_mc_uni(s, s->frame->data[2] + c_off, s->frame->linesize[2], src_frame->data[2], src_frame->linesize[2],
                 x0_c, y0_c, nPbW_c, nPbH_c, mv,
                 c_weights[1], c_offsets[1]);
-
+#endif
     {
         const int hshift           = s->ps.sps->hshift[1];
         const int vshift           = s->ps.sps->vshift[1];
@@ -2438,8 +2440,8 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
                 u[0].p.coeffs_y = y_coeffs;
                 u[0].p.wo_u = wo_u;
                 u[0].p.wo_v = wo_v;
-                u[0].p.dst_addr_u = dst_base_u + start_x;
-                u[0].p.dst_addr_v = dst_base_v + start_x;
+                u[0].p.dst_addr_u = dst_base_u + start_x * 2;
+                u[0].p.dst_addr_v = dst_base_v + start_x * 2;
             }
 
             dst_base_u += s->frame->linesize[1] * 16;
@@ -2461,15 +2463,14 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame,
   AVFrame * const src_frame2)
 {
-    const unsigned int c_off = x0_c + y0_c * s->frame->linesize[1];
-    av_assert0(s->frame->linesize[1] == s->frame->linesize[2]);
-
+    const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
+#if 0
     rpi_chroma_mc_bi(s, s->frame->data[1] + c_off, s->frame->linesize[1], src_frame, src_frame2,
                  x0_c, y0_c, nPbW_c, nPbH_c, mv_field, 0);
 
     rpi_chroma_mc_bi(s, s->frame->data[2] + c_off, s->frame->linesize[2], src_frame, src_frame2,
                  x0_c, y0_c, nPbW_c, nPbH_c, mv_field, 1);
-
+#endif
     {
         const int hshift = s->ps.sps->hshift[1];
         const int vshift = s->ps.sps->vshift[1];
@@ -2525,8 +2526,8 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
               u[1].b1.coeffs_y = coefs1_y;
               u[1].b1.wo_u = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
               u[1].b1.wo_v = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
-              u[1].b1.dst_addr_u = dst_base_u + start_x;
-              u[1].b1.dst_addr_v = dst_base_v + start_x;
+              u[1].b1.dst_addr_u = dst_base_u + start_x * 2;
+              u[1].b1.dst_addr_v = dst_base_v + start_x * 2;
           }
 
           dst_base_u += s->frame->linesize[1] * 16;
@@ -3263,7 +3264,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
 #endif
 
   for(i = s->num_pred_cmds[job]; i > 0; i--, cmd++) {
-      printf("i=%d cmd=%p job1=%d job0=%d\n",i,cmd,s->pass1_job,s->pass0_job);
+//      printf("i=%d cmd=%p job1=%d job0=%d\n",i,cmd,s->pass1_job,s->pass0_job);
 
       switch (cmd->type)
       {
@@ -3280,16 +3281,16 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
                   s->hpc.intra_pred_c[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
               break;
 
-          case RPI_PRED_TRANSFORM_ADD:
+          case RPI_PRED_ADD_RESIDUAL:
               s->hevcdsp.add_residual[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
 #ifdef RPI_PRECLEAR
               memset(cmd->buf, 0, sizeof(int16_t) << (cmd->size * 2)); // Clear coefficients here while they are in the cache
 #endif
               break;
-          case RPI_PRED_TRANSFORM_ADD_U:
+          case RPI_PRED_ADD_RESIDUAL_U:
               s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
-          case RPI_PRED_TRANSFORM_ADD_V:
+          case RPI_PRED_ADD_RESIDUAL_V:
               s->hevcdsp.add_residual_v[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
 
@@ -3316,6 +3317,8 @@ static void do_yc_inter_cmds(HEVCContext * const s, const HEVCMvCmd *cmd, unsign
     struct MvField mymv;
 
     for(; n>0 ; n--, cmd++) {
+        av_assert0(0);
+
         switch(cmd->cmd) {
         case RPI_CMD_LUMA_UNI:
             if (b_only)
@@ -3397,10 +3400,10 @@ static void rpi_begin(HEVCContext *s)
         u->next_src_y = 0;
         u->next_src_base_u = 0;
         u->next_src_base_v = 0;
-        u->s.pic_w = pic_width_c;
-        u->s.pic_h = pic_height_c;
-        u->s.src_stride = s->frame->linesize[3];
-        u->s.dst_stride = s->frame->linesize[1];
+        u->s.pic_cw = pic_width_c;
+        u->s.pic_ch = pic_height_c;
+        u->s.stride2 = rpi_sliced_frame_stride2(s->frame);
+        u->s.stride1 = s->frame->linesize[1];
         u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
         u->s.dummy0 = 0;
         u->s.dummy1 = 0;
@@ -3441,7 +3444,7 @@ static unsigned int mc_terminate_y(HEVCContext * const s, const int job)
     unsigned int i;
     const uint32_t exit_fn = qpu_fn(mc_exit);
     const uint32_t exit_fn2 = qpu_fn(mc_interrupt_exit12);
-    const uint32_t dummy_texture = qpu_fn(mc_setup_uv);
+    const uint32_t dummy_texture = qpu_fn(mc_setup_c);
     unsigned int tc = 0;
 
     // Add final commands to Q
@@ -3463,18 +3466,15 @@ static unsigned int mc_terminate_y(HEVCContext * const s, const int job)
     return tc;
 }
 
+#define MC_EXIT_FN_C2(n) mc_interrupt_exit ## n ## c
+#define MC_EXIT_FN_C(n) MC_EXIT_FN_C2(n)
+
 static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 {
     unsigned int i;
     const uint32_t exit_fn = qpu_fn(mc_exit_c);
-#if QPU_N_UV == 8
-    const uint32_t exit_fn2 = qpu_fn(mc_interrupt_exit8c);
-#elif QPU_N_UV == 12
-    const uint32_t exit_fn2 = qpu_fn(mc_interrupt_exit12c);
-#else
-#error Need appropriate exit code
-#endif
-    const uint32_t dummy_texture = qpu_fn(mc_setup_uv);
+    const uint32_t exit_fn2 = qpu_fn(MC_EXIT_FN_C(QPU_N_UV));
+    const uint32_t dummy_texture = qpu_fn(mc_setup_c);
     unsigned int tc = 0;
 
     // Add final commands to Q
@@ -3593,7 +3593,7 @@ static void worker_core(HEVCContext * const s)
     if (qpu_chroma && mc_terminate_uv(s, job) != 0)
     {
         uint32_t * const unif_vc = (uint32_t *)s->unif_mvs_ptr[job].vc;
-        const uint32_t code = qpu_fn(mc_setup_uv);
+        const uint32_t code = qpu_fn(mc_setup_c);
         uint32_t * p;
         unsigned int i;
         uint32_t mail_uv[QPU_N_UV * QPU_MAIL_EL_VALS];
@@ -4259,13 +4259,13 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_RADL_N  ||
                         s->nal_unit_type == HEVC_NAL_RASL_N);
 
-#if 1
+#if DEBUG_DECODE_N
         {
             static int z = 0;
             if (IS_IDR(s)) {
-                z = 0;
+                z = 1;
             }
-            if (z++ > 1) {
+            if (z != 0 && z++ > DEBUG_DECODE_N) {
                 s->is_decoded = 0;
                 break;
             }
@@ -5083,9 +5083,9 @@ AVCodec ff_hevc_decoder = {
     .update_thread_context = hevc_update_thread_context,
     .init_thread_copy      = hevc_init_thread_copy,
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
-                             0,
+//                             0,
 //                             AV_CODEC_CAP_FRAME_THREADS,
-//                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };

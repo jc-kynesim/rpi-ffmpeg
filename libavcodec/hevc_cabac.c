@@ -1532,8 +1532,9 @@ static void rpi_add_residual(HEVCContext * const s,
 //    }
     if (s->enable_rpi) {
         HEVCPredCmd * const cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
-        cmd->type = RPI_PRED_TRANSFORM_ADD + (is_sliced ? c_idx : 0);
+        cmd->type = RPI_PRED_ADD_RESIDUAL + (is_sliced ? c_idx : 0);
         cmd->size = log2_trafo_size;
+        cmd->c_idx = c_idx;
         cmd->ta.buf = coeffs;
         cmd->ta.dst = dst;
         cmd->ta.stride = stride;
