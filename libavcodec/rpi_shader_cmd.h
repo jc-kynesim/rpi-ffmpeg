@@ -40,10 +40,10 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t dst_addr_v;
         } b1;
         struct {
-            uint32_t pic_w;
-            uint32_t pic_h;
-            uint32_t src_stride;
-            uint32_t dst_stride;
+            uint32_t pic_cw;            // C Width (== Y width / 2)
+            uint32_t pic_ch;            // C Height (== Y Height / 2)
+            uint32_t stride2;
+            uint32_t stride1;
             uint32_t wdenom;
             uint32_t dummy0;
             uint32_t dummy1;
