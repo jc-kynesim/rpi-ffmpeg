@@ -23,8 +23,8 @@
  */
 
 #define DISABLE_SAO
-#define DISABLE_DEBLOCK
-#define DISABLE_STRENGTHS
+//#define DISABLE_DEBLOCK
+//#define DISABLE_STRENGTHS
 // define DISABLE_DEBLOCK_NONREF for a 6% speed boost (by skipping deblocking on unimportant frames)
 //#define DISABLE_DEBLOCK_NONREF
 
@@ -38,6 +38,7 @@
 
 #ifdef RPI
 #include "rpi_qpu.h"
+#include "rpi_zc.h"
 #endif
 
 #define LUMA 0
@@ -551,7 +552,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                src     = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+                src     = rpi_sliced_frame(s->frame) ?
+                    rpi_sliced_frame_pos_y(s->frame, x, y) :
+                    &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
                 if (pcmf) {
                     no_p[0] = get_pcm(s, x - 1, y);
                     no_p[1] = get_pcm(s, x - 1, y + 4);
@@ -596,7 +599,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 beta = betatable[av_clip(qp + beta_offset, 0, MAX_QP)];
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                src     = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+                src     = rpi_sliced_frame(s->frame) ?
+                    rpi_sliced_frame_pos_y(s->frame, x, y) :
+                    &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
                 if (pcmf) {
                     no_p[0] = get_pcm(s, x, y - 1);
                     no_p[1] = get_pcm(s, x + 4, y - 1);
@@ -643,7 +648,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                         c_tc[0] = (bs0 == 2) ? chroma_tc(s, qp0, chroma, tc_offset) : 0;
                         c_tc[1] = (bs1 == 2) ? chroma_tc(s, qp1, chroma, tc_offset) : 0;
-                        src       = &s->frame->data[chroma][(y >> s->ps.sps->vshift[chroma]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[chroma]) << s->ps.sps->pixel_shift)];
+                        src     = rpi_sliced_frame(s->frame) ?
+                            rpi_sliced_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
+                            &s->frame->data[chroma][(y >> s->ps.sps->vshift[chroma]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[chroma]) << s->ps.sps->pixel_shift)];
                         if (pcmf) {
                             no_p[0] = get_pcm(s, x - 1, y);
                             no_p[1] = get_pcm(s, x - 1, y + (4 * v));
@@ -690,7 +697,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                         c_tc[0]   = bs0 == 2 ? chroma_tc(s, qp0, chroma, tc_offset)     : 0;
                         c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
-                        src       = &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
+                        src     = rpi_sliced_frame(s->frame) ?
+                            rpi_sliced_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
+                            &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
                         if (pcmf) {
                             no_p[0] = get_pcm(s, x,           y - 1);
                             no_p[1] = get_pcm(s, x + (4 * h), y - 1);
