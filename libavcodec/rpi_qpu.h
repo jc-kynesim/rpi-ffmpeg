@@ -196,5 +196,7 @@ extern void rpi_do_block(const unsigned char *in_buffer_vc, int src_pitch, unsig
 extern void rpi_do_block_arm(const unsigned char *in_buffer, int src_pitch, unsigned char *dst, int dst_pitch);
 
 extern int gpu_get_mailbox(void);
+void gpu_ref(void);
+void gpu_unref(void);
 
 #endif

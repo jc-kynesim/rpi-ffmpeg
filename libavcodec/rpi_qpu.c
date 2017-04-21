@@ -416,6 +416,18 @@ int gpu_get_mailbox(void)
   return gpu->mb;
 }
 
+void gpu_ref(void)
+{
+  gpu_lock_ref();
+  gpu_unlock();
+}
+
+void gpu_unref(void)
+{
+  gpu_env_t * const ge = gpu_lock();
+  gpu_unlock_unref(ge);
+}
+
 // ----------------------------------------------------------------------------
 //
 // Cache flush functions

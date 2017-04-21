@@ -1,9 +1,11 @@
 #include "config.h"
 #ifdef RPI
 #include "rpi_qpu.h"
+#include "rpi_mailbox.h"
 #include "rpi_zc.h"
 #include "libavutil/avassert.h"
 #include "libavutil/buffer_internal.h"
+#include <interface/vctypes/vc_image_types.h>
 
 struct ZcPoolEnt;
 
@@ -207,14 +209,37 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
         {
             const unsigned int stripe_w = 128;
 
-            av_assert0(video_width == 1920 && video_height == 1080);
+            static pthread_mutex_t sand_lock = PTHREAD_MUTEX_INITIALIZER;
+            static VC_IMAGE_T img = {0};
+
+            // Given the overhead of calling the mailbox keep a stashed
+            // copy as we will almost certainly just want the same numbers again
+            // but that means we need a lock
+            pthread_mutex_lock(&sand_lock);
+
+            if (img.width != video_width || img.height != video_height)
+            {
+                VC_IMAGE_T new_img = {
+                    .type = VC_IMAGE_YUV_UV,
+                    .width = video_width,
+                    .height = video_height
+                };
+
+                gpu_ref();
+                mbox_get_image_params(gpu_get_mailbox(), &new_img);
+                gpu_unref();
+                img = new_img;
+            }
 
             geo.stride_y = stripe_w;
             geo.stride_c = stripe_w;
-            geo.height_y = 0x23000 / stripe_w;
-            geo.height_c = (0x35800 - 0x23000) / stripe_w;
+            geo.height_y = ((intptr_t)img.extra.uv.u - (intptr_t)img.image_data) / stripe_w;
+            geo.height_c = img.pitch / stripe_w - geo.height_y;
             geo.planes_c = 1;
             geo.stripes = (video_width + stripe_w - 1) / stripe_w;
+
+            pthread_mutex_unlock(&sand_lock);
+
             break;
         }
 

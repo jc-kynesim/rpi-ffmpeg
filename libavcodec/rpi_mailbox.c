@@ -41,6 +41,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define DEVICE_FILE_NAME "/dev/vcio"
 
 #include "rpi_mailbox.h"
+//#include <interface/vctypes/vc_image_structs.h>
 
 /*
  * use ioctl to send mbox property message
@@ -100,6 +101,31 @@ unsigned mbox_mem_unlock(int file_desc, unsigned handle)
    return p[5];
 }
 
+#define GET_VCIMAGE_PARAMS 0x30044
+
+int mbox_get_image_params(int fd, VC_IMAGE_T * img)
+{
+    uint32_t buf[sizeof(*img) / sizeof(uint32_t) + 32];
+    uint32_t * p = buf;
+    void * rimg;
+    int rv;
+
+    *p++ = 0; // size
+    *p++ = 0; // process request
+    *p++ = GET_VCIMAGE_PARAMS;
+    *p++ = sizeof(*img);
+    *p++ = sizeof(*img);
+    rimg = p;
+    memcpy(p, img, sizeof(*img));
+    p += sizeof(*img) / sizeof(*p);
+    *p++ = 0;  // End tag
+    buf[0] = (p - buf) * sizeof(*p);
+
+    rv = mbox_property(fd, buf);
+    memcpy(img, rimg, sizeof(*img));
+
+    return rv;
+}
 
 int mbox_open() {
    int file_desc;
