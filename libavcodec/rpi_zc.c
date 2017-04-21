@@ -155,10 +155,18 @@ zc_pool_destroy(ZcPool * const pool)
     pthread_mutex_destroy(&pool->lock);
 }
 
+typedef struct ZcOldCtxVals
+{
+    int thread_safe_callbacks;
+    int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
+    void * get_buffer_context;
+} ZcOldCtxVals;
 
 typedef struct AVZcEnv
 {
+    unsigned int refcount;
     ZcPool pool;
+    ZcOldCtxVals old;
 } ZcEnv;
 
 // Callback when buffer unrefed to zero
@@ -471,27 +479,50 @@ void av_rpi_zc_env_free(AVZcEnvPtr zc)
     }
 }
 
+int av_rpi_zc_in_use(const struct AVCodecContext * const s)
+{
+    return s->get_buffer2 == av_rpi_zc_get_buffer2;
+}
+
 int av_rpi_zc_init(struct AVCodecContext * const s)
 {
-    ZcEnv * const zc = av_rpi_zc_env_alloc();
-    if (zc == NULL)
+    if (av_rpi_zc_in_use(s))
     {
-        return AVERROR(ENOMEM);
+        ZcEnv * const zc = s->get_buffer_context;
+        ++zc->refcount;
     }
+    else
+    {
+        ZcEnv *const zc = av_rpi_zc_env_alloc();
+        if (zc == NULL)
+        {
+            return AVERROR(ENOMEM);
+        }
 
-    s->get_buffer_context = zc;
-    s->get_buffer2 = av_rpi_zc_get_buffer2;
+        zc->refcount = 1;
+        zc->old.get_buffer_context = s->get_buffer_context;
+        zc->old.get_buffer2 = s->get_buffer2;
+        zc->old.thread_safe_callbacks = s->thread_safe_callbacks;
+
+        s->get_buffer_context = zc;
+        s->get_buffer2 = av_rpi_zc_get_buffer2;
+        s->thread_safe_callbacks = 1;
+    }
     return 0;
 }
 
 void av_rpi_zc_uninit(struct AVCodecContext * const s)
 {
-    if (s->get_buffer2 == av_rpi_zc_get_buffer2)
+    if (av_rpi_zc_in_use(s))
     {
         ZcEnv * const zc = s->get_buffer_context;
-        s->get_buffer2 = avcodec_default_get_buffer2;
-        s->get_buffer_context = NULL;
-        av_rpi_zc_env_free(zc);
+        if (--zc->refcount == 0)
+        {
+            s->get_buffer2 = zc->old.get_buffer2;
+            s->get_buffer_context = zc->old.get_buffer_context;
+            s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
+            av_rpi_zc_env_free(zc);
+        }
     }
 }
 

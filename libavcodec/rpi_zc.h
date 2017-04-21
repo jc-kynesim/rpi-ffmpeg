@@ -4,9 +4,9 @@
 // Zero-Copy frame code for RPi
 // RPi needs Y/U/V planes to be contiguous for display.  By default
 // ffmpeg will allocate separated planes so a memcpy is needed before
-// display.  This code prodes a method a making ffmpeg allocate a single
-// bit of memory for the frame when can then be refrence counted until
-// display ahs finsihed with it.
+// display.  This code provides a method a making ffmpeg allocate a single
+// bit of memory for the frame when can then be reference counted until
+// display has finished with it.
 
 #include "libavutil/frame.h"
 #include "libavcodec/avcodec.h"
@@ -76,6 +76,8 @@ AVZcEnvPtr av_rpi_zc_env_alloc(void);
 // Allocate the environment used by the ZC code
 void av_rpi_zc_env_free(AVZcEnvPtr);
 
+// Test to see if the context is using zc (checks get_buffer2)
+int av_rpi_zc_in_use(const struct AVCodecContext * const s);
 
 // Init ZC into a context
 // There is nothing magic in this fn - it just packages setting

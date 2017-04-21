@@ -4404,7 +4404,7 @@ fail:  // Also success path
         rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
-    } else if (s->ref) {
+    } else if (s->ref && s->enable_rpi) {
 #if RPI_INTER
       // When running single threaded we need to flush the whole frame
       flush_frame(s,s->frame);
@@ -4733,6 +4733,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     vpu_qpu_term();
 
+    av_rpi_zc_uninit(avctx);
 #endif
 
     for (i = 0; i < 3; i++) {
@@ -4809,6 +4810,8 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     // many times as we have threads (init_thread_copy is called for the
     // threads).  So to match init & term put the init here where it will be
     // called by both init & copy
+    av_rpi_zc_init(avctx);
+
     if (vpu_qpu_init() != 0)
         goto fail;
 
