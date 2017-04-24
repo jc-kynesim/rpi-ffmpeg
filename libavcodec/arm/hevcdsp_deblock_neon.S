@@ -60,7 +60,9 @@
         lsr      r3, #16
 .endm
 
-.macro hevc_loop_filter_luma_body
+@ Uses: r2, r3, r12
+@ Modifies: r5, r6, r7, r8, r9
+function hevc_loop_filter_luma_body
         vmovl.u8  q15, d23
         vmovl.u8  q14, d22
         vmovl.u8  q13, d21
@@ -76,7 +78,6 @@
         vsub.i16   q6, q13
         vabd.s16   q7, q7, q10
         vabd.s16   q6, q6, q13
-
 
         vdup.16    q0, r2
         vmov       q4, q7
@@ -152,7 +153,7 @@
 
         and        r9, r8, r7
         cmp        r9, #0
-        beq        weakfilter_\@
+        beq        weakfilter_
 
         vadd.i16  q2, q11, q12
         vadd.i16  q4, q9, q8
@@ -210,11 +211,11 @@
         vbit      q13, q3, q5
         vbit      q14, q2, q5
 
-weakfilter_\@:
+weakfilter_:
         mvn       r8, r8
         and       r9, r8, r7
         cmp       r9, #0
-        beq       ready_\@
+        beq       ready_
 
         vdup.16    q4, r2
 
@@ -275,7 +276,7 @@ weakfilter_\@:
         vbit      q11, q0, q5
         vbit      q12, q4, q5
 
-ready_\@:
+ready_:
         vqmovun.s16 d16, q8
         vqmovun.s16 d17, q9
         vqmovun.s16 d18, q10
@@ -284,127 +285,116 @@ ready_\@:
         vqmovun.s16 d21, q13
         vqmovun.s16 d22, q14
         vqmovun.s16 d23, q15
-.endm
+        mov       pc, lr
+endfunc
 
 function ff_hevc_v_loop_filter_luma_neon, export=1
         hevc_loop_filter_luma_start
-        push     {r5-r11}
+        push     {r4-r10,lr}
         vpush    {d8-d15}
-        sub      r0, #4
-        mov r5, #4
-        sub r1, r1, r5
+        sub      r4, r0, #4
 
-        vld4.8  {d16[0],d17[0],d18[0],d19[0]}, [r0:32]!
+        vld4.8  {d16[0],d17[0],d18[0],d19[0]}, [r4:32], r1
         vld4.8  {d20[0],d21[0],d22[0],d23[0]}, [r0:32], r1
 
-        vld4.8  {d16[1],d17[1],d18[1],d19[1]}, [r0], r5
-        vld4.8  {d20[1],d21[1],d22[1],d23[1]}, [r0], r1
+        vld4.8  {d16[1],d17[1],d18[1],d19[1]}, [r4:32], r1
+        vld4.8  {d20[1],d21[1],d22[1],d23[1]}, [r0:32], r1
 
-        vld4.8  {d16[2],d17[2],d18[2],d19[2]}, [r0], r5
-        vld4.8  {d20[2],d21[2],d22[2],d23[2]}, [r0], r1
+        vld4.8  {d16[2],d17[2],d18[2],d19[2]}, [r4:32], r1
+        vld4.8  {d20[2],d21[2],d22[2],d23[2]}, [r0:32], r1
 
-        vld4.8  {d16[3],d17[3],d18[3],d19[3]}, [r0], r5
-        vld4.8  {d20[3],d21[3],d22[3],d23[3]}, [r0], r1
+        vld4.8  {d16[3],d17[3],d18[3],d19[3]}, [r4:32], r1
+        vld4.8  {d20[3],d21[3],d22[3],d23[3]}, [r0:32], r1
 
-        vld4.8  {d16[4],d17[4],d18[4],d19[4]}, [r0], r5
-        vld4.8  {d20[4],d21[4],d22[4],d23[4]}, [r0], r1
+        vld4.8  {d16[4],d17[4],d18[4],d19[4]}, [r4:32], r1
+        vld4.8  {d20[4],d21[4],d22[4],d23[4]}, [r0:32], r1
 
-        vld4.8  {d16[5],d17[5],d18[5],d19[5]}, [r0], r5
-        vld4.8  {d20[5],d21[5],d22[5],d23[5]}, [r0], r1
+        vld4.8  {d16[5],d17[5],d18[5],d19[5]}, [r4:32], r1
+        vld4.8  {d20[5],d21[5],d22[5],d23[5]}, [r0:32], r1
 
-        vld4.8  {d16[6],d17[6],d18[6],d19[6]}, [r0], r5
-        vld4.8  {d20[6],d21[6],d22[6],d23[6]}, [r0], r1
+        vld4.8  {d16[6],d17[6],d18[6],d19[6]}, [r4:32], r1
+        vld4.8  {d20[6],d21[6],d22[6],d23[6]}, [r0:32], r1
 
-        vld4.8  {d16[7],d17[7],d18[7],d19[7]}, [r0], r5
-        vld4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0], r1
+        vld4.8  {d16[7],d17[7],d18[7],d19[7]}, [r4:32]
+        vld4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0:32]
 
-        add r1, r1, r5
-        sub      r0, r0, r1, lsl #3
+        bl hevc_loop_filter_luma_body
 
-        hevc_loop_filter_luma_body
+        neg     r1, r1
 
-        mov r5, #4
-        sub r1, r1, r5
+        vst4.8  {d16[7],d17[7],d18[7],d19[7]}, [r4:32], r1
+        vst4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0:32], r1
 
-        vst4.8  {d16[0],d17[0],d18[0],d19[0]}, [r0:32]!
-        vst4.8  {d20[0],d21[0],d22[0],d23[0]}, [r0:32], r1
+        vst4.8  {d16[6],d17[6],d18[6],d19[6]}, [r4:32], r1
+        vst4.8  {d20[6],d21[6],d22[6],d23[6]}, [r0:32], r1
 
-        vst4.8  {d16[1],d17[1],d18[1],d19[1]}, [r0], r5
-        vst4.8  {d20[1],d21[1],d22[1],d23[1]}, [r0], r1
+        vst4.8  {d16[5],d17[5],d18[5],d19[5]}, [r4:32], r1
+        vst4.8  {d20[5],d21[5],d22[5],d23[5]}, [r0:32], r1
 
-        vst4.8  {d16[2],d17[2],d18[2],d19[2]}, [r0], r5
-        vst4.8  {d20[2],d21[2],d22[2],d23[2]}, [r0], r1
+        vst4.8  {d16[4],d17[4],d18[4],d19[4]}, [r4:32], r1
+        vst4.8  {d20[4],d21[4],d22[4],d23[4]}, [r0:32], r1
 
-        vst4.8  {d16[3],d17[3],d18[3],d19[3]}, [r0], r5
-        vst4.8  {d20[3],d21[3],d22[3],d23[3]}, [r0], r1
+        vst4.8  {d16[3],d17[3],d18[3],d19[3]}, [r4:32], r1
+        vst4.8  {d20[3],d21[3],d22[3],d23[3]}, [r0:32], r1
 
-        vst4.8  {d16[4],d17[4],d18[4],d19[4]}, [r0], r5
-        vst4.8  {d20[4],d21[4],d22[4],d23[4]}, [r0], r1
+        vst4.8  {d16[2],d17[2],d18[2],d19[2]}, [r4:32], r1
+        vst4.8  {d20[2],d21[2],d22[2],d23[2]}, [r0:32], r1
 
-        vst4.8  {d16[5],d17[5],d18[5],d19[5]}, [r0], r5
-        vst4.8  {d20[5],d21[5],d22[5],d23[5]}, [r0], r1
+        vst4.8  {d16[1],d17[1],d18[1],d19[1]}, [r4:32], r1
+        vst4.8  {d20[1],d21[1],d22[1],d23[1]}, [r0:32], r1
 
-        vst4.8  {d16[6],d17[6],d18[6],d19[6]}, [r0], r5
-        vst4.8  {d20[6],d21[6],d22[6],d23[6]}, [r0], r1
-
-        vst4.8  {d16[7],d17[7],d18[7],d19[7]}, [r0], r5
-        vst4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0], r1
+        vst4.8  {d16[0],d17[0],d18[0],d19[0]}, [r4:32]
+        vst4.8  {d20[0],d21[0],d22[0],d23[0]}, [r0:32]
 
         vpop     {d8-d15}
-        pop      {r5-r11}
-        bx lr
+        pop      {r4-r10,pc}
 endfunc
 
 function ff_hevc_h_loop_filter_luma_neon, export=1
         hevc_loop_filter_luma_start
-        push     {r5-r11}
+        push     {r4-r10,lr}
         vpush    {d8-d15}
-        sub      r0, r0, r1, lsl #2
+        sub      r4, r0, r1, lsl #2
+        add      r0, r4, #4
 
-        mov r5, #4
-        sub r1, r1, r5
-
-        vld1.32 {d16[0]}, [r0], r5
+        vld1.32 {d16[0]}, [r4], r1
         vld1.32 {d16[1]}, [r0], r1
-        vld1.32 {d17[0]}, [r0], r5
+        vld1.32 {d17[0]}, [r4], r1
         vld1.32 {d17[1]}, [r0], r1
-        vld1.32 {d18[0]}, [r0], r5
+        vld1.32 {d18[0]}, [r4], r1
         vld1.32 {d18[1]}, [r0], r1
-        vld1.32 {d19[0]}, [r0], r5
+        vld1.32 {d19[0]}, [r4], r1
         vld1.32 {d19[1]}, [r0], r1
-        vld1.32 {d20[0]}, [r0], r5
+        vld1.32 {d20[0]}, [r4], r1
         vld1.32 {d20[1]}, [r0], r1
-        vld1.32 {d21[0]}, [r0], r5
+        vld1.32 {d21[0]}, [r4], r1
         vld1.32 {d21[1]}, [r0], r1
-        vld1.32 {d22[0]}, [r0], r5
+        vld1.32 {d22[0]}, [r4], r1
         vld1.32 {d22[1]}, [r0], r1
-        vld1.32 {d23[0]}, [r0], r5
-        vld1.32 {d23[1]}, [r0], r1
+        vld1.32 {d23[0]}, [r4]
+        vld1.32 {d23[1]}, [r0]
 
-        add r1, r1, r5
-        sub        r0, r0, r1, lsl #3
-        add        r0, r1
-        hevc_loop_filter_luma_body
+        bl hevc_loop_filter_luma_body
 
-        mov r5, #4
-        sub r1, r1, r5
-        vst1.32 {d17[0]}, [r0], r5
-        vst1.32 {d17[1]}, [r0], r1
-        vst1.32 {d18[0]}, [r0], r5
-        vst1.32 {d18[1]}, [r0], r1
-        vst1.32 {d19[0]}, [r0], r5
-        vst1.32 {d19[1]}, [r0], r1
-        vst1.32 {d20[0]}, [r0], r5
-        vst1.32 {d20[1]}, [r0], r1
-        vst1.32 {d21[0]}, [r0], r5
-        vst1.32 {d21[1]}, [r0], r1
-        vst1.32 {d22[0]}, [r0], r5
+        neg     r1, r1
+        add     r4, r4, r1
+        add     r0, r0, r1
+        vst1.32 {d22[0]}, [r4], r1
         vst1.32 {d22[1]}, [r0], r1
+        vst1.32 {d21[0]}, [r4], r1
+        vst1.32 {d21[1]}, [r0], r1
+        vst1.32 {d20[0]}, [r4], r1
+        vst1.32 {d20[1]}, [r0], r1
+        vst1.32 {d19[0]}, [r4], r1
+        vst1.32 {d19[1]}, [r0], r1
+        vst1.32 {d18[0]}, [r4], r1
+        vst1.32 {d18[1]}, [r0], r1
+        vst1.32 {d17[0]}, [r4]
+        vst1.32 {d17[1]}, [r0]
 
 bypasswrite:
         vpop     {d8-d15}
-        pop      {r5-r11}
-        bx lr
+        pop      {r4-r10,pc}
 endfunc
 
 function ff_hevc_v_loop_filter_chroma_neon, export=1
