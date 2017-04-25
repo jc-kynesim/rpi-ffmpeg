@@ -31,6 +31,9 @@
         bxeq     lr
 .endm
 
+@ Uses: d2, d4, d18, d19
+@ Returns: d2, d4
+@ Modifies: d0-d7, d22-d25
 .macro hevc_loop_filter_chroma_body
         vsubl.u8  q3, d4, d2
         vsubl.u8  q11, d18, d19
