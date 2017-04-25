@@ -493,7 +493,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     uint8_t *src;
     int x, y;
     int chroma, beta;
-    int32_t c_tc[2], tc[2];
+    int32_t c_tc[4], tc[2];
     uint8_t no_p[2] = { 0 };
     uint8_t no_q[2] = { 0 };
 
@@ -552,34 +552,47 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                src     = rpi_sliced_frame(s->frame) ?
-                    rpi_sliced_frame_pos_y(s->frame, x, y) :
-                    &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
                 if (pcmf) {
                     no_p[0] = get_pcm(s, x - 1, y);
                     no_p[1] = get_pcm(s, x - 1, y + 4);
                     no_q[0] = get_pcm(s, x, y);
                     no_q[1] = get_pcm(s, x, y + 4);
-                    s->hevcdsp.hevc_v_loop_filter_luma_c(src,
-                                                         s->frame->linesize[LUMA],
-                                                         beta, tc, no_p, no_q);
-                } else
-#ifdef RPI_DEBLOCK_VPU
-                if (s->enable_rpi_deblock) {
-                    uint8_t (*setup)[2][2][4];
-                    int num16 = (y>>4)*s->setup_width + (x>>4);
-                    int a = ((y>>3) & 1) << 1;
-                    int b = (x>>3) & 1;
-                    setup = s->dvq->y_setup_arm[num16];
-                    setup[0][b][0][a] = beta;
-                    setup[0][b][0][a + 1] = beta;
-                    setup[0][b][1][a] = tc[0];
-                    setup[0][b][1][a + 1] = tc[1];
-                } else
+                }
+#ifdef RPI
+                if (rpi_sliced_frame(s->frame)) {
+                    extern void ff_hevc_v_loop_filter_luma2_neon(uint8_t * src_r,
+                                                     unsigned int stride, unsigned int beta, const int32_t tc[2],
+                                                     const uint8_t no_p[2], const uint8_t no_q[2],
+                                                     uint8_t * src_l);
+
+                    ff_hevc_v_loop_filter_luma2_neon(rpi_sliced_frame_pos_y(s->frame, x, y),
+                                                     s->frame->linesize[LUMA],
+                                                     beta, tc, no_p, no_q,
+                                                     rpi_sliced_frame_pos_y(s->frame, x - 4, y));
+                }
+                else
 #endif
-                    s->hevcdsp.hevc_v_loop_filter_luma(src,
-                                                       s->frame->linesize[LUMA],
-                                                       beta, tc, no_p, no_q);
+                {
+                    src = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+#ifdef RPI_DEBLOCK_VPU
+                    if (s->enable_rpi_deblock && !pcmf) {
+                        uint8_t (*setup)[2][2][4];
+                        int num16 = (y>>4)*s->setup_width + (x>>4);
+                        int a = ((y>>3) & 1) << 1;
+                        int b = (x>>3) & 1;
+                        setup = s->dvq->y_setup_arm[num16];
+                        setup[0][b][0][a] = beta;
+                        setup[0][b][0][a + 1] = beta;
+                        setup[0][b][1][a] = tc[0];
+                        setup[0][b][1][a + 1] = tc[1];
+                    } else
+#endif
+                    {
+                        s->hevcdsp.hevc_v_loop_filter_luma(src,
+                                                           s->frame->linesize[LUMA],
+                                                           beta, tc, no_p, no_q);
+                    }
+                }
             }
         }
 
@@ -632,6 +645,85 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     }
 
     if (s->ps.sps->chroma_format_idc) {
+#ifdef RPI
+        if (rpi_sliced_frame(s->frame)) {
+            extern void ff_hevc_h_loop_filter_uv_neon(uint8_t * src, unsigned int stride, uint32_t tc4,
+                                                      const uint8_t no_p[2], const uint8_t no_q[2]);
+            extern void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r, unsigned int stride, uint32_t tc4,
+                                                       const uint8_t no_p[2], const uint8_t no_q[2],
+                                                       uint8_t * src_l);
+
+
+            // vertical filtering chroma
+            for (y = y0; y < y_end; y += 8) {
+                for (x = x0 ? x0 : 8; x < x_end; x += 8) {
+                    const int bs0 = s->vertical_bs[(x +  y      * s->bs_width) >> 2];
+                    const int bs1 = s->vertical_bs[(x + (y + 4) * s->bs_width) >> 2];
+
+                    if ((bs0 == 2) || (bs1 == 2)) {
+                        const int qp0 = (get_qPy(s, x - 1, y)     + get_qPy(s, x, y)     + 1) >> 1;
+                        const int qp1 = (get_qPy(s, x - 1, y + 4) + get_qPy(s, x, y + 4) + 1) >> 1;
+
+                        // tc_offset here should be set to cur_tc_offset I think
+                        const uint32_t tc4 =
+                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 0, cur_tc_offset) | (chroma_tc(s, qp0, 1, cur_tc_offset) << 16)) |
+                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 0, cur_tc_offset) | (chroma_tc(s, qp1, 1, cur_tc_offset) << 16)) << 8));
+
+                        if (tc4 == 0)
+                            continue;
+
+                        if (pcmf) {
+                            no_p[0] = get_pcm(s, x - 1, y);
+                            no_p[1] = get_pcm(s, x - 1, y + 4);
+                            no_q[0] = get_pcm(s, x, y);
+                            no_q[1] = get_pcm(s, x, y + 4);
+                        }
+
+                        ff_hevc_v_loop_filter_uv2_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
+                                                                 s->frame->linesize[1],
+                                                                 tc4, no_p, no_q,
+                                                             rpi_sliced_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1));
+                    }
+                }
+
+                if (y == 0)
+                    continue;
+
+                // horizontal filtering chroma
+                tc_offset = x0 ? left_tc_offset : cur_tc_offset;
+                x_end2 = x_end;
+                if (x_end != s->ps.sps->width)
+                    x_end2 = x_end - 8;
+
+                for (x = x0 ? x0 - 8 : 0; x < x_end2; x += 8) {
+                    const int bs0 = s->horizontal_bs[( x      + y * s->bs_width) >> 2];
+                    const int bs1 = s->horizontal_bs[((x + 4) + y * s->bs_width) >> 2];
+                    if ((bs0 == 2) || (bs1 == 2)) {
+                        const int qp0 = bs0 == 2 ? (get_qPy(s, x,     y - 1) + get_qPy(s, x,     y) + 1) >> 1 : 0;
+                        const int qp1 = bs1 == 2 ? (get_qPy(s, x + 4, y - 1) + get_qPy(s, x + 4, y) + 1) >> 1 : 0;
+                        const uint32_t tc4 =
+                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 0, tc_offset) | (chroma_tc(s, qp0, 1, tc_offset) << 16)) |
+                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 0, cur_tc_offset) | (chroma_tc(s, qp1, 1, cur_tc_offset) << 16)) << 8));
+
+                        if (tc4 == 0)
+                            continue;
+
+                        if (pcmf) {
+                            no_p[0] = get_pcm(s, x,     y - 1);
+                            no_p[1] = get_pcm(s, x + 4, y - 1);
+                            no_q[0] = get_pcm(s, x,     y);
+                            no_q[1] = get_pcm(s, x + 4, y);
+                        }
+
+                        ff_hevc_h_loop_filter_uv_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
+                                                             s->frame->linesize[1],
+                                                             tc4, no_p, no_q);
+                    }
+                }
+            }
+        }
+        else
+#endif
         for (chroma = 1; chroma <= 2; chroma++) {
             int h = 1 << s->ps.sps->hshift[chroma];
             int v = 1 << s->ps.sps->vshift[chroma];
