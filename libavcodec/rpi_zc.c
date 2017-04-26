@@ -2,8 +2,11 @@
 #ifdef RPI
 #include "rpi_qpu.h"
 #include "rpi_zc.h"
+#include <pthread.h>
 
 #include "libavutil/buffer_internal.h"
+
+#define TRACE_ALLOC 0
 
 struct ZcPoolEnt;
 
@@ -58,6 +61,11 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req
         goto fail1;
     }
 
+#if TRACE_ALLOC
+    printf("%s: Alloc %#x bytes @ %p\n", __func__, zp->gmem.numbytes, zp->gmem.arm);
+#endif
+
+    pool->numbytes = zp->gmem.numbytes;
     zp->next = NULL;
     zp->pool = pool;
     zp->n = pool->n++;
@@ -71,6 +79,10 @@ fail0:
 
 static void zc_pool_ent_free(ZcPoolEnt * const zp)
 {
+#if TRACE_ALLOC
+    printf("%s: Free %#x bytes @ %p\n", __func__, zp->gmem.numbytes, zp->gmem.arm);
+#endif
+
     gpu_free(&zp->gmem);
     av_free(zp);
 }
@@ -79,6 +91,8 @@ static void zc_pool_flush(ZcPool * const pool)
 {
     ZcPoolEnt * p = pool->head;
     pool->head = NULL;
+    pool->numbytes = -1;
+
     while (p != NULL)
     {
         ZcPoolEnt * const zp = p;
@@ -87,15 +101,21 @@ static void zc_pool_flush(ZcPool * const pool)
     }
 }
 
-static ZcPoolEnt * zc_pool_alloc(ZcPool * const pool, const int numbytes)
+static ZcPoolEnt * zc_pool_alloc(ZcPool * const pool, const int req_bytes)
 {
     ZcPoolEnt * zp;
+    int numbytes;
+
     pthread_mutex_lock(&pool->lock);
 
-    if (numbytes != pool->numbytes)
+    numbytes = pool->numbytes;
+
+    // If size isn't close then dump the pool
+    // Close in this context means within 128k
+    if (req_bytes > numbytes || req_bytes + 0x20000 < numbytes)
     {
         zc_pool_flush(pool);
-        pool->numbytes = numbytes;
+        numbytes = req_bytes;
     }
 
     if (pool->head != NULL)
@@ -122,6 +142,10 @@ static void zc_pool_free(ZcPoolEnt * const zp)
     if (zp != NULL)
     {
         pthread_mutex_lock(&pool->lock);
+#if TRACE_ALLOC
+        printf("%s: Recycle %#x, %#x\n", __func__, pool->numbytes, zp->gmem.numbytes);
+#endif
+
         if (pool->numbytes == zp->gmem.numbytes)
         {
             zp->next = pool->head;
