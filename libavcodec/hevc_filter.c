@@ -724,7 +724,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 }
 
 
-#if 1
+#if 0
 
 static int boundary_strength(HEVCContext *s, MvField *curr, MvField *neigh,
                              RefPicList *neigh_refPicList)
@@ -778,6 +778,9 @@ static int boundary_strength(HEVCContext *s, MvField *curr, MvField *neigh,
             ref_B = neigh_refPicList[1].list[neigh->ref_idx[1]];
         }
 
+        printf("* pred:%d:%d, ref:%d:%d mv=%d,%d/%d,%d\n", curr->pred_flag, neigh->pred_flag, ref_A, ref_B,
+               A.x, A.y, B.x, B.y);
+
         if (ref_A == ref_B) {
             if (FFABS(A.x - B.x) >= 4 || FFABS(A.y - B.y) >= 4)
                 return 1;
@@ -804,6 +807,11 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
     int boundary_upper, boundary_left;
     int i, j, bs;
 
+    const unsigned int log2_dup = FFMIN(log2_min_pu_size, log2_trafo_size);
+    const unsigned int min_pu_in_4pix = 1 << (log2_dup - 2);  // Dup
+    const unsigned int trafo_in_min_pus = 1 << (log2_trafo_size - log2_dup); // Rep
+    RefPicList * const rpl      = s->ref->refPicList;
+
     boundary_upper = y0 > 0 && !(y0 & 7);
     if (boundary_upper &&
         ((!s->sh.slice_loop_filter_across_slices_enabled_flag &&
@@ -822,6 +830,26 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
         int yq_pu =  y0      >> log2_min_pu_size;
         int yp_tu = (y0 - 1) >> log2_min_tu_size;
         int yq_tu =  y0      >> log2_min_tu_size;
+        uint8_t * pbs = s->horizontal_bs + ((x0 + y0 * s->bs_width) >> 2);
+
+        for (i = 0; i < (1 << log2_trafo_size); i += 4)
+            pbs[i >> 2] = 0xff;
+        if (is_intra) {
+            for (i = 0; i < (1 << log2_trafo_size); i += 4)
+                pbs[i >> 2] = 2;
+        }
+        else
+            s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
+                    min_pu_in_4pix, sizeof (MvField), 4 >> 2,
+                    rpl[0].list, rpl[1].list, rpl_top[0].list, rpl_top[1].list,
+                    tab_mvf + yq_pu * min_pu_width + (x0 >> log2_min_pu_size),
+                    tab_mvf + yp_pu * min_pu_width + (x0 >> log2_min_pu_size),
+                    pbs);
+
+        if (trafo_in_min_pus * min_pu_in_4pix != ((1 << log2_trafo_size) >> 2)) {
+            printf("timp=%d, mpu=%d, l2t=%d, l2mpu=%d\n", trafo_in_min_pus, min_pu_in_4pix, log2_trafo_size, log2_min_pu_size);
+            av_assert0(trafo_in_min_pus * min_pu_in_4pix == (1 << log2_trafo_size) >> 2);
+        }
 
             for (i = 0; i < (1 << log2_trafo_size); i += 4) {
                 int x_pu = (x0 + i) >> log2_min_pu_size;
@@ -836,7 +864,15 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
                 else if (curr_cbf_luma || top_cbf_luma)
                     bs = 1;
                 else
+                {
                     bs = boundary_strength(s, curr, top, rpl_top);
+                    if (bs != pbs[i >> 2]) {
+                        printf("%d: (%d,%d) pred=%d:%d, bs=%d/%d, mpu=%d, timp=%d, l2t=%d\n", i, x0, y0,
+                               curr->pred_flag, top->pred_flag,
+                               bs, pbs[i >> 2], min_pu_in_4pix, trafo_in_min_pus, log2_trafo_size);
+                        av_assert0(bs == pbs[i >> 2]);
+                    }
+                }
                 s->horizontal_bs[((x0 + i) + y0 * s->bs_width) >> 2] = bs;
             }
     }
@@ -927,8 +963,9 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
     int boundary_upper, boundary_left;
     int i, j;
     RefPicList *rpl      = s->ref->refPicList;
-    int min_pu_in_4pix   = (1 << log2_min_pu_size) >> 2;
-    int trafo_in_min_pus = (1 << log2_trafo_size) >> log2_min_pu_size;
+    const unsigned int log2_dup = FFMIN(log2_min_pu_size, log2_trafo_size);
+    const unsigned int min_pu_in_4pix = 1 << (log2_dup - 2);  // Dup
+    const unsigned int trafo_in_min_pus = 1 << (log2_trafo_size - log2_dup); // Rep
     int y_pu             = y0 >> log2_min_pu_size;
     int x_pu             = x0 >> log2_min_pu_size;
     MvField *curr        = &tab_mvf[y_pu * min_pu_width + x_pu];

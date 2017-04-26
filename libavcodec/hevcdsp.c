@@ -181,6 +181,9 @@ static void hevc_deblocking_boundary_strengths(int pus, int dup, int in_inc, int
                 neigh_refL0 = neigh_refL1;
             }
 
+//            printf("pred:%d:%d, ref:%d:%d mv=%d,%d/%d,%d\n", curr->pred_flag, neigh->pred_flag, curr_refL0, neigh_refL0,
+//                   curr_mv0.x, curr_mv0.y, neigh_mv0.x, neigh_mv0.y);
+
             if (curr_refL0 == neigh_refL0) {
                 if (FFABS(curr_mv0.x - neigh_mv0.x) >= 4 || FFABS(curr_mv0.y - neigh_mv0.y) >= 4)
                     strength = 1;
