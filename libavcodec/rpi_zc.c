@@ -6,7 +6,7 @@
 
 #include "libavutil/buffer_internal.h"
 
-#define TRACE_ALLOC 0
+#define TRACE_ALLOC 1
 
 struct ZcPoolEnt;
 
@@ -146,7 +146,7 @@ static void zc_pool_free(ZcPoolEnt * const zp)
         printf("%s: Recycle %#x, %#x\n", __func__, pool->numbytes, zp->gmem.numbytes);
 #endif
 
-        if (pool->numbytes == zp->gmem.numbytes)
+        if (pool->numbytes == zp->gmem.numbytes && 0)
         {
             zp->next = pool->head;
             pool->head = zp;
@@ -449,7 +449,7 @@ void av_rpi_zc_env_free(AVZcEnvPtr zc)
     }
 }
 
-#if 0
+#if 1
 static void * zc_test_proc(void * v)
 {
     int i;
@@ -457,7 +457,7 @@ static void * zc_test_proc(void * v)
     for (i = 0; i != 10000; ++i)
     {
         ZcPoolEnt *zp = zc_pool_alloc(&zc->pool, 1920 * 1080 * 3 / 2);
-        memset(zp->gmem.arm, 0, zp->gmem.numbytes);
+        memset(zp->gmem.arm + 1029, 0, 567);
         zc_pool_free(zp);
         if (i % 1000 == 0)
         {
