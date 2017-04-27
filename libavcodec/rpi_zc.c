@@ -449,6 +449,47 @@ void av_rpi_zc_env_free(AVZcEnvPtr zc)
     }
 }
 
+#if 0
+static void * zc_test_proc(void * v)
+{
+    int i;
+    ZcEnv * const zc = v;
+    for (i = 0; i != 10000; ++i)
+    {
+        ZcPoolEnt *zp = zc_pool_alloc(&zc->pool, 1920 * 1080 * 3 / 2);
+        memset(zp->gmem.arm, 0, zp->gmem.numbytes);
+        zc_pool_free(zp);
+        if (i % 1000 == 0)
+        {
+            printf("***\n");
+        }
+    }
+    printf("Done\n");
+    return NULL;
+}
+
+static void zc_test(void)
+{
+    int i;
+    pthread_t threads[16];
+    ZcEnv * const zc = av_rpi_zc_env_alloc();
+
+    for(i = 0; i != 10; ++i)
+    {
+        pthread_create(threads + i, NULL, zc_test_proc, zc);
+    }
+
+    for(i = 0; i != 10; ++i)
+    {
+        pthread_join(threads[i], NULL);
+        printf("Join %d\n", i);
+    }
+
+    av_rpi_zc_env_free(zc);
+}
+#endif
+
+
 int av_rpi_zc_init(struct AVCodecContext * const s)
 {
     ZcEnv * const zc = av_rpi_zc_env_alloc();
@@ -457,6 +498,7 @@ int av_rpi_zc_init(struct AVCodecContext * const s)
         return AVERROR(ENOMEM);
     }
 
+//    zc_test();
     s->get_buffer_context = zc;
     s->get_buffer2 = av_rpi_zc_get_buffer2;
     return 0;
