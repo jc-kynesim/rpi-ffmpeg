@@ -57,7 +57,7 @@
 @ Modifies: d0-d7, d22-d25
 .macro hevc_loop_filter_uv_body P1, P0, Q0, Q1
         vsubl.u8  q3, \Q0, \P0
-        vsubl.u8  q11, \P1, \Q0
+        vsubl.u8  q11, \P1, \Q1
         vshl.i16  q3, #2
         vadd.i16  q11, q3
 

@@ -667,8 +667,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                         // tc_offset here should be set to cur_tc_offset I think
                         const uint32_t tc4 =
-                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 0, cur_tc_offset) | (chroma_tc(s, qp0, 1, cur_tc_offset) << 16)) |
-                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 0, cur_tc_offset) | (chroma_tc(s, qp1, 1, cur_tc_offset) << 16)) << 8));
+                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, cur_tc_offset) | (chroma_tc(s, qp0, 2, cur_tc_offset) << 16)) |
+                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
 
                         if (tc4 == 0)
                             continue;
@@ -703,8 +703,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                         const int qp0 = bs0 == 2 ? (get_qPy(s, x,         y - 1) + get_qPy(s, x,         y) + 1) >> 1 : 0;
                         const int qp1 = bs1 == 2 ? (get_qPy(s, x + 4 * h, y - 1) + get_qPy(s, x + 4 * h, y) + 1) >> 1 : 0;
                         const uint32_t tc4 =
-                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 0, tc_offset) | (chroma_tc(s, qp0, 1, tc_offset) << 16)) |
-                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 0, cur_tc_offset) | (chroma_tc(s, qp1, 1, cur_tc_offset) << 16)) << 8));
+                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, tc_offset) | (chroma_tc(s, qp0, 2, tc_offset) << 16)) |
+                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
 
                         if (tc4 == 0)
                             continue;
