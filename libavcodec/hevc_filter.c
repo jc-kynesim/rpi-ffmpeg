@@ -652,17 +652,18 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
             extern void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r, unsigned int stride, uint32_t tc4,
                                                        const uint8_t no_p[2], const uint8_t no_q[2],
                                                        uint8_t * src_l);
-
+            const int v = 2;
+            const int h = 2;
 
             // vertical filtering chroma
-            for (y = y0; y < y_end; y += 8) {
-                for (x = x0 ? x0 : 8; x < x_end; x += 8) {
-                    const int bs0 = s->vertical_bs[(x +  y      * s->bs_width) >> 2];
-                    const int bs1 = s->vertical_bs[(x + (y + 4) * s->bs_width) >> 2];
+            for (y = y0; y < y_end; y += 8 * v) {
+                for (x = x0 ? x0 : 8 * h; x < x_end; x += 8 * h) {
+                    const int bs0 = s->vertical_bs[(x +  y          * s->bs_width) >> 2];
+                    const int bs1 = s->vertical_bs[(x + (y + 4 * v) * s->bs_width) >> 2];
 
                     if ((bs0 == 2) || (bs1 == 2)) {
-                        const int qp0 = (get_qPy(s, x - 1, y)     + get_qPy(s, x, y)     + 1) >> 1;
-                        const int qp1 = (get_qPy(s, x - 1, y + 4) + get_qPy(s, x, y + 4) + 1) >> 1;
+                        const int qp0 = (get_qPy(s, x - 1, y)         + get_qPy(s, x, y)         + 1) >> 1;
+                        const int qp1 = (get_qPy(s, x - 1, y + 4 * v) + get_qPy(s, x, y + 4 * v) + 1) >> 1;
 
                         // tc_offset here should be set to cur_tc_offset I think
                         const uint32_t tc4 =
@@ -674,9 +675,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                         if (pcmf) {
                             no_p[0] = get_pcm(s, x - 1, y);
-                            no_p[1] = get_pcm(s, x - 1, y + 4);
+                            no_p[1] = get_pcm(s, x - 1, y + 4 * v);
                             no_q[0] = get_pcm(s, x, y);
-                            no_q[1] = get_pcm(s, x, y + 4);
+                            no_q[1] = get_pcm(s, x, y + 4 * v);
                         }
 
                         ff_hevc_v_loop_filter_uv2_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
@@ -693,14 +694,14 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 tc_offset = x0 ? left_tc_offset : cur_tc_offset;
                 x_end2 = x_end;
                 if (x_end != s->ps.sps->width)
-                    x_end2 = x_end - 8;
+                    x_end2 = x_end - 8 * h;
 
-                for (x = x0 ? x0 - 8 : 0; x < x_end2; x += 8) {
-                    const int bs0 = s->horizontal_bs[( x      + y * s->bs_width) >> 2];
-                    const int bs1 = s->horizontal_bs[((x + 4) + y * s->bs_width) >> 2];
+                for (x = x0 ? x0 - 8 * h: 0; x < x_end2; x += 8 * h) {
+                    const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
+                    const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
                     if ((bs0 == 2) || (bs1 == 2)) {
-                        const int qp0 = bs0 == 2 ? (get_qPy(s, x,     y - 1) + get_qPy(s, x,     y) + 1) >> 1 : 0;
-                        const int qp1 = bs1 == 2 ? (get_qPy(s, x + 4, y - 1) + get_qPy(s, x + 4, y) + 1) >> 1 : 0;
+                        const int qp0 = bs0 == 2 ? (get_qPy(s, x,         y - 1) + get_qPy(s, x,         y) + 1) >> 1 : 0;
+                        const int qp1 = bs1 == 2 ? (get_qPy(s, x + 4 * h, y - 1) + get_qPy(s, x + 4 * h, y) + 1) >> 1 : 0;
                         const uint32_t tc4 =
                             ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 0, tc_offset) | (chroma_tc(s, qp0, 1, tc_offset) << 16)) |
                             ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 0, cur_tc_offset) | (chroma_tc(s, qp1, 1, cur_tc_offset) << 16)) << 8));
@@ -709,10 +710,10 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             continue;
 
                         if (pcmf) {
-                            no_p[0] = get_pcm(s, x,     y - 1);
-                            no_p[1] = get_pcm(s, x + 4, y - 1);
-                            no_q[0] = get_pcm(s, x,     y);
-                            no_q[1] = get_pcm(s, x + 4, y);
+                            no_p[0] = get_pcm(s, x,         y - 1);
+                            no_p[1] = get_pcm(s, x + 4 * h, y - 1);
+                            no_q[0] = get_pcm(s, x,         y);
+                            no_q[1] = get_pcm(s, x + 4 * h, y);
                         }
 
                         ff_hevc_h_loop_filter_uv_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
