@@ -837,8 +837,9 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
     int boundary_upper, boundary_left;
     int i, j;
     RefPicList *rpl      = s->ref->refPicList;
-    int min_pu_in_4pix   = (1 << log2_min_pu_size) >> 2;
-    int trafo_in_min_pus = (1 << log2_trafo_size) >> log2_min_pu_size;
+    const unsigned int log2_dup = FFMIN(log2_min_pu_size, log2_trafo_size);
+    const unsigned int min_pu_in_4pix = 1 << (log2_dup - 2);  // Dup
+    const unsigned int trafo_in_min_pus = 1 << (log2_trafo_size - log2_dup); // Rep
     int y_pu             = y0 >> log2_min_pu_size;
     int x_pu             = x0 >> log2_min_pu_size;
     MvField *curr        = &tab_mvf[y_pu * min_pu_width + x_pu];
