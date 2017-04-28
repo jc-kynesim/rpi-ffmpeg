@@ -27,6 +27,8 @@
 #include "avformat.h"
 #include "internal.h"
 
+#define DEBUG_WRAPPED_FRAME 1
+
 struct HashContext {
     const AVClass *avclass;
     struct AVHashContext *hash;
@@ -66,7 +68,53 @@ static int hash_write_header(struct AVFormatContext *s)
 static int hash_write_packet(struct AVFormatContext *s, AVPacket *pkt)
 {
     struct HashContext *c = s->priv_data;
+    printf("%s: %#x @ %p n=%d\n", __func__, pkt->size, pkt->data, s->nb_streams);
     av_hash_update(c->hash, pkt->data, pkt->size);
+    return 0;
+}
+
+static void update_hash_sand_c(struct HashContext *c, const AVFrame * const frame, const int c_off)
+{
+    for (int y = 0; y != frame->height / 2; ++y) {
+        for (int x = 0; x < frame->width; x += frame->linesize[0]) {
+            uint8_t cbuf[128]; // Will deal with SAND256 if needed
+            const uint8_t * p = frame->data[1] + x * frame->linesize[3] + y * frame->linesize[0] + c_off;
+            for (int i = 0; i < frame->linesize[0] / 2; ++i)
+                cbuf[i] = p[i * 2];
+
+            av_hash_update(c->hash,
+                cbuf,
+                FFMIN(frame->linesize[0], frame->width - x) / 2);
+        }
+    }
+}
+
+static int hash_write_packet_v(struct AVFormatContext *s, AVPacket *pkt)
+{
+    struct HashContext *c = s->priv_data;
+    const AVFrame * const frame = (AVFrame *)pkt->data;
+
+    switch (frame->format) {
+    case AV_PIX_FMT_SAND128:
+        {
+            int x, y;
+            // Luma is "easy"
+            for (y = 0; y != frame->height; ++y) {
+                for (x = 0; x < frame->width; x += frame->linesize[0]) {
+                    av_hash_update(c->hash,
+                        frame->data[0] + x * frame->linesize[3] + y * frame->linesize[0],
+                        FFMIN(frame->linesize[0], frame->width - x));
+                }
+            }
+            // Chroma is dull
+            update_hash_sand_c(c, frame, 0);
+            update_hash_sand_c(c, frame, 1);
+        }
+        break;
+    default:
+        av_log(NULL, AV_LOG_ERROR, "MD5V can only deal with sand currently");
+        return -1;
+    }
     return 0;
 }
 
@@ -117,6 +165,7 @@ static const AVClass md5enc_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
+#if !DEBUG_WRAPPED_FRAME
 AVOutputFormat ff_md5_muxer = {
     .name              = "md5",
     .long_name         = NULL_IF_CONFIG_SMALL("MD5 testing"),
@@ -130,6 +179,22 @@ AVOutputFormat ff_md5_muxer = {
                          AVFMT_TS_NEGATIVE,
     .priv_class        = &md5enc_class,
 };
+#else
+AVOutputFormat ff_md5_muxer = {
+    .name              = "md5",
+    .long_name         = NULL_IF_CONFIG_SMALL("MD5 (VFrame) testing"),
+    .priv_data_size    = sizeof(struct HashContext),
+    .audio_codec       = AV_CODEC_ID_PCM_S16LE,
+    .video_codec       = AV_CODEC_ID_WRAPPED_AVFRAME,
+    .write_header      = hash_write_header,
+    .write_packet      = hash_write_packet_v,
+    .write_trailer     = hash_write_trailer,
+    .flags             = AVFMT_VARIABLE_FPS | AVFMT_TS_NONSTRICT |
+                         AVFMT_TS_NEGATIVE,
+    .priv_class        = &md5enc_class,
+};
+#endif
+
 #endif
 
 #if CONFIG_FRAMEHASH_MUXER || CONFIG_FRAMEMD5_MUXER

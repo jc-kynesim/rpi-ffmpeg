@@ -49,6 +49,47 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
+static uint8_t * cpy_sand_c(uint8_t * dst, const AVFrame * const frame, const int c_off)
+{
+    for (int y = 0; y != frame->height / 2; ++y) {
+        for (int x = 0; x < frame->width; x += frame->linesize[0]) {
+            const uint8_t * p = frame->data[1] + x * frame->linesize[3] + y * frame->linesize[0] + c_off;
+            const int w = FFMIN(frame->linesize[0], frame->width - x) / 2;
+            for (int i = 0; i < w; ++i)
+                *dst++ = p[i * 2];
+        }
+    }
+    return dst;
+}
+
+static int raw_sand_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
+                      const AVFrame *frame)
+{
+    int size = frame->width * frame->height * 3 / 2;
+    uint8_t * dst;
+    int ret;
+
+    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+        return ret;
+
+    dst = pkt->data;
+
+    // Luma is "easy"
+    for (int y = 0; y != frame->height; ++y) {
+        for (int x = 0; x < frame->width; x += frame->linesize[0]) {
+            const int w = FFMIN(frame->linesize[0], frame->width - x);
+            memcpy(dst,
+                frame->data[0] + x * frame->linesize[3] + y * frame->linesize[0], w);
+            dst += w;
+        }
+    }
+    // Chroma is dull
+    dst = cpy_sand_c(dst, frame, 0);
+    dst = cpy_sand_c(dst, frame, 1);
+
+    return 0;
+}
+
 static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame, int *got_packet)
 {
@@ -57,6 +98,12 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
 
     if (ret < 0)
         return ret;
+
+    if (frame->format == AV_PIX_FMT_SAND128) {
+        ret = raw_sand_as_yuv420(avctx, pkt, frame);
+        *got_packet = (ret == 0);
+        return ret;
+    }
 
     if ((ret = ff_alloc_packet2(avctx, pkt, ret, ret)) < 0)
         return ret;
