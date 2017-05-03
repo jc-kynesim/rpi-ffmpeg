@@ -331,9 +331,30 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         int width    = FFMIN(ctb_size_h, (s->ps.sps->width  >> s->ps.sps->hshift[c_idx]) - x0);
         int height   = FFMIN(ctb_size_v, (s->ps.sps->height >> s->ps.sps->vshift[c_idx]) - y0);
         int tab      = sao_tab[(FFALIGN(width, 8) >> 3) - 1];
-        uint8_t *src = &s->frame->data[c_idx][y0 * stride_src + (x0 << s->ps.sps->pixel_shift)];
+        const int sliced = rpi_sliced_frame(s->frame);
+        const unsigned int sh = s->ps.sps->pixel_shift;
+        uint8_t * const src = !sliced ?
+                &s->frame->data[c_idx][y0 * stride_src + (x0 << s->ps.sps->pixel_shift)] :
+            c_idx == 0 ?
+                rpi_sliced_frame_pos_y(s->frame, x0, y0) :
+                rpi_sliced_frame_pos_c(s->frame, x0, y0);
+        const uint8_t * const src_l = edges[0] ? NULL :
+            !sliced ? src - (1 << sh) :
+            c_idx == 0 ?
+                rpi_sliced_frame_pos_y(s->frame, x0 - 1, y0) :
+                rpi_sliced_frame_pos_c(s->frame, x0 - 1, y0);
+        const uint8_t * const src_r = edges[2] ? NULL :
+            !sliced ? src + (width << sh) :
+            c_idx == 0 ?
+                rpi_sliced_frame_pos_y(s->frame, x0 + width, y0) :
+                rpi_sliced_frame_pos_c(s->frame, x0 + width, y0);
+
         ptrdiff_t stride_dst;
         uint8_t *dst;
+
+        if (sliced && c_idx != 0) {
+            break;
+        }
 
         switch (sao->type_idx[c_idx]) {
         case SAO_BAND:
@@ -364,37 +385,32 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
             int top_edge = edges[1];
             int right_edge = edges[2];
             int bottom_edge = edges[3];
-            int sh = s->ps.sps->pixel_shift;
             int left_pixels, right_pixels;
 
             stride_dst = 2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE;
             dst = lc->edge_emu_buffer + stride_dst + AV_INPUT_BUFFER_PADDING_SIZE;
 
             if (!top_edge) {
-                int left = 1 - left_edge;
-                int right = 1 - right_edge;
-                const uint8_t *src1[2];
                 uint8_t *dst1;
-                int src_idx, pos;
+                int src_idx;
+                const uint8_t * const src_spb = s->sao_pixel_buffer_h[c_idx] + (((2 * y_ctb - 1) * w + x0) << sh);
 
-                dst1 = dst - stride_dst - (left << sh);
-                src1[0] = src - stride_src - (left << sh);
-                src1[1] = s->sao_pixel_buffer_h[c_idx] + (((2 * y_ctb - 1) * w + x0 - left) << sh);
-                pos = 0;
-                if (left) {
+                dst1 = dst - stride_dst;
+
+                if (src_l != NULL) {
                     src_idx = (CTB(s->sao, x_ctb-1, y_ctb-1).type_idx[c_idx] ==
                                SAO_APPLIED);
-                    copy_pixel(dst1, src1[src_idx], sh);
-                    pos += (1 << sh);
+                    copy_pixel(dst1 - (1 << sh), src_idx ? src_spb - (1 << sh) : src_l - stride_src, sh);
                 }
+
                 src_idx = (CTB(s->sao, x_ctb, y_ctb-1).type_idx[c_idx] ==
                            SAO_APPLIED);
-                memcpy(dst1 + pos, src1[src_idx] + pos, width << sh);
-                if (right) {
-                    pos += width << sh;
+                memcpy(dst1, src_idx ? src_spb : src - stride_src, width << sh);
+
+                if (src_r != NULL) {
                     src_idx = (CTB(s->sao, x_ctb+1, y_ctb-1).type_idx[c_idx] ==
                                SAO_APPLIED);
-                    copy_pixel(dst1 + pos, src1[src_idx] + pos, sh);
+                    copy_pixel(dst1 + (width << sh), src_idx ? src_spb + (width << sh) : src_r - stride_src, sh);
                 }
             }
             if (!bottom_edge) {
