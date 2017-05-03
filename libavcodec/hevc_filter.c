@@ -385,7 +385,6 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
             int top_edge = edges[1];
             int right_edge = edges[2];
             int bottom_edge = edges[3];
-            int left_pixels, right_pixels;
 
             stride_dst = 2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE;
             dst = lc->edge_emu_buffer + stride_dst + AV_INPUT_BUFFER_PADDING_SIZE;
@@ -414,56 +413,53 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                 }
             }
             if (!bottom_edge) {
-                int left = 1 - left_edge;
-                int right = 1 - right_edge;
-                const uint8_t *src1[2];
-                uint8_t *dst1;
-                int src_idx, pos;
+                uint8_t * const dst1 = dst + height * stride_dst;
+                int src_idx;
+                const uint8_t * const src_spb = s->sao_pixel_buffer_h[c_idx] + (((2 * y_ctb + 2) * w + x0) << sh);
+                const unsigned int hoff = height * stride_src;
 
-                dst1 = dst + height * stride_dst - (left << sh);
-                src1[0] = src + height * stride_src - (left << sh);
-                src1[1] = s->sao_pixel_buffer_h[c_idx] + (((2 * y_ctb + 2) * w + x0 - left) << sh);
-                pos = 0;
-                if (left) {
+                if (src_l != NULL) {
                     src_idx = (CTB(s->sao, x_ctb-1, y_ctb+1).type_idx[c_idx] ==
                                SAO_APPLIED);
-                    copy_pixel(dst1, src1[src_idx], sh);
-                    pos += (1 << sh);
+                    copy_pixel(dst1 - (1 << sh), src_idx ? src_spb - (1 << sh) : src_l + hoff, sh);
                 }
+
                 src_idx = (CTB(s->sao, x_ctb, y_ctb+1).type_idx[c_idx] ==
                            SAO_APPLIED);
-                memcpy(dst1 + pos, src1[src_idx] + pos, width << sh);
-                if (right) {
-                    pos += width << sh;
+                memcpy(dst1, src_idx ? src_spb : src + hoff, width << sh);
+
+                if (src_r != NULL) {
                     src_idx = (CTB(s->sao, x_ctb+1, y_ctb+1).type_idx[c_idx] ==
                                SAO_APPLIED);
-                    copy_pixel(dst1 + pos, src1[src_idx] + pos, sh);
+                    copy_pixel(dst1 + (width << sh), src_idx ? src_spb + (width << sh) : src_r + hoff, sh);
                 }
             }
-            left_pixels = 0;
             if (!left_edge) {
                 if (CTB(s->sao, x_ctb-1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
                     copy_vert(dst - (1 << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb - 1) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    left_pixels = 1;
+                    copy_vert(dst - (1 << sh),
+                              src_l,
+                              sh, height, stride_dst, stride_src);
                 }
             }
-            right_pixels = 0;
             if (!right_edge) {
                 if (CTB(s->sao, x_ctb+1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
                     copy_vert(dst + (width << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 2) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    right_pixels = 1;
+                    copy_vert(dst + (width << sh),
+                              src_r,
+                              sh, height, stride_dst, stride_src);
                 }
             }
 
-            copy_CTB(dst - (left_pixels << sh),
-                     src - (left_pixels << sh),
-                     (width + left_pixels + right_pixels) << sh,
+            copy_CTB(dst,
+                     src,
+                     width << sh,
                      height, stride_dst, stride_src);
 
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
