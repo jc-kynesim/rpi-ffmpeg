@@ -665,7 +665,10 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
 #ifdef RPI
-        *fmt++ = AV_PIX_FMT_SAND128;
+        // Currently geometry calc is stuffed for big sizes
+        if (sps->width < 2048 && sps->height <= 1088) {
+            *fmt++ = AV_PIX_FMT_SAND128;
+        }
 #endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
@@ -700,6 +703,7 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
         ret = ff_thread_get_format(s->avctx, pix_fmts);
         if (ret < 0)
             goto fail;
+
         s->avctx->pix_fmt = ret;
     }
     else {

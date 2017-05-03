@@ -89,6 +89,20 @@ static void update_hash_sand_c(struct HashContext *c, const AVFrame * const fram
     }
 }
 
+static void update_hash_2d(struct HashContext *c,
+                           const uint8_t * src, const unsigned int width, const unsigned int height, const unsigned int stride)
+{
+    if (stride == width) {
+        av_hash_update(c->hash, src, width * height);
+    }
+    else
+    {
+        for (unsigned int y = 0; y != height; ++y, src += stride) {
+            av_hash_update(c->hash, src, width);
+        }
+    }
+}
+
 static int hash_write_packet_v(struct AVFormatContext *s, AVPacket *pkt)
 {
     struct HashContext *c = s->priv_data;
@@ -111,8 +125,15 @@ static int hash_write_packet_v(struct AVFormatContext *s, AVPacket *pkt)
             update_hash_sand_c(c, frame, 1);
         }
         break;
+
+    case AV_PIX_FMT_YUV420P:
+        update_hash_2d(c, frame->data[0], frame->width, frame->height, frame->linesize[0]);
+        update_hash_2d(c, frame->data[1], frame->width/2, frame->height/2, frame->linesize[1]);
+        update_hash_2d(c, frame->data[2], frame->width/2, frame->height/2, frame->linesize[2]);
+        break;
+
     default:
-        av_log(NULL, AV_LOG_ERROR, "MD5V can only deal with sand currently");
+        av_log(NULL, AV_LOG_ERROR, "MD5V can only deal with sand currently\n");
         return -1;
     }
     return 0;

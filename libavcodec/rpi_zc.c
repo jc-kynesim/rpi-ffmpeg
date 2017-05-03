@@ -265,6 +265,8 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
 
             pthread_mutex_unlock(&sand_lock);
 
+            av_assert0((int)geo.height_y > 0 && (int)geo.height_c > 0);
+            av_assert0(geo.height_y >= video_height && geo.height_c >= video_height / 2);
             break;
         }
 
