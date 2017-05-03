@@ -360,7 +360,6 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
             int right_edge = edges[2];
             int bottom_edge = edges[3];
             int sh = s->ps.sps->pixel_shift;
-            int left_pixels, right_pixels;
 
             stride_dst = 2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE;
             dst = lc->edge_emu_buffer + stride_dst + AV_INPUT_BUFFER_PADDING_SIZE;
@@ -419,30 +418,36 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                     copy_pixel(dst1 + pos, src1[src_idx] + pos, sh);
                 }
             }
-            left_pixels = 0;
             if (!left_edge) {
                 if (CTB(s->sao, x_ctb-1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
                     copy_vert(dst - (1 << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb - 1) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    left_pixels = 1;
+                    copy_vert(dst - (1 << sh),
+                              src - (1 << sh),
+                              sh, height, stride_dst, stride_src);
                 }
             }
-            right_pixels = 0;
             if (!right_edge) {
                 if (CTB(s->sao, x_ctb+1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
                     copy_vert(dst + (width << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 2) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    right_pixels = 1;
+                    copy_vert(dst + (width << sh),
+                              src + (width << sh),
+                              sh, height, stride_dst, stride_src);
                 }
             }
 
-            copy_CTB(dst - (left_pixels << sh),
-                     src - (left_pixels << sh),
-                     (width + left_pixels + right_pixels) << sh,
+//            if (width != 32 && width != 64)
+            {
+                printf("%s: widthxheight=%dx%d\n", __func__, width, height);
+            }
+            copy_CTB(dst,
+                     src,
+                     width << sh,
                      height, stride_dst, stride_src);
 
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,

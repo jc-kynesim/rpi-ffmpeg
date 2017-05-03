@@ -141,6 +141,7 @@ function ff_hevc_sao_band_w64_neon_8, export=1
         bx lr
 endfunc
 
+// Only uses regs specified on the line
 .macro diff32 out0, out1, tmp0, tmp1, in0, in1, in2, in3
         vcgt.u8 \out0, \in2, \in0  // c > a -> -1 , otherwise 0
         vcgt.u8 \tmp0,  \in0, \in2  // a > c -> -1 , otherwise 0
@@ -149,6 +150,16 @@ endfunc
         vsub.s8 \out0, \tmp0, \out0 // diff0
         vsub.s8 \out1, \tmp1, \out1 // diff0 part 2
 .endm
+
+// Input:
+// r0     Address to store results (aligned)
+// r2     Post-increment for r0
+// r4, r5  Offset table
+// d0-d7   Line
+//
+// Changed:
+// r0      Address of next store
+// d0-d7, d24, d26-d31
 
 .macro table64
         vmov.s8 q13, #2 // 2 to all elements
