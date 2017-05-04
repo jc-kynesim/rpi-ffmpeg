@@ -726,11 +726,12 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
         for(c_idx = 0; c_idx < c_count; c_idx++) {
             int w = sps->width >> sps->hshift[c_idx];
             int h = sps->height >> sps->vshift[c_idx];
+            // ******** Very very nasty allocation kludge for plaited Chroma
             s->sao_pixel_buffer_h[c_idx] =
-                av_malloc((w * 2 * sps->ctb_height) <<
+                av_malloc((w * 2 * sps->ctb_height * (1 + (c_idx == 1))) <<
                           sps->pixel_shift);
             s->sao_pixel_buffer_v[c_idx] =
-                av_malloc((h * 2 * sps->ctb_width) <<
+                av_malloc((h * 2 * sps->ctb_width  * (1 + (c_idx == 1))) <<
                           sps->pixel_shift);
         }
     }

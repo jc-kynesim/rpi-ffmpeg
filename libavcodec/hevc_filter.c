@@ -149,6 +149,15 @@ static int get_qPy(HEVCContext *s, int xC, int yC)
     return s->qp_y_tab[x + y * s->ps.sps->min_cb_width];
 }
 
+static inline unsigned int pixel_shift(const HEVCContext * const s, const unsigned int c_idx)
+{
+#ifdef RPI
+    return c_idx != 0 && rpi_sliced_frame(s->frame) ? 1 : s->ps.sps->pixel_shift;
+#else
+    return s->ps.sps->pixel_shift;
+#endif
+}
+
 static void copy_CTB(uint8_t *dst, const uint8_t *src, int width, int height,
                      ptrdiff_t stride_dst, ptrdiff_t stride_src)
 {
@@ -203,7 +212,7 @@ static void copy_CTB_to_hv(HEVCContext *s, const uint8_t *src,
                            ptrdiff_t stride_src, int x, int y, int width, int height,
                            int c_idx, int x_ctb, int y_ctb)
 {
-    int sh = s->ps.sps->pixel_shift;
+    const unsigned int sh = pixel_shift(s, c_idx);
     int w = s->ps.sps->width >> s->ps.sps->hshift[c_idx];
     int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
 
@@ -234,13 +243,15 @@ static void restore_tqb_pixels(HEVCContext *s,
         int y_min        = ((y0         ) >> s->ps.sps->log2_min_pu_size);
         int x_max        = ((x0 + width ) >> s->ps.sps->log2_min_pu_size);
         int y_max        = ((y0 + height) >> s->ps.sps->log2_min_pu_size);
-        int len          = (min_pu_size >> hshift) << s->ps.sps->pixel_shift;
+        const unsigned int sh = pixel_shift(s, c_idx);
+        int len          = (min_pu_size >> hshift) << sh;
         for (y = y_min; y < y_max; y++) {
             for (x = x_min; x < x_max; x++) {
                 if (s->is_pcm[y * s->ps.sps->min_pu_width + x]) {
                     int n;
-                    uint8_t *src = src1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_src + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << s->ps.sps->pixel_shift);
-                    const uint8_t *dst = dst1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_dst + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << s->ps.sps->pixel_shift);
+                    uint8_t *src = src1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_src + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << sh);
+                    const uint8_t *dst = dst1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_dst + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << sh);
+                    printf("%s!\n", __func__);
                     for (n = 0; n < (min_pu_size >> vshift); n++) {
                         memcpy(src, dst, len);
                         src += stride_src;
@@ -287,10 +298,6 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
     return;
 #endif
 
-    if (s->frame->format == AV_PIX_FMT_SAND128) {
-        return;
-    }
-
     if (restore) {
         if (!edges[0]) {
             left_tile_edge  = no_tile_filter && s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs-1]];
@@ -332,18 +339,20 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         int height   = FFMIN(ctb_size_v, (s->ps.sps->height >> s->ps.sps->vshift[c_idx]) - y0);
         int tab      = sao_tab[(FFALIGN(width, 8) >> 3) - 1];
         const int sliced = rpi_sliced_frame(s->frame);
-        const unsigned int sh = s->ps.sps->pixel_shift;
+        const unsigned int sh = (sliced && c_idx != 0) ? 1 : s->ps.sps->pixel_shift;
+//        const int wants_lr = sao->type_idx[c_idx] == SAO_EDGE && sao->eo_class[c_idx] != 1 /* Vertical */;
+        const int wants_lr = 1;
         uint8_t * const src = !sliced ?
                 &s->frame->data[c_idx][y0 * stride_src + (x0 << s->ps.sps->pixel_shift)] :
             c_idx == 0 ?
                 rpi_sliced_frame_pos_y(s->frame, x0, y0) :
                 rpi_sliced_frame_pos_c(s->frame, x0, y0);
-        const uint8_t * const src_l = edges[0] ? NULL :
+        const uint8_t * const src_l = edges[0] || !wants_lr ? NULL :
             !sliced ? src - (1 << sh) :
             c_idx == 0 ?
                 rpi_sliced_frame_pos_y(s->frame, x0 - 1, y0) :
                 rpi_sliced_frame_pos_c(s->frame, x0 - 1, y0);
-        const uint8_t * const src_r = edges[2] ? NULL :
+        const uint8_t * const src_r = edges[2] || !wants_lr ? NULL :
             !sliced ? src + (width << sh) :
             c_idx == 0 ?
                 rpi_sliced_frame_pos_y(s->frame, x0 + width, y0) :
@@ -352,9 +361,11 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         ptrdiff_t stride_dst;
         uint8_t *dst;
 
-        if (sliced && c_idx != 0) {
+        if (sliced && c_idx > 1) {
             break;
         }
+
+        memset(lc->edge_emu_buffer, 0, sizeof(lc->edge_emu_buffer)); // ********************
 
         switch (sao->type_idx[c_idx]) {
         case SAO_BAND:
@@ -362,18 +373,36 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                            x_ctb, y_ctb);
             if (s->ps.pps->transquant_bypass_enable_flag ||
                 (s->ps.sps->pcm.loop_filter_disable_flag && s->ps.sps->pcm_enabled_flag)) {
-            dst = lc->edge_emu_buffer;
-            stride_dst = 2*MAX_PB_SIZE;
-            copy_CTB(dst, src, width << s->ps.sps->pixel_shift, height, stride_dst, stride_src);
-            s->hevcdsp.sao_band_filter[tab](src, dst, stride_src, stride_dst,
-                                            sao->offset_val[c_idx], sao->band_position[c_idx],
-                                            width, height);
-            restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
-                               x, y, width, height, c_idx);
+                dst = lc->edge_emu_buffer;
+                stride_dst = 2*MAX_PB_SIZE;
+                copy_CTB(dst, src, width << sh, height, stride_dst, stride_src);
+                if (!sliced || c_idx == 0) {
+                    s->hevcdsp.sao_band_filter[tab](src, dst, stride_src, stride_dst,
+                                                    sao->offset_val[c_idx], sao->band_position[c_idx],
+                                                    width, height);
+                }
+                else
+                {
+                    s->hevcdsp.sao_band_filter_c[tab](src, dst, stride_src, stride_dst,
+                                                    sao->offset_val[1], sao->band_position[1],
+                                                    sao->offset_val[2], sao->band_position[2],
+                                                    width, height);
+                }
+                restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
+                                   x, y, width, height, c_idx);
             } else {
-            s->hevcdsp.sao_band_filter[tab](src, src, stride_src, stride_src,
-                                            sao->offset_val[c_idx], sao->band_position[c_idx],
-                                            width, height);
+                if (!sliced || c_idx == 0) {
+                    s->hevcdsp.sao_band_filter[tab](src, src, stride_src, stride_src,
+                                                    sao->offset_val[c_idx], sao->band_position[c_idx],
+                                                    width, height);
+                }
+                else
+                {
+                    s->hevcdsp.sao_band_filter_c[tab](src, src, stride_src, stride_src,
+                                                    sao->offset_val[1], sao->band_position[1],
+                                                    sao->offset_val[2], sao->band_position[2],
+                                                    width, height);
+                }
             }
             sao->type_idx[c_idx] = SAO_APPLIED;
             break;
@@ -381,9 +410,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         {
             int w = s->ps.sps->width >> s->ps.sps->hshift[c_idx];
             int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
-            int left_edge = edges[0];
             int top_edge = edges[1];
-            int right_edge = edges[2];
             int bottom_edge = edges[3];
 
             stride_dst = 2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE;
@@ -434,7 +461,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                     copy_pixel(dst1 + (width << sh), src_idx ? src_spb + (width << sh) : src_r + hoff, sh);
                 }
             }
-            if (!left_edge) {
+            if (src_l != NULL) {
                 if (CTB(s->sao, x_ctb-1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
                     copy_vert(dst - (1 << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb - 1) * h + y0) << sh),
@@ -445,7 +472,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                               sh, height, stride_dst, stride_src);
                 }
             }
-            if (!right_edge) {
+            if (src_r != NULL) {
                 if (CTB(s->sao, x_ctb+1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
                     copy_vert(dst + (width << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 2) * h + y0) << sh),
@@ -464,16 +491,33 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
 
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
                            x_ctb, y_ctb);
-            s->hevcdsp.sao_edge_filter[tab](src, dst, stride_src, sao->offset_val[c_idx],
-                                            sao->eo_class[c_idx], width, height);
-            s->hevcdsp.sao_edge_restore[restore](src, dst,
-                                                stride_src, stride_dst,
-                                                sao,
-                                                edges, width,
-                                                height, c_idx,
-                                                vert_edge,
-                                                horiz_edge,
-                                                diag_edge);
+
+            if (!sliced || c_idx == 0) {
+                s->hevcdsp.sao_edge_filter[tab](src, dst, stride_src, sao->offset_val[c_idx],
+                                                sao->eo_class[c_idx], width, height);
+                s->hevcdsp.sao_edge_restore[restore](src, dst,
+                                                    stride_src, stride_dst,
+                                                    sao,
+                                                    edges, width,
+                                                    height, c_idx,
+                                                    vert_edge,
+                                                    horiz_edge,
+                                                    diag_edge);
+            }
+            else {
+                // Class always the same for both U & V (which is just as well :-))
+                s->hevcdsp.sao_edge_filter_c[tab](src, dst, stride_src,
+                                                sao->offset_val[1], sao->offset_val[2], sao->eo_class[1],
+                                                width, height);
+                s->hevcdsp.sao_edge_restore_c[restore](src, dst,
+                                                    stride_src, stride_dst,
+                                                    sao,
+                                                    edges, width,
+                                                    height, c_idx,
+                                                    vert_edge,
+                                                    horiz_edge,
+                                                    diag_edge);
+            }
             restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
                                x, y, width, height, c_idx);
             sao->type_idx[c_idx] = SAO_APPLIED;
