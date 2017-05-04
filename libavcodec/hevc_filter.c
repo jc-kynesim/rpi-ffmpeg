@@ -789,6 +789,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                 (get_pcm(s, x,         y)     ? 4 : 0) |
                                 (get_pcm(s, x + 4 * h, y)     ? 8 : 0);
 
+                            if (no_f == 0xf)
+                                continue;
                         }
 
                         ff_hevc_h_loop_filter_uv_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
