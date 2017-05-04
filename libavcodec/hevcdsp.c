@@ -309,6 +309,7 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
 
 #define HEVC_DSP(depth)                                                     \
     hevcdsp->put_pcm                = FUNC(put_pcm, depth);                 \
+    hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth);                 \
     hevcdsp->add_residual[0]        = FUNC(add_residual4x4, depth);         \
     hevcdsp->add_residual[1]        = FUNC(add_residual8x8, depth);         \
     hevcdsp->add_residual[2]        = FUNC(add_residual16x16, depth);       \

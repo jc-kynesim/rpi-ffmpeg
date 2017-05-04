@@ -1685,7 +1685,11 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
                            s->frame->linesize[0],
                            cb_size, cb_size, &gb, s->ps.sps->pcm.bit_depth);
 
-        // *** CHROMA
+        s->hevcdsp.put_pcm_c(rpi_sliced_frame_pos_c(s->frame, x0 >> s->ps.sps->hshift[1], y0 >> s->ps.sps->vshift[1]),
+                           s->frame->linesize[1],
+                           cb_size >> s->ps.sps->hshift[1],
+                           cb_size >> s->ps.sps->vshift[1],
+                           &gb, s->ps.sps->pcm.bit_depth_chroma);
     }
     else
     {

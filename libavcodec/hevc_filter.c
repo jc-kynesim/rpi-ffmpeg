@@ -365,8 +365,6 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
             break;
         }
 
-        memset(lc->edge_emu_buffer, 0, sizeof(lc->edge_emu_buffer)); // ********************
-
         switch (sao->type_idx[c_idx]) {
         case SAO_BAND:
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,

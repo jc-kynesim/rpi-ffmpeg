@@ -45,6 +45,29 @@ static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height
     }
 }
 
+static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
+                          GetBitContext *gb, int pcm_bit_depth)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++)
+            dst[x*2] = get_bits(gb, pcm_bit_depth) << (BIT_DEPTH - pcm_bit_depth);
+        dst += stride;
+    }
+
+    dst = (pixel *)_dst + 1;
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++)
+            dst[x*2] = get_bits(gb, pcm_bit_depth) << (BIT_DEPTH - pcm_bit_depth);
+        dst += stride;
+    }
+}
+
+
 static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
                                                 ptrdiff_t stride, int size)
 {
