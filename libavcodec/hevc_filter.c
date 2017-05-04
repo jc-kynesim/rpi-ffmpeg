@@ -525,6 +525,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
     }
 }
 
+// Returns 2 or 0.
 static int get_pcm(HEVCContext *s, int x, int y)
 {
     int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
@@ -623,6 +624,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                      const uint8_t no_p[2], const uint8_t no_q[2],
                                                      uint8_t * src_l);
 
+                    // This copes properly with no_p/no_q
                     ff_hevc_v_loop_filter_luma2_neon(rpi_sliced_frame_pos_y(s->frame, x, y),
                                                      s->frame->linesize[LUMA],
                                                      beta, tc, no_p, no_q,
@@ -632,8 +634,15 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #endif
                 {
                     src = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+                    if (pcmf) {
+                        // Standard DSP code is broken if no_p / no_q is set
+                        s->hevcdsp.hevc_v_loop_filter_luma_c(src,
+                                                           s->frame->linesize[LUMA],
+                                                           beta, tc, no_p, no_q);
+                    }
+                    else
 #ifdef RPI_DEBLOCK_VPU
-                    if (s->enable_rpi_deblock && !pcmf) {
+                    if (s->enable_rpi_deblock) {
                         uint8_t (*setup)[2][2][4];
                         int num16 = (y>>4)*s->setup_width + (x>>4);
                         int a = ((y>>3) & 1) << 1;
@@ -706,10 +715,10 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 #ifdef RPI
         if (rpi_sliced_frame(s->frame)) {
             extern void ff_hevc_h_loop_filter_uv_neon(uint8_t * src, unsigned int stride, uint32_t tc4,
-                                                      const uint8_t no_p[2], const uint8_t no_q[2]);
+                                                      unsigned int no_f);
             extern void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r, unsigned int stride, uint32_t tc4,
-                                                       const uint8_t no_p[2], const uint8_t no_q[2],
-                                                       uint8_t * src_l);
+                                                       uint8_t * src_l,
+                                                       unsigned int no_f);
             const int v = 2;
             const int h = 2;
 
@@ -722,6 +731,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     if ((bs0 == 2) || (bs1 == 2)) {
                         const int qp0 = (get_qPy(s, x - 1, y)         + get_qPy(s, x, y)         + 1) >> 1;
                         const int qp1 = (get_qPy(s, x - 1, y + 4 * v) + get_qPy(s, x, y + 4 * v) + 1) >> 1;
+                        unsigned int no_f = 0;
 
                         // tc_offset here should be set to cur_tc_offset I think
                         const uint32_t tc4 =
@@ -732,16 +742,20 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             continue;
 
                         if (pcmf) {
-                            no_p[0] = get_pcm(s, x - 1, y);
-                            no_p[1] = get_pcm(s, x - 1, y + 4 * v);
-                            no_q[0] = get_pcm(s, x, y);
-                            no_q[1] = get_pcm(s, x, y + 4 * v);
+                            no_f =
+                                (get_pcm(s, x - 1, y) ? 1 : 0) |
+                                (get_pcm(s, x - 1, y + 4 * v) ? 2 : 0) |
+                                (get_pcm(s, x, y) ? 4 : 0) |
+                                (get_pcm(s, x, y + 4 * v) ? 8 : 0);
+                            if (no_f == 0xf)
+                                continue;
                         }
 
                         ff_hevc_v_loop_filter_uv2_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
-                                                                 s->frame->linesize[1],
-                                                                 tc4, no_p, no_q,
-                                                             rpi_sliced_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1));
+                                                       s->frame->linesize[1],
+                                                       tc4,
+                                                       rpi_sliced_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
+                                                       no_f);
                     }
                 }
 
@@ -763,20 +777,23 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                         const uint32_t tc4 =
                             ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, tc_offset) | (chroma_tc(s, qp0, 2, tc_offset) << 16)) |
                             ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
+                        unsigned int no_f = 0;
 
                         if (tc4 == 0)
                             continue;
 
                         if (pcmf) {
-                            no_p[0] = get_pcm(s, x,         y - 1);
-                            no_p[1] = get_pcm(s, x + 4 * h, y - 1);
-                            no_q[0] = get_pcm(s, x,         y);
-                            no_q[1] = get_pcm(s, x + 4 * h, y);
+                            no_f =
+                                (get_pcm(s, x,         y - 1) ? 1 : 0) |
+                                (get_pcm(s, x + 4 * h, y - 1) ? 2 : 0) |
+                                (get_pcm(s, x,         y)     ? 4 : 0) |
+                                (get_pcm(s, x + 4 * h, y)     ? 8 : 0);
+
                         }
 
                         ff_hevc_h_loop_filter_uv_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
                                                              s->frame->linesize[1],
-                                                             tc4, no_p, no_q);
+                                                             tc4, no_f);
                     }
                 }
             }

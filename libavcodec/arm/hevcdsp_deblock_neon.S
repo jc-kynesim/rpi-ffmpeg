@@ -322,6 +322,7 @@ endfunc
 function ff_hevc_v_loop_filter_luma2_neon, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}       @ 8 regs = 32 bytes
+
         ldr      r4, [sp, #40]
         b        v_loop_luma_common
 endfunc
@@ -330,8 +331,16 @@ endfunc
 function ff_hevc_v_loop_filter_luma_neon, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}
+
         sub      r4, r0, #4
 v_loop_luma_common:
+        @ Why this isn't a bitmask to start with I have no idea...
+        ldr      r5, [sp, #32]
+        ldrh     r10, [r5]
+        ldr      r5, [sp, #36]
+        ldrh     r5, [r5]
+        orr      r10, r10, r5, lsl #16  @ So should have b0:no_p[0], b8:no_p[1], b16: no_q[0], b24:no_q[1]
+
         vpush    {d8-d15}
 
         @ Uses slightly fewer instructions to do laned loads than unlaned
@@ -365,30 +374,44 @@ v_loop_luma_common:
 
         neg     r1, r1
 
+        @ no_p[1]
+        tst     r10, #0x300
+        addne    r4, r4, r1, lsl #2
+        bne     1f
         vst4.8  {d16[7],d17[7],d18[7],d19[7]}, [r4:32], r1
-        vst4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0:32], r1
-
         vst4.8  {d16[6],d17[6],d18[6],d19[6]}, [r4:32], r1
-        vst4.8  {d20[6],d21[6],d22[6],d23[6]}, [r0:32], r1
-
         vst4.8  {d16[5],d17[5],d18[5],d19[5]}, [r4:32], r1
-        vst4.8  {d20[5],d21[5],d22[5],d23[5]}, [r0:32], r1
-
         vst4.8  {d16[4],d17[4],d18[4],d19[4]}, [r4:32], r1
+
+1:
+        @ no_q[1]
+        tst     r10, #0x3000000
+        addne    r0, r0, r1, lsl #2
+        bne     2f
+        vst4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0:32], r1
+        vst4.8  {d20[6],d21[6],d22[6],d23[6]}, [r0:32], r1
+        vst4.8  {d20[5],d21[5],d22[5],d23[5]}, [r0:32], r1
         vst4.8  {d20[4],d21[4],d22[4],d23[4]}, [r0:32], r1
 
+2:
+        @ no_p[0]
+        tst     r10, #0x3
+        bne     3f
         vst4.8  {d16[3],d17[3],d18[3],d19[3]}, [r4:32], r1
-        vst4.8  {d20[3],d21[3],d22[3],d23[3]}, [r0:32], r1
-
         vst4.8  {d16[2],d17[2],d18[2],d19[2]}, [r4:32], r1
-        vst4.8  {d20[2],d21[2],d22[2],d23[2]}, [r0:32], r1
-
         vst4.8  {d16[1],d17[1],d18[1],d19[1]}, [r4:32], r1
-        vst4.8  {d20[1],d21[1],d22[1],d23[1]}, [r0:32], r1
-
         vst4.8  {d16[0],d17[0],d18[0],d19[0]}, [r4:32]
+
+3:
+        @ no_q[0]
+        tst     r10, #0x30000
+        bne     4f
+        vst4.8  {d20[3],d21[3],d22[3],d23[3]}, [r0:32], r1
+        vst4.8  {d20[2],d21[2],d22[2],d23[2]}, [r0:32], r1
+        vst4.8  {d20[1],d21[1],d22[1],d23[1]}, [r0:32], r1
         vst4.8  {d20[0],d21[0],d22[0],d23[0]}, [r0:32]
 
+4:
         vpop     {d8-d15}
         pop      {r4-r10,pc}
 endfunc
@@ -425,6 +448,12 @@ bypasswrite:
         pop      {r4-r10,pc}
 endfunc
 
+@ void ff_hevc_h_loop_filter_uv_neon(uint8_t * src_r,        // r0
+@                                     unsigned int stride,   // r1
+@                                     uint32_t tc4,          // r2
+@                                     unsigned int no_f);    // r3
+@
+@ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
 function ff_hevc_h_loop_filter_uv_neon, export=1
         sub      r0, r0, r1, lsl #1
         vld2.8   {d16,d17}, [r0], r1
@@ -435,22 +464,47 @@ function ff_hevc_h_loop_filter_uv_neon, export=1
         hevc_loop_filter_uv_body d16, d18, d26, d28
         lsr      r2, r2, #16
         hevc_loop_filter_uv_body d17, d19, d27, d29
+        cmp      r3, #0
+        bne      1f
         vst2.8   {d18,d19}, [r0], r1
         vst2.8   {d26,d27}, [r0]
         bx       lr
+
+        @ At least one no_f bit is set
+        @ Which means we need to break this apart in an ugly fashion
+1:      vzip.8   d18, d19
+        vzip.8   d26, d27
+        sub      r1, r1, #8
+
+        tst      r3, #1
+        bne      1f
+        vst1.8   {d18}, [r0]
+1:      add      r0, r0, #8
+        tst      r3, #2
+        bne      2f
+        vst1.8   {d19}, [r0]
+2:      add      r0, r0, r1
+
+        tst      r3, #4
+        bne      1f
+        vst1.8   {d26}, [r0]
+1:      add      r0, r0, #8
+        tst      r3, #8
+        bxne     lr
+        vst1.8   {d27}, [r0]
+        bx       lr
+
 endfunc
 
 
 @ void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r,       // r0
 @                                     unsigned int stride,   // r1
 @                                     uint32_t tc4,          // r2
-@                                     const uint8_t no_p[2], // r3
-@                                     const uint8_t no_q[2], // sp[0]
-@                                     uint8_t * src_l);      // sp[4]
-
+@                                     uint8_t * src_l,       // r3
+@                                     unsigned int no_f);   // sp[0]
+@
+@ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
 function ff_hevc_v_loop_filter_uv2_neon, export=1
-        ldr      r3, [sp, #4]
-
         vld4.8   {d16[0], d17[0], d18[0], d19[0]}, [r3], r1
         vld4.8   {d26[0], d27[0], d28[0], d29[0]}, [r0], r1
 
@@ -481,28 +535,43 @@ function ff_hevc_v_loop_filter_uv2_neon, export=1
 
         neg      r1, r1
 
+        ldr      r2, [sp, #0]
+
+        @ p[1]
+        tst      r2, #2
+        addne    r3, r3, r1, lsl #2
+        bne      1f
         vst4.8   {d16[7], d17[7], d18[7], d19[7]}, [r3], r1
-        vst4.8   {d26[7], d27[7], d28[7], d29[7]}, [r0], r1
-
         vst4.8   {d16[6], d17[6], d18[6], d19[6]}, [r3], r1
-        vst4.8   {d26[6], d27[6], d28[6], d29[6]}, [r0], r1
-
         vst4.8   {d16[5], d17[5], d18[5], d19[5]}, [r3], r1
-        vst4.8   {d26[5], d27[5], d28[5], d29[5]}, [r0], r1
-
         vst4.8   {d16[4], d17[4], d18[4], d19[4]}, [r3], r1
+
+1:
+        @ q[1]
+        tst      r2, #8
+        addne    r0, r0, r1, lsl #2
+        bne 2f
+        vst4.8   {d26[7], d27[7], d28[7], d29[7]}, [r0], r1
+        vst4.8   {d26[6], d27[6], d28[6], d29[6]}, [r0], r1
+        vst4.8   {d26[5], d27[5], d28[5], d29[5]}, [r0], r1
         vst4.8   {d26[4], d27[4], d28[4], d29[4]}, [r0], r1
 
+2:
+        @ p[0]
+        tst      r2, #1
+        bne      3f
         vst4.8   {d16[3], d17[3], d18[3], d19[3]}, [r3], r1
-        vst4.8   {d26[3], d27[3], d28[3], d29[3]}, [r0], r1
-
         vst4.8   {d16[2], d17[2], d18[2], d19[2]}, [r3], r1
-        vst4.8   {d26[2], d27[2], d28[2], d29[2]}, [r0], r1
-
         vst4.8   {d16[1], d17[1], d18[1], d19[1]}, [r3], r1
-        vst4.8   {d26[1], d27[1], d28[1], d29[1]}, [r0], r1
-
         vst4.8   {d16[0], d17[0], d18[0], d19[0]}, [r3]
+
+3:
+        @ q[0]
+        tst      r2, #4
+        bxne     lr
+        vst4.8   {d26[3], d27[3], d28[3], d29[3]}, [r0], r1
+        vst4.8   {d26[2], d27[2], d28[2], d29[2]}, [r0], r1
+        vst4.8   {d26[1], d27[1], d28[1], d29[1]}, [r0], r1
         vst4.8   {d26[0], d27[0], d28[0], d29[0]}, [r0]
 
         bx       lr
