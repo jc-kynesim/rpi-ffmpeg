@@ -152,8 +152,7 @@ endfunc
 
 .macro table64
         vmov.s8 q13, #2 // 2 to all elements
-        vmov.32  d24[0], r4  // load offset table from general registers
-        vmov.32  d24[1], r5  // load rest of offset table
+        vmov     d24, r4, r5  // load offset table from general registers
 
         vadd.s8 q0, q13
         vadd.s8 q1, q13
@@ -181,9 +180,13 @@ endfunc
         vsub.s8   q1, q15
         vsub.s8   q2, q15
         vsub.s8   q3, q15
-        vst1.8  {q0-q1}, [r0, :128]!
-        vst1.8  {q2-q3}, [r0, :128], r2
-        sub     r0, #32
+
+        vstm    r0, {q0-q3}
+        add     r0, r0, r2
+
+@        vst1.8  {q0-q1}, [r0, :128]!
+@        vst1.8  {q2-q3}, [r0, :128], r2
+@        sub     r0, #32
 .endm
 
 // input
@@ -193,7 +196,7 @@ endfunc
 // offset table in r7 and r5
 // output in q0 - q3
 // clobbers q12 - q15
-.macro edge_w64_body
+function edge_w64_body
         diff32 q12, q13, q0, q1, q0, q1, q4, q5
         diff32 q0, q1, q14, q15, q8, q9, q4, q5
 
@@ -206,12 +209,13 @@ endfunc
         vadd.s8  q2, q14
         vadd.s8  q3, q15
         table64
-.endm
+        bx       lr
+endfunc
 
 .macro init_edge_64
-        push   {r4-r5}
-        ldr    r12, [sp, #8] // height
-        ldr    r5, [sp, #12] // sao_offset_val_table
+        push   {r4-r6,lr}
+        ldr    r12, [sp, #16] // height
+        ldr    r5, [sp, #20] // sao_offset_val_table
         ldr    r4, [r5]
         add    r5, #4
         ldr    r5, [r5]
@@ -237,11 +241,10 @@ function ff_hevc_sao_edge_eo0_w64_neon_8, export=1
         vext.8 q9, q5, q6, #1
         vext.8 q10, q6, q7, #1
         vext.8 q11, q7, q12, #1
-        edge_w64_body
+        bl    edge_w64_body
         bne   1b
         vpop  {d8-d15}
-        pop   {r4-r5}
-        bx lr
+        pop   {r4-r6,pc}
 endfunc
 
 function ff_hevc_sao_edge_eo1_w64_neon_8, export=1
@@ -261,7 +264,7 @@ function ff_hevc_sao_edge_eo1_w64_neon_8, export=1
         vld1.8  {q8-q9}, [r1, :128]!
         vld1.8  {q10-q11}, [r1, :128], r3
         sub     r1, #32
-        edge_w64_body
+        bl      edge_w64_body
         // copy c to a
         vmov.64 q0, q4
         vmov.64 q1, q5
@@ -274,8 +277,7 @@ function ff_hevc_sao_edge_eo1_w64_neon_8, export=1
         vmov.64 q7, q11
         bne   1b
         vpop  {d8-d15}
-        pop   {r4-r5}
-        bx lr
+        pop   {r4-r6,pc}
 endfunc
 
 function ff_hevc_sao_edge_eo2_w64_neon_8, export=1
@@ -299,11 +301,10 @@ function ff_hevc_sao_edge_eo2_w64_neon_8, export=1
         vld1.8  {q8-q9}, [r1]!
         vld1.8  {q10-q11}, [r1]
         sub     r1, #33
-        edge_w64_body
+        bl      edge_w64_body
         bne   1b
         vpop  {d8-d15}
-        pop   {r4-r5}
-        bx lr
+        pop   {r4-r6,pc}
 endfunc
 
 function ff_hevc_sao_edge_eo3_w64_neon_8, export=1
@@ -327,11 +328,61 @@ function ff_hevc_sao_edge_eo3_w64_neon_8, export=1
         vld1.8  {q8-q9}, [r1]!
         vld1.8  {q10-q11}, [r1]
         sub     r1, #31
-        edge_w64_body
+        bl      edge_w64_body
         bne   1b
         vpop  {d8-d15}
-        pop   {r4-r5}
-        bx lr
+        pop   {r4-r6,pc}
+endfunc
+
+@ void ff_hevc_sao_edge_c_eo1_w64_neon_8(
+@   uint8_t *_dst,               r0
+@   uint8_t *_src,               r1
+@   ptrdiff_t stride_dst,        r2
+@   ptrdiff_t stride_src,        r3
+@   int height,                  sp[0]
+@   int8_t *sao_offset_table_u,  sp[4]
+@   int8_t *sao_offset_table_v); sp[8]
+
+.macro init_edge_c_64
+        push   {r4-r6,lr}
+        ldr    r12, [sp, #16] // height
+        ldr    r5, [sp, #20] // sao_offset_val_table
+        ldr    r4, [r5]
+        add    r5, #4
+        ldr    r5, [r5]
+.endm
+
+function ff_hevc_sao_edge_c_eo1_w64_neon_8, export=1
+        init_edge_c_64
+        vpush {d8-d15}
+        sub     r1, r3
+        // load a
+        vld1.8  {q0-q1}, [r1, :128]!
+        vld1.8  {q2-q3}, [r1, :128], r3
+        sub     r1, #32
+        // load c
+        vld1.8  {q4-q5}, [r1, :128]!
+        vld1.8  {q6-q7}, [r1, :128], r3
+        sub     r1, #32
+1:      subs    r12, #1
+        // load b
+        vld1.8  {q8-q9}, [r1, :128]!
+        vld1.8  {q10-q11}, [r1, :128], r3
+        sub     r1, #32
+        bl      edge_w64_body
+        // copy c to a
+        vmov.64 q0, q4
+        vmov.64 q1, q5
+        vmov.64 q2, q6
+        vmov.64 q3, q7
+        // copy b to c
+        vmov.64 q4, q8
+        vmov.64 q5, q9
+        vmov.64 q6, q10
+        vmov.64 q7, q11
+        bne   1b
+        vpop  {d8-d15}
+        pop   {r4-r6,pc}
 endfunc
 
 .macro init_edge_32
