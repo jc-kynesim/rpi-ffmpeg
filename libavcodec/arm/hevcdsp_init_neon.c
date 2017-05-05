@@ -318,7 +318,7 @@ static void ff_hevc_sao_edge_neon_wrapper(uint8_t *_dst /* align 16 */, uint8_t 
             ff_hevc_sao_edge_eo0_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
             break;
         case 1:
-            ff_hevc_sao_edge_eo1_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
+            ff_hevc_sao_edge_c_eo1_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val, sao_offset_val);
             break;
         case 2:
             ff_hevc_sao_edge_eo2_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
@@ -373,7 +373,7 @@ static void ff_hevc_sao_edge_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src, 
         sao_offset_val_v[x] = _sao_offset_val_v[edge_idx[x]];
     }
 
-    if (height % 8 == 0)
+    if (height % 8 == 0 && eo == 1)
         cwidth = width;
 
     stride_src /= sizeof(pixel);
@@ -398,23 +398,14 @@ static void ff_hevc_sao_edge_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src, 
             break;
         }
         break;
+#endif
     case 64:
         switch(eo) {
-        case 0:
-            ff_hevc_sao_edge_eo0_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
         case 1:
-            ff_hevc_sao_edge_eo1_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 2:
-            ff_hevc_sao_edge_eo2_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 3:
-            ff_hevc_sao_edge_eo3_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
+            ff_hevc_sao_edge_c_eo1_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val_u, sao_offset_val_v);
             break;
         }
         break;
-#endif
     default:
         a_stride = pos[eo][0][0] * 2 + pos[eo][0][1] * stride_src;
         b_stride = pos[eo][1][0] * 2 + pos[eo][1][1] * stride_src;

@@ -141,13 +141,14 @@ function ff_hevc_sao_band_w64_neon_8, export=1
         bx lr
 endfunc
 
-.macro diff32 out0, out1, tmp0, tmp1, in0, in1, in2, in3
+@ It is safe to overlap tmp0/in0
+.macro diff32 out0, out1, tmp0, in0, in1, in2, in3
         vcgt.u8 \out0, \in2, \in0  // c > a -> -1 , otherwise 0
         vcgt.u8 \tmp0,  \in0, \in2  // a > c -> -1 , otherwise 0
-        vcgt.u8 \out1, \in3, \in1  // c > a -> -1 , otherwise 0 part 2
-        vcgt.u8 \tmp1,  \in1, \in3  // a > c -> -1 , otherwise 0 part 2
         vsub.s8 \out0, \tmp0, \out0 // diff0
-        vsub.s8 \out1, \tmp1, \out1 // diff0 part 2
+        vcgt.u8 \out1, \in3, \in1  // c > a -> -1 , otherwise 0 part 2
+        vcgt.u8 \tmp0,  \in1, \in3  // a > c -> -1 , otherwise 0 part 2
+        vsub.s8 \out1, \tmp0, \out1 // diff0 part 2
 .endm
 
 .macro table64
@@ -181,12 +182,6 @@ endfunc
         vsub.s8   q2, q15
         vsub.s8   q3, q15
 
-        vstm    r0, {q0-q3}
-        add     r0, r0, r2
-
-@        vst1.8  {q0-q1}, [r0, :128]!
-@        vst1.8  {q2-q3}, [r0, :128], r2
-@        sub     r0, #32
 .endm
 
 // input
@@ -197,18 +192,25 @@ endfunc
 // output in q0 - q3
 // clobbers q12 - q15
 function edge_w64_body
-        diff32 q12, q13, q0, q1, q0, q1, q4, q5
-        diff32 q0, q1, q14, q15, q8, q9, q4, q5
+        diff32 q12, q13, q0, q0, q1, q4, q5
+        diff32 q0, q1, q14, q8, q9, q4, q5
 
         vadd.s8  q0, q12 //diff0 + diff1
         vadd.s8  q1, q13
 
-        diff32  q14, q15, q2, q3, q2, q3, q6, q7
-        diff32  q2, q3, q12, q13, q10, q11, q6, q7
+        diff32  q14, q15, q2, q2, q3, q6, q7
+        diff32  q2, q3, q12, q10, q11, q6, q7
 
         vadd.s8  q2, q14
         vadd.s8  q3, q15
         table64
+
+        vstm    r0, {q0-q3}
+        add     r0, r0, r2
+
+@        vst1.8  {q0-q1}, [r0, :128]!
+@        vst1.8  {q2-q3}, [r0, :128], r2
+@        sub     r0, #32
         bx       lr
 endfunc
 
@@ -334,6 +336,74 @@ function ff_hevc_sao_edge_eo3_w64_neon_8, export=1
         pop   {r4-r6,pc}
 endfunc
 
+.macro table64_c
+        vmov.s8 q13, #2 // 2 to all elements
+        vmov     d24, r4, r5  // load offset table from general registers
+        vmov     d25, r6, r7  // load offset table from general registers
+
+        vadd.s8 q0, q13
+        vadd.s8 q1, q13
+        vadd.s8 q2, q13
+        vadd.s8 q3, q13
+
+        vmov.u8  q15, #128 // s8 #-128
+        vtbl.8   d0, {d24}, d0
+        vadd.s8  q13,  q4, q15
+        vtbl.8   d1, {d24}, d1
+        vadd.s8  q14,  q5, q15
+        vtbl.8   d2, {d25}, d2
+        vqadd.s8 q0, q13
+        vtbl.8   d3, {d25}, d3
+        vqadd.s8 q1, q14
+        vtbl.8   d4, {d24}, d4
+        vadd.s8  q13,  q6, q15
+        vtbl.8   d5, {d24}, d5
+        vadd.s8  q14,  q7, q15
+        vtbl.8   d6, {d25}, d6
+        vqadd.s8 q2, q13
+        vtbl.8   d7, {d25}, d7
+        vqadd.s8 q3, q14
+        vsub.s8   q0, q15
+        vsub.s8   q1, q15
+        vsub.s8   q2, q15
+        vsub.s8   q3, q15
+
+.endm
+
+// input
+// a in q0 - q3
+// c in q4 - q7
+// b in q8 - q11
+// offset table in  r4,r5
+// output in q0 - q3
+// clobbers q12 - q15
+function edge_w64_body_c
+        diff32 q12, q13, q0, q0, q1, q4, q5
+        diff32 q0, q1, q14, q8, q9, q4, q5
+
+        vadd.s8  q0, q12 //diff0 + diff1
+        vadd.s8  q1, q13
+
+        diff32  q14, q15, q2, q2, q3, q6, q7
+        diff32  q2, q3, q12, q10, q11, q6, q7
+
+        vadd.s8  q2, q14
+        vadd.s8  q3, q15
+        table64_c
+
+        vzip.8  q0, q1
+        vzip.8  q2, q3
+
+        vstm    r0, {q0-q3}
+        add     r0, r0, r2
+
+@        vst1.8  {q0-q1}, [r0, :128]!
+@        vst1.8  {q2-q3}, [r0, :128], r2
+@        sub     r0, #32
+        bx       lr
+endfunc
+
+
 @ void ff_hevc_sao_edge_c_eo1_w64_neon_8(
 @   uint8_t *_dst,               r0
 @   uint8_t *_src,               r1
@@ -344,12 +414,12 @@ endfunc
 @   int8_t *sao_offset_table_v); sp[8]
 
 .macro init_edge_c_64
-        push   {r4-r6,lr}
-        ldr    r12, [sp, #16] // height
-        ldr    r5, [sp, #20] // sao_offset_val_table
-        ldr    r4, [r5]
-        add    r5, #4
-        ldr    r5, [r5]
+        push   {r4-r8,lr}     // 6 reg = 24
+        ldr    r12, [sp, #24] // height
+        ldr    r5,  [sp, #28] // sao_offset_val_table_u
+        ldrd   r4, r5, [r5]
+        ldr    r7,  [sp, #32] // sao_offset_val_table_v
+        ldrd   r6, r7, [r7]
 .endm
 
 function ff_hevc_sao_edge_c_eo1_w64_neon_8, export=1
@@ -357,19 +427,24 @@ function ff_hevc_sao_edge_c_eo1_w64_neon_8, export=1
         vpush {d8-d15}
         sub     r1, r3
         // load a
-        vld1.8  {q0-q1}, [r1, :128]!
-        vld1.8  {q2-q3}, [r1, :128], r3
-        sub     r1, #32
+        vldm    r1, {q0-q3}
+        add     r1, r3
+        vuzp.8  q0, q1
+        vuzp.8  q2, q3
         // load c
         vld1.8  {q4-q5}, [r1, :128]!
         vld1.8  {q6-q7}, [r1, :128], r3
         sub     r1, #32
+        vuzp.8  q4, q5
+        vuzp.8  q6, q7
 1:      subs    r12, #1
         // load b
-        vld1.8  {q8-q9}, [r1, :128]!
-        vld1.8  {q10-q11}, [r1, :128], r3
+        vld2.8  {q8-q9}, [r1, :128]!
+        vld2.8  {q10-q11}, [r1, :128], r3
+@        vuzp.8  q8, q9
+@        vuzp.8  q10, q11
         sub     r1, #32
-        bl      edge_w64_body
+        bl      edge_w64_body_c
         // copy c to a
         vmov.64 q0, q4
         vmov.64 q1, q5
@@ -382,7 +457,7 @@ function ff_hevc_sao_edge_c_eo1_w64_neon_8, export=1
         vmov.64 q7, q11
         bne   1b
         vpop  {d8-d15}
-        pop   {r4-r6,pc}
+        pop   {r4-r8,pc}
 endfunc
 
 .macro init_edge_32
@@ -432,7 +507,7 @@ function ff_hevc_sao_edge_eo0_w32_neon_8, export=1
         vext.8   q3, q14, q15, #4
         vshr.u64 d16, d30, #32
         // diff0
-        diff32 q13, q14, q4, q5, q0, q1, q2, q3
+        diff32 q13, q14, q4, q0, q1, q2, q3
         diff   d18, d25, d24, d16
         // -diff1
         vext.s8 q0, q13, q14, #1
@@ -455,11 +530,11 @@ function ff_hevc_sao_edge_eo1_w32_neon_8, export=1
         vld1.8  {q0-q1}, [r1, :128], r3
         // load c
         vld1.8  {q2-q3}, [r1, :128], r3
-        diff32 q12, q13, q0, q1, q0, q1, q2, q3 // CMP ( c, a )
+        diff32 q12, q13, q0, q0, q1, q2, q3 // CMP ( c, a )
 1:      subs    r12, #1
         // load b
         vld1.8  {q8-q9}, [r1, :128], r3
-        diff32 q4, q5, q10, q11, q8, q9, q2, q3 // CMP ( c, b )
+        diff32 q4, q5, q10, q8, q9, q2, q3 // CMP ( c, b )
         vadd.s8 q0, q4, q12 //diff0 + diff1
         vadd.s8 q1, q5, q13
         table32
@@ -500,8 +575,8 @@ function ff_hevc_sao_edge_eo2_w32_neon_8, export=1
         vext.8  q6, q10, q11, #8
         vext.8  q7, q11, q12, #8
         vext.8  q5, q10, q11, #7
-        diff32 q12, q13, q0, q1, q0, q1, q2, q3
-        diff32 q0, q1, q10, q11, q8, q9, q2, q3
+        diff32 q12, q13, q0, q0, q1, q2, q3
+        diff32 q0, q1, q10,  q8, q9, q2, q3
         vadd.s8 q0, q12 //diff0 + diff1
         vadd.s8 q1, q13
         table32
@@ -540,8 +615,8 @@ function ff_hevc_sao_edge_eo3_w32_neon_8, export=1
         vext.8  q9, q11, q12, #7
         vext.8  q14, q12, q10, #7
 
-        diff32 q12, q13, q0, q1, q0, q1, q2, q3
-        diff32 q0, q1, q10, q11, q8, q9, q2, q3
+        diff32 q12, q13, q0, q0, q1, q2, q3
+        diff32 q0, q1, q10,  q8, q9, q2, q3
 
         vadd.s8 q0, q12 //diff0 + diff1
         vadd.s8 q1, q13
