@@ -335,6 +335,7 @@ function ff_hevc_v_loop_filter_luma_neon, export=1
         sub      r4, r0, #4
 v_loop_luma_common:
         @ Why this isn't a bitmask to start with I have no idea...
+        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
         ldr      r5, [sp, #32]
         ldrh     r10, [r5]
         ldr      r5, [sp, #36]
@@ -375,7 +376,7 @@ v_loop_luma_common:
         neg     r1, r1
 
         @ no_p[1]
-        tst     r10, #0x300
+        tst     r10, #0xff00
         addne    r4, r4, r1, lsl #2
         bne     1f
         vst4.8  {d16[7],d17[7],d18[7],d19[7]}, [r4:32], r1
@@ -385,7 +386,7 @@ v_loop_luma_common:
 
 1:
         @ no_q[1]
-        tst     r10, #0x3000000
+        tst     r10, #0xff000000
         addne    r0, r0, r1, lsl #2
         bne     2f
         vst4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0:32], r1
@@ -395,7 +396,7 @@ v_loop_luma_common:
 
 2:
         @ no_p[0]
-        tst     r10, #0x3
+        tst     r10, #0xff
         bne     3f
         vst4.8  {d16[3],d17[3],d18[3],d19[3]}, [r4:32], r1
         vst4.8  {d16[2],d17[2],d18[2],d19[2]}, [r4:32], r1
@@ -404,7 +405,7 @@ v_loop_luma_common:
 
 3:
         @ no_q[0]
-        tst     r10, #0x30000
+        tst     r10, #0xff0000
         bne     4f
         vst4.8  {d20[3],d21[3],d22[3],d23[3]}, [r0:32], r1
         vst4.8  {d20[2],d21[2],d22[2],d23[2]}, [r0:32], r1
@@ -412,14 +413,24 @@ v_loop_luma_common:
         vst4.8  {d20[0],d21[0],d22[0],d23[0]}, [r0:32]
 
 4:
+bypasswrite:
         vpop     {d8-d15}
         pop      {r4-r10,pc}
 endfunc
 
+@ void (*hevc_h_loop_filter_luma)(uint8_t *pix,     [r0]
+@                                 ptrdiff_t stride, [r1]
+@                                 int beta,         [r2]
+@                                 int32_t *tc,      [r3]
+@                                 uint8_t *no_p,    sp[0]
+@                                 uint8_t *no_q);   sp[4]
+@
 @ Src should always be on 8 byte boundry & all in the same slice
+
 function ff_hevc_h_loop_filter_luma_neon, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}
+
         vpush    {d8-d15}
         sub      r0, r0, r1, lsl #2
 
@@ -434,8 +445,20 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
 
         bl hevc_loop_filter_luma_body
 
+        vpop     {d8-d15}
+
         neg     r1, r1
         add     r0, r0, r1
+
+        @ Why this isn't a bitmask to start with I have no idea...
+        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
+        ldr      r5, [sp, #32]
+        ldrh     r10, [r5]
+        ldr      r5, [sp, #36]
+        ldrh     r5, [r5]
+        orrs     r10, r10, r5, lsl #16  @ So should have b1:no_p[0], b9:no_p[1], b17: no_q[0], b25:no_q[1]
+        bne      1f
+
         vst1.8  {d22}, [r0], r1
         vst1.8  {d21}, [r0], r1
         vst1.8  {d20}, [r0], r1
@@ -443,9 +466,43 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
         vst1.8  {d18}, [r0], r1
         vst1.8  {d17}, [r0]
 
-bypasswrite:
-        vpop     {d8-d15}
         pop      {r4-r10,pc}
+
+@ Partial write
+1:
+        vmov     r2, r3, d22
+        vmov     r4, r5, d21
+        vmov     r6, r7, d20
+
+        tst      r10, #0xff0000
+        streq    r2, [r0]
+        streq    r4, [r0, r1]
+        streq    r6, [r0, r1, lsl # 1]
+
+        add      r0, r0, #4
+        tst      r10, #0xff000000
+        streq    r3, [r0]
+        streq    r5, [r0, r1]
+        streq    r7, [r0, r1, lsl # 1]
+
+        vmov     r2, r3, d19
+        vmov     r4, r5, d18
+        vmov     r6, r7, d17
+        add      r0, r0, r1
+        add      r0, r0, r1, lsl # 1
+
+        tst      r10, #0xff00
+        streq    r3, [r0]
+        streq    r5, [r0, r1]
+        streq    r7, [r0, r1, lsl # 1]
+
+        tst      r10, #0xff
+        streq    r2, [r0, #-4]!
+        streq    r4, [r0, r1]
+        streq    r6, [r0, r1, lsl # 1]
+
+        pop      {r4-r10,pc}
+
 endfunc
 
 @ void ff_hevc_h_loop_filter_uv_neon(uint8_t * src_r,        // r0

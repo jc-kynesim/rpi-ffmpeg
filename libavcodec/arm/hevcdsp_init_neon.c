@@ -299,7 +299,9 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
     if (bit_depth == 8) {
         int x;
         c->hevc_v_loop_filter_luma     = ff_hevc_v_loop_filter_luma_neon;
+        c->hevc_v_loop_filter_luma_c   = ff_hevc_v_loop_filter_luma_neon;
         c->hevc_h_loop_filter_luma     = ff_hevc_h_loop_filter_luma_neon;
+        c->hevc_h_loop_filter_luma_c   = ff_hevc_h_loop_filter_luma_neon;
         c->hevc_v_loop_filter_chroma   = ff_hevc_v_loop_filter_chroma_neon;
         c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon;
         c->idct[0]                     = ff_hevc_transform_4x4_neon_8;
