@@ -374,7 +374,7 @@ static void ff_hevc_sao_edge_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src, 
         sao_offset_val_v[x] = _sao_offset_val_v[edge_idx[x]];
     }
 
-    if (height % 8 == 0 && eo <= 1)
+    if (height % 8 == 0)
         cwidth = width;
 
     stride_src /= sizeof(pixel);
