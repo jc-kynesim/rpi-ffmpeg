@@ -267,7 +267,7 @@ static void restore_tqb_pixels(HEVCContext *s,
 
 static void sao_filter_CTB(HEVCContext *s, int x, int y)
 {
-    static const uint8_t sao_tab[8] = { 0, 1, 2, 2, 3, 3, 4, 4 };
+    static const uint8_t sao_tab[8] = { 0 /* 8 */, 1 /* 16 */, 2 /* 24 */, 2 /* 32 */, 3, 3 /* 48 */, 4, 4 /* 64 */};
     HEVCLocalContext *lc = s->HEVClc;
     int c_idx;
     int edges[4];  // 0 left 1 top 2 right 3 bottom

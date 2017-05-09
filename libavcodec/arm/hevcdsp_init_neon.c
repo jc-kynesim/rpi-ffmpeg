@@ -66,7 +66,7 @@ extern ff_hevc_sao_edge_c_eoX_w64_neon_8 ff_hevc_sao_edge_c_eo1_w64_neon_8;
 extern ff_hevc_sao_edge_c_eoX_w64_neon_8 ff_hevc_sao_edge_c_eo2_w64_neon_8;
 extern ff_hevc_sao_edge_c_eoX_w64_neon_8 ff_hevc_sao_edge_c_eo3_w64_neon_8;
 
-void ff_hevc_sao_band_c_w64_neon_8(uint8_t *_dst, const uint8_t *_src,
+void ff_hevc_sao_band_c_neon_8(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
                                   const int16_t *sao_offset_val_v, int sao_left_class_v,
@@ -229,34 +229,18 @@ static void ff_hevc_sao_band_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src,
                                   const int16_t *sao_offset_val_v, int sao_left_class_v,
                                   int width, int height)
 {
-    int k, y, x;
-    const int shift  = 3; // BIT_DEPTH - 5
-    int cwidth = 0;
-
-    width *= 2;
-    if (height % 8 == 0)
-        cwidth = width;
-
-    switch(cwidth){
-#if 0
-    case 8:
-        ff_hevc_sao_band_w8_neon_8(_dst, _src, offset_table, stride_src, stride_dst, height);
-        break;
-    case 16:
-        ff_hevc_sao_band_w16_neon_8(_dst, _src, offset_table, stride_src, stride_dst, height);
-        break;
-    case 32:
-        ff_hevc_sao_band_w32_neon_8(_dst, _src, offset_table, stride_src, stride_dst, height);
-        break;
-#endif
-    case 64:
-        ff_hevc_sao_band_c_w64_neon_8(_dst, _src, stride_src, stride_dst,
-                                      sao_offset_val_u, sao_left_class_u,
-                                      sao_offset_val_v, sao_left_class_v,
-                                      width, height);
-        break;
-    default:
+    // Width 32 already dealt with
+    // width 16 code works in double lines
+    if (width == 16 && (height & 1) == 0) {
+        ff_hevc_sao_band_c_neon_8(_dst, _src, stride_src, stride_dst,
+                                          sao_offset_val_u, sao_left_class_u,
+                                          sao_offset_val_v, sao_left_class_v,
+                                          width, height);
+    }
+    else
     {
+        const int shift  = 3; // BIT_DEPTH - 5
+        int k, y, x;
         pixel *dst = (pixel *)_dst;
         pixel *src = (pixel *)_src;
         int8_t offset_table_u[32] = { 0 };
@@ -271,7 +255,7 @@ static void ff_hevc_sao_band_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src,
             offset_table_v[(k + sao_left_class_v) & 31] = sao_offset_val_v[k + 1];
 
         for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x += 2)
+            for (x = 0; x < width * 2; x += 2)
             {
                 dst[x + 0] = av_clip_pixel(src[x + 0] + offset_table_u[src[x + 0] >> shift]);
                 dst[x + 1] = av_clip_pixel(src[x + 1] + offset_table_v[src[x + 1] >> shift]);
@@ -280,8 +264,6 @@ static void ff_hevc_sao_band_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src,
             src += stride_src;
 
         }
-        break;
-    }
     }
 }
 
@@ -480,6 +462,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
           c->sao_edge_filter[x]        = ff_hevc_sao_edge_neon_wrapper;
           c->sao_edge_filter_c[x]      = ff_hevc_sao_edge_c_neon_wrapper;
         }
+        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_neon_8;  // width=32
         put_hevc_qpel_neon[1][0]       = ff_hevc_put_qpel_v1_neon_8;
         put_hevc_qpel_neon[2][0]       = ff_hevc_put_qpel_v2_neon_8;
         put_hevc_qpel_neon[3][0]       = ff_hevc_put_qpel_v3_neon_8;

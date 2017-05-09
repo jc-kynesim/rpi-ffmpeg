@@ -158,7 +158,7 @@ endfunc
 @ the pixel values but we want to beware of loading ouside our buffer to avoid
 @ loading stuff into the cache that should still be invalid (in use by QPU, VPU)
 
-function ff_hevc_sao_band_c_w64_neon_8, export=1
+function ff_hevc_sao_band_c_neon_8, export=1
         mov     r12, sp
         push   {r4-r8, lr}  // 24 bytes
 
@@ -171,15 +171,18 @@ function ff_hevc_sao_band_c_w64_neon_8, export=1
         vld1.16 {d18}, [r6]
         pld     [r1]
         vmov.i8  d17, #0
+        mov     r4, r1
         vmov.i8  d19, #0
         lsl     r7, r7, #3
         vdup.8  q1, r5
+        ldr     r5, [r12, #16]  @ width
         vdup.8  q2, r7
         ldr     r12, [r12, #20]
         vqmovn.s16 d0, q8
+        cmp     r5, #16         @ At some point we may want a table lookup
         vqmovn.s16 d1, q9
-        rsb     r12, #1
         vmov.i8 q3, #128
+        beq     16f
 
         @ d0 U lookup
         @ d1 V lookup
@@ -187,15 +190,15 @@ function ff_hevc_sao_band_c_w64_neon_8, export=1
         @ q2 V raw offset
         @ q3 #128
 
-        @ r12 = 1 - height
+        @ r4 = r1 = src - Inteded for preload pointer
+        @ r12 = height
 
-        @ *** If height == 1 then we do this accidentally
-        @ Currently never called with height == 1
-2:
-        pld       [r1, r3]
+        @ Will never be called with height == 1
+        sub       r12, #1
+        addne     r4, r3
 
 1:
-        adds      r12, #1
+        subs      r12, #1
         vld2.8    {q8-q9}, [r1, :128]!
         vsub.u8   q12, q8, q1
         vld2.8    {q10-q11}, [r1, :128], r3
@@ -203,6 +206,56 @@ function ff_hevc_sao_band_c_w64_neon_8, export=1
         vsub.u8   q13, q9, q2
         sub       r1, #32
         vsub.u8   q15, q11, q2
+        pld       [r4]
+        vshr.u8   q12, #3
+        vadd.s8   q8, q3
+        vshr.u8   q13, #3
+        vadd.s8   q9, q3
+
+        vtbl.8   d24, {d0}, d24
+        vshr.u8  q14, #3
+        vtbl.8   d25, {d0}, d25
+        vshr.u8  q15, #3
+        vtbl.8   d26, {d1}, d26
+        vadd.s8  q10, q3
+        vtbl.8   d27, {d1}, d27
+        vadd.s8  q11, q3
+        vtbl.8   d28, {d0}, d28
+        vqadd.s8 q8, q12
+        vtbl.8   d29, {d0}, d29
+        vqadd.s8 q9, q13
+        vtbl.8   d30, {d1}, d30
+        vqadd.s8 q10, q14
+        vtbl.8   d31, {d1}, d31
+        vsub.s8  q8, q3
+        vqadd.s8 q11, q15
+        vsub.s8  q9, q3
+        vsub.s8  q10, q3
+        vsub.s8  q11, q3
+
+        addne     r4, r3        @ Do not inc on final pass
+        vst2.8    {q8-q9}, [r0, :128]!
+        vst2.8    {q10-q11}, [r0, :128], r2
+        sub       r0, #32
+        bpl       1b
+
+        pop    {r4-r8, pc}
+
+@ -- width 16 (UV pairs) --
+16:
+        subs    r12, #2
+        addne   r4, r4, r3, lsl #1
+
+1:
+        subs      r12, #2
+        vld2.8    {q8-q9}, [r1, :128], r3
+        vsub.u8   q12, q8, q1
+        vld2.8    {q10-q11}, [r1, :128], r3
+        vsub.u8   q14, q10, q1
+        vsub.u8   q13, q9, q2
+        pld       [r4]
+        vsub.u8   q15, q11, q2
+        pld       [r4, r3]
         vshr.u8  q12, #3
         vadd.s8  q8, q3
         vshr.u8  q13, #3
@@ -229,14 +282,13 @@ function ff_hevc_sao_band_c_w64_neon_8, export=1
         vsub.s8  q10, q3
         vsub.s8  q11, q3
 
-        vst2.8    {q8-q9}, [r0, :128]!
+        addne   r4, r4, r3, lsl #1
+        vst2.8    {q8-q9}, [r0, :128], r2
         vst2.8    {q10-q11}, [r0, :128], r2
-        sub       r0, #32
-        bmi       2b
-        @ Avoid preload at end
-        beq       1b
+        bpl       1b
 
         pop    {r4-r8, pc}
+
 endfunc
 
 
