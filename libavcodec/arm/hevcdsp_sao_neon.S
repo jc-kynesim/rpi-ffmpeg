@@ -141,6 +141,105 @@ function ff_hevc_sao_band_w64_neon_8, export=1
         bx lr
 endfunc
 
+
+@ ff_hevc_sao_band_c_w64_neon_8(
+@   uint8_t * dst          [r0]
+@   uint8_t * src          [r1]
+@   uint32_t dst_stride    [r2]
+@   uint32_t src_stride    [r3]
+@   const int16_t * table1 sp[0]
+@   uint32_t offset1       sp[4]
+@   const int16_t * table2 sp[8]
+@   uint32_t offset2       sp[12]
+@   int width              sp[16]
+@   int height             sp[20]
+
+@ As this is often done in-place on the frame buffer it is worth preloading
+@ the pixel values but we want to beware of loading ouside our buffer to avoid
+@ loading stuff into the cache that should still be invalid (in use by QPU, VPU)
+
+function ff_hevc_sao_band_c_w64_neon_8, export=1
+        mov     r12, sp
+        push   {r4-r8, lr}  // 24 bytes
+
+        ldm     r12, {r4-r7}
+
+        add     r4, #2
+        add     r6, #2
+        vld1.16 {d16}, [r4]    @ Unaligned
+        lsl     r5, r5, #3
+        vld1.16 {d18}, [r6]
+        pld     [r1]
+        vmov.i8  d17, #0
+        vmov.i8  d19, #0
+        lsl     r7, r7, #3
+        vdup.8  q1, r5
+        vdup.8  q2, r7
+        ldr     r12, [r12, #20]
+        vqmovn.s16 d0, q8
+        vqmovn.s16 d1, q9
+        rsb     r12, #1
+        vmov.i8 q3, #128
+
+        @ d0 U lookup
+        @ d1 V lookup
+        @ q1 U raw offset
+        @ q2 V raw offset
+        @ q3 #128
+
+        @ r12 = 1 - height
+
+        @ *** If height == 1 then we do this accidentally
+        @ Currently never called with height == 1
+2:
+        pld       [r1, r3]
+
+1:
+        adds      r12, #1
+        vld2.8    {q8-q9}, [r1, :128]!
+        vsub.u8   q12, q8, q1
+        vld2.8    {q10-q11}, [r1, :128], r3
+        vsub.u8   q14, q10, q1
+        vsub.u8   q13, q9, q2
+        sub       r1, #32
+        vsub.u8   q15, q11, q2
+        vshr.u8  q12, #3
+        vadd.s8  q8, q3
+        vshr.u8  q13, #3
+        vadd.s8  q9, q3
+
+        vtbl.8   d24, {d0}, d24
+        vshr.u8  q14, #3
+        vtbl.8   d25, {d0}, d25
+        vshr.u8  q15, #3
+        vtbl.8   d26, {d1}, d26
+        vadd.s8  q10, q3
+        vtbl.8   d27, {d1}, d27
+        vadd.s8  q11, q3
+        vtbl.8   d28, {d0}, d28
+        vqadd.s8 q8, q12
+        vtbl.8   d29, {d0}, d29
+        vqadd.s8 q9, q13
+        vtbl.8   d30, {d1}, d30
+        vqadd.s8 q10, q14
+        vtbl.8   d31, {d1}, d31
+        vsub.s8  q8, q3
+        vqadd.s8 q11, q15
+        vsub.s8  q9, q3
+        vsub.s8  q10, q3
+        vsub.s8  q11, q3
+
+        vst2.8    {q8-q9}, [r0, :128]!
+        vst2.8    {q10-q11}, [r0, :128], r2
+        sub       r0, #32
+        bmi       2b
+        @ Avoid preload at end
+        beq       1b
+
+        pop    {r4-r8, pc}
+endfunc
+
+
 .macro diff32 out0, out1, tmp0, tmp1, in0, in1, in2, in3
         vcgt.u8 \out0, \in2, \in0  // c > a -> -1 , otherwise 0
         vcgt.u8 \tmp0,  \in0, \in2  // a > c -> -1 , otherwise 0
