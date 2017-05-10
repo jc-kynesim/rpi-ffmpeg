@@ -17,6 +17,7 @@
 #include "rpi_qpu.h"
 #include "rpi_shader.h"
 #include "rpi_hevc_transform.h"
+#include "rpi_zc.h"
 
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files
@@ -99,9 +100,16 @@ struct GPU
   short transMatrix2even[16*16*2];
 };
 
+#define CFE_ENTS_PER_A 8
+// If we have a sliced frame 2048 wide @ 64 per slice then there are 32 slices
+// in a line & we want to flush luma + chroma + a couple of bits so ents ~ 70
+// allow 128
+#define CFE_ENT_COUNT  128
+#define CFE_A_COUNT    (CFE_ENT_COUNT / CFE_ENTS_PER_A)
+
 struct rpi_cache_flush_env_s {
     unsigned int n;
-    struct vcsm_user_clean_invalid_s a;
+    struct vcsm_user_clean_invalid_s a[CFE_A_COUNT];
 };
 
 #define WAIT_COUNT_MAX 16
@@ -435,10 +443,11 @@ void gpu_unref(void)
 
 rpi_cache_flush_env_t * rpi_cache_flush_init()
 {
-    rpi_cache_flush_env_t * const rfe = calloc(1, sizeof(rpi_cache_flush_env_t));
+    rpi_cache_flush_env_t * const rfe = malloc(sizeof(rpi_cache_flush_env_t));
     if (rfe == NULL)
         return NULL;
 
+    rfe->n = 0;
     return rfe;
 }
 
@@ -450,7 +459,19 @@ void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe)
 
 int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
 {
-    int rc = (rfe->n == 0) ? 0 : vcsm_clean_invalid(&rfe->a);
+    int rc = 0;
+    unsigned int na;
+    unsigned int nr;
+
+    // Clear any reamaining ents in the final block
+    if ((nr = rfe->n % CFE_ENTS_PER_A) != 0)
+        memset(rfe->a[rfe->n / CFE_ENTS_PER_A].s + nr, 0, (CFE_ENTS_PER_A - nr) * sizeof(rfe->a[0].s[0]));
+
+    for (na = 0; na * CFE_ENTS_PER_A < rfe->n; ++na)
+    {
+        if (vcsm_clean_invalid(rfe->a + na) != 0)
+            rc = -1;
+    }
 
     free(rfe);
 
@@ -463,17 +484,22 @@ int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
 
 void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode)
 {
-    av_assert0(rfe->n < sizeof(rfe->a.s) / sizeof(rfe->a.s[0]));
-
     // Deal with empty pointer trivially
     if (gm == NULL || gm->numbytes == 0)
         return;
 
-    rfe->a.s[rfe->n].cmd = mode;
-    rfe->a.s[rfe->n].handle = gm->vcsm_handle;
-    rfe->a.s[rfe->n].addr = (unsigned int)gm->arm;
-    rfe->a.s[rfe->n].size = gm->numbytes;
-    ++rfe->n;
+    {
+        struct vcsm_user_clean_invalid_s * const a = rfe->a + (rfe->n / CFE_ENTS_PER_A);
+        const unsigned int n = rfe->n % CFE_ENTS_PER_A;
+
+        av_assert0(rfe->n < CFE_ENT_COUNT);
+
+        a->s[n].cmd = mode;
+        a->s[n].handle = gm->vcsm_handle;
+        a->s[n].addr = (unsigned int)gm->arm;
+        a->s[n].size = gm->numbytes;
+        ++rfe->n;
+    }
 }
 
 void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
@@ -483,16 +509,24 @@ void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_M
     if (gm == NULL || size == 0)
         return;
 
-    av_assert0(rfe->n < sizeof(rfe->a.s) / sizeof(rfe->a.s[0]));
+//    printf("[%d] offset=%d, size=%d, numbytes=%d\n", rfe->n, offset, size, gm->numbytes);
+
     av_assert0(offset <= gm->numbytes);
     av_assert0(size <= gm->numbytes);
     av_assert0(offset + size <= gm->numbytes);
 
-    rfe->a.s[rfe->n].cmd = mode;
-    rfe->a.s[rfe->n].handle = gm->vcsm_handle;
-    rfe->a.s[rfe->n].addr = (unsigned int)gm->arm + offset;
-    rfe->a.s[rfe->n].size = size;
-    ++rfe->n;
+    {
+        struct vcsm_user_clean_invalid_s * const a = rfe->a + (rfe->n / CFE_ENTS_PER_A);
+        const unsigned int n = rfe->n % CFE_ENTS_PER_A;
+
+        av_assert0(rfe->n < CFE_ENT_COUNT);
+
+        a->s[n].cmd = mode;
+        a->s[n].handle = gm->vcsm_handle;
+        a->s[n].addr = (unsigned int)gm->arm + offset;
+        a->s[n].size = size;
+        ++rfe->n;
+    }
 }
 
 void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode)
@@ -514,10 +548,6 @@ void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame 
 void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
   const unsigned int start_line, const unsigned int n, const unsigned int uv_shift, const int do_luma, const int do_chroma)
 {
-#if 1
-  // Argh.. sand frames!
-  rpi_cache_flush_add_frame(rfe, frame, mode);
-#else
   const unsigned int y_offset = frame->linesize[0] * start_line;
   const unsigned int y_size = frame->linesize[0] * n;
   // Round UV up/down to get everything
@@ -531,7 +561,18 @@ void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AV
   av_assert0(n <= (unsigned int)frame->height);
   av_assert0(start_line + n <= (unsigned int)frame->height);
 
-  if (gpu_is_buf1(frame)) {
+  if (!gpu_is_buf1(frame))
+  {
+    if (do_luma) {
+      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 0), mode, y_offset, y_size);
+    }
+    if (do_chroma) {
+      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 1), mode, uv_offset, uv_size);
+      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
+    }
+  }
+  else if (!rpi_sliced_frame(frame))
+  {
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
     if (do_luma) {
       rpi_cache_flush_add_gm_range(rfe, gm, mode, (frame->data[0] - gm->arm) + y_offset, y_size);
@@ -543,15 +584,18 @@ void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AV
   }
   else
   {
-    if (do_luma) {
-      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 0), mode, y_offset, y_size);
-    }
-    if (do_chroma) {
-      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 1), mode, uv_offset, uv_size);
-      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
+    const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
+//    printf("%s: start_line=%d, lines=%d, %c%c\n", __func__, start_line, n, do_luma ? 'l' : ' ', do_chroma ? 'c' : ' ');
+    for (int x = 0; x < frame->width; x += frame->linesize[0]) {
+      if (do_luma) {
+        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sliced_frame_off_y(frame, x, start_line), y_size);
+      }
+      if (do_chroma) {
+        rpi_cache_flush_add_gm_range(rfe, gm, mode,
+                                     (frame->data[1] - gm->arm) + rpi_sliced_frame_off_c(frame, x >> 1, start_line >> 1), uv_size);
+      }
     }
   }
-#endif
 }
 
 // Call this to clean and invalidate a region of memory
