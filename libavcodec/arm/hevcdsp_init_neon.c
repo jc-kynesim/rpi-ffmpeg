@@ -60,11 +60,8 @@ void ff_hevc_sao_edge_eo1_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t str
 void ff_hevc_sao_edge_eo2_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 void ff_hevc_sao_edge_eo3_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 
-typedef void ff_hevc_sao_edge_c_eoX_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table_u, int8_t *sao_offset_table_v);
-extern ff_hevc_sao_edge_c_eoX_w64_neon_8 ff_hevc_sao_edge_c_eo0_w64_neon_8;
-extern ff_hevc_sao_edge_c_eoX_w64_neon_8 ff_hevc_sao_edge_c_eo1_w64_neon_8;
-extern ff_hevc_sao_edge_c_eoX_w64_neon_8 ff_hevc_sao_edge_c_eo2_w64_neon_8;
-extern ff_hevc_sao_edge_c_eoX_w64_neon_8 ff_hevc_sao_edge_c_eo3_w64_neon_8;
+void ff_hevc_sao_edge_c_w64_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height,
+                                   const int16_t *sao_offset_table_u, const int16_t *sao_offset_table_v, int eo);
 
 void ff_hevc_sao_band_c_neon_8(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
@@ -351,71 +348,36 @@ static void ff_hevc_sao_edge_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src, 
                                   const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
                                   int eo, int width, int height)
 {
-    static const uint8_t edge_idx[] = { 1, 2, 0, 3, 4 };
-    static const int8_t pos[4][2][2] = {
-        { { -1,  0 }, {  1, 0 } }, // horizontal
-        { {  0, -1 }, {  0, 1 } }, // vertical
-        { { -1, -1 }, {  1, 1 } }, // 45 degree
-        { {  1, -1 }, { -1, 1 } }, // 135 degree
-    };
-    int8_t sao_offset_val_u[8];  // padding of 3 for vld
-    int8_t sao_offset_val_v[8];  // padding of 3 for vld
-    ptrdiff_t stride_src = (2*MAX_PB_SIZE + FF_INPUT_BUFFER_PADDING_SIZE);
-    pixel *dst = (pixel *)_dst;
-    pixel *src = (pixel *)_src;
-    int a_stride, b_stride;
-    int x, y;
-    int cwidth = 0;
+    const ptrdiff_t stride_src = (2*MAX_PB_SIZE + FF_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
 
-    width *= 2;
-
-    for (x = 0; x < 5; x++) {
-        sao_offset_val_u[x] = _sao_offset_val_u[edge_idx[x]];
-        sao_offset_val_v[x] = _sao_offset_val_v[edge_idx[x]];
+    if (width == 32 && (height & 7) == 0) {
+        ff_hevc_sao_edge_c_w64_neon_8(_dst, _src, stride_dst, stride_src, height, _sao_offset_val_u, _sao_offset_val_v, eo);
     }
-
-    if (height % 8 == 0)
-        cwidth = width;
-
-    stride_src /= sizeof(pixel);
-    stride_dst /= sizeof(pixel);
-
-    switch (cwidth) {
-#if 0
-    case
-    case 32:
-        switch(eo) {
-        case 0:
-            ff_hevc_sao_edge_eo0_w32_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 1:
-            ff_hevc_sao_edge_eo1_w32_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 2:
-            ff_hevc_sao_edge_eo2_w32_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 3:
-            ff_hevc_sao_edge_eo3_w32_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        }
-        break;
-#endif
-    case 64:
+    else
     {
-        static ff_hevc_sao_edge_c_eoX_w64_neon_8 * const eoX[] = {
-            ff_hevc_sao_edge_c_eo0_w64_neon_8,
-            ff_hevc_sao_edge_c_eo1_w64_neon_8,
-            ff_hevc_sao_edge_c_eo2_w64_neon_8,
-            ff_hevc_sao_edge_c_eo3_w64_neon_8
+        static const uint8_t edge_idx[] = { 1, 2, 0, 3, 4 };
+        static const int8_t pos[4][2][2] = {
+            { { -1,  0 }, {  1, 0 } }, // horizontal
+            { {  0, -1 }, {  0, 1 } }, // vertical
+            { { -1, -1 }, {  1, 1 } }, // 45 degree
+            { {  1, -1 }, { -1, 1 } }, // 135 degree
         };
-        eoX[eo](dst, src, stride_dst, stride_src, height, sao_offset_val_u, sao_offset_val_v);
-        break;
-    }
-    default:
+        int8_t sao_offset_val_u[8];  // padding of 3 for vld
+        int8_t sao_offset_val_v[8];  // padding of 3 for vld
+        pixel *dst = (pixel *)_dst;
+        pixel *src = (pixel *)_src;
+        int a_stride, b_stride;
+        int x, y;
+
+        for (x = 0; x < 5; x++) {
+            sao_offset_val_u[x] = _sao_offset_val_u[edge_idx[x]];
+            sao_offset_val_v[x] = _sao_offset_val_v[edge_idx[x]];
+        }
+
         a_stride = pos[eo][0][0] * 2 + pos[eo][0][1] * stride_src;
         b_stride = pos[eo][1][0] * 2 + pos[eo][1][1] * stride_src;
         for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x += 2) {
+            for (x = 0; x < width * 2; x += 2) {
                 int diff0u = CMP(src[x], src[x + a_stride]);
                 int diff1u = CMP(src[x], src[x + b_stride]);
                 int diff0v = CMP(src[x+1], src[x+1 + a_stride]);
@@ -426,7 +388,6 @@ static void ff_hevc_sao_edge_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src, 
             src += stride_src;
             dst += stride_dst;
         }
-        break;
     }
 }
 #undef CMP

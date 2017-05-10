@@ -542,21 +542,45 @@ endfunc
 @   ptrdiff_t stride_dst,        r2
 @   ptrdiff_t stride_src,        r3
 @   int height,                  sp[0]
-@   int8_t *sao_offset_table_u,  sp[4]
-@   int8_t *sao_offset_table_v); sp[8]
+@   int16_t *sao_offset_table_u,  sp[4]
+@   int16_t *sao_offset_table_v); sp[8]
+@   int eo                        sp[12]
 
-.macro init_edge_c_64
+function ff_hevc_sao_edge_c_w64_neon_8, export=1
         push   {r4-r8,lr}     // 6 reg = 24
-        ldr    r12, [sp, #24] // height
         ldr    r5,  [sp, #28] // sao_offset_val_table_u
-        ldrd   r4, r5, [r5]
         ldr    r7,  [sp, #32] // sao_offset_val_table_v
-        ldrd   r6, r7, [r7]
-.endm
 
-function ff_hevc_sao_edge_c_eo0_w64_neon_8, export=1
-        init_edge_c_64
-        vpush {d8-d15}
+        @ Load and rearrange offsets
+        @ Also "convert" from 16bit to 8bit
+        ldrb    r4, [r5, #2]
+        ldrb    r8, [r5, #4]
+        ldrb    r6, [r7, #2]
+        ldrb    r12, [r7, #4]
+        orr     r4, r4, r8, lsl #8
+        orr     r6, r6, r12, lsl #8
+        ldrb    r8, [r5, #6]
+        ldrb    r12, [r7, #6]
+        orr     r4, r4, r8, lsl #24
+        orr     r6, r6, r12, lsl #24
+        ldrb    r5, [r5, #8]
+        ldrb    r7, [r7, #8]
+
+        ldr     r12, [sp, #36] // e0
+        adr     r8, edge_c_tbl_w64
+        ldr     r8, [r8, r12, lsl #2]
+
+        ldr     r12, [sp, #24] // height
+        vpush   {d8-d15}
+        mov     pc, r8
+
+edge_c_tbl_w64:
+        .word   ff_hevc_sao_edge_c_eo0_w64_neon_8
+        .word   ff_hevc_sao_edge_c_eo1_w64_neon_8
+        .word   ff_hevc_sao_edge_c_eo2_w64_neon_8
+        .word   ff_hevc_sao_edge_c_eo3_w64_neon_8
+
+ff_hevc_sao_edge_c_eo0_w64_neon_8:
         sub    r1, #8
 1:      subs    r12, #1
         vld1.64  {d7}, [r1, :64]!
@@ -578,11 +602,8 @@ function ff_hevc_sao_edge_c_eo0_w64_neon_8, export=1
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
-endfunc
 
-function ff_hevc_sao_edge_c_eo1_w64_neon_8, export=1
-        init_edge_c_64
-        vpush {d8-d15}
+ff_hevc_sao_edge_c_eo1_w64_neon_8:
         sub     r1, r3
         // load a
         vldm    r1, {q0-q3}
@@ -608,11 +629,8 @@ function ff_hevc_sao_edge_c_eo1_w64_neon_8, export=1
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
-endfunc
 
-function ff_hevc_sao_edge_c_eo2_w64_neon_8, export=1
-        init_edge_c_64
-        vpush {d8-d15}
+ff_hevc_sao_edge_c_eo2_w64_neon_8:
 1:      sub     r1, r3
         // load a
         // TODO: fix unaligned load
@@ -635,11 +653,8 @@ function ff_hevc_sao_edge_c_eo2_w64_neon_8, export=1
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
-endfunc
 
-function ff_hevc_sao_edge_c_eo3_w64_neon_8, export=1
-        init_edge_c_64
-        vpush {d8-d15}
+ff_hevc_sao_edge_c_eo3_w64_neon_8:
 1:      sub     r1, r3
         // load a
         // TODO: fix unaligned load
