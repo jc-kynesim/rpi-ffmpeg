@@ -47,6 +47,8 @@
 //  #define RPI_DEBLOCK_VPU
 
   #define RPI_VPU_DEBLOCK_CACHED 1
+
+  #define RPI_FRAME_INVALID      1
 #endif
 
 /**

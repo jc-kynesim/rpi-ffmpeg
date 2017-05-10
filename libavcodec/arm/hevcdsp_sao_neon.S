@@ -193,8 +193,8 @@ function ff_hevc_sao_band_c_neon_8, export=1
         @ r4 = r1 = src - Inteded for preload pointer
         @ r12 = height
 
-        @ Will never be called with height == 1
-        sub       r12, #1
+        @ Might be called with height == 1? avoid preload in this unlikely case
+        subs      r12, #1
         addne     r4, r3
 
 1:

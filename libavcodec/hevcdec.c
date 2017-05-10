@@ -41,6 +41,7 @@
 #include "hevc_data.h"
 #include "hevcdec.h"
 #include "profiles.h"
+#include <unistd.h>
 
 #ifdef RPI
   #include "rpi_qpu.h"
@@ -1407,6 +1408,7 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                         int16_t *coeffs   = (int16_t*)lc->edge_emu_buffer2;
                         int size = 1 << log2_trafo_size_c;
 
+                        av_assert0(0);
                         uint8_t *dst = &s->frame->data[1][(y0 >> vshift) * stride +
                                                               ((x0 >> hshift) << s->ps.sps->pixel_shift)];
                         for (i = 0; i < (size * size); i++) {
@@ -1445,6 +1447,7 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
                         for (i = 0; i < (size * size); i++) {
                             coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                         }
+                        av_assert0(0);
                         s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
                     }
             }
@@ -1889,6 +1892,8 @@ static void luma_mc_uni(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
     return;
 #endif
 
+    av_assert0(!s->enable_rpi);
+
     x_off += mv->x >> 2;
     y_off += mv->y >> 2;
     src   += y_off * srcstride + (x_off * (1 << s->ps.sps->pixel_shift));
@@ -1962,6 +1967,8 @@ static void luma_mc_bi(HEVCContext *s, uint8_t *dst, ptrdiff_t dststride,
 #ifdef DISABLE_MC
     return;
 #endif
+
+    av_assert0(!s->enable_rpi);
 
     if (x_off0 < QPEL_EXTRA_BEFORE || y_off0 < QPEL_EXTRA_AFTER ||
         x_off0 >= pic_width - block_w - QPEL_EXTRA_AFTER ||
@@ -2052,6 +2059,8 @@ static void chroma_mc_uni(HEVCContext *s, uint8_t *dst0,
     return;
 #endif
 
+    av_assert0(!s->enable_rpi);
+
     x_off += mv->x >> (2 + hshift);
     y_off += mv->y >> (2 + vshift);
     src0  += y_off * srcstride + (x_off * (1 << s->ps.sps->pixel_shift));
@@ -2134,6 +2143,9 @@ static void chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVF
     int x_off1 = x_off + (mv1->x >> (2 + hshift));
     int y_off1 = y_off + (mv1->y >> (2 + vshift));
     int idx = ff_hevc_pel_weight[block_w];
+
+    av_assert0(!s->enable_rpi);
+
     src1  += y_off0 * src1stride + (int)((unsigned)x_off0 << s->ps.sps->pixel_shift);
     src2  += y_off1 * src2stride + (int)((unsigned)x_off1 << s->ps.sps->pixel_shift);
 
@@ -2259,10 +2271,11 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
            AVFrame *const src_frame)
 {
     const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
-
+#if 0
     rpi_luma_mc_uni(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
                     mv, x0, y0, nPbW, nPbH,
                     weight_mul, weight_offset);
+#endif
 
     {
         const unsigned int mx          = mv->x & 3;
@@ -3617,8 +3630,10 @@ static void worker_core(HEVCContext * const s)
 #if RPI_CACHE_UNIF_MVS
         rpi_cache_flush_add_gm_ptr(rfe, s->unif_mvs_ptr + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
 #endif
+#if !RPI_FRAME_INVALID
         rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
           flush_start, flush_count, s->ps.sps->vshift[1], 0, 1);
+#endif
     }
 #endif
 
@@ -3644,8 +3659,10 @@ static void worker_core(HEVCContext * const s)
 #if RPI_CACHE_UNIF_MVS
         rpi_cache_flush_add_gm_ptr(rfe, s->y_unif_mvs_ptr + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
 #endif
+#if !RPI_FRAME_INVALID
         rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
           flush_start, flush_count, s->ps.sps->vshift[1], 1, 0);
+#endif
     }
 
     pthread_mutex_unlock(&wg->lock);
@@ -3677,10 +3694,12 @@ static void worker_core(HEVCContext * const s)
 #else
     vpu_qpu_wait(&sync_y);
 #endif
+    usleep(3000);
     rpi_execute_pred_cmds(s);
 
     // Perform deblocking for CTBs in this row
     rpi_execute_dblk_cmds(s);
+
 
     avpriv_atomic_int_add_and_fetch(&wg->arm_load, -arm_const_cost);
 }
@@ -3779,7 +3798,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
           if ( s->ctu_count >= s->max_ctu_count ) {
 #ifdef RPI_WORKER
-            if (s->used_for_ref)
+            if (s->used_for_ref && 0)
             {
 //              printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
 
@@ -4410,7 +4429,11 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
 fail:  // Also success path
     if (s->ref && s->threads_type == FF_THREAD_FRAME) {
 #if RPI_INTER
+#if RPI_FRAME_INVALID
+        flush_frame(s,s->frame);
+#else
         rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
+#endif
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
     } else if (s->ref && s->enable_rpi) {
@@ -5095,9 +5118,9 @@ AVCodec ff_hevc_decoder = {
     .update_thread_context = hevc_update_thread_context,
     .init_thread_copy      = hevc_init_thread_copy,
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
-//                             0,
+                             0,
 //                             AV_CODEC_CAP_FRAME_THREADS,
-                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+//                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };

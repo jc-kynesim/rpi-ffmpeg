@@ -5,6 +5,7 @@
 #include "rpi_zc.h"
 #include "libavutil/avassert.h"
 #include <pthread.h>
+#include "hevc.h"
 
 #include "libavutil/buffer_internal.h"
 #include <interface/vctypes/vc_image_types.h>
@@ -136,8 +137,10 @@ static ZcPoolEnt * zc_pool_alloc(ZcPool * const pool, const int req_bytes)
 
     pthread_mutex_unlock(&pool->lock);
 
+#if RPI_FRAME_INVALID
     // Start with our buffer empty of preconceptions
-//    rpi_cache_flush_one_gm_ptr(&zp->gmem, RPI_CACHE_FLUSH_MODE_INVALIDATE);
+    rpi_cache_flush_one_gm_ptr(&zp->gmem, RPI_CACHE_FLUSH_MODE_INVALIDATE);
+#endif
 
     return zp;
 }
