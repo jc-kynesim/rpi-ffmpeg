@@ -123,22 +123,27 @@ endfunc
 
 function ff_hevc_sao_band_w64_neon_8, export=1
         init_sao_band
-1:      subs      r12, #1
-        pld       [r1, r3]
-        vld1.8    {q8-q9}, [r1, :128]!
-        vshr.u8  q12, q8, #3
-        vshr.u8  q13, q9, #3
-        vld1.8    {q10-q11}, [r1, :128], r3
-        vshr.u8  q14, q10, #3
-        vshr.u8  q15, q11, #3
-        sub       r1, #32
-        sao_band_64
-        vst1.8    {q8-q9}, [r0, :128]!
-        vst1.8    {q10-q11}, [r0, :128], r2
-        sub       r0, #32
-        bne       1b
 
-        bx lr
+        push      {r4, lr}
+        subs      r12, #1
+        mov       r4, r1
+        addne     r4, r3
+
+1:      subs      r12, #1
+        vldm      r1, {q8-q11}
+        pld       [r4]
+        vshr.u8   q12, q8, #3
+        vshr.u8   q13, q9, #3
+        add       r1, r3
+        vshr.u8   q14, q10, #3
+        vshr.u8   q15, q11, #3
+        sao_band_64
+        addne     r4, r3
+        vstm      r0, {q8-q11}
+        add       r0, r2
+        bpl       1b
+
+        pop       {r4, pc}
 endfunc
 
 
@@ -193,8 +198,8 @@ function ff_hevc_sao_band_c_neon_8, export=1
         @ r4 = r1 = src - Inteded for preload pointer
         @ r12 = height
 
-        @ Will never be called with height == 1
-        sub       r12, #1
+        @ Might (unlikely) be called with height == 1
+        subs      r12, #1
         addne     r4, r3
 
 1:
