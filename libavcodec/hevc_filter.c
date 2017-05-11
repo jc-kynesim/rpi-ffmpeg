@@ -251,7 +251,6 @@ static void restore_tqb_pixels(HEVCContext *s,
                     int n;
                     uint8_t *src = src1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_src + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << sh);
                     const uint8_t *dst = dst1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_dst + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << sh);
-                    printf("%s!\n", __func__);
                     for (n = 0; n < (min_pu_size >> vshift); n++) {
                         memcpy(src, dst, len);
                         src += stride_src;
