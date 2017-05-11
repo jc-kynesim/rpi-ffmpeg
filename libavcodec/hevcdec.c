@@ -89,7 +89,7 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 // For each block of 64*64 the smallest block size is 8x4
 // We also need an extra command for the setup information
 
-#define RPI_CHROMA_COMMAND_WORDS 11
+#define RPI_CHROMA_COMMAND_WORDS 9
 #define UV_COMMANDS_PER_QPU ((1 + RPI_NUM_CHUNKS*(64*64)*2/(8*4)) * RPI_CHROMA_COMMAND_WORDS)
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
@@ -2433,13 +2433,11 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
         const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
         const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
         const uint32_t src_base_u = get_vc_address_u(src_frame);
-        const uint32_t src_base_v = get_vc_address_v(src_frame);
         const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->x, 2 + hshift) << (1 - hshift)];
         const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->y, 2 + vshift) << (1 - vshift)];
         const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
         const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
         uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
-        uint32_t dst_base_v = get_vc_address_v(s->frame) + c_off;
 
         qpu_mc_pred_c_t * u = (qpu_mc_pred_c_t *)s->curr_u_mvs;
 
@@ -2455,20 +2453,17 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
                 u[-1].next_fn  = s->qpu_filter_uv;
                 u[-1].next_src_x = x1_c + start_x;
                 u[-1].next_src_y = y1_c + start_y;
-                u[-1].next_src_base_u = src_base_u;
-                u[-1].next_src_base_v = src_base_v;
+                u[-1].next_src_base_c = src_base_u;
                 u[0].p.h = bh;
                 u[0].p.w = bw;
                 u[0].p.coeffs_x = x_coeffs;
                 u[0].p.coeffs_y = y_coeffs;
                 u[0].p.wo_u = wo_u;
                 u[0].p.wo_v = wo_v;
-                u[0].p.dst_addr_u = dst_base_u + start_x * 2;
-                u[0].p.dst_addr_v = dst_base_v + start_x * 2;
+                u[0].p.dst_addr_c = dst_base_u + start_x * 2;
             }
 
             dst_base_u += s->frame->linesize[1] * 16;
-            dst_base_v += s->frame->linesize[2] * 16;
         }
         s->curr_u_mvs = (uint32_t *)u;
     }
@@ -2516,7 +2511,6 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
         const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
 
         uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
-        uint32_t dst_base_v = get_vc_address_v(s->frame) + c_off;
         qpu_mc_pred_c_t * u = (qpu_mc_pred_c_t *)s->curr_u_mvs;
 
         for (int start_y = 0; start_y < nPbH_c; start_y += 16) {
@@ -2526,14 +2520,12 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
               u[-1].next_fn = s->qpu_filter_uv_b0; // In fact ignored
               u[-1].next_src_x = x1_c + start_x;
               u[-1].next_src_y = y1_c + start_y;
-              u[-1].next_src_base_u = get_vc_address_u(src_frame);
-              u[-1].next_src_base_v = get_vc_address_v(src_frame);
+              u[-1].next_src_base_c = get_vc_address_u(src_frame);
 
               u[0].next_fn = s->qpu_filter_uv_b;
               u[0].next_src_x = x2_c + start_x;
               u[0].next_src_y = y2_c + start_y;
-              u[0].next_src_base_u = get_vc_address_u(src_frame2);
-              u[0].next_src_base_v = get_vc_address_v(src_frame2);
+              u[0].next_src_base_c = get_vc_address_u(src_frame2);
 
               u[0].b0.h = (bh<16 ? bh : 16);
               u[0].b0.w = (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH);
@@ -2542,19 +2534,16 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
               u[0].b0.weight_u = c_weights[0]; // Weight L0 U
               u[0].b0.weight_v = c_weights[1]; // Weight L0 V
               u[0].b0.dummy0 = 0;  // Intermediate results are not written back in first pass of B filtering
-              u[0].b0.dummy1 = 0;
 
               u[1].b1.dummy0 = 0;  // w,h inherited from b0
               u[1].b1.coeffs_x = coefs1_x;
               u[1].b1.coeffs_y = coefs1_y;
               u[1].b1.wo_u = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
               u[1].b1.wo_v = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
-              u[1].b1.dst_addr_u = dst_base_u + start_x * 2;
-              u[1].b1.dst_addr_v = dst_base_v + start_x * 2;
+              u[1].b1.dst_addr_c = dst_base_u + start_x * 2;
           }
 
           dst_base_u += s->frame->linesize[1] * 16;
-          dst_base_v += s->frame->linesize[2] * 16;
         }
 
         s->curr_u_mvs = (uint32_t *)u;
@@ -3421,15 +3410,13 @@ static void rpi_begin(HEVCContext *s)
         u->next_fn = 0;
         u->next_src_x = 0;
         u->next_src_y = 0;
-        u->next_src_base_u = 0;
-        u->next_src_base_v = 0;
+        u->next_src_base_c = 0;
         u->s.pic_cw = pic_width_c;
         u->s.pic_ch = pic_height_c;
         u->s.stride2 = rpi_sliced_frame_stride2(s->frame);
         u->s.stride1 = s->frame->linesize[1];
         u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
         u->s.dummy0 = 0;
-        u->s.dummy1 = 0;
 
         s->u_mvs[job][i] = (uint32_t *)(u + 1);
     }
@@ -3511,8 +3498,7 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
         pu->next_src_x = 0;
         pu->next_src_y = 0;
         // We use this code as a dummy texture - safe?
-        pu->next_src_base_u = dummy_texture;
-        pu->next_src_base_v = dummy_texture;
+        pu->next_src_base_c = dummy_texture;
     }
 
     return tc;

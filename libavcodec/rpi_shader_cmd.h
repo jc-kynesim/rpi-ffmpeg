@@ -7,8 +7,7 @@ typedef struct qpu_mc_pred_c_s {
     uint32_t next_fn;
     int16_t next_src_y;
     int16_t next_src_x;
-    uint32_t next_src_base_u;
-    uint32_t next_src_base_v;
+    uint32_t next_src_base_c;
     union {
         struct {
             uint16_t h;
@@ -17,8 +16,7 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t coeffs_y;
             uint32_t wo_u;
             uint32_t wo_v;
-            uint32_t dst_addr_u;
-            uint32_t dst_addr_v;
+            uint32_t dst_addr_c;
         } p;
         struct {
             uint16_t h;
@@ -28,7 +26,6 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t weight_u;
             uint32_t weight_v;
             uint32_t dummy0;
-            uint32_t dummy1;
         } b0;
         struct {
             uint32_t dummy0;
@@ -36,8 +33,7 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t coeffs_y;
             uint32_t wo_u;
             uint32_t wo_v;
-            uint32_t dst_addr_u;
-            uint32_t dst_addr_v;
+            uint32_t dst_addr_c;
         } b1;
         struct {
             uint32_t pic_cw;            // C Width (== Y width / 2)
@@ -46,7 +42,6 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t stride1;
             uint32_t wdenom;
             uint32_t dummy0;
-            uint32_t dummy1;
         } s;
     };
 } qpu_mc_pred_c_t;

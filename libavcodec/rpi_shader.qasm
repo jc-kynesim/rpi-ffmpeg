@@ -68,7 +68,6 @@
 # ra30                                          next kernel address
 # ra31                                          chroma-B height+3; free otherwise
 
-.set SRC_RASTER, 0
 .set SRC_STRIPE_WIDTH, 128
 .set SRC_STRIPE_SHIFT, 7
 
@@ -150,7 +149,7 @@
 
 
 ################################################################################
-# mc_setup_uv(next_kernel, x, y, ref_u_base, ref_v_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
+# mc_setup_uv(next_kernel, x, y, ref_c_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_c
   mov tmurs, 1          ; mov ra_link, unif        # No swap TMUs ; Next fn
 
@@ -160,9 +159,8 @@
 
   add ra_x, ra0.16b, r0   # Store x
   mov ra_y, ra0.16a       # Store y
-  mov ra_frame_base, unif # Store frame u base
+  mov ra_frame_base, unif # Store frame c base
   mov r1, vdw_setup_1(0)  # Merged with dst_stride shortly, delay slot for ra_frame_base
-  mov -, unif           # src_v
 
 # Read image dimensions
   sub rb25, unif, 1     # pic c width
@@ -240,7 +238,6 @@
 
   add rb13, 9, unif     # denominator
   mov -, unif           # Unused
-  mov -, unif           # ??? same as (register) qpu_num
 
 # Compute part of VPM to use for DMA output
   m_calc_dma_regs_c rb28, rb27
@@ -277,7 +274,6 @@ add r0, ra2.16b, r0   # x
 max r0, r0, 0
 min r0, r0, rb_frame_width_minus_1
 
-  mov -, unif           # V base
   mov ra_xshift, ra_xshift_next
   shl ra_xshift_next, r0, 4
 
@@ -393,21 +389,17 @@ add r1, r1, rb12
 # >>>
 
 # DMA out for U & stash for V
-.if SRC_RASTER
-  mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
-.else
   mov ra9, 0
   mov vw_setup, rb26
-.endif
   bra -, ra_link
   mov vw_setup, rb29    ; mov ra10, rb29 # Stride
   mov vw_addr, unif     # u_dst_addr
-  mov ra11, unif        # v_dst_addr
+  nop
 # >>>
 
 ################################################################################
 
-# mc_filter_uv_b0(next_kernel, x, y, frame_u_base, frame_v_base, height, hcoeffs[0], hcoeffs[1], vcoeffs[0], vcoeffs[1], this_u_dst, this_v_dst)
+# mc_filter_uv_b0(next_kernel, x, y, frame_c_base, height, hcoeffs[0], hcoeffs[1], vcoeffs[0], vcoeffs[1], this_u_dst, this_v_dst)
 
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
@@ -424,7 +416,6 @@ add r0, ra2.16b, r0   # x
 max r0, r0, 0
 min r0, r0, rb_frame_width_minus_1
 
-  mov -, unif           # V base
   mov ra_xshift, ra_xshift_next
   shl ra_xshift_next, r0, 4
 
@@ -542,7 +533,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   sub.setf -, 15, r3    # 12 + 3 of preroll
   brr.anyn -, r:uv_b0_post_fin                  # h > 12 (n) => 16 (do nothing)
   sub r3, 11, r3        ; mov -, unif           # r3 = shifts wanted ; Discard u_dst_addr
-  mov r0, i_shift16     ; mov -, unif           # ; Discard v_dst_addr
+  mov r0, i_shift16
   mov r1, 0x10000
 # >>>
   brr.anyz -, r:uv_b0_post12                    # h == 12 deal with specially
@@ -606,9 +597,9 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   add r0, ra0.16b, r0    # x
 
   max r0, r0, 0                      ; mov ra_y_next, ra0.16a # y
-  min r0, r0, rb_frame_width_minus_1 ; mov r3, unif        # U frame_base
+  min r0, r0, rb_frame_width_minus_1 ; mov r3, unif        # C frame_base
 
-  mov ra_xshift, ra_xshift_next      ; mov -, unif         # V base
+  mov ra_xshift, ra_xshift_next
   shl ra_xshift_next, r0, 4
 
   and r0, r0, -2
@@ -707,13 +698,13 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   mov vpm, ra3
 # >>>
 
-# DMA out for U & stash for V
+# DMA out
 
   mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
   bra -, ra_link
   mov vw_setup, rb29    ; mov ra10, rb29 # Stride
-  mov vw_addr, unif     # u_dst_addr
-  mov ra11, unif        # v_dst_addr
+  mov vw_addr, unif     # c_dst_addr
+  nop
 
 
 
@@ -784,12 +775,8 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # Read image dimensions
   mov ra3, unif         # width_height
-.if SRC_RASTER
-  mov rb_pitch, unif    # src_pitch [ra3 delay]
-.else
   mov rb_pitch, SRC_STRIPE_WIDTH
   mov rb_xpitch, unif    # src_pitch [ra3 delay]
-.endif
   sub rb_frame_width_minus_1, ra3.16b, 1
   sub rb_frame_height_minus_1, ra3.16a, 1
 
@@ -804,15 +791,6 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   min r0, r0, rb_frame_width_minus_1
   shl ra_xshift_next, r0, 3 # Compute shifts
 
-.if SRC_RASTER
-  add ra_y, ra8.16b, 1
-  and r0, r0, ~3        # r0 gives the clipped and aligned x coordinate
-  add r2, ra9, r0       # ra9 is address for frame0 (not including y offset)
-  max r1, ra8.16b, 0
-  min r1, r1, rb_frame_height_minus_1
-  nop                   ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-  add t0s, r2, r1       ; mov ra_frame_base, r2
-.else
 
 # In a single 32 bit word we get 4 Y Pels so mask 2 bottom bits of xs
 
@@ -832,23 +810,12 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   nop                   ; mul24 r1, r1, rb_pitch
   add t0s, ra_frame_base, r1
 
-.endif
 
   # r3 still contains elem_num
   add r0, ra10.16a, r3  # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
   shl rx_xshift2_next, r0, 3 # Compute shifts
-
-.if SRC_RASTER
-  add ra_y2, ra10.16b, 1
-  and r0, r0, ~3        # r0 gives the clipped and aligned x coordinate
-  add r2, ra11, r0      # r2 is address for frame1 (not including y offset)
-  max r1, ra10.16b, 0
-  min r1, r1, rb_frame_height_minus_1
-  nop                   ; mul24 r1, r1, rb_pitch   # r2 contains the addresses (not including y offset) for frame0
-  add t1s, r2, r1       ; mov ra_frame_base2, r2
-.else
 
   # r2 still contains mask
   and r0, r0, -4
@@ -865,8 +832,6 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 # submit texture requests for first line
   nop                   ; mul24 r1, r1, rb_pitch
   add t1s, ra_frame_base2, r1
-
-.endif
 
 # load constants
 
@@ -916,23 +881,6 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # get base addresses and per-channel shifts for *next* invocation
 
-.if SRC_RASTER
-  add r0, ra1.16a, r3 # Load x
-  max r0, r0, 0
-  min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
-  shl ra_xshift_next, r0, 3 # Compute shifts
-  mov ra_y_next, ra1.16b
-  and r0, r0, ~3                     ; mov ra1, unif # y2_x2
-  add ra_frame_base_next, r2, r0
-
-  add r0, ra1.16a, r3   # Load x
-  max r0, r0, 0
-  min r0, r0, rb_frame_width_minus_1 ; mov r2, unif  # Load the frame base
-  shl rx_xshift2_next, r0, 3         # Compute shifts
-  mov ra_y2_next, ra1.16b
-  and r0, r0, ~3                     ; mov ra1, unif  # width_height ; r0 gives the clipped and aligned x coordinate
-  add rb_frame_base2_next, r2, r0    # r2 is address for frame1 (not including y offset)
-.else
   add r0, ra1.16a, r3   # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
@@ -960,8 +908,6 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   add rb_frame_base2_next, unif, r0              # Base1
   mov ra_y2_next, ra1.16b                      # Load y
   mov ra1, unif         # width_height
-
-.endif
 
 # set up VPM write
   mov vw_setup, rb28
