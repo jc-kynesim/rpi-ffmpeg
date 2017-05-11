@@ -316,19 +316,20 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     s->ctu_per_uv_chan = s->max_ctu_count / QPU_N_UV;
 
     for(job=0;job<RPI_MAX_JOBS;job++) {
-      for(job=0;job<RPI_MAX_JOBS;job++) {
-        gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
-        s->coeffs_buf_arm[job][0] = (int16_t*) s->coeffs_buf_default[job].arm;
-        if (!s->coeffs_buf_arm[job][0])
-            goto fail;
-        gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
-        s->coeffs_buf_arm[job][2] = (int16_t*) s->coeffs_buf_accelerated[job].arm;
-        s->coeffs_buf_vc[job][2] = s->coeffs_buf_accelerated[job].vc;
-        if (!s->coeffs_buf_arm[job][2])
-            goto fail;
-        s->coeffs_buf_arm[job][3] = coefs_per_row + s->coeffs_buf_arm[job][2];  // This points to just beyond the end of the buffer.  Coefficients fill in backwards.
-        s->coeffs_buf_vc[job][3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[job][2];
-      }
+        for(job=0;job<RPI_MAX_JOBS;job++) {
+            gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
+            s->coeffs_buf_arm[job][0] = (int16_t*) s->coeffs_buf_default[job].arm;
+            if (!s->coeffs_buf_arm[job][0])
+                goto fail;
+
+            gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
+            s->coeffs_buf_arm[job][2] = (int16_t*) s->coeffs_buf_accelerated[job].arm;
+            s->coeffs_buf_vc[job][2] = s->coeffs_buf_accelerated[job].vc;
+            if (!s->coeffs_buf_arm[job][2])
+                goto fail;
+            s->coeffs_buf_arm[job][3] = coefs_per_row + s->coeffs_buf_arm[job][2];  // This points to just beyond the end of the buffer.  Coefficients fill in backwards.
+            s->coeffs_buf_vc[job][3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[job][2];
+        }
     }
 #endif
 #ifdef RPI_DEBLOCK_VPU
@@ -1749,8 +1750,21 @@ static int hls_pcm_sample(HEVCContext * const s, const int x0, const int y0, uns
     if (s->enable_rpi) {
         // Copy coeffs
         const int blen = (length + 7) >> 3;
-        int16_t * const coeffs = rpi_alloc_coeff_buf(s, 0, (blen + 1) >> 1);
+        // Round allocated bytes up to nearest 32 to avoid alignment confusion
+        // Allocation is in int16_t s
+        // As we are only using 1 byte per sample and the coeff buffer allows 2 per
+        // sample this rounding doesn't affect the total size we need to allocate for
+        // the coeff buffer
+        int16_t * const coeffs = rpi_alloc_coeff_buf(s, 0, ((blen + 31) & ~31) >> 1);
         memcpy(coeffs, pcm, blen);
+
+        // Our coeff stash assumes that any partially allocated 64byte lump
+        // is zeroed so make that true.
+        {
+            uint8_t * const eopcm = (uint8_t *)coeffs + blen;
+            if ((-(intptr_t)eopcm & 63) != 0)
+                memset(eopcm, 0, -(intptr_t)eopcm & 63);
+        }
 
         // Add command
         {

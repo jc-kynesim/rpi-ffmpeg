@@ -906,6 +906,11 @@ extern const uint8_t ff_hevc_qpel_extra[4];
 
 #ifdef RPI
 int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n);
+
+// arm/hevc_misc_neon.S
+// Neon coeff zap fn
+extern void rpi_zap_coeff_vals(int16_t * dst, unsigned int l2ts_m2);
+
 #endif
 
 #endif /* AVCODEC_HEVCDEC_H */
