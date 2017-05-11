@@ -2440,6 +2440,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
         uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
 
         qpu_mc_pred_c_t * u = s->curr_pred_c->qpu_mc_curr;
+        qpu_mc_pred_c_t *last_l0 = s->curr_pred_c->last_l0;
 
         for(int start_y=0;start_y < nPbH_c;start_y+=16)
         {
@@ -2450,10 +2451,10 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
             for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH, ++u)
             {
                 const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
-                u[-1].next_fn  = s->qpu_filter_uv;
-                u[-1].next_src_x = x1_c + start_x;
-                u[-1].next_src_y = y1_c + start_y;
-                u[-1].next_src_base_c = src_base_u;
+                last_l0->next_fn  = s->qpu_filter_uv;
+                last_l0->next_src_x = x1_c + start_x;
+                last_l0->next_src_y = y1_c + start_y;
+                last_l0->next_src_base_c = src_base_u;
                 u[0].p.h = bh;
                 u[0].p.w = bw;
                 u[0].p.coeffs_x = x_coeffs;
@@ -2461,10 +2462,12 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
                 u[0].p.wo_u = wo_u;
                 u[0].p.wo_v = wo_v;
                 u[0].p.dst_addr_c = dst_base_u + start_x * 2;
+                last_l0 = u;
             }
 
             dst_base_u += s->frame->linesize[1] * 16;
         }
+        s->curr_pred_c->last_l0 = last_l0;
         s->curr_pred_c->qpu_mc_curr = u;
     }
   return;
@@ -2512,17 +2515,19 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
 
         uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
         qpu_mc_pred_c_t * u = s->curr_pred_c->qpu_mc_curr;
+        qpu_mc_pred_c_t *last_l0 = s->curr_pred_c->last_l0;
 
         for (int start_y = 0; start_y < nPbH_c; start_y += 16) {
           for (int start_x=0; start_x < nPbW_c; start_x += RPI_CHROMA_BLOCK_WIDTH, u += 2) {
               int bw = nPbW_c-start_x;
               int bh = nPbH_c-start_y;
-              u[-1].next_fn = s->qpu_filter_uv_b0; // In fact ignored
-              u[-1].next_src_x = x1_c + start_x;
-              u[-1].next_src_y = y1_c + start_y;
-              u[-1].next_src_base_c = get_vc_address_u(src_frame);
 
-              u[0].next_fn = s->qpu_filter_uv_b;
+              last_l0->next_fn = s->qpu_filter_uv_b0;
+              last_l0->next_src_x = x1_c + start_x;
+              last_l0->next_src_y = y1_c + start_y;
+              last_l0->next_src_base_c = get_vc_address_u(src_frame);
+
+              u[0].next_fn = s->qpu_filter_uv_b;  // In fact ignored
               u[0].next_src_x = x2_c + start_x;
               u[0].next_src_y = y2_c + start_y;
               u[0].next_src_base_c = get_vc_address_u(src_frame2);
@@ -2541,11 +2546,14 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
               u[1].b1.wo_u = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
               u[1].b1.wo_v = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
               u[1].b1.dst_addr_c = dst_base_u + start_x * 2;
+
+              last_l0 = u + 1;
           }
 
           dst_base_u += s->frame->linesize[1] * 16;
         }
 
+        s->curr_pred_c->last_l0 = last_l0;
         s->curr_pred_c->qpu_mc_curr = u;
     }
 }
@@ -3405,7 +3413,8 @@ static void rpi_begin(HEVCContext *s)
     const uint16_t pic_height_c       = s->ps.sps->height >> s->ps.sps->vshift[1];
 
     for(i=0; i < QPU_N_UV;i++) {
-        qpu_mc_pred_c_t * const u = s->jobs[job].chroma_mvs[i].qpu_mc_base;
+        HEVCRpiChromaPred * const cp = s->jobs[job].chroma_mvs + i;
+        qpu_mc_pred_c_t * const u = cp->qpu_mc_base;
 
         u->next_fn = 0;
         u->next_src_x = 0;
@@ -3418,9 +3427,11 @@ static void rpi_begin(HEVCContext *s)
         u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
         u->s.dummy0 = 0;
 
-        s->jobs[job].chroma_mvs[i].qpu_mc_curr = u + 1;
+        cp->last_l0 = u;
+        cp->last_l1 = u;  /** No ********/
+        cp->qpu_mc_curr = u + 1;
     }
-    s->curr_pred_c = NULL;  //????
+    s->curr_pred_c = NULL;
 
     for(i=0;i < QPU_N_Y;i++) {
         qpu_mc_pred_y_t * const y = (qpu_mc_pred_y_t *)s->y_mvs_base[job][i];
@@ -3490,7 +3501,11 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 
     // Add final commands to Q
     for(i = 0; i != QPU_N_UV; ++i) {
-        qpu_mc_pred_c_t *const pu = jb->chroma_mvs[i].qpu_mc_curr - 1;
+        HEVCRpiChromaPred * const cp = s->jobs[job].chroma_mvs + i;
+        qpu_mc_pred_c_t *const pu = cp->last_l0;
+
+        /*** And L1 ***/
+
         if (pu != jb->chroma_mvs[i].qpu_mc_base)
             tc = 1;
 
