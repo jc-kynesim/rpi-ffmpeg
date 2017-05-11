@@ -29,9 +29,9 @@
 # rb15                                          -- free --
 #
 # ra16                                          clipped(row start address+elem_num)&~3
-# ra17                                          per-channel shifts
+# ra17                                          ra_y:ra_xshift
 # ra18                                          L1 weight (Y)
-# ra19                                          next ra17
+# ra19                                          ra_y_next:ra_xshift_next
 #
 # rb16                                          pitch
 # rb17                                          height + 1
@@ -39,11 +39,11 @@
 # rb19                                          next ra16
 #
 # ra20                                          1
-# ra21                                          ra_21
+# ra21                                          ra_y2_next:ra_y2 (luma); free (chroma)
 # ra22 ra_k256                                  256
-# ra23 ra_y2_next                               ra_y2_next
+# ra23                                          -- free --
 #
-# rb20                                          -- free -- (xpitch)
+# rb20                                          -- free --
 # rb21                                          -- free --
 # rb22 rb_k255                                  255
 # rb23                                          -- free --
@@ -57,12 +57,12 @@
 # rb30                                          frame height-1
 # rb31                                          used as temp to count loop iterations
 #
-# ra24                                          clipped(row start address+8+elem_num)&~3
-# ra25                                          per-channel shifts 2
+# ra24                                          src frame base
+# ra25                                          src frame base 2
 # ra26                                          next ra24
 # ra27                                          next ra25
-# ra28                                          next y
-# ra29                                          y for next texture access
+# ra28                                          -- free --
+# ra29                                          -- free --
 #
 # Use an even numbered register as a link register to avoid corrupting flags
 # ra30                                          next kernel address
@@ -79,24 +79,23 @@
 .set ra_y2,                        ra21.16a
 .set ra_y2_next,                   ra21.16b
 
-.set rb_x_next,                    rb19
 .set rb_frame_base2_next,          rb19
 
 .set ra_frame_base,                ra24
 .set ra_frame_base_next,           ra26
-.set ra_xshift,                    ra17
+.set ra_xshift,                    ra17.16a
 
-.set ra_u2v_ref_offset,            ra25
 .set ra_frame_base2,               ra25
 
-.set ra_xshift_next,               ra19
+# Note ra_xy & ra_xy_next should have same structure!
+.set ra_xshift_next,               ra19.16a
 .set rx_xshift2,                   rb0
 .set rx_xshift2_next,              rb1
 
 .set ra_u2v_dst_offset,            ra27
 
-.set ra_y_next,                    ra28
-.set ra_y,                         ra29
+.set ra_y_next,                    ra19.16b
+.set ra_y,                         ra17.16b
 
 .set ra_k1,                        ra20
 .set rb_xpitch,                    rb20
@@ -196,7 +195,7 @@
   mov ra9, 0
 
 # Compute base address for first and second access
-# ra_x ends up with t0s base
+# ra_frame_base ends up with t0s base
 # ra_frame_base ends up with t1s base
 
   mov r0, ra_x           # Load x
@@ -215,7 +214,7 @@
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1
-  add ra_x, ra_frame_base, r0
+  add ra_frame_base, ra_frame_base, r0
 
   mov r1, ra_y          # Load y
   add ra_y, r1, 1       # Set for next
@@ -224,7 +223,7 @@
 
 # submit texture requests for first line
   nop                   ; mul24 r1, r1, rb_pitch
-  add t0s, ra_x, r1
+  add t0s, ra_frame_base, r1
 
 # submit texture requests for 2nd line
 
@@ -234,7 +233,7 @@
   min r1, r1, rb_frame_height_minus_1
 
   nop                   ; mul24 r1, r1, rb_pitch
-  add t0s, ra_x, r1
+  add t0s, ra_frame_base, r1
 
   add rb13, 9, unif     # denominator
   mov -, unif           # Unused
@@ -283,7 +282,7 @@ min r0, r0, rb_frame_width_minus_1
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
-  add rb_x_next, r3, r0
+  add ra_frame_base_next, r3, r0
 
   mov ra1, unif         # ; width_height
   mov ra0, unif         # H filter coeffs
@@ -326,22 +325,29 @@ shl rb14, ra1.16a, 1  # b14 = weight*2
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
+# Regs needed for src context
+#   ra_xshift
+#   ra_y
+#   ra_x   (should actually be ra_src_base or something like that)
+
+
+
 # r3 = 0
 :uvloop
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb17   ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
-  shr r0, r4, ra_xshift  ; mov.ifz ra_x, rb_x_next
-  nop                   ; mov rb31, r3
+  sub.setf -, r3, rb17    ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
+  shr r0, r4, ra_xshift
+  mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next ; mov r3, rb_pitch
-  mov r1, r0            ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
+  mov r1, r0              ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
   shr r1, r1, 8
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y, ra_y, 1     ; mul24 r2, r2, r3
-  add t0s, ra_x, r2     ; v8min r1, r1, rb_k255
+  add t0s, ra_frame_base, r2     ; v8min r1, r1, rb_k255
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -425,7 +431,7 @@ min r0, r0, rb_frame_width_minus_1
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
-  add rb_x_next, r3, r0
+  add ra_frame_base_next, r3, r0
 
   mov ra1, unif         # ; width_height
   mov ra0, unif         # H filter coeffs
@@ -469,8 +475,8 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 # then submit two more texture requests
 
   sub.setf -, r3, rb17  ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
-  shr r0, r4, ra_xshift ; mov.ifz ra_x, rb_x_next
-  nop                   ; mov rb31, r3
+  shr r0, r4, ra_xshift
+  mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next ; mov r3, rb_pitch
   mov r1, r0            ; v8min r0, r0, rb_k255          # v8subs masks out all but bottom byte
   shr r1, r1, 8
@@ -478,14 +484,15 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   max r2, ra_y, 0       # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y, ra_y, 1     ; mul24 r2, r2, r3
-  add t0s, ra_x, r2     ; v8min r1, r1, rb_k255
+#  add t0s, ra_frame_base, r2     ; v8min r1, r1, rb_k255
+  add t0s, ra_frame_base, r2
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
 
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-  nop                   ; mul24      r3, ra0.8a,       r0
+  and r1, r1, rb_k255   ; mul24      r3, ra0.8a,       r0
   nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0
   nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1  @ "mul_used", 0
   nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9  @ "mul_used", 0
@@ -524,7 +531,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 # 1st half done all results now in the a/b4..7 fifo
 
 # Need to bulk rotate FIFO for heights other than 16
-# plausible heights are 16, 12, 8, 6, 4, 3, 2 and that is all we deal with
+# plausible heights are 16, 12, 8, 6, 4, 2 and that is all we deal with
 # we are allowed 3/4 cb_size w/h :-(
 
 # Destination uniforms discarded
@@ -608,7 +615,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
-  add rb_x_next, r3, r0
+  add ra_frame_base_next, r3, r0
 
   mov -, unif           # ; width_height
   mov ra0, unif         # H filter coeffs
@@ -626,7 +633,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 # The unif read occurs unconditionally, only the write is conditional
 mov      ra1, unif  ; mov rb8,  ra3.8a    # U offset/weight ;
 mov.ifnz ra1, unif  ; mov rb9,  ra3.8b    # V offset/weight ;
-add ra_frame_base_next, rb_x_next, r2 ; mov rb10, ra3.8c
+nop                 ; mov rb10, ra3.8c
 mov r3, 0           ; mov rb11, ra3.8d    # Loop counter ;
 
 shl r1, ra1.16b, rb13
@@ -643,8 +650,8 @@ asr rb12, r1, 1
 # then submit two more texture requests
 
   sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
-  shr r0, r4, ra_xshift     ; mov.ifz ra_x, rb_x_next
-  nop                   ; mov rb31, r3
+  shr r0, r4, ra_xshift
+  mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next ; mov r3, rb_pitch
   mov r1, r0            ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
   shr r1, r1, 8
@@ -652,7 +659,7 @@ asr rb12, r1, 1
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y, ra_y, 1         ; mul24 r2, r2, r3
-  add t0s, ra_x, r2         ; v8min r1, r1, rb_k255
+  add t0s, ra_frame_base, r2         ; v8min r1, r1, rb_k255
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
