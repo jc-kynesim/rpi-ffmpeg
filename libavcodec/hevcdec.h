@@ -549,6 +549,23 @@ typedef struct HEVCPredCmd {
 
 #endif
 
+#ifdef RPI
+
+struct qpu_mc_pred_c_s;
+
+typedef struct HEVCRpiChromaPred
+{
+    struct qpu_mc_pred_c_s *qpu_mc_base;
+    struct qpu_mc_pred_c_s *qpu_mc_curr;
+} HEVCRpiChromaPred;
+
+typedef struct HEVCRpiJob {
+    GPU_MEM_PTR_T chroma_mvs_gptr;
+    HEVCRpiChromaPred chroma_mvs[QPU_N_UV];
+} HEVCRpiJob;
+
+#endif
+
 typedef struct HEVCContext {
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
@@ -592,15 +609,10 @@ typedef struct HEVCContext {
     int ctu_per_y_chan; // Number of CTUs per luma QPU
     int ctu_per_uv_chan; // Number of CTUs per chroma QPU
 
-#if RPI_INTER
-    GPU_MEM_PTR_T unif_mvs_ptr[RPI_MAX_JOBS];
-    uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
+    HEVCRpiJob jobs[RPI_MAX_JOBS];
 
-    // _base pointers are to the start of the row
-    uint32_t *mvs_base[RPI_MAX_JOBS][QPU_N_UV];
-    // these pointers are to the next free space
-    uint32_t *u_mvs[RPI_MAX_JOBS][QPU_N_UV];
-    uint32_t *curr_u_mvs; // Current uniform stream to use for chroma
+#if RPI_INTER
+    HEVCRpiChromaPred * curr_pred_c;
     // Function pointers
     uint32_t qpu_filter_uv;
     uint32_t qpu_filter_uv_b0;
