@@ -1,7 +1,7 @@
 
 # The @ "mul_used", 0 annotations that occur by various mul blocks suppress
 # the warning that we are using rotation & ra/rb registers. r0..3 can be
-# rotated through all 16 elems ra regs can only be routated through their
+# rotated through all 16 elems ra regs can only be rotated through their
 # local 4.  As it happens this is what is wanted here as we do not want the
 # constants from the other half of the calc.
 
@@ -28,7 +28,7 @@
 # rb14                                          L0 weight (U on left, V on right)
 # rb15                                          -- free --
 #
-# ra16                                          clipped(row start address+elem_num)&~3
+# ra16                                          -- free --
 # ra17                                          ra_y:ra_xshift
 # ra18                                          L1 weight (Y)
 # ra19                                          ra_y_next:ra_xshift_next
@@ -36,7 +36,7 @@
 # rb16                                          pitch
 # rb17                                          height + 1
 # rb18                                          height + 3
-# rb19                                          next ra16
+# rb19                                          frame_base2_next
 #
 # ra20                                          1
 # ra21                                          ra_y2_next:ra_y2 (luma); free (chroma)
@@ -75,7 +75,6 @@
 .set rb_frame_width_minus_1,       rb25
 .set rb_frame_height_minus_1,      rb30
 .set rb_pitch,                     rb16
-.set ra_x,                         ra16
 .set ra_y2,                        ra21.16a
 .set ra_y2_next,                   ra21.16b
 
@@ -154,9 +153,7 @@
 
 # Load first request location
   mov ra0, unif         # next_x_y
-  mov r0, elem_num
 
-  add ra_x, ra0.16b, r0   # Store x
   mov ra_y, ra0.16a       # Store y
   mov ra_frame_base, unif # Store frame c base
   mov r1, vdw_setup_1(0)  # Merged with dst_stride shortly, delay slot for ra_frame_base
@@ -191,14 +188,12 @@
   mov ra14, 0
   mov ra15, 0
 
-  # ra9 - delayed setup - must be 0 initially
-  mov ra9, 0
-
 # Compute base address for first and second access
 # ra_frame_base ends up with t0s base
-# ra_frame_base ends up with t1s base
+# ra_frame_base2 ends up with t1s base
 
-  mov r0, ra_x           # Load x
+  mov r0, ra0.16b           # Load x
+  add r0, r0, elem_num
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
 
@@ -248,7 +243,6 @@
 
 # Load first request location
   mov ra0, unif            # next_x_y
-  mov r0, elem_num
 
   mov ra_y2, ra0.16a       # Store y
   mov ra_frame_base2, unif # Store frame c base
@@ -258,6 +252,7 @@
 # ra_frame_base2 ends up with t1s base
 
   mov r0, ra0.16b          # Load x
+  add r0, r0, elem_num     # Add QPU slice
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
 
@@ -384,16 +379,8 @@ shl rb14, ra1.16a, 1  # b14 = weight*2
 # rb13 = weight denom + 6 + 9
 # rb12 = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb13 - 1)
 
-# r2 is elem_num
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
-
-# Regs needed for src context
-#   ra_xshift
-#   ra_y
-#   ra_x   (should actually be ra_src_base or something like that)
-
-
 
 # r3 = 0
 :uvloop

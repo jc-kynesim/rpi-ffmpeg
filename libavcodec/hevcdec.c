@@ -3523,14 +3523,15 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
 
     // Add final commands to Q
     for(i = 0; i != QPU_N_UV; ++i) {
-        HEVCRpiChromaPred * const cp = s->jobs[job].chroma_mvs + i;
+        HEVCRpiChromaPred * const cp = jb->chroma_mvs + i;
         qpu_mc_pred_c_t *const p0 = cp->last_l0;
         qpu_mc_pred_c_t *const p1 = cp->last_l1;
 
-        if (p0 != jb->chroma_mvs[i].qpu_mc_base)
+        // We will always have had L0 if we have L1 so only test L0
+        if (p0 != cp->qpu_mc_base)
             tc = 1;
 
-        cp->qpu_mc_curr->next_fn = (i != QPU_N_UV - 1) ? exit_fn : exit_fn2;  // Actual fn ptr
+        cp->qpu_mc_curr[-1].next_fn = (i != QPU_N_UV - 1) ? exit_fn : exit_fn2;  // Actual fn ptr
 
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->next_src_x = 0;
