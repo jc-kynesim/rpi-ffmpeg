@@ -89,8 +89,8 @@
 
 # Note ra_xy & ra_xy_next should have same structure!
 .set ra_xshift_next,               ra19.16a
-.set rx_xshift2,                   rb0
-.set rx_xshift2_next,              rb1
+.set rb_xshift2,                   rb0
+.set rb_xshift2_next,              rb1
 
 .set ra_u2v_dst_offset,            ra27
 
@@ -240,6 +240,69 @@
 
 # Compute part of VPM to use for DMA output
   m_calc_dma_regs_c rb28, rb27
+
+# -----------------
+# And again for L1, but only worrying about frame2 stuff
+
+  mov ra_link, unif        # Next fn
+
+# Load first request location
+  mov ra0, unif            # next_x_y
+  mov r0, elem_num
+
+  mov ra_y2, ra0.16a       # Store y
+  mov ra_frame_base2, unif # Store frame c base
+
+# Compute base address for first and second access
+# ra_frame_base ends up with t0s base
+# ra_frame_base2 ends up with t1s base
+
+  mov r0, ra0.16b          # Load x
+  max r0, r0, 0
+  min r0, r0, rb_frame_width_minus_1
+
+# Get shift
+  and r1, r0, 1
+  shl rb_xshift2_next, r1, 4
+
+# In a single 32 bit word we get 2 UV pairs so mask bottom bit of xs
+
+  and r0, r0, -2
+  add r0, r0, r0        ; v8subs r1, r1, r1
+  sub r1, r1, rb_pitch
+  and r1, r0, r1
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
+  add r0, r0, r1
+  add ra_frame_base2, ra_frame_base2, r0
+
+  mov r1, ra_y2          # Load y
+  add ra_y2, r1, 1       # Set for next
+  max r1, r1, 0
+  min r1, r1, rb_frame_height_minus_1
+
+# submit texture requests for first line
+  nop                   ; mul24 r1, r1, rb_pitch
+  add t1s, ra_frame_base2, r1
+
+# submit texture requests for 2nd line
+
+  mov r1, ra_y2          # Load y
+  add ra_y2, r1, 1       # Set for next
+  max r1, r1, 0
+  min r1, r1, rb_frame_height_minus_1
+
+  nop                   ; mul24 r1, r1, rb_pitch
+  add t1s, ra_frame_base2, r1
+
+# Discard all the other stuff
+# Move to overlap!
+  mov -, unif           # Unused
+  mov -, unif           # Unused
+  mov -, unif           # Unused
+  mov -, unif           # Unused
+  mov -, unif           # Unused
+  mov -, unif           # Unused
+
 
   bra -, ra_link
   nop
@@ -598,16 +661,16 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 # per-channel shifts were calculated on the *previous* invocation
 
 # set up VPM write
-  mov ra_xshift, ra_xshift_next      ; mov vw_setup, rb28
+  mov rb_xshift2, rb_xshift2_next
+  mov vw_setup, rb28     # B:vw_setup
 
 # get base addresses and per-channel shifts for *next* invocation
   add r0, ra0.16b, r0    # x
 
-  max r0, r0, 0                      ; mov ra_y_next, ra0.16a # y
+  max r0, r0, 0                      ; mov ra_y2_next, ra0.16a # y
   min r0, r0, rb_frame_width_minus_1 ; mov r3, unif        # C frame_base
 
-  mov ra_xshift, ra_xshift_next
-  shl ra_xshift_next, r0, 4
+  shl rb_xshift2_next, r0, 4
 
   and r0, r0, -2
   add r0, r0, r0        ; v8subs r1, r1, r1
@@ -615,7 +678,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
-  add ra_frame_base_next, r3, r0
+  add rb_frame_base2_next, r3, r0
 
   mov -, unif           # ; width_height
   mov ra0, unif         # H filter coeffs
@@ -649,17 +712,17 @@ asr rb12, r1, 1
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
-  shr r0, r4, ra_xshift
-  mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
-  mov.ifz ra_y, ra_y_next ; mov r3, rb_pitch
+  sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu1     # loop counter increment
+  shr r0, r4, ra_xshift	; mov.ifz ra_frame_base2, rb_frame_base2_next
+  nop ; mov rb31, r3
+  mov.ifz ra_y2, ra_y2_next ; mov r3, rb_pitch
   mov r1, r0            ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
   shr r1, r1, 8
 
-  max r2, ra_y, 0  # y
+  max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
-  add ra_y, ra_y, 1         ; mul24 r2, r2, r3
-  add t0s, ra_frame_base, r2         ; v8min r1, r1, rb_k255
+  add ra_y2, ra_y2, 1         ; mul24 r2, r2, r3
+  add t1s, ra_frame_base, r2         ; v8min r1, r1, rb_k255
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -719,7 +782,9 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # mc_exit()
 
+# Chroma & Luma the same now
 ::mc_exit_c
+.if 0
   ldtmu0
   mov  -, vw_wait ; nop ; ldtmu0 # wait on the VDW
 
@@ -728,7 +793,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   nop        ; nop ; thrend
   nop        ; nop # delay slot 1
   nop        ; nop # delay slot 2
-
+.endif
 ::mc_exit
   ldtmu0
   ldtmu1
@@ -822,7 +887,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   add r0, ra10.16a, r3  # Load x
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
-  shl rx_xshift2_next, r0, 3 # Compute shifts
+  shl rb_xshift2_next, r0, 3 # Compute shifts
 
   # r2 still contains mask
   and r0, r0, -4
@@ -884,7 +949,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # per-channel shifts were calculated on the *previous* invocation
   mov ra_xshift, ra_xshift_next
-  mov rx_xshift2, rx_xshift2_next
+  mov rb_xshift2, rb_xshift2_next
 
 # get base addresses and per-channel shifts for *next* invocation
 
@@ -907,7 +972,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   max r0, r0, 0
   min r0, r0, rb_frame_width_minus_1
 
-  shl rx_xshift2_next, r0, 3         # Compute shifts
+  shl rb_xshift2_next, r0, 3         # Compute shifts
   and r0, r0, -4
   and r1, r0, r2
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
@@ -1020,7 +1085,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rb_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-  shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
+  shr r1, r4, rb_xshift2    ; mov.ifz ra_y2, ra_y2_next
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
@@ -1128,7 +1193,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   shr r0, r4, ra_xshift     ; mov.ifz ra_frame_base2, rb_frame_base2_next    ; ldtmu1
   mov.ifz ra_frame_base, ra_frame_base_next ; mov rb31, r3
   mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-  shr r1, r4, rx_xshift2    ; mov.ifz ra_y2, ra_y2_next
+  shr r1, r4, rb_xshift2    ; mov.ifz ra_y2, ra_y2_next
 
   max r2, ra_y, 0  # y
   min r2, r2, rb_frame_height_minus_1
@@ -1206,6 +1271,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 ################################################################################
 
+.if 0
 ::mc_interrupt_exit6c
   ldtmu0
   mov  -, vw_wait ; nop ; ldtmu0  # wait on the VDW
@@ -1219,9 +1285,12 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   nop        ; nop ; thrend
   mov interrupt, 1; nop # delay slot 1
   nop        ; nop # delay slot 2
+.endif
 
 ::mc_interrupt_exit8c
   ldtmu0
+  ldtmu1
+  ldtmu1
   mov  -, vw_wait ; nop ; ldtmu0  # wait on the VDW
 
   mov -,sacq(0) # 1

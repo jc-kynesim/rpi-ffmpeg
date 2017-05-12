@@ -2516,6 +2516,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
         uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
         qpu_mc_pred_c_t * u = s->curr_pred_c->qpu_mc_curr;
         qpu_mc_pred_c_t *last_l0 = s->curr_pred_c->last_l0;
+        qpu_mc_pred_c_t *last_l1 = s->curr_pred_c->last_l1;
 
         for (int start_y = 0; start_y < nPbH_c; start_y += 16) {
           for (int start_x=0; start_x < nPbW_c; start_x += RPI_CHROMA_BLOCK_WIDTH, u += 2) {
@@ -2547,13 +2548,15 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
               u[1].b1.wo_v = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
               u[1].b1.dst_addr_c = dst_base_u + start_x * 2;
 
-              last_l0 = u + 1;
+              last_l0 = u;
+              last_l1 = u + 1;
           }
 
           dst_base_u += s->frame->linesize[1] * 16;
         }
 
         s->curr_pred_c->last_l0 = last_l0;
+        s->curr_pred_c->last_l1 = last_l1;
         s->curr_pred_c->qpu_mc_curr = u;
     }
 }
@@ -3414,22 +3417,41 @@ static void rpi_begin(HEVCContext *s)
 
     for(i=0; i < QPU_N_UV;i++) {
         HEVCRpiChromaPred * const cp = s->jobs[job].chroma_mvs + i;
-        qpu_mc_pred_c_t * const u = cp->qpu_mc_base;
+        qpu_mc_pred_c_t * u = cp->qpu_mc_base;
+
+        // Chroma setup is a double block with L0 fetch
+        // and other stuff in the 1st block and L1 fetch
+        // in the 2nd along with a lot of dummy vars
+        // This could be packed a lot tighter but it would make
+        // L0, L1 management a lot harder
 
         u->next_fn = 0;
         u->next_src_x = 0;
         u->next_src_y = 0;
         u->next_src_base_c = 0;
-        u->s.pic_cw = pic_width_c;
-        u->s.pic_ch = pic_height_c;
-        u->s.stride2 = rpi_sliced_frame_stride2(s->frame);
-        u->s.stride1 = s->frame->linesize[1];
-        u->s.wdenom = s->sh.chroma_log2_weight_denom + 6;
-        u->s.dummy0 = 0;
-
+        u->s0.pic_cw = pic_width_c;
+        u->s0.pic_ch = pic_height_c;
+        u->s0.stride2 = rpi_sliced_frame_stride2(s->frame);
+        u->s0.stride1 = s->frame->linesize[1];
+        u->s0.wdenom = s->sh.chroma_log2_weight_denom + 6;
+        u->s0.dummy0 = 0;
         cp->last_l0 = u;
-        cp->last_l1 = u;  /** No ********/
-        cp->qpu_mc_curr = u + 1;
+        ++u;
+
+        u->next_fn = 0;
+        u->next_src_x = 0;
+        u->next_src_y = 0;
+        u->next_src_base_c = 0;
+        u->s1.dummy0 = 0;
+        u->s1.dummy1 = 0;
+        u->s1.dummy2 = 0;
+        u->s1.dummy3 = 0;
+        u->s1.dummy4 = 0;
+        u->s1.dummy5 = 0;
+        cp->last_l1 = u;
+        ++u;
+
+        cp->qpu_mc_curr = u;
     }
     s->curr_pred_c = NULL;
 
@@ -3502,19 +3524,24 @@ static unsigned int mc_terminate_uv(HEVCContext * const s, const int job)
     // Add final commands to Q
     for(i = 0; i != QPU_N_UV; ++i) {
         HEVCRpiChromaPred * const cp = s->jobs[job].chroma_mvs + i;
-        qpu_mc_pred_c_t *const pu = cp->last_l0;
+        qpu_mc_pred_c_t *const p0 = cp->last_l0;
+        qpu_mc_pred_c_t *const p1 = cp->last_l1;
 
-        /*** And L1 ***/
-
-        if (pu != jb->chroma_mvs[i].qpu_mc_base)
+        if (p0 != jb->chroma_mvs[i].qpu_mc_base)
             tc = 1;
 
-        pu->next_fn = (i != QPU_N_UV - 1) ? exit_fn : exit_fn2;  // Actual fn ptr
-        // Need to set the src to something that can be (pointlessly) prefetched
-        pu->next_src_x = 0;
-        pu->next_src_y = 0;
-        // We use this code as a dummy texture - safe?
-        pu->next_src_base_c = dummy_texture;
+        cp->qpu_mc_curr->next_fn = (i != QPU_N_UV - 1) ? exit_fn : exit_fn2;  // Actual fn ptr
+
+        // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
+        p0->next_src_x = 0;
+        p0->next_src_y = 0;
+        p0->next_src_base_c = dummy_texture;
+        p1->next_src_x = 0;
+        p1->next_src_y = 0;
+        p1->next_src_base_c = dummy_texture;
+
+        cp->last_l0 = NULL;
+        cp->last_l1 = NULL;
     }
 
     return tc;

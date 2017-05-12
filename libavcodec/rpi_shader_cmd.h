@@ -42,7 +42,15 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t stride1;
             uint32_t wdenom;
             uint32_t dummy0;
-        } s;
+        } s0;
+        struct {
+            uint32_t dummy0;
+            uint32_t dummy1;
+            uint32_t dummy2;
+            uint32_t dummy3;
+            uint32_t dummy4;
+            uint32_t dummy5;
+        } s1;
     };
 } qpu_mc_pred_c_t;
 
