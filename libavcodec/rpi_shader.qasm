@@ -317,58 +317,46 @@
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 ::mc_filter_uv
-  mov ra_link, unif
+  mov ra_link, unif     ; mov vw_setup, rb28    # ; x_y
 
 # per-channel shifts were calculated on the *previous* invocation
 
 # get base addresses and per-channel shifts for *next* invocation
-  mov ra2, unif         ; mov vw_setup, rb28    # ; x_y
-  mov r0, elem_num      ; mov r3, unif          # base
+  mov ra2, unif         ; mov r0, elem_num
 
-  add r0, ra2.16b, r0   # x
+  setf_nz_if_v                                  # Also acts as delay slot for ra2
+
+  add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
+  sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, 0         ; mov ra_xshift, ra_xshift_next
   min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
 
   shl ra_xshift_next, r0, 4
 
   and r0, r0, -2        ; mov ra0, unif         # H filter coeffs
-  add r0, r0, r0        ; v8subs r1, r1, r1
-  sub r1, r1, rb_pitch  ; mov ra_y_next, ra2.16a
-  and r1, r0, r1
+  add r0, r0, r0        ; mov ra_y_next, ra2.16a
+  and r1, r0, r1        ; mul24 r2, ra1.16b, 2  # r2=x*2 (we are working in pel pairs)
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        # Add stripe offsets
-  add ra_base_next, r3, r0
-
-
-
-
-  shl ra1.16b, ra1.16b, 1  # width * 2
-  nop
+  add r0, r0, r1        ; mov r1, ra1.16a       # Add stripe offsets ; r1=height
+  add ra_base_next, r3, r0 ; mul24 r0, r1, ra_k256
 
 # set up VPM write
-# get width,height of block
 
-sub rb29, rb24, ra1.16b  # Compute vdw_setup1(dst_pitch-width)
-add rb17, ra1.16a, 1
-add rb18, ra1.16a, 3
-shl r0,   ra1.16a, 8
+  sub rb29, rb24, r2    ; mov ra3, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
+  add rb17, r1, 1       ; mov ra1, unif         # ; U offset/weight
+  add rb18, r1, 3       ; mov.ifnz ra1, unif    # ; V offset/weight
 
-add r0,   r0, ra1.16b    # Combine width and height of destination area
-shl r0,   r0, 15  # Shift into bits 16 upwards of the vdw_setup0 register
-add rb26, r0, rb27    ; mov ra3, unif  # ; V filter coeffs
+# ; unpack filter coefficients
 
-  setf_nz_if_v
+  add r0,   r0, r2      ; mov rb8,  ra3.8a      # Combine width and height of destination area
+  shl r0,   r0, 15      ; mov rb9,  ra3.8b      # Shift into bits 16 upwards of the vdw_setup0 register
+  add rb26, r0, rb27    ; mov r1, ra1.16b       # ; r1=weight
 
-# unpack filter coefficients
+  shl r1, r1, rb13      ; mov rb10, ra3.8c
+  mov r3, 0             ; mov rb11, ra3.8d   # Loop count
 
-mov ra1, unif         ; mov rb8,  ra3.8a   # U offset/weight
-mov.ifnz ra1, unif    ; mov rb9,  ra3.8b   # V offset/weight
-nop                   ; mov rb10, ra3.8c
-mov r3, 0             ; mov rb11, ra3.8d   # Loop count
-
-shl r1, ra1.16b, rb13
-asr rb12, r1, 1
-shl rb14, ra1.16a, 1  # b14 = weight*2
+  asr rb12, r1, 1
+  shl rb14, ra1.16a, 1  # b14 = weight*2
 
 # rb14 - weight L0 * 2
 # rb13 = weight denom + 6 + 9
@@ -694,17 +682,18 @@ asr rb12, r1, 1
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1          ; ldtmu1     # loop counter increment
-  shr r0, r4, ra_xshift	; mov.ifz ra_base2, rb_base2_next
-  nop ; mov rb31, r3
+  sub.setf -, r3, rb17  ; v8adds r3, r3, ra_k1          ; ldtmu1     # loop counter increment
+  nop                   ; mov.ifz ra_base2, rb_base2_next
+# No particular reason for xshift2 here - could use xshift is ra_ is more convienient
+  shr r0, r4, rb_xshift2 ; mov rb31, r3
   mov.ifz ra_y2, ra_y2_next ; mov r3, rb_pitch
   mov r1, r0            ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
   shr r1, r1, 8
 
   max r2, ra_y2, 0  # y
   min r2, r2, rb_max_y
-  add ra_y2, ra_y2, 1         ; mul24 r2, r2, r3
-  add t1s, ra_base2, r2         ; v8min r1, r1, rb_k255
+  add ra_y2, ra_y2, 1   ; mul24 r2, r2, r3
+  add t1s, ra_base2, r2 ; v8min r1, r1, rb_k255
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
