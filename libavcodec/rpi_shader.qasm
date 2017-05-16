@@ -156,8 +156,8 @@
   mov ra_base, unif                             # Store frame c base
 
 # Read image dimensions
-  sub rb_max_y, unif, 1     # pic c width
-  sub rb_max_x, unif, 1     # pic c height
+  sub rb_max_x, unif, 1     # pic c width
+  sub rb_max_y, unif, 1     # pic c height
 
 # load constants
   mov ra_k1, 1
