@@ -328,7 +328,7 @@
 
   add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
-  max r0, r0, 0         ; mov ra_xshift, ra_xshift_next
+  max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next # xshift2 used because B
   min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
 
   shl ra_xshift_next, r0, 4
@@ -370,17 +370,14 @@
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb17    ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
-  shr r0, r4, ra_xshift
-  mov.ifz ra_base, ra_base_next ; mov rb31, r3
-  mov.ifz ra_y, ra_y_next ; mov r3, rb_pitch
-  mov r1, r0              ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
-  shr r1, r1, 8
+  sub.setf -, r3, rb17  ; v8adds rb31, r3, ra_k1 ; ldtmu0     # loop counter increment
+  shr r0, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
+  shr r1, r0, 8         ; mov.ifnz r3, ra_y
 
-  max r2, ra_y, 0  # y
+  max r2, r3, 0         ; mov.ifz ra_base, ra_base_next
   min r2, r2, rb_max_y
-  add ra_y, ra_y, 1     ; mul24 r2, r2, r3
-  add t0s, ra_base, r2     ; v8min r1, r1, rb_k255
+  add ra_y, r3, ra_k1   ; mul24 r2, r2, rb_pitch
+  add t0s, ra_base, r2  ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -391,9 +388,9 @@
 # The filter coeffs for the two halves of this are the same (unlike in the
 # Y case) so it doesn't matter which ra0 we get them from
 
-  nop                   ; mul24      r3, ra0.8a,       r0
-  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0
+  and r1, r1, rb_k255   ; mul24      r3, ra0.8a,       r0
   nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0
   nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9  @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 2,  r0 << 2  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10 @ "mul_used", 0
