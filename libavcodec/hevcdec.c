@@ -2274,9 +2274,9 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
 {
     const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
 
-    rpi_luma_mc_uni(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
-                    mv, x0, y0, nPbW, nPbH,
-                    weight_mul, weight_offset);
+//    rpi_luma_mc_uni(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
+//                    mv, x0, y0, nPbW, nPbH,
+//                    weight_mul, weight_offset);
 
     {
         const unsigned int mx          = mv->x & 3;
@@ -2289,6 +2289,17 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
         qpu_mc_pred_y_t * cmd_y = (qpu_mc_pred_y_t *)s->curr_y_mvs;
         uint32_t dst_addr = get_vc_address_y(s->frame) + y_off;
         const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
+
+        {
+            if (mx == 0 && my == 0)
+                ++s->y_pred1_x0y0;
+            else if (mx == 0)
+                ++s->y_pred1_x0;
+            else if (my == 0)
+                ++s->y_pred1_y0;
+            else
+                ++s->y_pred1_xy;
+        }
 
         // Potentially we could change the assembly code to support taller sizes in one go
         for (int start_y = 0; start_y < nPbH; start_y += 16, dst_addr += s->frame->linesize[0] * 16) {
@@ -2378,6 +2389,19 @@ rpi_pred_y_b(HEVCContext * const s,
         uint32_t dst = get_vc_address_y(s->frame) + y_off;
         const uint32_t src1_base = get_vc_address_y(src_frame);
         const uint32_t src2_base = get_vc_address_y(src_frame2);
+
+        {
+            const unsigned int mmx = mx | mx2;
+            const unsigned int mmy = my | my2;
+            if (mmx == 0 && mmy == 0)
+                ++s->y_pred2_x0y0;
+            else if (mmx == 0)
+                ++s->y_pred2_x0;
+            else if (mmy == 0)
+                ++s->y_pred2_y0;
+            else
+                ++s->y_pred2_xy;
+        }
 
         for (int start_y=0; start_y < nPbH; start_y += 16) {  // Potentially we could change the assembly code to support taller sizes in one go
           const unsigned int bh = FFMIN(nPbH - start_y, 16);
@@ -3881,6 +3905,12 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     if (s->enable_rpi && s->ctu_count) {
         rpi_do_all_passes(s);
     }
+
+    printf("P: %d/%d/%d/%d;  B: %d/%d/%d/%d\n",
+           s->y_pred1_xy, s->y_pred1_x0, s->y_pred1_y0, s->y_pred1_x0y0,
+           s->y_pred2_xy, s->y_pred2_x0, s->y_pred2_y0, s->y_pred2_x0y0);
+    s->y_pred1_xy = s->y_pred1_x0 = s->y_pred1_y0 = s->y_pred1_x0y0 = 0;
+    s->y_pred2_xy = s->y_pred2_x0 = s->y_pred2_y0 = s->y_pred2_x0y0 = 0;
 
 #endif
 

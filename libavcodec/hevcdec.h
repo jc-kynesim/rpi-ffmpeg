@@ -613,6 +613,15 @@ typedef struct HEVCContext {
 
     HEVCRpiJob jobs[RPI_MAX_JOBS];
 
+    int y_pred1_xy;
+    int y_pred1_x0;
+    int y_pred1_y0;
+    int y_pred1_x0y0;
+    int y_pred2_xy;
+    int y_pred2_x0;
+    int y_pred2_y0;
+    int y_pred2_x0y0;
+
 #if RPI_INTER
     HEVCRpiChromaPred * curr_pred_c;
     // Function pointers
