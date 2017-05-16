@@ -41,7 +41,7 @@
 # ra20                                          1
 # ra21                                          ra_y2_next:ra_y2 (luma); free (chroma)
 # ra22 ra_k256                                  256
-# ra23                                          -- free --
+# ra23                                          0
 #
 # rb20                                          -- free --
 # rb21                                          -- free --
@@ -98,6 +98,7 @@
 .set rb_xpitch,                    rb20
 .set rb_k255,                      rb22
 .set ra_k256,                      ra22
+.set ra_k0,                        ra23
 
 .set ra_link,                      ra30
 
@@ -167,6 +168,7 @@
   mov ra_k1, 1
   mov ra_k256, 256
   mov rb_k255, 255
+  mov ra_k0, 0
 
 # get destination vdw setup
   add rb24, r1, rb_pitch # vdw_setup_1
@@ -669,42 +671,40 @@ asr rb12, r1, 1
 # then submit two more texture requests
 
 # r3 = 0
+
 :uvloop_b
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb17  ; v8adds r3, r3, ra_k1          ; ldtmu1     # loop counter increment
-  nop                   ; mov.ifz ra_base2, rb_base2_next
-# No particular reason for xshift2 here - could use xshift is ra_ is more convienient
-  shr r0, r4, rb_xshift2 ; mov rb31, r3
-  mov.ifz ra_y2, ra_y2_next ; mov r3, rb_pitch
-  mov r1, r0            ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
-  shr r1, r1, 8
 
-  max r2, ra_y2, 0  # y
+  sub.setf -, r3, rb17  ; v8adds rb31, r3, ra_k1 ; ldtmu1     # loop counter increment
+  shr r0, r4, rb_xshift2 ; mov.ifz r3, ra_y2_next
+  shr r1, r0, 8         ; mov.ifnz r3, ra_y2
+
+  max r2, r3, ra_k0     ; mov.ifz ra_base2, rb_base2_next
   min r2, r2, rb_max_y
-  add ra_y2, ra_y2, 1   ; mul24 r2, r2, r3
-  add t1s, ra_base2, r2 ; v8min r1, r1, rb_k255
+  add ra_y2, r3, ra_k1  ; mul24 r2, r2, rb_pitch
+  add t1s, ra_base2, r2 ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
 
 mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
-nop                  ; mul24      r3, ra0.8a,       r0
-nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8     @ "mul_used", 0
-nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1     @ "mul_used", 0
-nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9     @ "mul_used", 0
-sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2     @ "mul_used", 0
-nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10    @ "mul_used", 0
-add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3     @ "mul_used", 0
-nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11    @ "mul_used", 0
-sub r0, r2, r3       ; mov r3, rb31
-sub.setf -, r3, 4    ; mov ra12, ra13
-brr.anyn -, r:uvloop_b
-mov ra13, ra14          ; mul24 r1, ra14, rb9
-mov ra14, ra15          ; mul24 r2, ra15, rb10
-mov ra15, r0            ; mul24 r0, ra12, rb8
+  and r1, r1, rb_k255  ; mul24      r3, ra0.8a,       r0
+  nop                  ; mul24      r2, ra0.8b << 1,  r0 << 1     @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8     @ "mul_used", 0
+  nop                  ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9     @ "mul_used", 0
+  sub r2, r2, r3       ; mul24      r3, ra0.8c << 2,  r0 << 2     @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10    @ "mul_used", 0
+  add r2, r2, r3       ; mul24      r3, ra0.8d << 3,  r0 << 3     @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8d << 11, r1 << 11    @ "mul_used", 0
+  sub r0, r2, r3       ; mov r3, rb31
+  sub.setf -, r3, 4    ; mov ra12, ra13
+  brr.anyn -, r:uvloop_b
+  mov ra13, ra14          ; mul24 r1, ra14, rb9
+  mov ra14, ra15          ; mul24 r2, ra15, rb10
+  mov ra15, r0            ; mul24 r0, ra12, rb8
 # >>> .anyn uvloop_b
 
 # apply vertical filter and write to VPM
@@ -732,11 +732,10 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
 
 # DMA out
 
-  mov vw_setup, rb26    ; mov ra9, rb26 # VDW setup 0
   bra -, ra_link
-  mov vw_setup, rb29    ; mov ra10, rb29 # Stride
+  mov vw_setup, rb26
+  mov vw_setup, rb29
   mov vw_addr, unif     # c_dst_addr
-  nop
 
 
 
@@ -872,6 +871,7 @@ mov ra15, r0            ; mul24 r0, ra12, rb8
   mov ra_k1, 1
   mov ra_k256, 256
   mov rb_k255, 255
+  mov ra_k0, 0
 
 # touch vertical context to keep simulator happy
 
