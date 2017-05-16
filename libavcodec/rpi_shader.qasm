@@ -328,7 +328,7 @@
 
   add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
-  max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next # xshift2 used because B
+  max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next # ; xshift2 used because B
   min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
 
   shl ra_xshift_next, r0, 4
@@ -396,41 +396,39 @@
   nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10 @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra0.8d << 3,  r0 << 3  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11 @ "mul_used", 0
-sub r0, r2, r3       ; mov r3, rb31
-sub.setf -, r3, 4    ; mov ra12, ra13
-brr.anyn -, r:uvloop
-mov ra13, ra14          ; mul24 r1, ra14, rb9
-mov ra14, ra15
-mov ra15, r0            ; mul24 r0, ra12, rb8
+  sub r0, r2, r3        ; mov r3, rb31
+  sub.setf -, r3, 4     ; mov ra12, ra13
+  brr.anyn -, r:uvloop
+  mov ra13, ra14        ; mul24 r1, ra14, rb9
+  mov ra14, ra15
+  mov ra15, r0          ; mul24 r0, ra12, rb8
 # >>> .anyn uvloop
 
 # apply vertical filter and write to VPM
 
-sub r1, r1, r0          ; mul24 r0, ra14, rb10
-add r1, r1, r0          ; mul24 r0, ra15, rb11
-sub r1, r1, r0          ; mov -, vw_wait
-sub.setf -, r3, rb18    ; mul24 r1, r1, ra_k256
-asr r1, r1, 14
-nop                     ; mul24 r1, r1, rb14
-shl r1, r1, 8
+  sub r1, r1, r0        ; mul24 r0, ra14, rb10
+  add r1, r1, r0        ; mul24 r0, ra15, rb11
+  sub r1, r1, r0
+  sub.setf -, r3, rb18  ; mul24 r1, r1, ra_k256
+  asr r1, r1, 14
+  nop                   ; mul24 r1, r1, rb14
+  shl r1, r1, 8
 
-add r1, r1, rb12
+  add r1, r1, rb12
   asr ra1.8as, r1, rb13
   nop                   ; mov r1, r1 << 8
   brr.anyn -, r:uvloop
   asr ra1.8bs, r1, rb13
-  nop
+  mov -, vw_wait
   mov vpm, ra1
 
 # >>>
 
 # DMA out for U & stash for V
-  mov ra9, 0
-  mov vw_setup, rb26
   bra -, ra_link
-  mov vw_setup, rb29    ; mov ra10, rb29 # Stride
+  mov vw_setup, rb26
+  mov vw_setup, rb29
   mov vw_addr, unif     # u_dst_addr
-  nop
 # >>>
 
 ################################################################################
@@ -452,7 +450,7 @@ add r0, ra2.16b, r0   # x
 max r0, r0, 0
 min r0, r0, rb_max_x
 
-  mov ra_xshift, ra_xshift_next
+  mov rb_xshift2, ra_xshift_next
   shl ra_xshift_next, r0, 4
 
   and r0, r0, -2
@@ -504,18 +502,14 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb17  ; v8adds r3, r3, ra_k1          ; ldtmu0     # loop counter increment
-  shr r0, r4, ra_xshift
-  mov.ifz ra_base, ra_base_next ; mov rb31, r3
-  mov.ifz ra_y, ra_y_next ; mov r3, rb_pitch
-  mov r1, r0            ; v8min r0, r0, rb_k255          # v8subs masks out all but bottom byte
-  shr r1, r1, 8
+  sub.setf -, r3, rb17  ; v8adds rb31, r3, ra_k1 ; ldtmu0     # loop counter increment
+  shr r0, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
+  shr r1, r0, 8         ; mov.ifnz r3, ra_y
 
-  max r2, ra_y, 0       # y
+  max r2, r3, 0         ; mov.ifz ra_base, ra_base_next
   min r2, r2, rb_max_y
-  add ra_y, ra_y, 1     ; mul24 r2, r2, r3
-#  add t0s, ra_base, r2     ; v8min r1, r1, rb_k255
-  add t0s, ra_base, r2
+  add ra_y, r3, ra_k1   ; mul24 r2, r2, rb_pitch
+  add t0s, ra_base, r2  ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
