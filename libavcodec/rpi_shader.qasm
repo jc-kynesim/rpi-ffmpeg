@@ -274,7 +274,6 @@
   bra -, ra_link
 
   min r0, r0, rb_max_y  ; mov -, unif           # Unused 5
-
   add ra_y2, r1, ra_k1   ; mul24 r0, r0, rb_pitch
   add t1s, ra_base2, r0
 
