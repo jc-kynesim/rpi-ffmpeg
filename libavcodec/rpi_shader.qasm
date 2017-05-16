@@ -307,7 +307,6 @@
 
 
 .macro setf_nz_if_v
-#  mov.setf -, [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 .endm
 
@@ -440,59 +439,45 @@
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 ::mc_filter_uv_b0
-mov -, unif                  # Ignore chain address - always "b"
+  mov -, unif           ; mov vw_setup, rb28    # next_fn ignored - always uv_b
 
 # per-channel shifts were calculated on the *previous* invocation
 
 # get base addresses and per-channel shifts for *next* invocation
-mov ra2, unif         # x_y
-mov r0, elem_num      ; mov r3, unif          # base
+  mov ra2, unif         ; mov r0, elem_num
 
-add r0, ra2.16b, r0   # x
-max r0, r0, 0
-min r0, r0, rb_max_x
+  setf_nz_if_v                                  # Also acts as delay slot for ra2
 
-  mov rb_xshift2, ra_xshift_next
+  add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
+  sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
+  max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next # ; xshift2 used because B
+  min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
+
   shl ra_xshift_next, r0, 4
 
-  and r0, r0, -2
-  add r0, r0, r0        ; v8subs  r1, r1, r1
-  sub r1, r1, rb_pitch
-  and r1, r0, r1
+  and r0, r0, -2        ; mov ra0, unif         # H filter coeffs
+  add r0, r0, r0        ; mov ra_y_next, ra2.16a
+  and r1, r0, r1        ; mul24 r2, ra1.16b, 2  # r2=x*2 (we are working in pel pairs)
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        # Add stripe offsets
-  add ra_base_next, r3, r0
+  add r0, r0, r1        ; mov r1, ra1.16a       # Add stripe offsets ; r1=height
+  add ra_base_next, r3, r0 ; mul24 r0, r1, ra_k256
 
-  mov ra1, unif         # ; width_height
-  mov ra0, unif         # H filter coeffs
-  mov ra_y_next, ra2.16a
+# set up VPM write
 
-  shl ra1.16b, ra1.16b, 1
-  nop
+  sub rb29, rb24, r2    ; mov ra3, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
+  add rb17, r1, 1
+  add ra31, r1, 3       ; mov rb8,  ra3.8a      # Combine width and height of destination area
 
-# Need to have unsigned coeffs to so we can just unpack in the filter
-# chroma filter always goes -ve, +ve, +ve, -ve. This is fixed in the
-# filter code. Unpack into b regs for V
+# ; unpack filter coefficients
 
-sub rb29, rb24, ra1.16b         # Compute vdw_setup1(dst_pitch-width)
-add rb17, ra1.16a, 1
-add ra31, ra1.16a, 3
-shl r0,   ra1.16a, 8
-add r0,   r0, ra1.16b   ; mov ra3, unif   # Combine width and height of destination area ; V filter coeffs
-shl r0,   r0, 15        ; mov rb14, unif  # U weight L0
-add rb26, r0, rb27
+  add r0,   r0, r2      ; mov rb9,  ra3.8b
+  shl r0,   r0, 15      ; mov rb10, ra3.8c      # Shift into bits 16 upwards of the vdw_setup0 register
+  add rb26, r0, rb27
 
-mov rb8, ra3.8a
-mov rb9, ra3.8b
-mov rb10, ra3.8c
-mov rb11, ra3.8d
+  mov r3, 0             ; mov rb11, ra3.8d      # Loop count
 
-# r2 is elem_num
-# r3 is loop counter
-
-mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-
-mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
+  mov rb14, unif                                # U weight
+  mov.ifnz rb14, unif                           # V weight
 
 # rb14 unused in b0 but will hang around till the second pass
 
@@ -566,7 +551,7 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   sub.setf -, 15, r3    # 12 + 3 of preroll
   brr.anyn -, r:uv_b0_post_fin                  # h > 12 (n) => 16 (do nothing)
   sub r3, 11, r3        ; mov -, unif           # r3 = shifts wanted ; Discard u_dst_addr
-  mov r0, i_shift16
+  mov r0, i_shift16     ; mov ra_link, unif
   mov r1, 0x10000
 # >>>
   brr.anyz -, r:uv_b0_post12                    # h == 12 deal with specially
@@ -611,59 +596,36 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   mov ra7, r2           ; mov rb6, r3
 
 :uv_b0_post_fin
-  # drop through
 
-################################################################################
-
-::mc_filter_uv_b
-
-  mov ra_link, unif
-
-  mov ra0, unif         ; mov r0, elem_num
+##### L1 B processing
 
 # per-channel shifts were calculated on the *previous* invocation
 
-# set up VPM write
-  mov rb_xshift2, rb_xshift2_next
-  mov vw_setup, rb28     # B:vw_setup
-
 # get base addresses and per-channel shifts for *next* invocation
-  add r0, ra0.16b, r0    # x
+  mov ra2, unif         ; mov r0, elem_num
 
-  max r0, r0, 0                      ; mov ra_y2_next, ra0.16a # y
-  min r0, r0, rb_max_x ; mov r3, unif        # C base
+  setf_nz_if_v                                  # Also acts as delay slot for ra2
+
+  add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
+  sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
+  max r0, r0, ra_k0     ; mov rb_xshift2, rb_xshift2_next # ; xshift2 used because B
+  min r0, r0, rb_max_x  ; mov -, unif         # ; width_height
 
   shl rb_xshift2_next, r0, 4
 
-  and r0, r0, -2
-  add r0, r0, r0        ; v8subs r1, r1, r1
-  sub r1, r1, rb_pitch
-  and r1, r0, r1
+  and r0, r0, -2        ; mov ra0, unif         # H filter coeffs
+  add r0, r0, r0        ; mov ra_y2_next, ra2.16a
+  and r1, r0, r1        ; mov ra3, unif         # ; V filter coeffs
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        # Add stripe offsets
+  add r0, r0, r1        ; mov rb8,  ra3.8a      # Add stripe offsets ; start unpacking filter coeffs
   add rb_base2_next, r3, r0
 
-  mov -, unif           # ; width_height
-  mov ra0, unif         # H filter coeffs
+  mov ra1, unif         ; mov rb9,  ra3.8b      # U offset/weight
+  mov.ifnz ra1, unif    ; mov rb10, ra3.8c      # V offset/weight
 
-# rb17, rb26, rb29, ra31 inherited from B0 as w/h must be the same
-
-mov ra3, unif #  V filter coeffs
-
-# get filter coefficients
-
-mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-
-# Get offset & weight stuff
-
-# The unif read occurs unconditionally, only the write is conditional
-mov      ra1, unif  ; mov rb8,  ra3.8a    # U offset/weight ;
-mov.ifnz ra1, unif  ; mov rb9,  ra3.8b    # V offset/weight ;
-nop                 ; mov rb10, ra3.8c
-mov r3, 0           ; mov rb11, ra3.8d    # Loop counter ;
-
-shl r1, ra1.16b, rb13
-asr rb12, r1, 1
+  nop                   ; mov rb11, ra3.8d
+  shl r1, ra1.16b, rb13 ; v8subs r3, r3, r3     # ; r3 (loop counter)  = 0
+  asr rb12, r1, 1
 
 # ra1.16a used directly in the loop
 
@@ -675,7 +637,6 @@ asr rb12, r1, 1
 :uvloop_b
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
-
 
   sub.setf -, r3, rb17  ; v8adds rb31, r3, ra_k1 ; ldtmu1     # loop counter increment
   shr r0, r4, rb_xshift2 ; mov.ifz r3, ra_y2_next
@@ -738,23 +699,34 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov vw_addr, unif     # c_dst_addr
 
 
-
 ################################################################################
 
 # mc_exit()
 
-# Chroma & Luma the same now
-::mc_exit_c
-.if 0
+::mc_interrupt_exit8c
   ldtmu0
-  mov  -, vw_wait ; nop ; ldtmu0 # wait on the VDW
+  ldtmu1
+  ldtmu1
+  mov  -, vw_wait ; nop ; ldtmu0  # wait on the VDW
 
-  mov -,srel(0)
+  mov -,sacq(0) # 1
+  mov -,sacq(0) # 2
+  mov -,sacq(0) # 3
+  mov -,sacq(0) # 4
+  mov -,sacq(0) # 5
+  mov -,sacq(0) # 6
+  mov -,sacq(0) # 7
+#  mov -,sacq(0) # 8
+#  mov -,sacq(0) # 9
+#  mov -,sacq(0) # 10
+#  mov -,sacq(0) # 11
 
   nop        ; nop ; thrend
-  nop        ; nop # delay slot 1
+  mov interrupt, 1; nop # delay slot 1
   nop        ; nop # delay slot 2
-.endif
+
+# Chroma & Luma the same now
+::mc_exit_c
 ::mc_exit
   ldtmu0
   ldtmu1
@@ -767,30 +739,41 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   nop        ; nop # delay slot 1
   nop        ; nop # delay slot 2
 
-# mc_interrupt_exit8()
-#::mc_interrupt_exit8
-#mov  -, vw_wait # wait on the VDW
-#
-#ldtmu0
-#ldtmu1
-#ldtmu0
-#ldtmu1
-#
-#mov -,sacq(0) # 1
-#mov -,sacq(0) # 2
-#mov -,sacq(0) # 3
-#mov -,sacq(0) # 4
-#mov -,sacq(0) # 5
-#mov -,sacq(0) # 6
-#mov -,sacq(0) # 7
-#
-#nop        ; nop ; thrend
-#mov interrupt, 1; nop # delay slot 1
-#nop        ; nop # delay slot 2
-#
+
+# mc_interrupt_exit12()
+::mc_interrupt_exit12
+  ldtmu0
+  ldtmu1
+  ldtmu0
+  mov  -, vw_wait ; nop ; ldtmu1  # wait on the VDW
+
+  mov -,sacq(0) # 1
+  mov -,sacq(0) # 2
+  mov -,sacq(0) # 3
+  mov -,sacq(0) # 4
+  mov -,sacq(0) # 5
+  mov -,sacq(0) # 6
+  mov -,sacq(0) # 7
+  mov -,sacq(0) # 8
+  mov -,sacq(0) # 9
+  mov -,sacq(0) # 10
+  mov -,sacq(0) # 11
+
+  nop        ; nop ; thrend
+  mov interrupt, 1; nop # delay slot 1
+  nop        ; nop # delay slot 2
 
 
+::mc_exit1
+  mov  -, vw_wait # wait on the VDW
 
+  ldtmu0
+  ldtmu1
+  ldtmu0
+  ldtmu1
+  nop        ; nop ; thrend
+  mov interrupt, 1; nop # delay slot 1
+  nop        ; nop # delay slot 2
 
 # LUMA CODE
 
@@ -1232,79 +1215,6 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov vw_addr, unif # start the VDW   Delay 3
 
 ################################################################################
-
-.if 0
-::mc_interrupt_exit6c
-  ldtmu0
-  mov  -, vw_wait ; nop ; ldtmu0  # wait on the VDW
-
-  mov -,sacq(0) # 1
-  mov -,sacq(0) # 2
-  mov -,sacq(0) # 3
-  mov -,sacq(0) # 4
-  mov -,sacq(0) # 5
-
-  nop        ; nop ; thrend
-  mov interrupt, 1; nop # delay slot 1
-  nop        ; nop # delay slot 2
-.endif
-
-::mc_interrupt_exit8c
-  ldtmu0
-  ldtmu1
-  ldtmu1
-  mov  -, vw_wait ; nop ; ldtmu0  # wait on the VDW
-
-  mov -,sacq(0) # 1
-  mov -,sacq(0) # 2
-  mov -,sacq(0) # 3
-  mov -,sacq(0) # 4
-  mov -,sacq(0) # 5
-  mov -,sacq(0) # 6
-  mov -,sacq(0) # 7
-#  mov -,sacq(0) # 8
-#  mov -,sacq(0) # 9
-#  mov -,sacq(0) # 10
-#  mov -,sacq(0) # 11
-
-  nop        ; nop ; thrend
-  mov interrupt, 1; nop # delay slot 1
-  nop        ; nop # delay slot 2
-
-# mc_interrupt_exit12()
-::mc_interrupt_exit12
-  ldtmu0
-  ldtmu1
-  ldtmu0
-  mov  -, vw_wait ; nop ; ldtmu1  # wait on the VDW
-
-  mov -,sacq(0) # 1
-  mov -,sacq(0) # 2
-  mov -,sacq(0) # 3
-  mov -,sacq(0) # 4
-  mov -,sacq(0) # 5
-  mov -,sacq(0) # 6
-  mov -,sacq(0) # 7
-  mov -,sacq(0) # 8
-  mov -,sacq(0) # 9
-  mov -,sacq(0) # 10
-  mov -,sacq(0) # 11
-
-  nop        ; nop ; thrend
-  mov interrupt, 1; nop # delay slot 1
-  nop        ; nop # delay slot 2
-
-
-::mc_exit1
-  mov  -, vw_wait # wait on the VDW
-
-  ldtmu0
-  ldtmu1
-  ldtmu0
-  ldtmu1
-  nop        ; nop ; thrend
-  mov interrupt, 1; nop # delay slot 1
-  nop        ; nop # delay slot 2
 
 ::mc_end
 # Do not add code here because mc_end must appear after all other code.

@@ -4906,7 +4906,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     }
     s->qpu_filter_uv = qpu_fn(mc_filter_uv);
     s->qpu_filter_uv_b0 = qpu_fn(mc_filter_uv_b0);
-    s->qpu_filter_uv_b = qpu_fn(mc_filter_uv_b);
 
     for (job=0; job < RPI_MAX_JOBS; job++)
     {
