@@ -154,7 +154,6 @@
 # Load first request location
   mov ra0, unif         # next_x_y
 
-  mov ra_y, ra0.16a       # Store y
   mov ra_frame_base, unif # Store frame c base
   mov r1, vdw_setup_1(0)  # Merged with dst_stride shortly, delay slot for ra_frame_base
 
@@ -192,6 +191,7 @@
 # ra_frame_base ends up with t0s base
 # ra_frame_base2 ends up with t1s base
 
+  mov ra_y, ra0.16a       # Store y
   mov r0, ra0.16b           # Load x
   add r0, r0, elem_num
   max r0, r0, 0
@@ -244,13 +244,13 @@
 # Load first request location
   mov ra0, unif            # next_x_y
 
-  mov ra_y2, ra0.16a       # Store y
   mov ra_frame_base2, unif # Store frame c base
 
 # Compute base address for first and second access
 # ra_frame_base ends up with t0s base
 # ra_frame_base2 ends up with t1s base
 
+  mov ra_y2, ra0.16a       # Store y
   mov r0, ra0.16b          # Load x
   add r0, r0, elem_num     # Add QPU slice
   max r0, r0, 0
@@ -543,8 +543,8 @@ mov.ifnz rb14, unif    ; mov r3, 0  # V weight L0 ; Loop counter
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
   and r1, r1, rb_k255   ; mul24      r3, ra0.8a,       r0
-  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0
   nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0  # Need to wait 1 cycle for rotated r1
   nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9  @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 2,  r0 << 2  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10 @ "mul_used", 0
@@ -709,7 +709,7 @@ asr rb12, r1, 1
   max r2, ra_y2, 0  # y
   min r2, r2, rb_frame_height_minus_1
   add ra_y2, ra_y2, 1         ; mul24 r2, r2, r3
-  add t1s, ra_frame_base, r2         ; v8min r1, r1, rb_k255
+  add t1s, ra_frame_base2, r2         ; v8min r1, r1, rb_k255
 
 # generate seven shifted versions
 # interleave with scroll of vertical context

@@ -2451,7 +2451,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
             for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH, ++u)
             {
                 const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
-                last_l0->next_fn  = s->qpu_filter_uv;
+                u[-1].next_fn  = s->qpu_filter_uv;
                 last_l0->next_src_x = x1_c + start_x;
                 last_l0->next_src_y = y1_c + start_y;
                 last_l0->next_src_base_c = src_base_u;
@@ -2523,12 +2523,12 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
               int bw = nPbW_c-start_x;
               int bh = nPbH_c-start_y;
 
-              last_l0->next_fn = s->qpu_filter_uv_b0;
+              u[-1].next_fn = s->qpu_filter_uv_b0;
               last_l0->next_src_x = x1_c + start_x;
               last_l0->next_src_y = y1_c + start_y;
               last_l0->next_src_base_c = get_vc_address_u(src_frame);
 
-              u[0].next_fn = s->qpu_filter_uv_b;  // In fact ignored
+              u[0].next_fn = 0;  // Ignored - 2 block cmd
               u[0].next_src_x = x2_c + start_x;
               u[0].next_src_y = y2_c + start_y;
               u[0].next_src_base_c = get_vc_address_u(src_frame2);
@@ -2540,6 +2540,10 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
               u[0].b0.weight_u = c_weights[0]; // Weight L0 U
               u[0].b0.weight_v = c_weights[1]; // Weight L0 V
               u[0].b0.dummy0 = 0;  // Intermediate results are not written back in first pass of B filtering
+
+              last_l1->next_src_x = x2_c + start_x;
+              last_l1->next_src_y = y2_c + start_y;
+              last_l1->next_src_base_c = get_vc_address_u(src_frame2);
 
               u[1].b1.dummy0 = 0;  // w,h inherited from b0
               u[1].b1.coeffs_x = coefs1_x;
