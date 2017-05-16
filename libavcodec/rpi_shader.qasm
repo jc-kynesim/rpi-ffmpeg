@@ -148,30 +148,22 @@
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_c_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_c
-  mov tmurs, 1          ; mov ra_link, unif        # No swap TMUs ; Next fn
+  mov tmurs, 1          ; mov -, unif        # No swap TMUs ; Next fn (ignored)
 
 # Load first request location
   mov ra0, unif         # next_x_y
 
-  mov ra_base, unif # Store frame c base
-  mov r1, vdw_setup_1(0)  # Merged with dst_stride shortly, delay slot for ra_base
+  mov ra_base, unif                             # Store frame c base
 
 # Read image dimensions
-  sub rb25, unif, 1     # pic c width
-  sub rb30, unif, 1     # pic c height
-
-# get source pitch
-  mov rb_xpitch, unif   # stride2
-  mov rb_pitch, unif    # stride1
+  sub rb_max_y, unif, 1     # pic c width
+  sub rb_max_x, unif, 1     # pic c height
 
 # load constants
   mov ra_k1, 1
   mov ra_k256, 256
   mov rb_k255, 255
   mov ra_k0, 0
-
-# get destination vdw setup
-  add rb24, r1, rb_pitch # vdw_setup_1
 
 # touch registers to keep simulator happy
 
@@ -181,20 +173,22 @@
   mov ra6, 0 ; mov rb6, 0
   mov ra7, 0 ; mov rb7, 0
 
-  # ra12..15: vertical scroll registers
-  mov ra12, 0
-  mov ra13, 0
-  mov ra14, 0
-  mov ra15, 0
+  mov r1, vdw_setup_1(0)  # Merged with dst_stride shortly, delay slot for ra_base
+
+# ; ra12..15: vertical scroll registers
+# get source pitch
+  mov rb_xpitch, unif   ; mov ra12, 0           # stride2
+  mov rb_pitch, unif    ; mov ra13, 0           # stride1
+  mov r0, elem_num      ; mov ra14, 0
+# get destination vdw setup
+  add rb24, r1, rb_pitch ; mov ra15, ra_k0 # vdw_setup_1
 
 # Compute base address for first and second access
 # ra_base ends up with t0s base
 # ra_base2 ends up with t1s base
 
-  mov ra_y, ra0.16a       # Store y
-  mov r0, ra0.16b           # Load x
-  add r0, r0, elem_num
-  max r0, r0, 0
+  add r0, r0, ra0.16b                           # Add elem no to x to get X for this slice
+  max r0, r0, 0         ; mov ra_y, ra0.16a     # ; stash Y
   min r0, r0, rb_max_x
 
 # Get shift
@@ -208,27 +202,23 @@
   sub r1, r1, rb_pitch
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1
+  add r0, r0, r1        ; mov r1, ra_y
   add ra_base, ra_base, r0
 
-  mov r1, ra_y          # Load y
-  add ra_y, r1, 1       # Set for next
-  max r1, r1, 0
-  min r1, r1, rb_max_y
+  max r0, r1, 0
+  min r0, r0, rb_max_y
 
 # submit texture requests for first line
-  nop                   ; mul24 r1, r1, rb_pitch
-  add t0s, ra_base, r1
+  add r1, r1, ra_k1     ; mul24 r0, r0, rb_pitch
+  add t0s, ra_base, r0
 
 # submit texture requests for 2nd line
 
-  mov r1, ra_y          # Load y
-  add ra_y, r1, 1       # Set for next
-  max r1, r1, 0
-  min r1, r1, rb_max_y
+  max r0, r1, 0
+  min r0, r0, rb_max_y
 
-  nop                   ; mul24 r1, r1, rb_pitch
-  add t0s, ra_base, r1
+  add ra_y, r1, ra_k1   ; mul24 r0, r0, rb_pitch
+  add t0s, ra_base, r0
 
   add rb13, 9, unif     # denominator
   mov -, unif           # Unused
@@ -253,11 +243,11 @@
   mov ra_y2, ra0.16a       # Store y
   mov r0, ra0.16b          # Load x
   add r0, r0, elem_num     # Add QPU slice
-  max r0, r0, 0
-  min r0, r0, rb_max_x
+  max r0, r0, 0         ; mov -, unif           # Unused 0
+  min r0, r0, rb_max_x  ; mov -, unif           # Unused 1
 
 # Get shift
-  and r1, r0, 1
+  and r1, r0, 1         ; mov -, unif           # Unused 2
   shl rb_xshift2_next, r1, 4
 
 # In a single 32 bit word we get 2 UV pairs so mask bottom bit of xs
@@ -267,43 +257,28 @@
   sub r1, r1, rb_pitch
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1
+  add r0, r0, r1        ; mov r1, ra_y2
   add ra_base2, ra_base2, r0
 
-  mov r1, ra_y2          # Load y
-  add ra_y2, r1, 1       # Set for next
-  max r1, r1, 0
-  min r1, r1, rb_max_y
+  max r0, r1, 0
+  min r0, r0, rb_max_y
 
 # submit texture requests for first line
-  nop                   ; mul24 r1, r1, rb_pitch
-  add t1s, ra_base2, r1
+  add r1, r1, ra_k1     ; mul24 r0, r0, rb_pitch
+  add t1s, ra_base2, r0 ; mov -, unif           # Unused 3
 
 # submit texture requests for 2nd line
 
-  mov r1, ra_y2          # Load y
-  add ra_y2, r1, 1       # Set for next
-  max r1, r1, 0
-  min r1, r1, rb_max_y
-
-  nop                   ; mul24 r1, r1, rb_pitch
-  add t1s, ra_base2, r1
-
-# Discard all the other stuff
-# Move to overlap!
-  mov -, unif           # Unused
-  mov -, unif           # Unused
-  mov -, unif           # Unused
-  mov -, unif           # Unused
-  mov -, unif           # Unused
-  mov -, unif           # Unused
-
+  max r0, r1, 0         ; mov -, unif           # Unused 4
 
   bra -, ra_link
-  nop
-  nop
-  nop
 
+  min r0, r0, rb_max_y  ; mov -, unif           # Unused 5
+
+  add ra_y2, r1, ra_k1   ; mul24 r0, r0, rb_pitch
+  add t1s, ra_base2, r0
+
+# >>> ra_link
 
 
 .macro setf_nz_if_v
@@ -609,7 +584,7 @@
   add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, ra_k0     ; mov rb_xshift2, rb_xshift2_next # ; xshift2 used because B
-  min r0, r0, rb_max_x  ; mov -, unif         # ; width_height
+  min r0, r0, rb_max_x  ; mov -, unif           # ; width_height
 
   shl rb_xshift2_next, r0, 4
 
