@@ -25,8 +25,8 @@ unsigned int rpi_shader[] = {
 /* [0x00000000] */ 0x95801ff6, 0xd0020927, // mov tmurs, 1          ; mov -, unif
 /* [0x00000008] */ 0x15827d80, 0x10020027, // mov ra0, unif
 /* [0x00000010] */ 0x15827d80, 0x10020627, // mov ra_base, unif
-/* [0x00000018] */ 0x0d801dc0, 0xd00217a7, // sub rb_max_y, unif, 1
-/* [0x00000020] */ 0x0d801dc0, 0xd0021667, // sub rb_max_x, unif, 1
+/* [0x00000018] */ 0x0d801dc0, 0xd0021667, // sub rb_max_x, unif, 1
+/* [0x00000020] */ 0x0d801dc0, 0xd00217a7, // sub rb_max_y, unif, 1
 /* [0x00000028] */ 0x00000001, 0xe0020527, // mov ra_k1, 1
 /* [0x00000030] */ 0x00000100, 0xe00205a7, // mov ra_k256, 256
 /* [0x00000038] */ 0x000000ff, 0xe00215a7, // mov rb_k255, 255
