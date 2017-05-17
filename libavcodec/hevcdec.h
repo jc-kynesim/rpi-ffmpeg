@@ -566,6 +566,25 @@ typedef struct HEVCRpiJob {
     HEVCRpiChromaPred chroma_mvs[QPU_N_UV];
 } HEVCRpiJob;
 
+#if RPI_TSTATS
+typedef struct HEVCRpiStats {
+    int y_pred1_xy;
+    int y_pred1_x0;
+    int y_pred1_y0;
+    int y_pred1_x0y0;
+    int y_pred1_wle8;
+    int y_pred1_wgt8;
+    int y_pred1_hle16;
+    int y_pred1_hgt16;
+    int y_pred2_xy;
+    int y_pred2_x0;
+    int y_pred2_y0;
+    int y_pred2_x0y0;
+    int y_pred2_hle16;
+    int y_pred2_hgt16;
+} HEVCRpiStats;
+#endif
+
 #endif
 
 typedef struct HEVCContext {
@@ -612,16 +631,9 @@ typedef struct HEVCContext {
     int ctu_per_uv_chan; // Number of CTUs per chroma QPU
 
     HEVCRpiJob jobs[RPI_MAX_JOBS];
-
-    int y_pred1_xy;
-    int y_pred1_x0;
-    int y_pred1_y0;
-    int y_pred1_x0y0;
-    int y_pred2_xy;
-    int y_pred2_x0;
-    int y_pred2_y0;
-    int y_pred2_x0y0;
-
+#if RPI_TSTATS
+    HEVCRpiStats tstats;
+#endif
 #if RPI_INTER
     HEVCRpiChromaPred * curr_pred_c;
     // Function pointers

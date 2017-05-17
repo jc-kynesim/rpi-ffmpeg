@@ -25,6 +25,7 @@
 #ifndef RPI
 
   #define RPI_INTER          0
+  #define RPI_TSTATS         0
 
 #else
 
@@ -47,6 +48,8 @@
 //  #define RPI_DEBLOCK_VPU
 
   #define RPI_VPU_DEBLOCK_CACHED 1
+
+  #define RPI_TSTATS 1
 #endif
 
 /**

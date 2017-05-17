@@ -28,14 +28,14 @@
 # rb14                                          L0 weight (U on left, V on right)
 # rb15                                          -- free --
 #
-# ra16                                          -- free --
+# ra16                                          width:height
 # ra17                                          ra_y:ra_xshift
 # ra18                                          L1 weight (Y)
 # ra19                                          ra_y_next:ra_xshift_next
 #
 # rb16                                          pitch
 # rb17                                          height + 1
-# rb18                                          height + 3
+# rb18                                          max(height,16) + 3
 # rb19                                          frame_base2_next
 #
 # ra20                                          1
@@ -46,7 +46,7 @@
 # rb20                                          -- free --
 # rb21                                          -- free --
 # rb22 rb_k255                                  255
-# rb23                                          -- free --
+# rb23                                          dest (Y)
 #
 # rb24                                          vdw_setup_1(dst_pitch)
 # rb25                                          frame width-1
@@ -71,11 +71,15 @@
 .set rb_max_x,                     rb25
 .set rb_max_y,                     rb30
 .set rb_pitch,                     rb16
+.set ra_width_height,              ra16
+.set ra_width,                     ra16.16b
+.set ra_height,                    ra16.16a
 .set ra_y2,                        ra21.16a
 .set ra_y2_next,                   ra21.16b
 
 .set rb_base2_next,                rb19
 
+.set rb_dest,                      rb23
 .set ra_base,                      ra24
 .set ra_base_next,                 ra26
 .set ra_xshift,                    ra17.16a
@@ -101,6 +105,7 @@
 # With shifts only the bottom 5 bits are considered so -16=16, -15=17 etc.
 .set i_shift16,                    -16
 .set i_shift21,                    -11
+.set i_shift23,                     -9
 .set i_shift30,                     -2
 
 # Much of the setup code is common between Y & C
@@ -859,6 +864,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 :per_block_setup
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov ra_link, unif
+#### We do all the setup even if we are about to exit - reading junk from unif....
 
   mov ra1, unif         ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
 
@@ -894,18 +900,20 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   add r0, r0, r1        # Add stripe offsets
   add rb_base2_next, unif, r0              # Base1
   mov ra_y2_next, ra1.16b                      # Load y
-  mov ra1, unif         # width_height
+  mov ra_width_height, unif         # width_height
 
 # set up VPM write
-  mov vw_setup, rb28
+  mov vw_setup, rb28    # [ra1 delay]
 
 # get width,height of block (unif load above)
-  sub rb29, rb24, ra1.16b # Compute vdw_setup1(dst_pitch-width)
-  add rb17, ra1.16a, 5
-  add rb18, ra1.16a, 7
-  shl r0,   ra1.16a, 7
-  add r0,   r0, ra1.16b # Combine width and height of destination area
-  shl r0,   r0, i_shift16 # Shift into bits 16 upwards of the vdw_setup0 register
+  sub rb29, rb24, ra_width # Compute vdw_setup1(dst_pitch-width)
+  add rb17, ra_height, 5  ; mov r0, ra_height
+  mov r1, 16
+  max r0, r0, r1
+  add rb18, r0, 7
+  shl r0,   r0, 7
+  add r0,   r0, ra_width                        # Combine width and height of destination area
+  shl r0,   r0, i_shift16                       # Shift into bits 16 upwards of the vdw_setup0 register
   add rb26, r0, rb27                 ; mov r0, unif   # Packed filter offsets
 
 # get filter coefficients and discard unused B frame values
@@ -957,6 +965,8 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov rb5, ra3.8b
   mov rb6, ra3.8c
   mov.ifnz ra5, ra18
+
+  mov rb_dest, unif     # Destination address
 
   bra -, ra_link
 
@@ -1072,12 +1082,41 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   max vpm, r1, 0         # Delay 3
 # >>> branch.anyn yloop
 
-# DMA out
+# If looping again the we consumed 16 height last loop
+  # rb29 (stride) remains constant
+  # rb17 remains const (based on total height)
+  # recalc rb26, rb18 based on new segment height
+  # N.B. r3 is loop counter still
 
-  brr -, r:per_block_setup
+  mov r1, 16
+  sub r0, ra_height, r1
+  mov ra_height, r0
+  min.setf r0, r0, 0    # Done if Z now
+
+# DMA out
+  brr.anyz -, r:per_block_setup
   mov vw_setup, rb26 # VDW setup 0    Delay 1
   mov vw_setup, rb29 # Stride         Delay 2
-  mov vw_addr, unif # start the VDW   Delay 3
+  mov vw_addr, rb_dest # start the VDW   Delay 3
+# >>> .anyz per_block_setup
+
+  max r0, r0, r1
+  add rb18, rb18, r0
+  shl r0, r0, i_shift23
+  add rb26, rb26, r0
+
+  nop ; mul24 r0, r1, rb_pitch  # r0 = pitch*16
+  add rb_dest, rb_dest, r0
+
+  mov vw_setup, rb28    # Reset our VDM write pointer
+
+  brr -, r:yloop
+  nop
+  nop
+  nop
+# >>>
+
+
 
 
 
@@ -1178,11 +1217,39 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   min r1, r1, rb_k255       # Delay 2
   max vpm, r1, 0         # Delay 3
 
+
+# If looping again the we consumed 16 height last loop
+  # rb29 (stride) remains constant
+  # rb17 remains const (based on total height)
+  # recalc rb26, rb18 based on new segment height
+  # N.B. r3 is loop counter still
+
+  mov r1, 16
+  sub r0, ra_height, r1
+  mov ra_height, r0
+  min.setf r0, r0, 0    # Done if Z now
+
 # DMA out
-  brr -, r:per_block_setup
+  brr.anyz -, r:per_block_setup
   mov vw_setup, rb26 # VDW setup 0    Delay 1
   mov vw_setup, rb29 # Stride         Delay 2
-  mov vw_addr, unif # start the VDW   Delay 3
+  mov vw_addr, rb_dest # start the VDW   Delay 3
+# >>> .anyz per_block_setup
+
+  max r0, r0, r1
+  add rb18, rb18, r0
+  shl r0, r0, i_shift23
+  add rb26, rb26, r0
+
+  nop ; mul24 r0, r1, rb_pitch  # r0 = pitch*16
+  add rb_dest, rb_dest, r0
+
+  mov vw_setup, rb28    # Reset our VDM write pointer
+
+  brr -, r:yloop
+  nop
+  nop
+  nop
 
 ################################################################################
 

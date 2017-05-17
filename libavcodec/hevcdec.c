@@ -2290,22 +2290,14 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
         uint32_t dst_addr = get_vc_address_y(s->frame) + y_off;
         const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
 
-        {
-            if (mx == 0 && my == 0)
-                ++s->y_pred1_x0y0;
-            else if (mx == 0)
-                ++s->y_pred1_x0;
-            else if (my == 0)
-                ++s->y_pred1_y0;
-            else
-                ++s->y_pred1_xy;
-        }
-
         // Potentially we could change the assembly code to support taller sizes in one go
         for (int start_y = 0; start_y < nPbH; start_y += 16, dst_addr += s->frame->linesize[0] * 16) {
+//        {
+//            int start_y = 0;
             const uint32_t src_yx_y = y1_m3 + start_y;
             int start_x = 0;
-            const int bh = FFMIN(nPbH - start_y, 16);
+//            const int bh = nPbH;
+            const int bh = FFMIN(nPbH, 16);
 
             // As Y-pred operates on two independant 8-wide src blocks we can merge
             // this pred with the previous one if it the previous one is 8 pel wide,
@@ -2331,6 +2323,29 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
 
             for (; start_x < nPbW; start_x += 16) {
                 const int bw = FFMIN(nPbW - start_x, 16);
+#if RPI_TSTATS
+                {
+                    HEVCRpiStats *const ts = &s->tstats;
+                    if (mx == 0 && my == 0)
+                        ++ts->y_pred1_x0y0;
+                    else if (mx == 0)
+                        ++ts->y_pred1_x0;
+                    else if (my == 0)
+                        ++ts->y_pred1_y0;
+                    else
+                        ++ts->y_pred1_xy;
+
+                    if (nPbW > 8)
+                        ++ts->y_pred1_wgt8;
+                    else
+                        ++ts->y_pred1_wle8;
+
+                    if (nPbH > 16)
+                        ++ts->y_pred1_hgt16;
+                    else
+                        ++ts->y_pred1_hle16;
+                }
+#endif
                 cmd_y[-1].next_src1_x = x1_m3 + start_x;
                 cmd_y[-1].next_src1_y = src_yx_y;
                 cmd_y[-1].next_src1_base = src_vc_address_y;
@@ -2390,23 +2405,30 @@ rpi_pred_y_b(HEVCContext * const s,
         const uint32_t src1_base = get_vc_address_y(src_frame);
         const uint32_t src2_base = get_vc_address_y(src_frame2);
 
-        {
-            const unsigned int mmx = mx | mx2;
-            const unsigned int mmy = my | my2;
-            if (mmx == 0 && mmy == 0)
-                ++s->y_pred2_x0y0;
-            else if (mmx == 0)
-                ++s->y_pred2_x0;
-            else if (mmy == 0)
-                ++s->y_pred2_y0;
-            else
-                ++s->y_pred2_xy;
-        }
-
         for (int start_y=0; start_y < nPbH; start_y += 16) {  // Potentially we could change the assembly code to support taller sizes in one go
           const unsigned int bh = FFMIN(nPbH - start_y, 16);
 
           for (int start_x=0; start_x < nPbW; start_x += 8) { // B blocks work 8 at a time
+#if RPI_TSTATS
+              {
+                  HEVCRpiStats *const ts = &s->tstats;
+                  const unsigned int mmx = mx | mx2;
+                  const unsigned int mmy = my | my2;
+                  if (mmx == 0 && mmy == 0)
+                      ++ts->y_pred2_x0y0;
+                  else if (mmx == 0)
+                      ++ts->y_pred2_x0;
+                  else if (mmy == 0)
+                      ++ts->y_pred2_y0;
+                  else
+                      ++ts->y_pred2_xy;
+
+                  if (nPbH > 16)
+                      ++ts->y_pred2_hgt16;
+                  else
+                      ++ts->y_pred2_hle16;
+              }
+#endif
               cmd_y[-1].next_src1_x = x1 + start_x;
               cmd_y[-1].next_src1_y = y1 + start_y;
               cmd_y[-1].next_src1_base = src1_base;
@@ -3906,11 +3928,18 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         rpi_do_all_passes(s);
     }
 
-    printf("P: %d/%d/%d/%d;  B: %d/%d/%d/%d\n",
-           s->y_pred1_xy, s->y_pred1_x0, s->y_pred1_y0, s->y_pred1_x0y0,
-           s->y_pred2_xy, s->y_pred2_x0, s->y_pred2_y0, s->y_pred2_x0y0);
-    s->y_pred1_xy = s->y_pred1_x0 = s->y_pred1_y0 = s->y_pred1_x0y0 = 0;
-    s->y_pred2_xy = s->y_pred2_x0 = s->y_pred2_y0 = s->y_pred2_x0y0 = 0;
+#if RPI_TSTATS
+    {
+        HEVCRpiStats *const ts = &s->tstats;
+
+        printf("=== P: xy00:%5d/%5d/%5d/%5d h16gl:%5d/%5d w8gl:%5d/%5d\n    B: xy00:%5d/%5d/%5d/%5d h16gl:%5d/%5d\n",
+               ts->y_pred1_xy, ts->y_pred1_x0, ts->y_pred1_y0, ts->y_pred1_x0y0,
+               ts->y_pred1_hgt16, ts->y_pred1_hle16, ts->y_pred1_wgt8, ts->y_pred1_wle8,
+               ts->y_pred2_xy, ts->y_pred2_x0, ts->y_pred2_y0, ts->y_pred2_x0y0,
+               ts->y_pred2_hgt16, ts->y_pred2_hle16);
+        memset(ts, 0, sizeof(*ts));
+    }
+#endif
 
 #endif
 
