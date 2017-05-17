@@ -60,6 +60,16 @@
   #include "libavutil/atomic.h"
 
   static void worker_core(HEVCContext * const s);
+
+  // We can pred any block height but annoyingly if we we do then the TMU cache
+  // explodes and it goes even slower :-(
+  #if 0
+  #define Y_P_MAX_H     16
+  #define Y_B_MAX_H     16
+  #else
+  #define Y_P_MAX_H     64
+  #define Y_B_MAX_H     64
+  #endif
 #endif
 
 // #define DISABLE_MC
@@ -2291,13 +2301,11 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
         const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
 
         // Potentially we could change the assembly code to support taller sizes in one go
-//        for (int start_y = 0; start_y < nPbH; start_y += 16, dst_addr += s->frame->linesize[0] * 16)
+        for (int start_y = 0; start_y < nPbH; start_y += Y_P_MAX_H, dst_addr += s->frame->linesize[0] * 16)
         {
-            int start_y = 0;
             const uint32_t src_yx_y = y1_m3 + start_y;
             int start_x = 0;
-            const int bh = nPbH;
-//            const int bh = FFMIN(nPbH - start_y, 16);
+            const int bh = FFMIN(nPbH - start_y, Y_P_MAX_H);
 
             // As Y-pred operates on two independant 8-wide src blocks we can merge
             // this pred with the previous one if it the previous one is 8 pel wide,
@@ -2349,9 +2357,18 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 cmd_y[-1].next_src1_x = x1_m3 + start_x;
                 cmd_y[-1].next_src1_y = src_yx_y;
                 cmd_y[-1].next_src1_base = src_vc_address_y;
-                cmd_y[-1].next_src2_x = x1_m3 + start_x + 8;
-                cmd_y[-1].next_src2_y = src_yx_y;
-                cmd_y[-1].next_src2_base = src_vc_address_y;
+                if (bw <= 8)
+                {
+                    cmd_y[-1].next_src2_x = -31;
+                    cmd_y[-1].next_src2_y = -31;
+                    cmd_y[-1].next_src2_base = s->qpu_dummy_frame;
+                }
+                else
+                {
+                    cmd_y[-1].next_src2_x = x1_m3 + start_x + 8;
+                    cmd_y[-1].next_src2_y = src_yx_y;
+                    cmd_y[-1].next_src2_base = src_vc_address_y;
+                }
                 cmd_y[0].p.w = bw;
                 cmd_y[0].p.h = bh;
                 cmd_y[0].p.mymx21 = my2_mx2_my_mx;
@@ -2405,13 +2422,11 @@ rpi_pred_y_b(HEVCContext * const s,
         const uint32_t src1_base = get_vc_address_y(src_frame);
         const uint32_t src2_base = get_vc_address_y(src_frame2);
 
-//        for (int start_y=0; start_y < nPbH; start_y += 16)
-        {  // Potentially we could change the assembly code to support taller sizes in one go
-//            const unsigned int bh = FFMIN(nPbH - start_y, 16);
-          const unsigned int bh = nPbH;
-          int start_y = 0;
+        for (int start_y=0; start_y < nPbH; start_y += Y_B_MAX_H)
+        {
+            const unsigned int bh = FFMIN(nPbH - start_y, Y_B_MAX_H);
 
-          for (int start_x=0; start_x < nPbW; start_x += 8) { // B blocks work 8 at a time
+            for (int start_x=0; start_x < nPbW; start_x += 8) { // B blocks work 8 at a time
 #if RPI_TSTATS
               {
                   HEVCRpiStats *const ts = &s->tstats;
@@ -4968,6 +4983,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     }
     s->qpu_filter_uv = qpu_fn(mc_filter_uv);
     s->qpu_filter_uv_b0 = qpu_fn(mc_filter_uv_b0);
+    s->qpu_dummy_frame = qpu_fn(mc_setup_c);  // Use our code as a dummy frame
 
     for (job=0; job < RPI_MAX_JOBS; job++)
     {

@@ -639,6 +639,7 @@ typedef struct HEVCContext {
     // Function pointers
     uint32_t qpu_filter_uv;
     uint32_t qpu_filter_uv_b0;
+    uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
 
     GPU_MEM_PTR_T y_unif_mvs_ptr[RPI_MAX_JOBS];
     uint32_t *y_unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands

@@ -28,6 +28,10 @@
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
 #define RPI_TRACE_TIME_VPU_QPU_WAIT     0
 
+// Add profile flags to all QPU requests - generates output in "vcdbg log msg"
+// Beware this is expensive and will probably throw off all other timing by 5-10%
+#define RPI_TRACE_QPU_PROFILE_ALL       1
+
 // QPU "noflush" flags
 // a mixture of flushing & profiling
 
@@ -775,7 +779,11 @@ void vpu_qpu_job_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, co
 
     j->command = EXECUTE_QPU;
     j->u.q.jobs = n;
+#if RPI_TRACE_QPU_PROFILE_ALL
+    j->u.q.noflush = QPU_FLAGS_NO_FLUSH_VPU | QPU_FLAGS_PROF_CLEAR_AND_ENABLE | QPU_FLAGS_PROF_OUTPUT_COUNTS;
+#else
     j->u.q.noflush = QPU_FLAGS_NO_FLUSH_VPU;
+#endif
     j->u.q.timeout = 5000;
     memcpy(j->u.q.control, mail, n * QPU_MAIL_EL_VALS * sizeof(uint32_t));
   }
