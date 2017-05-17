@@ -68,10 +68,6 @@
 # ra30                                          next kernel address
 # ra31                                          chroma-B height+3; free otherwise
 
-.set SRC_STRIPE_WIDTH, 128
-.set SRC_STRIPE_SHIFT, 7
-
-
 .set rb_max_x,                     rb25
 .set rb_max_y,                     rb30
 .set rb_pitch,                     rb16
@@ -765,14 +761,14 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # Read image dimensions
   mov ra3, unif         # width_height
-  mov rb_pitch, SRC_STRIPE_WIDTH
-  mov rb_xpitch, unif    # src_pitch [ra3 delay]
+  mov rb_xpitch, unif   # stride2
   sub rb_max_x, ra3.16b, 1
   sub rb_max_y, ra3.16a, 1
+  mov rb_pitch, unif    # stride1
 
 # get destination pitch
   mov r1, vdw_setup_1(0)
-  or  rb24, r1, unif    # dst_pitch
+  or  rb24, r1, rb_pitch
 
 # Compute base address for first and second access
   mov r3, elem_num
