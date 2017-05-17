@@ -49,7 +49,7 @@
 
   #define RPI_VPU_DEBLOCK_CACHED 1
 
-  #define RPI_TSTATS 1
+  #define RPI_TSTATS 0
 #endif
 
 /**

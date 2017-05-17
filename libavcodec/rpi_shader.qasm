@@ -909,7 +909,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   sub rb29, rb24, ra_width # Compute vdw_setup1(dst_pitch-width)
   add rb17, ra_height, 5  ; mov r0, ra_height
   mov r1, 16
-  max r0, r0, r1
+  min r0, r0, r1
   add rb18, r0, 7
   shl r0,   r0, 7
   add r0,   r0, ra_width                        # Combine width and height of destination area
@@ -1091,7 +1091,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov r1, 16
   sub r0, ra_height, r1
   mov ra_height, r0
-  min.setf r0, r0, 0    # Done if Z now
+  max.setf r0, r0, 0    # Done if Z now
 
 # DMA out
   brr.anyz -, r:per_block_setup
@@ -1100,8 +1100,9 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov vw_addr, rb_dest # start the VDW   Delay 3
 # >>> .anyz per_block_setup
 
-  max r0, r0, r1
+  min r0, r0, r1
   add rb18, rb18, r0
+  sub r0, r0, r1
   shl r0, r0, i_shift23
   add rb26, rb26, r0
 
@@ -1227,7 +1228,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov r1, 16
   sub r0, ra_height, r1
   mov ra_height, r0
-  min.setf r0, r0, 0    # Done if Z now
+  max.setf r0, r0, 0    # Done if Z now
 
 # DMA out
   brr.anyz -, r:per_block_setup
@@ -1236,8 +1237,9 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov vw_addr, rb_dest # start the VDW   Delay 3
 # >>> .anyz per_block_setup
 
-  max r0, r0, r1
+  min r0, r0, r1
   add rb18, rb18, r0
+  sub r0, r0, r1
   shl r0, r0, i_shift23
   add rb26, rb26, r0
 
@@ -1246,7 +1248,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
   mov vw_setup, rb28    # Reset our VDM write pointer
 
-  brr -, r:yloop
+  brr -, r:yloopb
   nop
   nop
   nop
