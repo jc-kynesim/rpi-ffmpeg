@@ -365,12 +365,12 @@ unsigned int rpi_shader[] = {
 /* [0x00000a38] */ 0x15827d80, 0x100202a7, // mov ra10, unif
 /* [0x00000a40] */ 0x15827d80, 0x100202e7, // mov ra11, unif
 /* [0x00000a48] */ 0x15827d80, 0x100200e7, // mov ra3, unif
-/* [0x00000a50] */ 0x00000080, 0xe0021427, // mov rb_pitch, SRC_STRIPE_WIDTH
-/* [0x00000a58] */ 0x15827d80, 0x10021527, // mov rb_xpitch, unif
-/* [0x00000a60] */ 0x0d0c1dc0, 0xd4021667, // sub rb_max_x, ra3.16b, 1
-/* [0x00000a68] */ 0x0d0c1dc0, 0xd20217a7, // sub rb_max_y, ra3.16a, 1
+/* [0x00000a50] */ 0x15827d80, 0x10021527, // mov rb_xpitch, unif
+/* [0x00000a58] */ 0x0d0c1dc0, 0xd4021667, // sub rb_max_x, ra3.16b, 1
+/* [0x00000a60] */ 0x0d0c1dc0, 0xd20217a7, // sub rb_max_y, ra3.16a, 1
+/* [0x00000a68] */ 0x15827d80, 0x10021427, // mov rb_pitch, unif
 /* [0x00000a70] */ 0xc0000000, 0xe0020867, // mov r1, vdw_setup_1(0)
-/* [0x00000a78] */ 0x15827380, 0x10021627, // or  rb24, r1, unif
+/* [0x00000a78] */ 0x159d03c0, 0x10021627, // or  rb24, r1, rb_pitch
 /* [0x00000a80] */ 0x159a7d80, 0x100208e7, // mov r3, elem_num
 /* [0x00000a88] */ 0x0c227cc0, 0x12020827, // add r0, ra8.16a, r3
 /* [0x00000a90] */ 0x139c01c0, 0xd0020827, // max r0, r0, 0
