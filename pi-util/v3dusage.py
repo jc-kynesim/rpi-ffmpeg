@@ -9,11 +9,14 @@ def do_logparse(logname):
     rmatch = re.compile(r'^([0-9]+\.[0-9]{3}): (done )?((vpu0)|(vpu1)|(qpu1)) ([A-Z_]+) cb:([0-9a-f]+) ')
     rqcycle = re.compile(r'^([0-9]+\.[0-9]{3}): v3d: QPU Total clock cycles for all QPUs doing vertex/coordinate shading +([0-9]+)$')
     rqtscycle = re.compile(r'^([0-9]+\.[0-9]{3}): v3d: QPU Total clock cycles for all QPUs stalled waiting for TMUs +([0-9]+)$')
+    rl2hits = re.compile(r'^([0-9]+\.[0-9]{3}): v3d: L2C Total Level 2 cache ([a-z]+) +([0-9]+)$')
 
     ttotal = {'idle':0.0}
     tstart = {}
     qctotal = {}
     qtstotal = {}
+    l2hits = {}
+    l2total = {}
     time0 = None
     idle_start = None
     qpu_op_no = 0
@@ -64,15 +67,26 @@ def do_logparse(logname):
             if match:
                 unit = "qpu1." + str(qpu_op_no)
                 if not unit in qctotal:
-                    qctotal[unit] = 0;
+                    qctotal[unit] = 0
                 qctotal[unit] += int(match.group(2))
 
             match = rqtscycle.match(line)
             if match:
                 unit = "qpu1." + str(qpu_op_no)
                 if not unit in qtstotal:
-                    qtstotal[unit] = 0;
+                    qtstotal[unit] = 0
                 qtstotal[unit] += int(match.group(2))
+
+            match = rl2hits.match(line)
+            if match:
+                unit = "qpu1." + str(qpu_op_no)
+                if not unit in l2total:
+                    l2total[unit] = 0
+                    l2hits[unit] = 0
+                l2total[unit] += int(match.group(3))
+                if match.group(2) == "hits":
+                    l2hits[unit] += int(match.group(3))
+
 
     if not time0:
         print "No v3d profile records found"
@@ -86,7 +100,9 @@ def do_logparse(logname):
         for unit in sorted(qctotal):
             if not unit in qtstotal:
                 qtstotal[unit] = 0;
-            print b'%6s: Qcycles: %10d, TMU stall: %10d  %7.3f%%' % (unit, qctotal[unit], qtstotal[unit], (qtstotal[unit] * 100.0)/qctotal[unit])
+            print b'%6s: Qcycles: %10d, TMU stall: %10d (%7.3f%%)' % (unit, qctotal[unit], qtstotal[unit], (qtstotal[unit] * 100.0)/qctotal[unit])
+            if unit in l2total:
+                print b'        L2Total: %10d, hits:      %10d (%7.3f%%)' % (l2total[unit], l2hits[unit], (l2hits[unit] * 100.0)/l2total[unit])
 
 
 
