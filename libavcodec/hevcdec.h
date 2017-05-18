@@ -552,6 +552,14 @@ typedef struct HEVCPredCmd {
 #ifdef RPI
 
 struct qpu_mc_pred_c_s;
+struct qpu_mc_pred_y_s;
+
+typedef struct HEVCRpiLumaPred
+{
+    struct qpu_mc_pred_y_s *qpu_mc_base;
+    struct qpu_mc_pred_y_s *qpu_mc_curr;
+    struct qpu_mc_pred_y_s *last_lx;
+} HEVCRpiLumaPred;
 
 typedef struct HEVCRpiChromaPred
 {
@@ -563,7 +571,9 @@ typedef struct HEVCRpiChromaPred
 
 typedef struct HEVCRpiJob {
     GPU_MEM_PTR_T chroma_mvs_gptr;
+    GPU_MEM_PTR_T luma_mvs_gptr;
     HEVCRpiChromaPred chroma_mvs[QPU_N_UV];
+    HEVCRpiLumaPred luma_mvs[QPU_N_Y];
 } HEVCRpiJob;
 
 #if RPI_TSTATS
@@ -636,17 +646,11 @@ typedef struct HEVCContext {
 #endif
 #if RPI_INTER
     HEVCRpiChromaPred * curr_pred_c;
+    HEVCRpiLumaPred * curr_pred_y;
     // Function pointers
     uint32_t qpu_filter_uv;
     uint32_t qpu_filter_uv_b0;
     uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
-
-    GPU_MEM_PTR_T y_unif_mvs_ptr[RPI_MAX_JOBS];
-    uint32_t *y_unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
-    uint32_t *y_mvs_base[RPI_MAX_JOBS][QPU_N_Y];
-    uint32_t *y_mvs[RPI_MAX_JOBS][QPU_N_Y];
-    uint32_t *curr_y_mvs; // Current uniform stream for luma
-    // Function pointers
     uint32_t qpu_filter;
     uint32_t qpu_filter_b;
 #endif
