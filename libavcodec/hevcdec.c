@@ -2272,27 +2272,19 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
 
 #if RPI_INTER
 
-static qpu_mc_pred_y_t *
-rpi_new_pred_y(HEVCContext *const s, const uint32_t fn, const unsigned int load_val, qpu_mc_pred_y_t ** const plx)
+static HEVCRpiLumaPred *
+rpi_nxt_pred_y(HEVCContext *const s, const unsigned int load_val)
 {
     HEVCRpiLumaPred * yp = s->curr_pred_y;
-
-    {
-        HEVCRpiLumaPred * ypt = yp + 1;
-        for (unsigned int i = 1; i != QPU_N_GRP_Y; ++i, ++ypt) {
-            if (ypt->load < yp->load)
-                yp = ypt;
-        }
+    HEVCRpiLumaPred * ypt = yp + 1;
+    for (unsigned int i = 1; i != QPU_N_GRP_Y; ++i, ++ypt) {
+        if (ypt->load < yp->load)
+            yp = ypt;
     }
 
-    {
-        qpu_mc_pred_y_t * const cmd_y = yp->qpu_mc_curr++;
-        cmd_y[-1].next_fn = fn;
-        *plx = cmd_y - 1;
-        yp->load += load_val;
-//        ++yp->load;
-        return cmd_y;
-    }
+//        yp->load += load_val;
+    ++yp->load;
+    return yp;
 }
 
 static void
@@ -2327,35 +2319,40 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             int start_x = 0;
             const int bh = FFMIN(nPbH - start_y, Y_P_MAX_H);
 
-#if 0
+#if 1
             // As Y-pred operates on two independant 8-wide src blocks we can merge
             // this pred with the previous one if it the previous one is 8 pel wide,
             // the same height as the current block, immediately to the left of our
             // current dest block and mono-pred.
-            //
-            // In the init (1st) block w/h is pic width height so given
-            // that no pic will ever be 8 pixels wide the first test here
-            // should fail if this is the first pred (i.e. after that test
-            // ppy is valid)
-            if (cmd_y[-1].p.w == 8 && cmd_y[-1].p.h == bh && cmd_y[-1].p.dst_addr + 8 == dst_addr && cmd_y[-2].next_fn == s->qpu_filter) {
+
+            qpu_mc_pred_y_t *const last_y8_p = s->last_y8_p;
+            if (last_y8_p != NULL && last_y8_p->p.h == bh && last_y8_p->p.dst_addr + 8 == dst_addr)
+            {
                 const int bw = FFMIN(nPbW, 8);
+                qpu_mc_pred_y_t *const last_y8_lx = s->last_y8_lx;
 
-                cmd_y[-2].next_src2_x = x1_m3;
-                cmd_y[-2].next_src2_y = src_yx_y;
-                cmd_y[-2].next_src2_base = src_vc_address_y;
-                cmd_y[-1].p.w += bw;
-                cmd_y[-1].p.mymx21 = PACK2(my2_mx2_my_mx, cmd_y[-1].p.mymx21);
-                cmd_y[-1].p.wo2 = wo;
+                last_y8_lx->next_src2_x = x1_m3;
+                last_y8_lx->next_src2_y = src_yx_y;
+                last_y8_lx->next_src2_base = src_vc_address_y;
+                last_y8_p->p.w += bw;
+                last_y8_p->p.mymx21 = PACK2(my2_mx2_my_mx, last_y8_p->p.mymx21);
+                last_y8_p->p.wo2 = wo;
 
+                s->last_y8_p = NULL;
+                s->last_y8_lx = NULL;
                 start_x = bw;
+#if RPI_TSTATS
+                ++s->tstats.y_pred1_y8_merge;
+#endif
             }
 #endif
 
             for (; start_x < nPbW; start_x += 16)
             {
                 const int bw = FFMIN(nPbW - start_x, 16);
-                qpu_mc_pred_y_t * cmd_lx;
-                qpu_mc_pred_y_t *const cmd_y = rpi_new_pred_y(s, s->qpu_filter, bh + 7, &cmd_lx);
+                HEVCRpiLumaPred * const yp = rpi_nxt_pred_y(s, bh + 7);
+                qpu_mc_pred_y_t *const cmd_lx = yp->last_lx;
+                qpu_mc_pred_y_t *const cmd_y = yp->qpu_mc_curr;
 #if RPI_TSTATS
                 {
                     HEVCRpiStats *const ts = &s->tstats;
@@ -2379,6 +2376,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                         ++ts->y_pred1_hle16;
                 }
 #endif
+                cmd_y[-1].next_fn = s->qpu_filter;
                 cmd_lx->next_src1_x = x1_m3 + start_x;
                 cmd_lx->next_src1_y = src_yx_y;
                 cmd_lx->next_src1_base = src_vc_address_y;
@@ -2400,6 +2398,13 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 cmd_y->p.wo1 = wo;
                 cmd_y->p.wo2 = wo;
                 cmd_y->p.dst_addr =  dst_addr + start_x;
+                yp->last_lx = cmd_y;
+                yp->qpu_mc_curr = cmd_y + 1;
+
+                if (bw == 8) {
+                    s->last_y8_lx = cmd_lx;
+                    s->last_y8_p = cmd_y;
+                }
             }
         }
     }
@@ -2449,8 +2454,9 @@ rpi_pred_y_b(HEVCContext * const s,
 
             for (int start_x=0; start_x < nPbW; start_x += 8)
             { // B blocks work 8 at a time
-                qpu_mc_pred_y_t * cmd_lx;
-                qpu_mc_pred_y_t *const cmd_y = rpi_new_pred_y(s, s->qpu_filter_b, bh + 7, &cmd_lx);
+                HEVCRpiLumaPred * const yp = rpi_nxt_pred_y(s, bh + 7);
+                qpu_mc_pred_y_t *const cmd_lx = yp->last_lx;
+                qpu_mc_pred_y_t *const cmd_y = yp->qpu_mc_curr;
 #if RPI_TSTATS
               {
                   HEVCRpiStats *const ts = &s->tstats;
@@ -2471,6 +2477,7 @@ rpi_pred_y_b(HEVCContext * const s,
                       ++ts->y_pred2_hle16;
               }
 #endif
+              cmd_y[-1].next_fn = s->qpu_filter_b;
               cmd_lx->next_src1_x = x1 + start_x;
               cmd_lx->next_src1_y = y1 + start_y;
               cmd_lx->next_src1_base = src1_base;
@@ -2483,6 +2490,8 @@ rpi_pred_y_b(HEVCContext * const s,
               cmd_y->p.wo1 = wo1;
               cmd_y->p.wo2 = wo2;
               cmd_y->p.dst_addr =  dst + start_x;
+              yp->last_lx = cmd_y;
+              yp->qpu_mc_curr = cmd_y + 1;
           }
           dst += s->frame->linesize[0] * 16;
         }
@@ -2499,8 +2508,9 @@ rpi_nxt_pred_c(HEVCContext *const s, const unsigned int load_val)
         if (cpt->load < cp->load)
             cp = cpt;
     }
-//    ++cp->load;
-    cp->load += load_val;
+    // Actual use of load_val is noticably better but we haven't sorted Q length problems yet
+    ++cp->load;
+//    cp->load += load_val;
     return cp;
 }
 
@@ -3584,6 +3594,8 @@ static void rpi_begin(HEVCContext *s)
         yp->qpu_mc_curr = y;
     }
     s->curr_pred_y = NULL;
+    s->last_y8_p = NULL;
+    s->last_y8_lx = NULL;
 #endif
     s->ctu_count = 0;
 }
@@ -3992,9 +4004,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     {
         HEVCRpiStats *const ts = &s->tstats;
 
-        printf("=== P: xy00:%5d/%5d/%5d/%5d h16gl:%5d/%5d w8gl:%5d/%5d\n    B: xy00:%5d/%5d/%5d/%5d h16gl:%5d/%5d\n",
+        printf("=== P: xy00:%5d/%5d/%5d/%5d h16gl:%5d/%5d w8gl:%5d/%5d y8m:%d\n    B: xy00:%5d/%5d/%5d/%5d h16gl:%5d/%5d\n",
                ts->y_pred1_xy, ts->y_pred1_x0, ts->y_pred1_y0, ts->y_pred1_x0y0,
-               ts->y_pred1_hgt16, ts->y_pred1_hle16, ts->y_pred1_wgt8, ts->y_pred1_wle8,
+               ts->y_pred1_hgt16, ts->y_pred1_hle16, ts->y_pred1_wgt8, ts->y_pred1_wle8, ts->y_pred1_y8_merge,
                ts->y_pred2_xy, ts->y_pred2_x0, ts->y_pred2_y0, ts->y_pred2_x0y0,
                ts->y_pred2_hgt16, ts->y_pred2_hle16);
         memset(ts, 0, sizeof(*ts));

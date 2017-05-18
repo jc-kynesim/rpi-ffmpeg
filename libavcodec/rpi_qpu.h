@@ -153,16 +153,12 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T * const p, const rpi_cache_f
 // QPU specific functions
 uint32_t qpu_fn(const int * const mc_fn);
 
-#define QPU_N_GRP_UV 8
-#define QPU_N_UV   8
-#define QPU_N_GRP_Y 12  // 4 QPUs per TMU
-#define QPU_N_Y    12
-#define QPU_N_MAX  16
+#define QPU_N_GRP_UV 4
+#define QPU_N_UV     8
+#define QPU_N_GRP_Y  4  // 4 QPUs per TMU
+#define QPU_N_Y      12
 
 #define QPU_MAIL_EL_VALS  2
-#define QPU_MAIL_EL_SIZE  (QPU_MAIL_EL_VALS * sizeof(uint32_t))
-#define QPU_MAIL_VALS_MAX (QPU_N_MAX * QPU_MAIL_EL_VALS)
-#define QPU_MAIL_SIZE (QPU_MAIL_VALS_MAX * sizeof(uint32_t))
 
 struct vpu_qpu_wait_s;
 typedef struct vq_wait_s * vpu_qpu_wait_h;

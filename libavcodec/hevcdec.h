@@ -580,6 +580,7 @@ typedef struct HEVCRpiJob {
 
 #if RPI_TSTATS
 typedef struct HEVCRpiStats {
+    int y_pred1_y8_merge;
     int y_pred1_xy;
     int y_pred1_x0;
     int y_pred1_y0;
@@ -649,6 +650,9 @@ typedef struct HEVCContext {
 #if RPI_INTER
     HEVCRpiChromaPred * curr_pred_c;
     HEVCRpiLumaPred * curr_pred_y;
+    struct qpu_mc_pred_y_s * last_y8_p;
+    struct qpu_mc_pred_y_s * last_y8_lx;
+
     // Function pointers
     uint32_t qpu_filter_uv;
     uint32_t qpu_filter_uv_b0;
