@@ -559,6 +559,7 @@ typedef struct HEVCRpiLumaPred
     struct qpu_mc_pred_y_s *qpu_mc_base;
     struct qpu_mc_pred_y_s *qpu_mc_curr;
     struct qpu_mc_pred_y_s *last_lx;
+    unsigned int load;
 } HEVCRpiLumaPred;
 
 typedef struct HEVCRpiChromaPred
