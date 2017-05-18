@@ -68,33 +68,39 @@
 # ra30                                          next kernel address
 # ra31                                          chroma-B height+3; free otherwise
 
-.set rb_max_x,                     rb25
-.set rb_max_y,                     rb30
-.set rb_pitch,                     rb16
+
 .set ra_width_height,              ra16
 .set ra_width,                     ra16.16b
 .set ra_height,                    ra16.16a
-.set ra_y2,                        ra21.16a
-.set ra_y2_next,                   ra21.16b
 
-.set rb_base2_next,                rb19
+.set ra_y_y2,                      ra17
+.set ra_y2,                        ra17.16a
+.set ra_y,                         ra17.16b
+
+.set ra_y_y2_next,                 ra19
+.set ra_y_next,                    ra19.16b
+.set ra_y2_next,                   ra19.16a
+
+.set ra_k1,                        ra20
+
+.set ra_xshift,                    ra21.16a
+.set ra_xshift_next,               ra21.16b
 
 .set rb_dest,                      rb23
 .set ra_base,                      ra24
 .set ra_base_next,                 ra26
-.set ra_xshift,                    ra17.16a
 
 .set ra_base2,                     ra25
 
-# Note ra_xy & ra_xy_next should have same structure!
-.set ra_xshift_next,               ra19.16a
 .set rb_xshift2,                   rb0
 .set rb_xshift2_next,              rb1
 
-.set ra_y_next,                    ra19.16b
-.set ra_y,                         ra17.16b
+.set rb_max_x,                     rb25
+.set rb_max_y,                     rb30
+.set rb_pitch,                     rb16
 
-.set ra_k1,                        ra20
+
+.set rb_base2_next,                rb19
 .set rb_xpitch,                    rb20
 .set rb_k255,                      rb22
 .set ra_k256,                      ra22
@@ -849,33 +855,36 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   min r1, r1, rb_max_y
   add ra_y, ra_y, 1
   mov -, unif           ; mul24 r1, r1, rb_pitch  # unused ;
-  add t0s, r1, ra_base
+  add t0s, r1, ra_base  ; mov ra_link, unif     # ; Next fn
 
   max r1, ra_y2, 0
   min r1, r1, rb_max_y
+  bra -, ra_link
   add ra_y2, ra_y2, 1
   nop                   ; mul24 r1, r1, rb_pitch
   add t1s, r1, ra_base2
+# >>>
 
-# FALL THROUGHT TO PER-BLOCK SETUP
+# 1st 3 instructions of per_block-setup in branch delay
+.macro luma_setup
+  brr ra_link, r:per_block_setup
+  mov ra1, unif         ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
+  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1] # [ra1 delay]
+  add r0, ra1.16a, r3   ; mov rb_xshift2, rb_xshift2_next
+.endm
 
+################################################################################
+#
 # Start of per-block setup code
 # P and B blocks share the same setup code to save on Icache space
 :per_block_setup
-  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-  mov ra_link, unif
-#### We do all the setup even if we are about to exit - reading junk from unif....
 
-  mov ra1, unif         ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
-
-# per-channel shifts were calculated on the *previous* invocation
-  mov ra_xshift, ra_xshift_next
-  mov rb_xshift2, rb_xshift2_next
+# luma_setup_delay3 done in delay slots of branch that got us here
 
 # get base addresses and per-channel shifts for *next* invocation
+# per-channel shifts were calculated on the *previous* invocation
 
-  add r0, ra1.16a, r3   # Load x
-  max r0, r0, 0
+  max r0, r0, 0         ; mov ra_xshift, ra_xshift_next
   min r0, r0, rb_max_x
 
   shl ra_xshift_next, r0, 3         # Compute shifts
@@ -971,7 +980,7 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   bra -, ra_link
 
   shl r0, ra5.16b, rb13      # Offset calc
-  asr rb12, r0, 9            # For B l1 & L0 offsets should be identical so it doesn't matter which we use
+  asr rb12, r0, 9            ; mov ra_link, unif # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   mov r3, 0                  ; mov rb7, ra3.8d
 # >>> branch ra_link
 #
@@ -989,6 +998,8 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 # At this point we have already issued two pairs of texture requests for the current block
 
 ::mc_filter
+  luma_setup
+
 # ra5.16a = weight << 16; We want weight * 2 in rb14
 
   shl rb14, ra5.16a, 1
@@ -1006,21 +1017,19 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 # the grab for the next block before we finish with this block and that
 # might be B where y != y2 so we must do full processing on both y and y2
 
-  sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
-  shr r0, r4, ra_xshift     ; mov.ifz ra_base2, rb_base2_next    ; ldtmu1
-  mov.ifz ra_base, ra_base_next ; mov rb31, r3
-  mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-  shr r1, r4, rb_xshift2    ; mov.ifz ra_y2, ra_y2_next
+  sub.setf -, r3, rb17      ; v8adds rb31, r3, ra_k1             ; ldtmu1
+  shr r1, r4, rb_xshift2    ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
+  shr r0, r4, ra_xshift     ; mov r3, rb_pitch
 
   max r2, ra_y, 0  # y
-  min r2, r2, rb_max_y
-  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-  add t0s, ra_base, r2   ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
+  min r2, r2, rb_max_y      ; mov.ifz ra_base, ra_base_next
+  add ra_y, ra_y, 1         ; mul24 r2, r2, r3
+  add t0s, ra_base, r2      ; mov.ifz ra_base2, rb_base2_next
 
-  max r2, ra_y2, 0  # y
+  max r2, ra_y2, 0
   min r2, r2, rb_max_y
-  add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
-  add t1s, ra_base2, r2  ; v8min r1, r1, rb_k255
+  add ra_y2, ra_y2, 1       ; mul24 r2, r2, r3
+  add t1s, ra_base2, r2     ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -1028,9 +1037,9 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-  nop                  ; mul24      r3, ra0.8a,      r0
-  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
+  and r1, r1, rb_k255  ; mul24      r3, ra0.8a,      r0
   nop                  ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
   nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
   sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2    @ "mul_used", 0
   nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
@@ -1074,12 +1083,11 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   nop                     ; mul24 r1, r1, rb14
   add r1, r1, rb12
 
-  shl r1, r1, 8
+  shl r1, r1, 8         ; mov r0, ra_height
   brr.anyn -, r:yloop
-  asr r1, r1, rb13
-# We have a saturating pack unit - I can't help feeling it should be useful here
-  min r1, r1, rb_k255       # Delay 2  rb_k255 = 255
-  max vpm, r1, 0         # Delay 3
+  asr ra3.8as, r1, rb13
+  mov r1, 16
+  sub r0, r0, r1        ; mov vpm, ra3.8a
 # >>> branch.anyn yloop
 
 # If looping again the we consumed 16 height last loop
@@ -1088,34 +1096,23 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   # recalc rb26, rb18 based on new segment height
   # N.B. r3 is loop counter still
 
-  mov r1, 16
-  sub r0, ra_height, r1
-  mov ra_height, r0
-  max.setf r0, r0, 0    # Done if Z now
+  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
 
 # DMA out
-  brr.anyz -, r:per_block_setup
-  mov vw_setup, rb26 # VDW setup 0    Delay 1
-  mov vw_setup, rb29 # Stride         Delay 2
-  mov vw_addr, rb_dest # start the VDW   Delay 3
-# >>> .anyz per_block_setup
+  bra.anyz -, ra_link
+  min r0, r0, r1        ; mov vw_setup, rb26    # VDW setup 0
+  sub r2, r0, r1        ; mov vw_setup, rb29    # Stride
+  nop                   ; mov vw_addr, rb_dest  # start the VDW
+# >>> .anyz ra_link
 
-  min r0, r0, r1
   add rb18, rb18, r0
-  sub r0, r0, r1
-  shl r0, r0, i_shift23
+  shl r0, r2, i_shift23
   add rb26, rb26, r0
-
-  nop ; mul24 r0, r1, rb_pitch  # r0 = pitch*16
-  add rb_dest, rb_dest, r0
-
-  mov vw_setup, rb28    # Reset our VDM write pointer
-
   brr -, r:yloop
-  nop
-  nop
-  nop
-# >>>
+  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
+  add rb_dest, rb_dest, r0
+  mov vw_setup, rb28                            # Reset our VDM write pointer
+# >>> yloop
 
 
 
@@ -1134,6 +1131,8 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 # From 19->7 32bits per command.
 
 ::mc_filter_b
+  luma_setup
+
   # r0 = weightL0 << 16, we want it in rb14
 #  asr rb14, r0, i_shift16
 
@@ -1144,21 +1143,19 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 # If we knew there was no clipping then this code would get simpler.
 # Perhaps we could add on the pitch and clip using larger values?
 
-  sub.setf -, r3, rb17      ; v8adds r3, r3, ra_k1                           ; ldtmu0
-  shr r0, r4, ra_xshift     ; mov.ifz ra_base2, rb_base2_next    ; ldtmu1
-  mov.ifz ra_base, ra_base_next ; mov rb31, r3
-  mov.ifz ra_y, ra_y_next   ; mov r3, rb_pitch
-  shr r1, r4, rb_xshift2    ; mov.ifz ra_y2, ra_y2_next
+  sub.setf -, r3, rb17      ; v8adds rb31, r3, ra_k1             ; ldtmu1
+  shr r1, r4, rb_xshift2    ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
+  shr r0, r4, ra_xshift     ; mov r3, rb_pitch
 
   max r2, ra_y, 0  # y
-  min r2, r2, rb_max_y
-  add ra_y, ra_y, 1            ; mul24 r2, r2, r3
-  add t0s, ra_base, r2   ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
+  min r2, r2, rb_max_y      ; mov.ifz ra_base, ra_base_next
+  add ra_y, ra_y, 1         ; mul24 r2, r2, r3
+  add t0s, ra_base, r2      ; mov.ifz ra_base2, rb_base2_next
 
-  max r2, ra_y2, 0  # y
+  max r2, ra_y2, 0
   min r2, r2, rb_max_y
-  add ra_y2, ra_y2, 1          ; mul24 r2, r2, r3
-  add t1s, ra_base2, r2  ; v8min r1, r1, rb_k255
+  add ra_y2, ra_y2, 1       ; mul24 r2, r2, r3
+  add t1s, ra_base2, r2     ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -1166,9 +1163,9 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
 # apply horizontal filter
-  nop                  ; mul24      r3, ra0.8a,      r0
-  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
+  and r1, r1, rb_k255  ; mul24      r3, ra0.8a,      r0
   nop                  ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
+  nop                  ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
   nop                  ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
   sub r2, r2, r3       ; mul24      r3, ra0.8c << 2, r0 << 2    @ "mul_used", 0
   nop                  ; mul24.ifnz r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
@@ -1211,13 +1208,12 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   add r0, r0, r2          ; mul24 r1, r1 << 8, ra18.16a << 8    @ "mul_used", 0
 
   add r1, r1, r0          ; mov -, vw_wait
-  shl r1, r1, 8
-
+  shl r1, r1, 8         ; mov r0, ra_height
   brr.anyn -, r:yloopb
-  asr r1, r1, rb13         # Delay 1
-  min r1, r1, rb_k255       # Delay 2
-  max vpm, r1, 0         # Delay 3
-
+  asr ra3.8as, r1, rb13
+  mov r1, 16
+  sub r0, r0, r1        ; mov vpm, ra3.8a
+# >>> branch.anyn yloop
 
 # If looping again the we consumed 16 height last loop
   # rb29 (stride) remains constant
@@ -1225,33 +1221,24 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   # recalc rb26, rb18 based on new segment height
   # N.B. r3 is loop counter still
 
-  mov r1, 16
-  sub r0, ra_height, r1
-  mov ra_height, r0
-  max.setf r0, r0, 0    # Done if Z now
+  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
 
 # DMA out
-  brr.anyz -, r:per_block_setup
-  mov vw_setup, rb26 # VDW setup 0    Delay 1
-  mov vw_setup, rb29 # Stride         Delay 2
-  mov vw_addr, rb_dest # start the VDW   Delay 3
-# >>> .anyz per_block_setup
+  bra.anyz -, ra_link
+  min r0, r0, r1        ; mov vw_setup, rb26    # VDW setup 0
+  sub r2, r0, r1        ; mov vw_setup, rb29    # Stride
+  nop                   ; mov vw_addr, rb_dest  # start the VDW
+# >>> .anyz ra_link
 
-  min r0, r0, r1
   add rb18, rb18, r0
-  sub r0, r0, r1
-  shl r0, r0, i_shift23
+  shl r0, r2, i_shift23
   add rb26, rb26, r0
-
-  nop ; mul24 r0, r1, rb_pitch  # r0 = pitch*16
-  add rb_dest, rb_dest, r0
-
-  mov vw_setup, rb28    # Reset our VDM write pointer
-
   brr -, r:yloopb
-  nop
-  nop
-  nop
+  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
+  add rb_dest, rb_dest, r0
+  mov vw_setup, rb28                            # Reset our VDM write pointer
+# >>> yloop
+
 
 ################################################################################
 
