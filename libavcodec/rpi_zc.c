@@ -314,9 +314,8 @@ fail0:
     return NULL;
 }
 
-static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * const frame)
+static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
 {
-    ZcEnv *const zc = s->get_buffer_context;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->format, frame->width, frame->height);
     const unsigned int size_y = geo.stride_y * geo.height_y;
     const unsigned int size_c = geo.stride_c * geo.height_c;
@@ -328,7 +327,7 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
 
     if ((buf = rpi_buf_pool_alloc(&zc->pool, size_pic)) == NULL)
     {
-        av_log(s, AV_LOG_ERROR, "rpi_get_display_buffer: Failed to get buffer from pool\n");
+        av_log(NULL, AV_LOG_ERROR, "rpi_get_display_buffer: Failed to get buffer from pool\n");
         return AVERROR(ENOMEM);
     }
 
@@ -374,7 +373,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
     else if (frame->format == AV_PIX_FMT_YUV420P ||
              frame->format == AV_PIX_FMT_SAND128)
     {
-        rv = rpi_get_display_buffer(s, frame);
+        rv = rpi_get_display_buffer(s->get_buffer_context, frame);
     }
     else
     {
@@ -405,7 +404,7 @@ static AVBufferRef * zc_copy(struct AVCodecContext * const s,
     dest->width = src->width;
     dest->height = src->height;
 
-    if (rpi_get_display_buffer(s, dest) != 0)
+    if (rpi_get_display_buffer(s->get_buffer_context, dest) != 0)
     {
         return NULL;
     }
