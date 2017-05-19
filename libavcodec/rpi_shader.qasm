@@ -327,7 +327,7 @@
   bra -, ra_link
 
   min r0, r0, rb_max_y  ; mov -, unif           # Unused 5
-  add ra_y2, r1, ra_k1   ; mul24 r0, r0, rb_pitch
+  add ra_y2, r1, ra_k1  ; mul24 r0, r0, rb_pitch
   add t1s, ra_base2, r0
 
 # >>> ra_link
@@ -381,10 +381,10 @@
   add rb_dma0, r0, rb_dma0_base ; mov r1, ra1.16b       # ; r1=weight
 
   shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
-  mov r3, 0             ; mov rb11, ra3.8d   # Loop count
+  mov r3, 0             ; mov rb11, ra3.8d      # Loop count
 
   asr rb_wt_off, r1, 1
-  shl rb_wt_mul_l0, ra1.16a, 1  # b14 = weight*2
+  shl rb_wt_mul_l0, ra1.16a, 1                  # b14 = weight*2
 
 # rb_wt_mul_l0 - weight L0 * 2
 # rb_wt_den_p15 = weight denom + 6 + 9
@@ -458,6 +458,21 @@
   mov vw_setup, rb_dma1
   mov vw_addr, unif     # u_dst_addr
 # >>>
+
+# we want
+# C0C1 : C4Ca : C0C1 : C4Ca : C2C3 : CaCb : C2C3...
+# U0U4 : V0V4 : U1U5 : V1V5 : U2U6 : V2U6 : ...
+
+# mov.setf -, [0,1,0,...]
+# shr r2, r4, ra_xshift  # if elem & 2 == 1 then r0 = r0 >> 16
+# shr r1, r2, 8
+# mov r0, r2
+# mov.ifnz r0, r1 << 1   # ?? winge re r1 stability?
+# mov.ifz  r1, r2 << 15
+#
+#
+#
+
 
 ################################################################################
 
