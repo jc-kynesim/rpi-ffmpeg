@@ -467,7 +467,7 @@
 # shr r2, r4, ra_xshift  # if elem & 2 == 1 then r0 = r0 >> 16
 # shr r1, r2, 8
 # mov r0, r2
-# mov.ifnz r0, r1 << 1   # ?? winge re r1 stability?
+# mov.ifnz r0, r1 << 1
 # mov.ifz  r1, r2 << 15
 #
 #
@@ -666,7 +666,7 @@
   mov.ifnz ra1, unif    ; mov rb10, ra3.8c      # V offset/weight
 
   nop                   ; mov rb11, ra3.8d
-  shl r1, ra1.16b, rb_wt_den_p1 ; v8subs r3, r3, r3     # ; r3 (loop counter)  = 0
+  shl r1, ra1.16b, rb_wt_den_p15 ; v8subs r3, r3, r3     # ; r3 (loop counter)  = 0
   asr rb_wt_off, r1, 1
 
 # ra1.16a used directly in the loop
@@ -1038,11 +1038,11 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 # >>> branch ra_link
 #
 # r3 = 0
-# ra_wt_mul_l1 = weight L1
-# ra5.16a  = weight L0/L1 depending on side (wanted for 2x mono-pred)
+# ra_wt_mul_l1  = weight L1
+# ra5.16a       = weight L0/L1 depending on side (wanted for 2x mono-pred)
 # rb_wt_off     = (((is P) ? offset L0/L1 * 2 : offset L1 + offset L0) + 1) << (rb_wt_den_p15 - 1)
-# rb_wt_den_p15     = weight denom + 6 + 9
-# rb_wt_mul_l0     = weight L0
+# rb_wt_den_p15 = weight denom + 6 + 9
+# rb_wt_mul_l0  = weight L0
 
 
 ################################################################################
