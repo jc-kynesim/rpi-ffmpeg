@@ -127,6 +127,7 @@ function ff_hevc_sao_band_w64_neon_8, export=1
         push      {r4, lr}
         subs      r12, #1
         mov       r4, r1
+        it ne
         addne     r4, r3
 
 1:      subs      r12, #1
@@ -138,6 +139,7 @@ function ff_hevc_sao_band_w64_neon_8, export=1
         vshr.u8   q14, q10, #3
         vshr.u8   q15, q11, #3
         sao_band_64
+        it ne
         addne     r4, r3
         vstm      r0, {q8-q11}
         add       r0, r2
@@ -200,6 +202,7 @@ function ff_hevc_sao_band_c_neon_8, export=1
 
         @ Might (unlikely) be called with height == 1
         subs      r12, #1
+        it ne
         addne     r4, r3
 
 1:
@@ -238,6 +241,7 @@ function ff_hevc_sao_band_c_neon_8, export=1
         vsub.s8  q10, q3
         vsub.s8  q11, q3
 
+        it ne
         addne     r4, r3        @ Do not inc on final pass
         vst2.8    {q8-q9}, [r0, :128]!
         vst2.8    {q10-q11}, [r0, :128], r2
@@ -249,6 +253,7 @@ function ff_hevc_sao_band_c_neon_8, export=1
 @ -- width 16 (UV pairs) --
 16:
         subs    r12, #2
+        it ne
         addne   r4, r4, r3, lsl #1
 
 1:
@@ -287,6 +292,7 @@ function ff_hevc_sao_band_c_neon_8, export=1
         vsub.s8  q10, q3
         vsub.s8  q11, q3
 
+        it ne
         addne   r4, r4, r3, lsl #1
         vst2.8    {q8-q9}, [r0, :128], r2
         vst2.8    {q10-q11}, [r0, :128], r2

@@ -24,6 +24,7 @@ zc_tab:
 
 @ 4*4*2: "32 bytes" 64 or 0 depending on dst address
 zc_lc2:
+	it eq
         vstmeq  r0, {q8-q11}
         bx      lr
 

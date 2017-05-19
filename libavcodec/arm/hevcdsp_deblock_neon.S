@@ -377,6 +377,7 @@ v_loop_luma_common:
 
         @ no_p[1]
         tst     r10, #0xff00
+        itt ne
         addne    r4, r4, r1, lsl #2
         bne     1f
         vst4.8  {d16[7],d17[7],d18[7],d19[7]}, [r4:32], r1
@@ -387,6 +388,7 @@ v_loop_luma_common:
 1:
         @ no_q[1]
         tst     r10, #0xff000000
+        itt ne
         addne    r0, r0, r1, lsl #2
         bne     2f
         vst4.8  {d20[7],d21[7],d22[7],d23[7]}, [r0:32], r1
@@ -475,12 +477,14 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
         vmov     r6, r7, d20
 
         tst      r10, #0xff0000
+        ittt eq
         streq    r2, [r0]
         streq    r4, [r0, r1]
         streq    r6, [r0, r1, lsl # 1]
 
         add      r0, r0, #4
         tst      r10, #0xff000000
+        ittt eq
         streq    r3, [r0]
         streq    r5, [r0, r1]
         streq    r7, [r0, r1, lsl # 1]
@@ -492,11 +496,13 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
         add      r0, r0, r1, lsl # 1
 
         tst      r10, #0xff00
+        ittt eq
         streq    r3, [r0]
         streq    r5, [r0, r1]
         streq    r7, [r0, r1, lsl # 1]
 
         tst      r10, #0xff
+        ittt eq
         streq    r2, [r0, #-4]!
         streq    r4, [r0, r1]
         streq    r6, [r0, r1, lsl # 1]
@@ -547,6 +553,7 @@ function ff_hevc_h_loop_filter_uv_neon, export=1
         vst1.8   {d26}, [r0]
 1:      add      r0, r0, #8
         tst      r3, #8
+        it ne
         bxne     lr
         vst1.8   {d27}, [r0]
         bx       lr
@@ -596,6 +603,7 @@ function ff_hevc_v_loop_filter_uv2_neon, export=1
 
         @ p[1]
         tst      r2, #2
+        itt ne
         addne    r3, r3, r1, lsl #2
         bne      1f
         vst4.8   {d16[7], d17[7], d18[7], d19[7]}, [r3], r1
@@ -606,6 +614,7 @@ function ff_hevc_v_loop_filter_uv2_neon, export=1
 1:
         @ q[1]
         tst      r2, #8
+        itt ne
         addne    r0, r0, r1, lsl #2
         bne 2f
         vst4.8   {d26[7], d27[7], d28[7], d29[7]}, [r0], r1
@@ -625,6 +634,7 @@ function ff_hevc_v_loop_filter_uv2_neon, export=1
 3:
         @ q[0]
         tst      r2, #4
+        it ne
         bxne     lr
         vst4.8   {d26[3], d27[3], d28[3], d29[3]}, [r0], r1
         vst4.8   {d26[2], d27[2], d28[2], d29[2]}, [r0], r1
