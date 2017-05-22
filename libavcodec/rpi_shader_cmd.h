@@ -4,7 +4,6 @@
 #pragma pack(push, 4)
 
 typedef struct qpu_mc_pred_c_s {
-    uint32_t next_fn;
     int16_t next_src_y;
     int16_t next_src_x;
     uint32_t next_src_base_c;
@@ -52,6 +51,7 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t dummy5;
         } s1;
     };
+    uint32_t next_fn;
 } qpu_mc_pred_c_t;
 
 typedef struct qpu_mc_pred_y_s {
