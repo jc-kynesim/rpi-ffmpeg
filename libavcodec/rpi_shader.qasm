@@ -781,7 +781,7 @@
 # conflicts
 
 # mc_exit()
-
+.if 0
 ::mc_interrupt_exit8c
   nop                   ; nop           ; ldtmu0
   nop                   ; nop           ; ldtmu1
@@ -795,16 +795,12 @@
   mov -,sacq(0) # 5
   mov -,sacq(0) # 6
   mov -,sacq(0) # 7
-#  mov -,sacq(0) # 8
-#  mov -,sacq(0) # 9
-#  mov -,sacq(0) # 10
-#  mov -,sacq(0) # 11
 
   nop                   ; nop           ; thrend
   mov interrupt, 1
   nop
 # >>> thrend <<<
-
+.endif
 # Chroma & Luma the same now
 ::mc_exit_c
 ::mc_exit
@@ -821,6 +817,7 @@
 # >>> thrend <<<
 
 # mc_interrupt_exit12()
+::mc_interrupt_exit12c
 ::mc_interrupt_exit12
   nop                   ; nop           ; ldtmu0
   nop                   ; nop           ; ldtmu1
