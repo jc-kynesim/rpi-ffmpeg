@@ -103,7 +103,7 @@ unsigned int rpi_shader[] = {
 // ::mc_filter_uv
 /* [0x00000270] */ 0x159dcfc0, 0x10021c67, // mov vw_setup, rb_vpm_init
 /* [0x00000278] */ 0x15827d80, 0x100200a7, // mov ra2, unif
-/* [0x00000280] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+/* [0x00000280] */ 0x14981dc0, 0xd00229e7, // and.setf -, elem_num, 1
 /* [0x00000288] */ 0xec0a7d89, 0x14024821, // add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1
 /* [0x00000290] */ 0x0c9c21c0, 0x10020827, // add r0, r0, rb_elem_x
 /* [0x00000298] */ 0x8d8103f6, 0x10024863, // sub r1, r1, rb_pitch  ; mov r3, unif
@@ -174,7 +174,7 @@ unsigned int rpi_shader[] = {
 // ::mc_filter_uv_b0
 /* [0x00000498] */ 0x159dcfc0, 0x10021c67, // mov vw_setup, rb_vpm_init
 /* [0x000004a0] */ 0x15827d80, 0x100200a7, // mov ra2, unif
-/* [0x000004a8] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+/* [0x000004a8] */ 0x14981dc0, 0xd00229e7, // and.setf -, elem_num, 1
 /* [0x000004b0] */ 0xec0a7d89, 0x14024821, // add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1
 /* [0x000004b8] */ 0x0c9c21c0, 0x10020827, // add r0, r0, rb_elem_x
 /* [0x000004c0] */ 0x8d8103f6, 0x10024863, // sub r1, r1, rb_pitch  ; mov r3, unif
@@ -259,7 +259,7 @@ unsigned int rpi_shader[] = {
 /* [0x00000728] */ 0x959e749b, 0x100241c6, // mov ra7, r2           ; mov rb6, r3
 // :uv_b0_post_fin
 /* [0x00000730] */ 0x15827d80, 0x100200a7, // mov ra2, unif
-/* [0x00000738] */ 0x0000ff00, 0xe20229e7, // mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+/* [0x00000738] */ 0x14981dc0, 0xd00229e7, // and.setf -, elem_num, 1
 /* [0x00000740] */ 0xec0a7d89, 0x14024821, // add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1
 /* [0x00000748] */ 0x0c9c21c0, 0x10020827, // add r0, r0, rb_elem_x
 /* [0x00000750] */ 0x8d8103f6, 0x10024863, // sub r1, r1, rb_pitch  ; mov r3, unif

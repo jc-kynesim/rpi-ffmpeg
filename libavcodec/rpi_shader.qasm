@@ -361,7 +361,7 @@
 # get base addresses and per-channel shifts for *next* invocation
   mov ra2, unif                                 # x_y
 
-  setf_nz_if_v                                  # Also acts as delay slot for ra2
+  and.setf -, elem_num, 1                       # Also acts as delay slot for ra2
 
   add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1     # x ; r1=0
   add r0, r0, rb_elem_x
@@ -511,7 +511,7 @@
 # get base addresses and per-channel shifts for *next* invocation
   mov ra2, unif                                 # x_y
 
-  setf_nz_if_v                                  # Also acts as delay slot for ra2
+  and.setf -, elem_num, 1                       # Also acts as delay slot for ra2
 
   add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1     # x ; r1=0
   add r0, r0, rb_elem_x
@@ -676,7 +676,7 @@
 # get base addresses and per-channel shifts for *next* invocation
   mov ra2, unif                                 # x_y
 
-  setf_nz_if_v                                  # Also acts as delay slot for ra2
+  and.setf -, elem_num, 1                       # Also acts as delay slot for ra2
 
   add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1  # r0=x*2 ; r1=0
   add r0, r0, rb_elem_x
