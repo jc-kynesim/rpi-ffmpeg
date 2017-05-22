@@ -25,6 +25,8 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#ifdef RPI
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -142,3 +144,6 @@ int mbox_open() {
 void mbox_close(int file_desc) {
   close(file_desc);
 }
+
+#endif
+

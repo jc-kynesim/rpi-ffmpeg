@@ -1689,6 +1689,7 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
     if (ret < 0)
         return ret;
 
+#ifdef RPI
     if (rpi_sliced_frame(s->frame)) {
         s->hevcdsp.put_pcm(rpi_sliced_frame_pos_y(s->frame, x0, y0),
                            s->frame->linesize[0],
@@ -1701,6 +1702,7 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
                            &gb, s->ps.sps->pcm.bit_depth_chroma);
     }
     else
+#endif
     {
         const int stride0   = s->frame->linesize[0];
         uint8_t * const dst0 = &s->frame->data[0][y0 * stride0 + (x0 << s->ps.sps->pixel_shift)];
@@ -4591,12 +4593,13 @@ fail:  // Also success path
         rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
-    } else if (s->ref && s->enable_rpi) {
+    }
 #if RPI_INTER
+    else if (s->ref && s->enable_rpi) {
       // When running single threaded we need to flush the whole frame
       flush_frame(s,s->frame);
-#endif
     }
+#endif
     return ret;
 }
 

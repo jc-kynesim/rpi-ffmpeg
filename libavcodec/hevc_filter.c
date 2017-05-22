@@ -287,6 +287,12 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
     uint8_t right_tile_edge  = 0;
     uint8_t up_tile_edge     = 0;
     uint8_t bottom_tile_edge = 0;
+#ifdef RPI
+    const int sliced = rpi_sliced_frame(s->frame);
+    const int plane_count = sliced ? 2 : (s->ps.sps->chroma_format_idc ? 3 : 1);
+#else
+    const int plane_count = (s->ps.sps->chroma_format_idc ? 3 : 1);
+#endif
 
     edges[0]   = x_ctb == 0;
     edges[1]   = y_ctb == 0;
@@ -328,7 +334,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         }
     }
 
-    for (c_idx = 0; c_idx < (s->ps.sps->chroma_format_idc ? 3 : 1); c_idx++) {
+    for (c_idx = 0; c_idx < plane_count; c_idx++) {
         int x0       = x >> s->ps.sps->hshift[c_idx];
         int y0       = y >> s->ps.sps->vshift[c_idx];
         ptrdiff_t stride_src = s->frame->linesize[c_idx];
@@ -337,7 +343,10 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         int width    = FFMIN(ctb_size_h, (s->ps.sps->width  >> s->ps.sps->hshift[c_idx]) - x0);
         int height   = FFMIN(ctb_size_v, (s->ps.sps->height >> s->ps.sps->vshift[c_idx]) - y0);
         int tab      = sao_tab[(FFALIGN(width, 8) >> 3) - 1];
-        const int sliced = rpi_sliced_frame(s->frame);
+        ptrdiff_t stride_dst;
+        uint8_t *dst;
+
+#ifdef RPI
         const unsigned int sh = (sliced && c_idx != 0) ? 1 : s->ps.sps->pixel_shift;
         const int wants_lr = sao->type_idx[c_idx] == SAO_EDGE && sao->eo_class[c_idx] != 1 /* Vertical */;
         uint8_t * const src = !sliced ?
@@ -356,12 +365,17 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                 rpi_sliced_frame_pos_y(s->frame, x0 + width, y0) :
                 rpi_sliced_frame_pos_c(s->frame, x0 + width, y0);
 
-        ptrdiff_t stride_dst;
-        uint8_t *dst;
 
         if (sliced && c_idx > 1) {
             break;
         }
+#else
+        const unsigned int sh = s->ps.sps->pixel_shift;
+        const int wants_lr = sao->type_idx[c_idx] == SAO_EDGE && sao->eo_class[c_idx] != 1 /* Vertical */;
+        uint8_t * const src = &s->frame->data[c_idx][y0 * stride_src + (x0 << s->ps.sps->pixel_shift)];
+        const uint8_t * const src_l = edges[0] || !wants_lr ? NULL : src - (1 << sh);
+        const uint8_t * const src_r = edges[2] || !wants_lr ? NULL : src + (width << sh);
+#endif
 
         switch (sao->type_idx[c_idx]) {
         case SAO_BAND:
@@ -372,31 +386,37 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                 dst = lc->edge_emu_buffer;
                 stride_dst = 2*MAX_PB_SIZE;
                 copy_CTB(dst, src, width << sh, height, stride_dst, stride_src);
-                if (!sliced || c_idx == 0) {
-                    s->hevcdsp.sao_band_filter[tab](src, dst, stride_src, stride_dst,
-                                                    sao->offset_val[c_idx], sao->band_position[c_idx],
-                                                    width, height);
-                }
-                else
+#ifdef RPI
+                if (sliced && c_idx != 0)
                 {
                     s->hevcdsp.sao_band_filter_c[tab](src, dst, stride_src, stride_dst,
                                                     sao->offset_val[1], sao->band_position[1],
                                                     sao->offset_val[2], sao->band_position[2],
                                                     width, height);
                 }
-                restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
-                                   x, y, width, height, c_idx);
-            } else {
-                if (!sliced || c_idx == 0) {
-                    s->hevcdsp.sao_band_filter[tab](src, src, stride_src, stride_src,
+                else
+#endif
+                {
+                    s->hevcdsp.sao_band_filter[tab](src, dst, stride_src, stride_dst,
                                                     sao->offset_val[c_idx], sao->band_position[c_idx],
                                                     width, height);
                 }
-                else
+                restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
+                                   x, y, width, height, c_idx);
+            } else {
+#ifdef RPI
+                if (sliced && c_idx != 0)
                 {
                     s->hevcdsp.sao_band_filter_c[tab](src, src, stride_src, stride_src,
                                                     sao->offset_val[1], sao->band_position[1],
                                                     sao->offset_val[2], sao->band_position[2],
+                                                    width, height);
+                }
+                else
+#endif
+                {
+                    s->hevcdsp.sao_band_filter[tab](src, src, stride_src, stride_src,
+                                                    sao->offset_val[c_idx], sao->band_position[c_idx],
                                                     width, height);
                 }
             }
@@ -487,11 +507,14 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
 
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
                            x_ctb, y_ctb);
-
-            if (!sliced || c_idx == 0) {
-                s->hevcdsp.sao_edge_filter[tab](src, dst, stride_src, sao->offset_val[c_idx],
-                                                sao->eo_class[c_idx], width, height);
-                s->hevcdsp.sao_edge_restore[restore](src, dst,
+#ifdef RPI
+            if (sliced && c_idx != 0)
+            {
+                // Class always the same for both U & V (which is just as well :-))
+                s->hevcdsp.sao_edge_filter_c[tab](src, dst, stride_src,
+                                                sao->offset_val[1], sao->offset_val[2], sao->eo_class[1],
+                                                width, height);
+                s->hevcdsp.sao_edge_restore_c[restore](src, dst,
                                                     stride_src, stride_dst,
                                                     sao,
                                                     edges, width,
@@ -500,12 +523,12 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                                                     horiz_edge,
                                                     diag_edge);
             }
-            else {
-                // Class always the same for both U & V (which is just as well :-))
-                s->hevcdsp.sao_edge_filter_c[tab](src, dst, stride_src,
-                                                sao->offset_val[1], sao->offset_val[2], sao->eo_class[1],
-                                                width, height);
-                s->hevcdsp.sao_edge_restore_c[restore](src, dst,
+            else
+#endif
+            {
+                s->hevcdsp.sao_edge_filter[tab](src, dst, stride_src, sao->offset_val[c_idx],
+                                                sao->eo_class[c_idx], width, height);
+                s->hevcdsp.sao_edge_restore[restore](src, dst,
                                                     stride_src, stride_dst,
                                                     sao,
                                                     edges, width,
@@ -677,9 +700,12 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 beta = betatable[av_clip(qp + beta_offset, 0, MAX_QP)];
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                src     = rpi_sliced_frame(s->frame) ?
-                    rpi_sliced_frame_pos_y(s->frame, x, y) :
-                    &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+                src =
+#ifdef RPI
+                    rpi_sliced_frame(s->frame) ?
+                        rpi_sliced_frame_pos_y(s->frame, x, y) :
+#endif
+                        &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
                 if (pcmf) {
                     no_p[0] = get_pcm(s, x, y - 1);
                     no_p[1] = get_pcm(s, x + 4, y - 1);
@@ -816,9 +842,12 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                         c_tc[0] = (bs0 == 2) ? chroma_tc(s, qp0, chroma, tc_offset) : 0;
                         c_tc[1] = (bs1 == 2) ? chroma_tc(s, qp1, chroma, tc_offset) : 0;
-                        src     = rpi_sliced_frame(s->frame) ?
-                            rpi_sliced_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
-                            &s->frame->data[chroma][(y >> s->ps.sps->vshift[chroma]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[chroma]) << s->ps.sps->pixel_shift)];
+                        src =
+#ifdef RPI
+                            rpi_sliced_frame(s->frame) ?
+                                rpi_sliced_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
+#endif
+                                &s->frame->data[chroma][(y >> s->ps.sps->vshift[chroma]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[chroma]) << s->ps.sps->pixel_shift)];
                         if (pcmf) {
                             no_p[0] = get_pcm(s, x - 1, y);
                             no_p[1] = get_pcm(s, x - 1, y + (4 * v));
@@ -865,9 +894,12 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
                         c_tc[0]   = bs0 == 2 ? chroma_tc(s, qp0, chroma, tc_offset)     : 0;
                         c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
-                        src     = rpi_sliced_frame(s->frame) ?
-                            rpi_sliced_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
-                            &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
+                        src =
+#ifdef RPI
+                            rpi_sliced_frame(s->frame) ?
+                                rpi_sliced_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
+#endif
+                                &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
                         if (pcmf) {
                             no_p[0] = get_pcm(s, x,           y - 1);
                             no_p[1] = get_pcm(s, x + (4 * h), y - 1);
