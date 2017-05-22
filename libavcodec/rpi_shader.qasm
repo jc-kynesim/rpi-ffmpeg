@@ -310,7 +310,7 @@
 
 # Get shift
   nop                   ; mov -, unif           # Unused 2
-  shl rb_xshift2_next, r1, 3
+  shl rb_xshift2_next, r0, 3
 
 # In a single 32 bit word we get 2 UV pairs so mask bottom bit of xs
 
@@ -369,7 +369,7 @@
   max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next # ; xshift2 used because B
   min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
 
-  shl ra_xshift_next, r0, 4
+  shl ra_xshift_next, r0, 3
 
   and r0, r0, -4        ; mov ra0, unif         # H filter coeffs
   nop                   ; mov ra_y_next, ra2.16a
@@ -509,23 +509,25 @@
 # per-channel shifts were calculated on the *previous* invocation
 
 # get base addresses and per-channel shifts for *next* invocation
-  mov ra2, unif         ; mov r0, elem_num
+  mov ra2, unif                                 # x_y
 
   setf_nz_if_v                                  # Also acts as delay slot for ra2
 
-  add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
+  add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1     # x ; r1=0
+  add r0, r0, rb_elem_x
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next # ; xshift2 used because B
   min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
 
-  shl ra_xshift_next, r0, 4
+  shl ra_xshift_next, r0, 3
 
-  and r0, r0, -2        ; mov ra0, unif         # H filter coeffs
-  add r0, r0, r0        ; mov ra_y_next, ra2.16a
+  and r0, r0, -4        ; mov ra0, unif         # H filter coeffs
+  nop                   ; mov ra_y_next, ra2.16a
   and r1, r0, r1        ; mul24 r2, ra1.16b, 2  # r2=x*2 (we are working in pel pairs)
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        ; mov r1, ra1.16a       # Add stripe offsets ; r1=height
-  add ra_base_next, r3, r0      ; mul24 r0, r1, ra_k256
+  add ra_base_next, r3, r0
+  shl r0, r1, 7
 
 # set up VPM write
 
@@ -536,7 +538,7 @@
 # ; unpack filter coefficients
 
   add r0,   r0, r2      ; mov rb9,  ra3.8b
-  shl r0,   r0, 15      ; mov rb10, ra3.8c      # Shift into bits 16 upwards of the vdw_setup0 register
+  shl r0,   r0, i_shift16 ; mov rb10, ra3.8c      # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base
 
   mov r3, 0             ; mov rb11, ra3.8d      # Loop count
@@ -554,14 +556,19 @@
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb_i_tmu      ; v8adds rb_i, r3, ra_k1 ; ldtmu0     # loop counter increment
-  shr r0, r4, rb_xshift2        ; mov.ifz r3, ra_y_next
-  shr r1, r0, 8                 ; mov.ifnz r3, ra_y
+  sub.setf -, r3, rb_i_tmu ; v8adds rb_i, r3, ra_k1 ; ldtmu0     # loop counter increment
+  shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
+  shr r1, r2, 8         ; mov.ifnz r3, ra_y
+  mov.ifz ra_base, ra_base_next
 
-  max r2, r3, 0                 ; mov.ifz ra_base, ra_base_next
+  and.setf -, 1, elem_num ; mov r0, r2
+  nop                   ; mov.ifnz r0, r1 << 15
+  nop                   ; mov.ifz  r1, r2 << 1
+
+  max r2, r3, 0
   min r2, r2, rb_max_y
-  add ra_y, r3, ra_k1           ; mul24 r2, r2, rb_pitch
-  add t0s, ra_base, r2          ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
+  add ra_y, r3, ra_k1   ; mul24 r2, r2, rb_pitch
+  add t0s, ra_base, r2  ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -569,13 +576,13 @@
   mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
   and r1, r1, rb_k255   ; mul24      r3, ra0.8a,       r0
-  nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1  @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0  # Need to wait 1 cycle for rotated r1
-  nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9  @ "mul_used", 0
-  sub r2, r2, r3        ; mul24      r3, ra0.8c << 2,  r0 << 2  @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10 @ "mul_used", 0
-  add r2, r2, r3        ; mul24      r3, ra0.8d << 3,  r0 << 3  @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11 @ "mul_used", 0
+  nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0
+  nop                   ; mul24.ifnz r2, ra0.8b << 10, r1 << 10 @ "mul_used", 0
+  sub r2, r2, r3        ; mul24      r3, ra0.8c << 4,  r0 << 4  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8c << 12, r1 << 12 @ "mul_used", 0
+  add r2, r2, r3        ; mul24      r3, ra0.8d << 6,  r0 << 6  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8d << 14, r1 << 14 @ "mul_used", 0
   sub r0, r2, r3        ; mov r3, rb_i
   sub.setf -, r3, 4     ; mov ra12, ra13
   brr.anyn -, r:uvloop_b0
@@ -667,19 +674,20 @@
 # per-channel shifts were calculated on the *previous* invocation
 
 # get base addresses and per-channel shifts for *next* invocation
-  mov ra2, unif         ; mov r0, elem_num
+  mov ra2, unif                                 # x_y
 
   setf_nz_if_v                                  # Also acts as delay slot for ra2
 
-  add r0, ra2.16b, r0   ; v8subs r1, r1, r1     # x ; r1=0
+  add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1  # r0=x*2 ; r1=0
+  add r0, r0, rb_elem_x
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, ra_k0     ; mov rb_xshift2, rb_xshift2_next # ; xshift2 used because B
   min r0, r0, rb_max_x  ; mov -, unif           # ; width_height
 
-  shl rb_xshift2_next, r0, 4
+  shl rb_xshift2_next, r0, 3
 
-  and r0, r0, -2        ; mov ra0, unif         # H filter coeffs
-  add r0, r0, r0        ; mov ra_y2_next, ra2.16a
+  and r0, r0, -4        ; mov ra0, unif         # H filter coeffs
+  nop                   ; mov ra_y2_next, ra2.16a
   and r1, r0, r1        ; mov ra3, unif         # ; V filter coeffs
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        ; mov rb8,  ra3.8a      # Add stripe offsets ; start unpacking filter coeffs
@@ -705,10 +713,15 @@
 # then submit two more texture requests
 
   sub.setf -, r3, rb_i_tmu      ; v8adds rb_i, r3, ra_k1 ; ldtmu1     # loop counter increment
-  shr r0, r4, rb_xshift2        ; mov.ifz r3, ra_y2_next
-  shr r1, r0, 8                 ; mov.ifnz r3, ra_y2
+  shr r2, r4, rb_xshift2        ; mov.ifz r3, ra_y2_next
+  shr r1, r2, 8                 ; mov.ifnz r3, ra_y2
+  mov.ifz ra_base2, rb_base2_next
 
-  max r2, r3, ra_k0             ; mov.ifz ra_base2, rb_base2_next
+  and.setf -, 1, elem_num ; mov r0, r2
+  nop                   ; mov.ifnz r0, r1 << 15
+  nop                   ; mov.ifz  r1, r2 << 1
+
+  max r2, r3, ra_k0
   min r2, r2, rb_max_y
   add ra_y2, r3, ra_k1          ; mul24 r2, r2, rb_pitch
   add t1s, ra_base2, r2         ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
@@ -716,16 +729,16 @@
 # generate seven shifted versions
 # interleave with scroll of vertical context
 
-mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
   and r1, r1, rb_k255   ; mul24      r3, ra0.8a,       r0
-  nop                   ; mul24      r2, ra0.8b << 1,  r0 << 1     @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8     @ "mul_used", 0
-  nop                   ; mul24.ifnz r2, ra0.8b << 9,  r1 << 9     @ "mul_used", 0
-  sub r2, r2, r3        ; mul24      r3, ra0.8c << 2,  r0 << 2     @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10    @ "mul_used", 0
-  add r2, r2, r3        ; mul24      r3, ra0.8d << 3,  r0 << 3     @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11    @ "mul_used", 0
+  nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8a << 8,  r1 << 8  @ "mul_used", 0
+  nop                   ; mul24.ifnz r2, ra0.8b << 10, r1 << 10 @ "mul_used", 0
+  sub r2, r2, r3        ; mul24      r3, ra0.8c << 4,  r0 << 4  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8c << 12, r1 << 12 @ "mul_used", 0
+  add r2, r2, r3        ; mul24      r3, ra0.8d << 6,  r0 << 6  @ "mul_used", 0
+  nop                   ; mul24.ifnz r3, ra0.8d << 14, r1 << 14 @ "mul_used", 0
   sub r0, r2, r3        ; mov r3, rb_i
   sub.setf -, r3, 4     ; mov ra12, ra13
   brr.anyn -, r:uvloop_b
@@ -749,12 +762,10 @@ mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
   add r1, r1, rb_wt_off ; mov rb5, ra6          # rb_wt_off = (offsetL0 + offsetL1 + 1) << (rb_wt_den_p15 - 1)
 
   sub.setf -, r3, ra_cb_lheight_p3 ; mov ra6, rb7
-  asr ra3.8as, r1, rb_wt_den_p15
-  nop                   ; mov r1, r1 << 8
   brr.anyn -, r:uvloop_b
-  asr ra3.8bs, r1, rb_wt_den_p15
+  asr ra3.8as, r1, rb_wt_den_p15
   mov -, vw_wait        ; mov rb7, ra8          #  vw_wait is B-reg (annoyingly) ; Final FIFO mov
-  mov vpm, ra3
+  mov vpm, ra3.8a
 # >>>
 
 # DMA out
