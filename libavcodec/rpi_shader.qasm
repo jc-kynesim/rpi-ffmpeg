@@ -701,12 +701,12 @@
   shl r1, ra1.16b, rb_wt_den_p15 ; v8subs r3, r3, r3     # ; r3 (loop counter)  = 0
   asr rb_wt_off, r1, 1  ; mov ra_link, unif     # link
 
-# ra1.16a used directly in the loop
-
-# retrieve texture results and pick out bytes
-# then submit two more texture requests
 
 # r3 = 0
+
+# ra0.8x  filter components
+# ra1.16a (L1 mul weight) used directly in the loop
+# ra3.8a  used for saturation (temp)
 
 :uvloop_b
 # retrieve texture results and pick out bytes
