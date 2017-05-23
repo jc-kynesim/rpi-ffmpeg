@@ -1,10 +1,13 @@
 #include "config.h"
 #ifdef RPI
 #include "rpi_qpu.h"
+#include "rpi_mailbox.h"
 #include "rpi_zc.h"
+#include "libavutil/avassert.h"
 #include <pthread.h>
 
 #include "libavutil/buffer_internal.h"
+#include <interface/vctypes/vc_image_types.h>
 
 #define TRACE_ALLOC 0
 
@@ -42,6 +45,9 @@ typedef struct ZcPoolEnt
 #define STRIDE_ROUND    32
 #define STRIDE_OR       0
 #endif
+
+#define DEBUG_ZAP0_BUFFERS 0
+
 
 static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)
 {
@@ -176,10 +182,18 @@ zc_pool_destroy(ZcPool * const pool)
     pthread_mutex_destroy(&pool->lock);
 }
 
+typedef struct ZcOldCtxVals
+{
+    int thread_safe_callbacks;
+    int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
+    void * get_buffer_context;
+} ZcOldCtxVals;
 
 typedef struct AVZcEnv
 {
+    unsigned int refcount;
     ZcPool pool;
+    ZcOldCtxVals old;
 } ZcEnv;
 
 // Callback when buffer unrefed to zero
@@ -199,17 +213,70 @@ static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
 }
 
 AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
-    const unsigned int video_width, const unsigned int video_height)
+    const int format, const unsigned int video_width, const unsigned int video_height)
 {
     AVRpiZcFrameGeometry geo;
-    geo.stride_y = ((video_width + 32 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
-//    geo.stride_y = ((video_width + 32 + 31) & ~31);
-    geo.stride_c = geo.stride_y / 2;
-//    geo.height_y = (video_height + 15) & ~15;
-    geo.height_y = (video_height + 32 + 31) & ~31;
-    geo.height_c = geo.height_y / 2;
+
+    switch (format)
+    {
+        case AV_PIX_FMT_YUV420P:
+            geo.stride_y = ((video_width + 32 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
+        //    geo.stride_y = ((video_width + 32 + 31) & ~31);
+            geo.stride_c = geo.stride_y / 2;
+        //    geo.height_y = (video_height + 15) & ~15;
+            geo.height_y = (video_height + 32 + 31) & ~31;
+            geo.height_c = geo.height_y / 2;
+            geo.planes_c = 2;
+            geo.stripes = 1;
+            break;
+
+        case AV_PIX_FMT_SAND128:
+        {
+            const unsigned int stripe_w = 128;
+
+            static pthread_mutex_t sand_lock = PTHREAD_MUTEX_INITIALIZER;
+            static VC_IMAGE_T img = {0};
+
+            // Given the overhead of calling the mailbox keep a stashed
+            // copy as we will almost certainly just want the same numbers again
+            // but that means we need a lock
+            pthread_mutex_lock(&sand_lock);
+
+            if (img.width != video_width || img.height != video_height)
+            {
+                VC_IMAGE_T new_img = {
+                    .type = VC_IMAGE_YUV_UV,
+                    .width = video_width,
+                    .height = video_height
+                };
+
+                gpu_ref();
+                mbox_get_image_params(gpu_get_mailbox(), &new_img);
+                gpu_unref();
+                img = new_img;
+            }
+
+            geo.stride_y = stripe_w;
+            geo.stride_c = stripe_w;
+            geo.height_y = ((intptr_t)img.extra.uv.u - (intptr_t)img.image_data) / stripe_w;
+            geo.height_c = img.pitch / stripe_w - geo.height_y;
+            geo.planes_c = 1;
+            geo.stripes = (video_width + stripe_w - 1) / stripe_w;
+
+            pthread_mutex_unlock(&sand_lock);
+
+            av_assert0((int)geo.height_y > 0 && (int)geo.height_c > 0);
+            av_assert0(geo.height_y >= video_height && geo.height_c >= video_height / 2);
+            break;
+        }
+
+        default:
+            memset(&geo, 0, sizeof(geo));
+            break;
+    }
     return geo;
 }
+
 
 static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
 {
@@ -229,6 +296,10 @@ static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
     idata = ((idata & ~(ALLOC_PAD - 1)) | noff) + (((idata & (ALLOC_PAD - 1)) > noff) ? ALLOC_PAD : 0);
 #endif
 
+#if DEBUG_ZAP0_BUFFERS
+    memset((void*)idata, 0, size);
+#endif
+
     if ((buf = av_buffer_create((void *)idata, size, rpi_free_display_buffer, zp, AV_BUFFER_FLAG_READONLY)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "av_buffer_create() failed\n");
@@ -243,13 +314,12 @@ fail0:
     return NULL;
 }
 
-static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * const frame)
+static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
 {
-    ZcEnv *const zc = s->get_buffer_context;
-    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->width, frame->height);
+    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->format, frame->width, frame->height);
     const unsigned int size_y = geo.stride_y * geo.height_y;
     const unsigned int size_c = geo.stride_c * geo.height_c;
-    const unsigned int size_pic = size_y + size_c * 2;
+    const unsigned int size_pic = (size_y + size_c * geo.planes_c) * geo.stripes;
     AVBufferRef * buf;
     unsigned int i;
 
@@ -257,7 +327,7 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
 
     if ((buf = rpi_buf_pool_alloc(&zc->pool, size_pic)) == NULL)
     {
-        av_log(s, AV_LOG_ERROR, "rpi_get_display_buffer: Failed to get buffer from pool\n");
+        av_log(NULL, AV_LOG_ERROR, "rpi_get_display_buffer: Failed to get buffer from pool\n");
         return AVERROR(ENOMEM);
     }
 
@@ -268,18 +338,23 @@ static int rpi_get_display_buffer(struct AVCodecContext * const s, AVFrame * con
     }
 
     frame->buf[0] = buf;
+
     frame->linesize[0] = geo.stride_y;
     frame->linesize[1] = geo.stride_c;
     frame->linesize[2] = geo.stride_c;
+    if (geo.stripes > 1)
+        frame->linesize[3] = geo.height_y + geo.height_c;      // abuse: linesize[3] = stripe stride
+
     frame->data[0] = buf->data;
     frame->data[1] = frame->data[0] + size_y;
-    frame->data[2] = frame->data[1] + size_c;
+    if (geo.planes_c > 1)
+        frame->data[2] = frame->data[1] + size_c;
+
     frame->extended_data = frame->data;
     // Leave extended buf alone
 
     return 0;
 }
-
 
 #define RPI_GET_BUFFER2 1
 
@@ -290,21 +365,25 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
 #else
     int rv;
 
-    if ((s->codec->capabilities & AV_CODEC_CAP_DR1) == 0 ||
-        frame->format != AV_PIX_FMT_YUV420P)
+    if ((s->codec->capabilities & AV_CODEC_CAP_DR1) == 0)
     {
 //        printf("Do default alloc: format=%#x\n", frame->format);
         rv = avcodec_default_get_buffer2(s, frame, flags);
     }
+    else if (frame->format == AV_PIX_FMT_YUV420P ||
+             frame->format == AV_PIX_FMT_SAND128)
+    {
+        rv = rpi_get_display_buffer(s->get_buffer_context, frame);
+    }
     else
     {
-        rv = rpi_get_display_buffer(s, frame);
+        rv = avcodec_default_get_buffer2(s, frame, flags);
     }
 
 #if 0
-    printf("%s: %dx%d lsize=%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
-        frame->width, frame->height,
-        frame->linesize[0], frame->linesize[1], frame->linesize[2],
+    printf("%s: fmt:%d, %dx%d lsize=%d/%d/%d/%d data=%p/%p/%p bref=%p/%p/%p opaque[0]=%p\n", __func__,
+        frame->format, frame->width, frame->height,
+        frame->linesize[0], frame->linesize[1], frame->linesize[2], frame->linesize[3],
         frame->data[0], frame->data[1], frame->data[2],
         frame->buf[0], frame->buf[1], frame->buf[2],
         av_buffer_get_opaque(frame->buf[0]));
@@ -325,7 +404,7 @@ static AVBufferRef * zc_copy(struct AVCodecContext * const s,
     dest->width = src->width;
     dest->height = src->height;
 
-    if (rpi_get_display_buffer(s, dest) != 0)
+    if (rpi_get_display_buffer(s->get_buffer_context, dest) != 0)
     {
         return NULL;
     }
@@ -358,14 +437,16 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
 {
     assert(s != NULL);
 
-    if (frame->format != AV_PIX_FMT_YUV420P)
+    if (frame->format != AV_PIX_FMT_YUV420P &&
+        frame->format != AV_PIX_FMT_SAND128)
     {
-        av_log(s, AV_LOG_WARNING, "%s: *** Format not YUV420P: %d\n", __func__, frame->format);
+        av_log(s, AV_LOG_WARNING, "%s: *** Format not SAND/YUV420P: %d\n", __func__, frame->format);
         return NULL;
     }
 
     if (frame->buf[1] != NULL)
     {
+        av_assert0(frame->format == AV_PIX_FMT_YUV420P);
         if (maycopy)
         {
             av_log(s, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);
@@ -449,27 +530,50 @@ void av_rpi_zc_env_free(AVZcEnvPtr zc)
     }
 }
 
+int av_rpi_zc_in_use(const struct AVCodecContext * const s)
+{
+    return s->get_buffer2 == av_rpi_zc_get_buffer2;
+}
+
 int av_rpi_zc_init(struct AVCodecContext * const s)
 {
-    ZcEnv * const zc = av_rpi_zc_env_alloc();
-    if (zc == NULL)
+    if (av_rpi_zc_in_use(s))
     {
-        return AVERROR(ENOMEM);
+        ZcEnv * const zc = s->get_buffer_context;
+        ++zc->refcount;
     }
+    else
+    {
+        ZcEnv *const zc = av_rpi_zc_env_alloc();
+        if (zc == NULL)
+        {
+            return AVERROR(ENOMEM);
+        }
 
-    s->get_buffer_context = zc;
-    s->get_buffer2 = av_rpi_zc_get_buffer2;
+        zc->refcount = 1;
+        zc->old.get_buffer_context = s->get_buffer_context;
+        zc->old.get_buffer2 = s->get_buffer2;
+        zc->old.thread_safe_callbacks = s->thread_safe_callbacks;
+
+        s->get_buffer_context = zc;
+        s->get_buffer2 = av_rpi_zc_get_buffer2;
+        s->thread_safe_callbacks = 1;
+    }
     return 0;
 }
 
 void av_rpi_zc_uninit(struct AVCodecContext * const s)
 {
-    if (s->get_buffer2 == av_rpi_zc_get_buffer2)
+    if (av_rpi_zc_in_use(s))
     {
         ZcEnv * const zc = s->get_buffer_context;
-        s->get_buffer2 = avcodec_default_get_buffer2;
-        s->get_buffer_context = NULL;
-        av_rpi_zc_env_free(zc);
+        if (--zc->refcount == 0)
+        {
+            s->get_buffer2 = zc->old.get_buffer2;
+            s->get_buffer_context = zc->old.get_buffer_context;
+            s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
+            av_rpi_zc_env_free(zc);
+        }
     }
 }
 

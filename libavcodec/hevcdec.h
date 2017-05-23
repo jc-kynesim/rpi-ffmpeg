@@ -512,9 +512,15 @@ typedef struct HEVCMvCmd {
 
 
 // Command for intra prediction and transform_add of predictions to coefficients
-#define RPI_PRED_TRANSFORM_ADD 0
-#define RPI_PRED_INTRA 1
-#define RPI_PRED_I_PCM 2
+enum rpi_pred_cmd_e
+{
+    RPI_PRED_ADD_RESIDUAL,
+    RPI_PRED_ADD_RESIDUAL_U, // = RPI_PRED_TRANSFORM_ADD + c_idx
+    RPI_PRED_ADD_RESIDUAL_V, // = RPI_PRED_TRANSFORM_ADD + c_idx
+    RPI_PRED_INTRA,
+    RPI_PRED_I_PCM,
+    RPI_PRED_CMD_MAX
+};
 
 typedef struct HEVCPredCmd {
     uint8_t type;
@@ -540,6 +546,57 @@ typedef struct HEVCPredCmd {
         } i_pcm;
     };
 } HEVCPredCmd;
+
+#endif
+
+#ifdef RPI
+
+struct qpu_mc_pred_c_s;
+struct qpu_mc_pred_y_s;
+
+typedef struct HEVCRpiLumaPred
+{
+    struct qpu_mc_pred_y_s *qpu_mc_base;
+    struct qpu_mc_pred_y_s *qpu_mc_curr;
+    struct qpu_mc_pred_y_s *last_lx;
+    unsigned int load;
+} HEVCRpiLumaPred;
+
+typedef struct HEVCRpiChromaPred
+{
+    struct qpu_mc_pred_c_s *qpu_mc_base;
+    struct qpu_mc_pred_c_s *qpu_mc_curr;
+    struct qpu_mc_pred_c_s *last_l0;
+    struct qpu_mc_pred_c_s *last_l1;
+    unsigned int load;
+} HEVCRpiChromaPred;
+
+typedef struct HEVCRpiJob {
+    GPU_MEM_PTR_T chroma_mvs_gptr;
+    GPU_MEM_PTR_T luma_mvs_gptr;
+    HEVCRpiChromaPred chroma_mvs[QPU_N_UV];
+    HEVCRpiLumaPred luma_mvs[QPU_N_Y];
+} HEVCRpiJob;
+
+#if RPI_TSTATS
+typedef struct HEVCRpiStats {
+    int y_pred1_y8_merge;
+    int y_pred1_xy;
+    int y_pred1_x0;
+    int y_pred1_y0;
+    int y_pred1_x0y0;
+    int y_pred1_wle8;
+    int y_pred1_wgt8;
+    int y_pred1_hle16;
+    int y_pred1_hgt16;
+    int y_pred2_xy;
+    int y_pred2_x0;
+    int y_pred2_y0;
+    int y_pred2_x0y0;
+    int y_pred2_hle16;
+    int y_pred2_hgt16;
+} HEVCRpiStats;
+#endif
 
 #endif
 
@@ -586,26 +643,20 @@ typedef struct HEVCContext {
     int ctu_per_y_chan; // Number of CTUs per luma QPU
     int ctu_per_uv_chan; // Number of CTUs per chroma QPU
 
+    HEVCRpiJob jobs[RPI_MAX_JOBS];
+#if RPI_TSTATS
+    HEVCRpiStats tstats;
+#endif
 #if RPI_INTER
-    GPU_MEM_PTR_T unif_mvs_ptr[RPI_MAX_JOBS];
-    uint32_t *unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
+    HEVCRpiChromaPred * curr_pred_c;
+    HEVCRpiLumaPred * curr_pred_y;
+    struct qpu_mc_pred_y_s * last_y8_p;
+    struct qpu_mc_pred_y_s * last_y8_lx;
 
-    // _base pointers are to the start of the row
-    uint32_t *mvs_base[RPI_MAX_JOBS][QPU_N_UV];
-    // these pointers are to the next free space
-    uint32_t *u_mvs[RPI_MAX_JOBS][QPU_N_UV];
-    uint32_t *curr_u_mvs; // Current uniform stream to use for chroma
     // Function pointers
     uint32_t qpu_filter_uv;
     uint32_t qpu_filter_uv_b0;
-    uint32_t qpu_filter_uv_b;
-
-    GPU_MEM_PTR_T y_unif_mvs_ptr[RPI_MAX_JOBS];
-    uint32_t *y_unif_mvs[RPI_MAX_JOBS]; // Base of memory for motion vector commands
-    uint32_t *y_mvs_base[RPI_MAX_JOBS][QPU_N_Y];
-    uint32_t *y_mvs[RPI_MAX_JOBS][QPU_N_Y];
-    uint32_t *curr_y_mvs; // Current uniform stream for luma
-    // Function pointers
+    uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
     uint32_t qpu_filter;
     uint32_t qpu_filter_b;
 #endif
@@ -900,6 +951,13 @@ extern const uint8_t ff_hevc_qpel_extra[4];
 
 #ifdef RPI
 int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n);
+
+// arm/hevc_misc_neon.S
+// Neon coeff zap fn
+#if HAVE_NEON
+extern void rpi_zap_coeff_vals_neon(int16_t * dst, unsigned int l2ts_m2);
+#endif
+
 #endif
 
 #endif /* AVCODEC_HEVCDEC_H */

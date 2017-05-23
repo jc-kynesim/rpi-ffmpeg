@@ -25,6 +25,8 @@
 #ifndef RPI
 
   #define RPI_INTER          0
+  #define RPI_TSTATS         0
+  #define RPI_HEVC_SAND      0
 
 #else
 
@@ -47,6 +49,15 @@
 //  #define RPI_DEBLOCK_VPU
 
   #define RPI_VPU_DEBLOCK_CACHED 1
+
+  #if HAVE_NEON
+  #define RPI_HEVC_SAND      1
+  #else
+  // Sand bust on Pi1 currently - reasons unknown
+  #define RPI_HEVC_SAND      0
+  #endif
+
+  #define RPI_TSTATS 0
 #endif
 
 /**

@@ -1,8 +1,6 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
-#include <interface/vcsm/user-vcsm.h>
-
 #define RPI_ONE_BUF 1
 
 typedef struct gpu_mem_ptr_s {
@@ -125,10 +123,8 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
 
 // Cache flush stuff
 
-typedef struct rpi_flush_envss {
-    unsigned int n;
-    struct vcsm_user_clean_invalid_s a;
-} rpi_cache_flush_env_t;
+struct rpi_cache_flush_env_s;
+typedef struct rpi_cache_flush_env_s rpi_cache_flush_env_t;
 
 rpi_cache_flush_env_t * rpi_cache_flush_init(void);
 // Free env without flushing
@@ -157,14 +153,12 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T * const p, const rpi_cache_f
 // QPU specific functions
 uint32_t qpu_fn(const int * const mc_fn);
 
-#define QPU_N_UV   12
-#define QPU_N_Y    12
-#define QPU_N_MAX  16
+#define QPU_N_GRP_UV 4
+#define QPU_N_UV     8
+#define QPU_N_GRP_Y  4  // 4 QPUs per TMU
+#define QPU_N_Y      12
 
 #define QPU_MAIL_EL_VALS  2
-#define QPU_MAIL_EL_SIZE  (QPU_MAIL_EL_VALS * sizeof(uint32_t))
-#define QPU_MAIL_VALS_MAX (QPU_N_MAX * QPU_MAIL_EL_VALS)
-#define QPU_MAIL_SIZE (QPU_MAIL_VALS_MAX * sizeof(uint32_t))
 
 struct vpu_qpu_wait_s;
 typedef struct vq_wait_s * vpu_qpu_wait_h;
@@ -200,5 +194,7 @@ extern void rpi_do_block(const unsigned char *in_buffer_vc, int src_pitch, unsig
 extern void rpi_do_block_arm(const unsigned char *in_buffer, int src_pitch, unsigned char *dst, int dst_pitch);
 
 extern int gpu_get_mailbox(void);
+void gpu_ref(void);
+void gpu_unref(void);
 
 #endif
