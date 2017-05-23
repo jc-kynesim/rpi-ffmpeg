@@ -673,7 +673,7 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
     switch (sps->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
-#ifdef RPI
+#if RPI_HEVC_SAND
         // Currently geometry calc is stuffed for big sizes
         if (sps->width < 2048 && sps->height <= 1088) {
             *fmt++ = AV_PIX_FMT_SAND128;
