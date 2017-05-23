@@ -1900,3 +1900,217 @@ static void FUNC(hevc_v_loop_filter_luma)(uint8_t *pix, ptrdiff_t stride,
 #undef TQ1
 #undef TQ2
 #undef TQ3
+
+#ifdef RPI
+
+// line zero
+#define P3 pix_l[0 * xstride]
+#define P2 pix_l[1 * xstride]
+#define P1 pix_l[2 * xstride]
+#define P0 pix_l[3 * xstride]
+#define Q0 pix_r[0 * xstride]
+#define Q1 pix_r[1 * xstride]
+#define Q2 pix_r[2 * xstride]
+#define Q3 pix_r[3 * xstride]
+
+// line three. used only for deblocking decision
+#define TP3 pix_l[0 * xstride + 3 * ystride]
+#define TP2 pix_l[1 * xstride + 3 * ystride]
+#define TP1 pix_l[2 * xstride + 3 * ystride]
+#define TP0 pix_l[3 * xstride + 3 * ystride]
+#define TQ0 pix_r[0 * xstride + 3 * ystride]
+#define TQ1 pix_r[1 * xstride + 3 * ystride]
+#define TQ2 pix_r[2 * xstride + 3 * ystride]
+#define TQ3 pix_r[3 * xstride + 3 * ystride]
+
+// This is identical to hevc_loop_filter_luma except that the P/Q
+// components are on separate pointers
+static void FUNC(hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
+                                 unsigned int _stride, unsigned int beta, const int32_t _tc[2],
+                                 const uint8_t _no_p[2], const uint8_t _no_q[2],
+                                 uint8_t * _pix_l)
+{
+    int d, j;
+    pixel *pix_l        = (pixel *)_pix_l;
+    pixel *pix_r        = (pixel *)_pix_r;
+    const ptrdiff_t xstride = 1;
+    const ptrdiff_t ystride = _stride / sizeof(pixel);
+
+    beta <<= BIT_DEPTH - 8;
+
+    for (j = 0; j < 2; j++) {
+        const int dp0  = abs(P2  - 2 * P1  + P0);
+        const int dq0  = abs(Q2  - 2 * Q1  + Q0);
+        const int dp3  = abs(TP2 - 2 * TP1 + TP0);
+        const int dq3  = abs(TQ2 - 2 * TQ1 + TQ0);
+        const int d0   = dp0 + dq0;
+        const int d3   = dp3 + dq3;
+        const int tc   = _tc[j]   << (BIT_DEPTH - 8);
+        const int no_p = _no_p[j];
+        const int no_q = _no_q[j];
+
+        if (d0 + d3 >= beta) {
+            pix_l += 4 * ystride;
+            pix_r += 4 * ystride;
+            continue;
+        } else {
+            const int beta_3 = beta >> 3;
+            const int beta_2 = beta >> 2;
+            const int tc25   = ((tc * 5 + 1) >> 1);
+
+            if (abs(P3  -  P0) + abs(Q3  -  Q0) < beta_3 && abs(P0  -  Q0) < tc25 &&
+                abs(TP3 - TP0) + abs(TQ3 - TQ0) < beta_3 && abs(TP0 - TQ0) < tc25 &&
+                                      (d0 << 1) < beta_2 &&      (d3 << 1) < beta_2) {
+                // strong filtering
+                const int tc2 = tc << 1;
+                for (d = 0; d < 4; d++) {
+                    const int p3 = P3;
+                    const int p2 = P2;
+                    const int p1 = P1;
+                    const int p0 = P0;
+                    const int q0 = Q0;
+                    const int q1 = Q1;
+                    const int q2 = Q2;
+                    const int q3 = Q3;
+                    if (!no_p) {
+                        P0 = p0 + av_clip(((p2 + 2 * p1 + 2 * p0 + 2 * q0 + q1 + 4) >> 3) - p0, -tc2, tc2);
+                        P1 = p1 + av_clip(((p2 + p1 + p0 + q0 + 2) >> 2) - p1, -tc2, tc2);
+                        P2 = p2 + av_clip(((2 * p3 + 3 * p2 + p1 + p0 + q0 + 4) >> 3) - p2, -tc2, tc2);
+                    }
+                    if (!no_q) {
+                        Q0 = q0 + av_clip(((p1 + 2 * p0 + 2 * q0 + 2 * q1 + q2 + 4) >> 3) - q0, -tc2, tc2);
+                        Q1 = q1 + av_clip(((p0 + q0 + q1 + q2 + 2) >> 2) - q1, -tc2, tc2);
+                        Q2 = q2 + av_clip(((2 * q3 + 3 * q2 + q1 + q0 + p0 + 4) >> 3) - q2, -tc2, tc2);
+                    }
+                    pix_l += ystride;
+                    pix_r += ystride;
+                }
+            } else { // normal filtering
+                int nd_p = 1;
+                int nd_q = 1;
+                const int tc_2 = tc >> 1;
+                if (dp0 + dp3 < ((beta + (beta >> 1)) >> 3))
+                    nd_p = 2;
+                if (dq0 + dq3 < ((beta + (beta >> 1)) >> 3))
+                    nd_q = 2;
+
+                for (d = 0; d < 4; d++) {
+                    const int p2 = P2;
+                    const int p1 = P1;
+                    const int p0 = P0;
+                    const int q0 = Q0;
+                    const int q1 = Q1;
+                    const int q2 = Q2;
+                    int delta0   = (9 * (q0 - p0) - 3 * (q1 - p1) + 8) >> 4;
+                    if (abs(delta0) < 10 * tc) {
+                        delta0 = av_clip(delta0, -tc, tc);
+                        if (!no_p)
+                            P0 = av_clip_pixel(p0 + delta0);
+                        if (!no_q)
+                            Q0 = av_clip_pixel(q0 - delta0);
+                        if (!no_p && nd_p > 1) {
+                            const int deltap1 = av_clip((((p2 + p0 + 1) >> 1) - p1 + delta0) >> 1, -tc_2, tc_2);
+                            P1 = av_clip_pixel(p1 + deltap1);
+                        }
+                        if (!no_q && nd_q > 1) {
+                            const int deltaq1 = av_clip((((q2 + q0 + 1) >> 1) - q1 - delta0) >> 1, -tc_2, tc_2);
+                            Q1 = av_clip_pixel(q1 + deltaq1);
+                        }
+                    }
+                    pix_l += ystride;
+                    pix_r += ystride;
+                }
+            }
+        }
+    }
+}
+
+#undef TP3
+#undef TP2
+#undef TP1
+#undef TP0
+#undef TQ0
+#undef TQ1
+#undef TQ2
+#undef TQ3
+
+#undef P3
+#undef P2
+#undef P1
+#undef P0
+#undef Q0
+#undef Q1
+#undef Q2
+#undef Q3
+
+#define P1 pix_l[0 * xstride]
+#define P0 pix_l[1 * xstride]
+#define Q0 pix_r[0 * xstride]
+#define Q1 pix_r[1 * xstride]
+
+static void FUNC(hevc_loop_filter_uv2)(uint8_t *_pix_l, ptrdiff_t _xstride,
+                                          ptrdiff_t _ystride, const int32_t *_tc,
+                                          const uint8_t *_no_p, const uint8_t *_no_q, uint8_t *_pix_r)
+{
+    int d, j, no_p, no_q;
+    pixel *pix_l        = (pixel *)_pix_l;
+    pixel *pix_r        = (pixel *)_pix_r;
+    ptrdiff_t xstride = _xstride / sizeof(pixel);
+    ptrdiff_t ystride = _ystride / sizeof(pixel);
+
+    for (j = 0; j < 2; j++) {
+        const int tc = _tc[j] << (BIT_DEPTH - 8);
+        if (tc <= 0) {
+            pix_l += 4 * ystride;
+            pix_r += 4 * ystride;
+            continue;
+        }
+        no_p = _no_p[j];
+        no_q = _no_q[j];
+
+        for (d = 0; d < 4; d++) {
+            int delta0;
+            const int p1 = P1;
+            const int p0 = P0;
+            const int q0 = Q0;
+            const int q1 = Q1;
+            delta0 = av_clip((((q0 - p0) * 4) + p1 - q1 + 4) >> 3, -tc, tc);
+            if (!no_p)
+                P0 = av_clip_pixel(p0 + delta0);
+            if (!no_q)
+                Q0 = av_clip_pixel(q0 - delta0);
+            pix_l += ystride;
+            pix_r += ystride;
+        }
+    }
+}
+
+static void FUNC(hevc_h_loop_filter_uv)(uint8_t * pix, unsigned int stride, uint32_t tc4,
+                                 unsigned int no_f)
+{
+    uint8_t no_p[2] = {no_f & 1, no_f & 2};
+    uint8_t no_q[2] = {no_f & 4, no_f & 8};
+    int32_t tc[4] = {tc4 & 0xff, (tc4 >> 8) & 0xff, (tc4 >> 16) & 0xff, tc4 >> 24};
+    FUNC(hevc_loop_filter_chroma)(pix, stride, sizeof(pixel) * 2, tc, no_p, no_q);
+    FUNC(hevc_loop_filter_chroma)(pix + sizeof(pixel), stride, sizeof(pixel) * 2, tc + 2, no_p, no_q);
+}
+
+static void FUNC(hevc_v_loop_filter_uv2)(uint8_t * src_r, unsigned int stride, uint32_t tc4,
+                                 uint8_t * src_l,
+                                 unsigned int no_f)
+{
+    uint8_t no_p[2] = {no_f & 1, no_f & 2};
+    uint8_t no_q[2] = {no_f & 4, no_f & 8};
+    int32_t tc[4] = {tc4 & 0xff, (tc4 >> 8) & 0xff, (tc4 >> 16) & 0xff, tc4 >> 24};
+    FUNC(hevc_loop_filter_uv2)(src_l, sizeof(pixel) * 2, stride, tc, no_p, no_q, src_r);
+    FUNC(hevc_loop_filter_uv2)(src_l + sizeof(pixel), sizeof(pixel) * 2, stride, tc + 2, no_p, no_q, src_r + sizeof(pixel));
+}
+
+#undef P1
+#undef P0
+#undef Q0
+#undef Q1
+
+
+#endif
+

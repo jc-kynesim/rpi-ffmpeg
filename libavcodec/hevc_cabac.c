@@ -1809,7 +1809,11 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         if (s->enable_rpi) {
             use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size>=4;
             coeffs = rpi_alloc_coeff_buf(s, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
-            rpi_zap_coeff_vals(coeffs, log2_trafo_size - 2);
+#if HAVE_NEON
+            rpi_zap_coeff_vals_neon(coeffs, log2_trafo_size - 2);
+#else
+            memset(coeffs, 0, ccount * sizeof(int16_t));
+#endif
         }
         else
 #endif

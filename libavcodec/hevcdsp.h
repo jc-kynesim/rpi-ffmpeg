@@ -144,6 +144,19 @@ typedef struct HEVCDSPContext {
     void (*hevc_v_loop_filter_chroma_c)(uint8_t *pix, ptrdiff_t stride,
                                         int32_t *tc, uint8_t *no_p,
                                         uint8_t *no_q);
+#ifdef RPI
+    void (*hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
+                                 unsigned int _stride, unsigned int beta, const int32_t tc[2],
+                                 const uint8_t no_p[2], const uint8_t no_q[2],
+                                 uint8_t * _pix_l);
+    void (*hevc_h_loop_filter_uv)(uint8_t * src, unsigned int stride, uint32_t tc4,
+                                 unsigned int no_f);
+    void (*hevc_v_loop_filter_uv2)(uint8_t * src_r, unsigned int stride, uint32_t tc4,
+                                 uint8_t * src_l,
+                                 unsigned int no_f);
+
+#endif
+
     void (*hevc_deblocking_boundary_strengths)(int pus, int dup, int in_inc, int out_inc,
                                                int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
                                                MvField *curr, MvField *neigh, uint8_t *bs);

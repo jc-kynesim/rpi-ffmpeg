@@ -319,7 +319,7 @@ ready_:
 endfunc
 
 @ ff_hevc_v_loop_filter_luma2_neon(src (r0), stride (r1), beta (r2), tc (r3), np_p (sp[0]), no_q (sp[4]), src2 (sp[8]))
-function ff_hevc_v_loop_filter_luma2_neon, export=1
+function ff_hevc_v_loop_filter_luma2_neon_8, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}       @ 8 regs = 32 bytes
 
@@ -517,7 +517,7 @@ endfunc
 @                                     unsigned int no_f);    // r3
 @
 @ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
-function ff_hevc_h_loop_filter_uv_neon, export=1
+function ff_hevc_h_loop_filter_uv_neon_8, export=1
         sub      r0, r0, r1, lsl #1
         vld2.8   {d16,d17}, [r0], r1
         vld2.8   {d18,d19}, [r0], r1
@@ -568,7 +568,7 @@ endfunc
 @                                     unsigned int no_f);   // sp[0]
 @
 @ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
-function ff_hevc_v_loop_filter_uv2_neon, export=1
+function ff_hevc_v_loop_filter_uv2_neon_8, export=1
         vld4.8   {d16[0], d17[0], d18[0], d19[0]}, [r3], r1
         vld4.8   {d26[0], d27[0], d28[0], d29[0]}, [r0], r1
 

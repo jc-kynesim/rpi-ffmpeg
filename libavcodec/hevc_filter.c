@@ -640,13 +640,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 }
 #ifdef RPI
                 if (rpi_sliced_frame(s->frame)) {
-                    extern void ff_hevc_v_loop_filter_luma2_neon(uint8_t * src_r,
-                                                     unsigned int stride, unsigned int beta, const int32_t tc[2],
-                                                     const uint8_t no_p[2], const uint8_t no_q[2],
-                                                     uint8_t * src_l);
 
                     // This copes properly with no_p/no_q
-                    ff_hevc_v_loop_filter_luma2_neon(rpi_sliced_frame_pos_y(s->frame, x, y),
+                    s->hevcdsp.hevc_v_loop_filter_luma2(rpi_sliced_frame_pos_y(s->frame, x, y),
                                                      s->frame->linesize[LUMA],
                                                      beta, tc, no_p, no_q,
                                                      rpi_sliced_frame_pos_y(s->frame, x - 4, y));
@@ -738,11 +734,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     if (s->ps.sps->chroma_format_idc) {
 #ifdef RPI
         if (rpi_sliced_frame(s->frame)) {
-            extern void ff_hevc_h_loop_filter_uv_neon(uint8_t * src, unsigned int stride, uint32_t tc4,
-                                                      unsigned int no_f);
-            extern void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r, unsigned int stride, uint32_t tc4,
-                                                       uint8_t * src_l,
-                                                       unsigned int no_f);
             const int v = 2;
             const int h = 2;
 
@@ -775,7 +766,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                 continue;
                         }
 
-                        ff_hevc_v_loop_filter_uv2_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
+                        s->hevcdsp.hevc_v_loop_filter_uv2(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
                                                        s->frame->linesize[1],
                                                        tc4,
                                                        rpi_sliced_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
@@ -817,7 +808,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                 continue;
                         }
 
-                        ff_hevc_h_loop_filter_uv_neon(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
+                        s->hevcdsp.hevc_h_loop_filter_uv(rpi_sliced_frame_pos_c(s->frame, x >> 1, y >> 1),
                                                              s->frame->linesize[1],
                                                              tc4, no_f);
                     }

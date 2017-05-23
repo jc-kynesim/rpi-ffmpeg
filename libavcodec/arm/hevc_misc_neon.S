@@ -1,11 +1,11 @@
 #include "libavutil/arm/asm.S"
 #include "neon.S"
 
-@ rpi_zap_coeff_vals(
+@ rpi_zap_coeff_vals_neon(
 @   uint16_t * buf,          [r0]
 @   unsigned int log_n_m2)   [r1]
 
-function rpi_zap_coeff_vals, export=1
+function rpi_zap_coeff_vals_neon, export=1
         vmov.i64 q8, #0
         adr     r12, zc_tab
         vmov.i64 q9, #0
@@ -24,7 +24,7 @@ zc_tab:
 
 @ 4*4*2: "32 bytes" 64 or 0 depending on dst address
 zc_lc2:
-	it eq
+        it eq
         vstmeq  r0, {q8-q11}
         bx      lr
 

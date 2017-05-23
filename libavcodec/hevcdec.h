@@ -954,7 +954,9 @@ int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int
 
 // arm/hevc_misc_neon.S
 // Neon coeff zap fn
-extern void rpi_zap_coeff_vals(int16_t * dst, unsigned int l2ts_m2);
+#if HAVE_NEON
+extern void rpi_zap_coeff_vals_neon(int16_t * dst, unsigned int l2ts_m2);
+#endif
 
 #endif
 

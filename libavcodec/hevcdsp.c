@@ -307,6 +307,16 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 0, put_hevc_qpel_bi_w_v, depth);          \
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 1, put_hevc_qpel_bi_w_hv, depth)
 
+#ifndef RPI
+#define SLICED_LOOP_FILTERS(depth)
+#else
+#define SLICED_LOOP_FILTERS(depth)\
+    hevcdsp->hevc_v_loop_filter_luma2 = FUNC(hevc_v_loop_filter_luma2, depth); \
+    hevcdsp->hevc_h_loop_filter_uv    = FUNC(hevc_h_loop_filter_uv, depth);    \
+    hevcdsp->hevc_v_loop_filter_uv2   = FUNC(hevc_v_loop_filter_uv2, depth)
+#endif
+
+
 #define HEVC_DSP(depth)                                                     \
     hevcdsp->put_pcm                = FUNC(put_pcm, depth);                 \
     hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth);                 \
@@ -368,6 +378,7 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     EPEL_UNI_FUNCS(depth);                                                     \
     EPEL_BI_FUNCS(depth);                                                      \
                                                                                \
+    SLICED_LOOP_FILTERS(depth);                                                \
     hevcdsp->hevc_h_loop_filter_luma     = FUNC(hevc_h_loop_filter_luma, depth);   \
     hevcdsp->hevc_v_loop_filter_luma     = FUNC(hevc_v_loop_filter_luma, depth);   \
     hevcdsp->hevc_h_loop_filter_chroma   = FUNC(hevc_h_loop_filter_chroma, depth); \
