@@ -38,6 +38,17 @@ typedef struct HEVCPredContext {
     void (*pred_angular[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
                             int c_idx, int mode);
+#ifdef RPI
+    void (*intra_pred_c[4])(struct HEVCContext *s, int x0, int y0, int c_idx);
+
+    void (*pred_planar_c[4])(uint8_t *src, const uint8_t *top,
+                           const uint8_t *left, ptrdiff_t stride);
+    void (*pred_dc_c)(uint8_t *src, const uint8_t *top, const uint8_t *left,
+                    ptrdiff_t stride, int log2_size, int c_idx);
+    void (*pred_angular_c[4])(uint8_t *src, const uint8_t *top,
+                            const uint8_t *left, ptrdiff_t stride,
+                            int c_idx, int mode);
+#endif
 } HEVCPredContext;
 
 void ff_hevc_pred_init(HEVCPredContext *hpc, int bit_depth);

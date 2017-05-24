@@ -4,9 +4,9 @@
 // Zero-Copy frame code for RPi
 // RPi needs Y/U/V planes to be contiguous for display.  By default
 // ffmpeg will allocate separated planes so a memcpy is needed before
-// display.  This code prodes a method a making ffmpeg allocate a single
-// bit of memory for the frame when can then be refrence counted until
-// display ahs finsihed with it.
+// display.  This code provides a method a making ffmpeg allocate a single
+// bit of memory for the frame when can then be reference counted until
+// display has finished with it.
 
 #include "libavutil/frame.h"
 #include "libavcodec/avcodec.h"
@@ -23,10 +23,13 @@ typedef struct AVRpiZcFrameGeometry
     unsigned int height_y;
     unsigned int stride_c;
     unsigned int height_c;
+    unsigned int planes_c;
+    unsigned int stripes;
 } AVRpiZcFrameGeometry;
 
 
 AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
+    const int format,
     const unsigned int video_width, const unsigned int video_height);
 
 // Replacement fn for avctx->get_buffer2
@@ -35,7 +38,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
 // N.B. in addition to to setting avctx->get_buffer2, avctx->refcounted_frames
 // must be set to 1 as otherwise the buffer info is killed before being returned
 // by avcodec_decode_video2.  Note also that this means that the AVFrame that is
-// return must be manually derefed with av_frame_unref.  This should be done
+// returned must be manually derefed with av_frame_unref.  This should be done
 // after av_rpi_zc_ref has been called.
 int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 
@@ -73,6 +76,8 @@ AVZcEnvPtr av_rpi_zc_env_alloc(void);
 // Allocate the environment used by the ZC code
 void av_rpi_zc_env_free(AVZcEnvPtr);
 
+// Test to see if the context is using zc (checks get_buffer2)
+int av_rpi_zc_in_use(const struct AVCodecContext * const s);
 
 // Init ZC into a context
 // There is nothing magic in this fn - it just packages setting
@@ -83,6 +88,50 @@ int av_rpi_zc_init(struct AVCodecContext * const s);
 // There is nothing magic in this fn - it just packages unsetting
 // get_buffer2 & get_buffer_context
 void av_rpi_zc_uninit(struct AVCodecContext * const s);
+
+
+
+static inline unsigned int rpi_sliced_frame_stride2(const AVFrame * const frame)
+{
+    return frame->linesize[3];
+}
+
+static inline unsigned int rpi_sliced_frame_off_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
+{
+    const unsigned int stride1 = frame->linesize[0];
+    const unsigned int stride2 = rpi_sliced_frame_stride2(frame);
+    const unsigned int x1 = x & (stride1 - 1);
+    const unsigned int x2 = x ^ x1;
+
+    return x1 + stride1 * y + stride2 * x2;
+}
+
+static inline unsigned int rpi_sliced_frame_off_c(const AVFrame * const frame, const unsigned int x_c, const unsigned int y_c)
+{
+    const unsigned int stride1 = frame->linesize[0];
+    const unsigned int stride2 = rpi_sliced_frame_stride2(frame);
+    const unsigned int x = x_c * 2;
+    const unsigned int x1 = x & (stride1 - 1);
+    const unsigned int x2 = x ^ x1;
+
+    return x1 + stride1 * y_c + stride2 * x2;
+}
+
+static inline uint8_t * rpi_sliced_frame_pos_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
+{
+    return frame->data[0] + rpi_sliced_frame_off_y(frame, x, y);
+}
+
+static inline uint8_t * rpi_sliced_frame_pos_c(const AVFrame * const frame, const unsigned int x, const unsigned int y)
+{
+    return frame->data[1] + rpi_sliced_frame_off_c(frame, x, y);
+}
+
+static inline int rpi_sliced_frame(const AVFrame * const frame)
+{
+    return frame->format == AV_PIX_FMT_SAND128;
+}
+
 
 #endif
 

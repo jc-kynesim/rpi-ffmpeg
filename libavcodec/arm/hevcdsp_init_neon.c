@@ -29,6 +29,19 @@ void ff_hevc_v_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta
 void ff_hevc_h_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_v_loop_filter_chroma_neon(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_h_loop_filter_chroma_neon(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
+
+#ifdef RPI
+void ff_hevc_v_loop_filter_luma2_neon_8(uint8_t * _pix_r,
+                             unsigned int _stride, unsigned int beta, const int32_t tc[2],
+                             const uint8_t no_p[2], const uint8_t no_q[2],
+                             uint8_t * _pix_l);
+void ff_hevc_h_loop_filter_uv_neon_8(uint8_t * src, unsigned int stride, uint32_t tc4,
+                             unsigned int no_f);
+void ff_hevc_v_loop_filter_uv2_neon_8(uint8_t * src_r, unsigned int stride, uint32_t tc4,
+                             uint8_t * src_l,
+                             unsigned int no_f);
+#endif
+
 void ff_hevc_transform_4x4_neon_8(int16_t *coeffs, int col_limit);
 void ff_hevc_transform_8x8_neon_8(int16_t *coeffs, int col_limit);
 void ff_hevc_idct_4x4_dc_neon_8(int16_t *coeffs);
@@ -59,6 +72,16 @@ void ff_hevc_sao_edge_eo0_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t str
 void ff_hevc_sao_edge_eo1_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 void ff_hevc_sao_edge_eo2_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 void ff_hevc_sao_edge_eo3_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
+
+void ff_hevc_sao_edge_c_w64_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height,
+                                   const int16_t *sao_offset_table_u, const int16_t *sao_offset_table_v, int eo);
+
+void ff_hevc_sao_band_c_neon_8(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height);
+
 
 #define PUT_PIXELS(name) \
     void name(int16_t *dst, uint8_t *src, \
@@ -210,6 +233,50 @@ static void ff_hevc_sao_band_neon_wrapper(uint8_t *_dst, uint8_t *_src, ptrdiff_
     }
 }
 
+static void ff_hevc_sao_band_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height)
+{
+    // Width 32 already dealt with
+    // width 16 code works in double lines
+    if (width == 16 && (height & 1) == 0) {
+        ff_hevc_sao_band_c_neon_8(_dst, _src, stride_src, stride_dst,
+                                          sao_offset_val_u, sao_left_class_u,
+                                          sao_offset_val_v, sao_left_class_v,
+                                          width, height);
+    }
+    else
+    {
+        const int shift  = 3; // BIT_DEPTH - 5
+        int k, y, x;
+        pixel *dst = (pixel *)_dst;
+        pixel *src = (pixel *)_src;
+        int8_t offset_table_u[32] = { 0 };
+        int8_t offset_table_v[32] = { 0 };
+
+        stride_src /= sizeof(pixel);
+        stride_dst /= sizeof(pixel);
+
+        for (k = 0; k < 4; k++)
+            offset_table_u[(k + sao_left_class_u) & 31] = sao_offset_val_u[k + 1];
+        for (k = 0; k < 4; k++)
+            offset_table_v[(k + sao_left_class_v) & 31] = sao_offset_val_v[k + 1];
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width * 2; x += 2)
+            {
+                dst[x + 0] = av_clip_pixel(src[x + 0] + offset_table_u[src[x + 0] >> shift]);
+                dst[x + 1] = av_clip_pixel(src[x + 1] + offset_table_v[src[x + 1] >> shift]);
+            }
+            dst += stride_dst;
+            src += stride_src;
+
+        }
+    }
+}
+
 #define CMP(a, b) ((a) > (b) ? 1 : ((a) == (b) ? 0 : -1))
 static void ff_hevc_sao_edge_neon_wrapper(uint8_t *_dst /* align 16 */, uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
                                           int16_t *_sao_offset_val, int eo, int width, int height)
@@ -288,6 +355,54 @@ static void ff_hevc_sao_edge_neon_wrapper(uint8_t *_dst /* align 16 */, uint8_t 
         }
     }
 }
+
+
+static void ff_hevc_sao_edge_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height)
+{
+    const ptrdiff_t stride_src = (2*MAX_PB_SIZE + FF_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
+
+    if (width == 32 && (height & 7) == 0) {
+        ff_hevc_sao_edge_c_w64_neon_8(_dst, _src, stride_dst, stride_src, height, _sao_offset_val_u, _sao_offset_val_v, eo);
+    }
+    else
+    {
+        static const uint8_t edge_idx[] = { 1, 2, 0, 3, 4 };
+        static const int8_t pos[4][2][2] = {
+            { { -1,  0 }, {  1, 0 } }, // horizontal
+            { {  0, -1 }, {  0, 1 } }, // vertical
+            { { -1, -1 }, {  1, 1 } }, // 45 degree
+            { {  1, -1 }, { -1, 1 } }, // 135 degree
+        };
+        int8_t sao_offset_val_u[8];  // padding of 3 for vld
+        int8_t sao_offset_val_v[8];  // padding of 3 for vld
+        pixel *dst = (pixel *)_dst;
+        pixel *src = (pixel *)_src;
+        int a_stride, b_stride;
+        int x, y;
+
+        for (x = 0; x < 5; x++) {
+            sao_offset_val_u[x] = _sao_offset_val_u[edge_idx[x]];
+            sao_offset_val_v[x] = _sao_offset_val_v[edge_idx[x]];
+        }
+
+        a_stride = pos[eo][0][0] * 2 + pos[eo][0][1] * stride_src;
+        b_stride = pos[eo][1][0] * 2 + pos[eo][1][1] * stride_src;
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width * 2; x += 2) {
+                int diff0u = CMP(src[x], src[x + a_stride]);
+                int diff1u = CMP(src[x], src[x + b_stride]);
+                int diff0v = CMP(src[x+1], src[x+1 + a_stride]);
+                int diff1v = CMP(src[x+1], src[x+1 + b_stride]);
+                dst[x] = av_clip_pixel(src[x] + sao_offset_val_u[2 + diff0u + diff1u]);
+                dst[x+1] = av_clip_pixel(src[x+1] + sao_offset_val_v[2 + diff0v + diff1v]);
+            }
+            src += stride_src;
+            dst += stride_dst;
+        }
+    }
+}
 #undef CMP
 
 void ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,
@@ -299,9 +414,16 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
     if (bit_depth == 8) {
         int x;
         c->hevc_v_loop_filter_luma     = ff_hevc_v_loop_filter_luma_neon;
+        c->hevc_v_loop_filter_luma_c   = ff_hevc_v_loop_filter_luma_neon;
         c->hevc_h_loop_filter_luma     = ff_hevc_h_loop_filter_luma_neon;
+        c->hevc_h_loop_filter_luma_c   = ff_hevc_h_loop_filter_luma_neon;
         c->hevc_v_loop_filter_chroma   = ff_hevc_v_loop_filter_chroma_neon;
         c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon;
+#ifdef RPI
+        c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_8;
+        c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_8;
+        c->hevc_v_loop_filter_uv2      = ff_hevc_v_loop_filter_uv2_neon_8;
+#endif
         c->idct[0]                     = ff_hevc_transform_4x4_neon_8;
         c->idct[1]                     = ff_hevc_transform_8x8_neon_8;
         c->idct_dc[0]                  = ff_hevc_idct_4x4_dc_neon_8;
@@ -315,8 +437,11 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_8;
         for (x = 0; x < sizeof c->sao_band_filter / sizeof *c->sao_band_filter; x++) {
           c->sao_band_filter[x]        = ff_hevc_sao_band_neon_wrapper;
+          c->sao_band_filter_c[x]      = ff_hevc_sao_band_c_neon_wrapper;
           c->sao_edge_filter[x]        = ff_hevc_sao_edge_neon_wrapper;
+          c->sao_edge_filter_c[x]      = ff_hevc_sao_edge_c_neon_wrapper;
         }
+        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_neon_8;  // width=32
         put_hevc_qpel_neon[1][0]       = ff_hevc_put_qpel_v1_neon_8;
         put_hevc_qpel_neon[2][0]       = ff_hevc_put_qpel_v2_neon_8;
         put_hevc_qpel_neon[3][0]       = ff_hevc_put_qpel_v3_neon_8;
