@@ -391,7 +391,7 @@
   shl r0, r0, i_shift16 ; mov rb9,  ra3.8b      # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base ; mov r1, ra1.16b       # ; r1=weight
 
-  mov rb_dest, unif                             # dst_addr
+  mov rb_dest, unif     ; mov ra9, rb_max_y     # dst_addr ; alias rb_max_y
 
   shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
   mov r3, 0             ; mov rb11, ra3.8d      # Loop count
@@ -399,6 +399,7 @@
   asr rb_wt_off, r1, 1  ; mov ra_link, unif     # Link
   shl rb_wt_mul_l0, ra1.16a, 1                  # b14 = weight*2
 
+# ra9 alias for rb_max_y
 # rb_wt_mul_l0 - weight L0 * 2
 # rb_wt_den_p15 = weight denom + 6 + 9
 # rb_wt_off = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb_wt_den_p15 - 1)
@@ -412,7 +413,6 @@
 # goes to (r0r1)
 # U0U4 : V0V4 : U1U5 : V1V5 : U2U6 : V2U6 : ...
 
-
 # r3 = 0
 :uvloop
 # retrieve texture results and pick out bytes
@@ -421,15 +421,13 @@
   sub.setf -, r3, rb_i_tmu ; v8adds rb_i, r3, ra_k1 ; ldtmu0     # loop counter increment
   shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
   shr r1, r2, 8         ; mov.ifnz r3, ra_y
-  mov.ifz ra_base, ra_base_next
+  add r0, r3, 1         ; mov.ifz ra_base, ra_base_next
 
-  and.setf -, 1, elem_num ; mov r0, r2
-  nop                   ; mov.ifnz r0, r1 << 15
-  nop                   ; mov.ifz  r1, r2 << 1
+  and.setf -, 1, elem_num ; mov ra_y, r0
+  max r3, r3, ra_k0     ; mov      r0, r1 << 15
+  min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
 
-  max r2, r3, 0
-  min r2, r2, rb_max_y
-  add ra_y, r3, ra_k1   ; mul24 r2, r2, rb_pitch
+  mov.ifz r0, r2        ; mul24 r2, r3, rb_pitch
   add t0s, ra_base, r2  ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
@@ -538,13 +536,13 @@
 # ; unpack filter coefficients
 
   add r0,   r0, r2      ; mov rb9,  ra3.8b
-  shl r0,   r0, i_shift16 ; mov rb10, ra3.8c      # Shift into bits 16 upwards of the vdw_setup0 register
+  shl r0,   r0, i_shift16 ; mov rb10, ra3.8c    # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base
 
   mov r3, 0             ; mov rb11, ra3.8d      # Loop count
 
-  mov rb_wt_mul_l0, unif                                # U weight
-  mov.ifnz rb_wt_mul_l0, unif                           # V weight
+  mov rb_wt_mul_l0, unif ; mov ra9, rb_max_y    # U weight
+  mov.ifnz rb_wt_mul_l0, unif                   # V weight
 
 # rb_wt_mul_l0 unused in b0 but will hang around till the second pass
 
@@ -559,15 +557,13 @@
   sub.setf -, r3, rb_i_tmu ; v8adds rb_i, r3, ra_k1 ; ldtmu0     # loop counter increment
   shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
   shr r1, r2, 8         ; mov.ifnz r3, ra_y
-  mov.ifz ra_base, ra_base_next
+  add r0, r3, 1         ; mov.ifz ra_base, ra_base_next
 
-  and.setf -, 1, elem_num ; mov r0, r2
-  nop                   ; mov.ifnz r0, r1 << 15
-  nop                   ; mov.ifz  r1, r2 << 1
+  and.setf -, 1, elem_num ; mov ra_y, r0
+  max r3, r3, ra_k0     ; mov      r0, r1 << 15
+  min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
 
-  max r2, r3, 0
-  min r2, r2, rb_max_y
-  add ra_y, r3, ra_k1   ; mul24 r2, r2, rb_pitch
+  mov.ifz r0, r2        ; mul24 r2, r3, rb_pitch
   add t0s, ra_base, r2  ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
@@ -704,6 +700,7 @@
 
 # r3 = 0
 
+# ra9 alias for rb_max_y (still valid from previous loop)
 # ra0.8x  filter components
 # ra1.16a (L1 mul weight) used directly in the loop
 # ra3.8a  used for saturation (temp)
@@ -712,19 +709,17 @@
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r3, rb_i_tmu      ; v8adds rb_i, r3, ra_k1 ; ldtmu1     # loop counter increment
-  shr r2, r4, rb_xshift2        ; mov.ifz r3, ra_y2_next
-  shr r1, r2, 8                 ; mov.ifnz r3, ra_y2
-  mov.ifz ra_base2, rb_base2_next
+  sub.setf -, r3, rb_i_tmu ; v8adds rb_i, r3, ra_k1 ; ldtmu1     # loop counter increment
+  shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y2_next
+  shr r1, r2, 8         ; mov.ifnz r3, ra_y2
+  add r0, r3, ra_k1     ; mov.ifz ra_base2, rb_base2_next
 
-  and.setf -, 1, elem_num ; mov r0, r2
-  nop                   ; mov.ifnz r0, r1 << 15
-  nop                   ; mov.ifz  r1, r2 << 1
+  and.setf -, 1, elem_num ; mov ra_y2, r0
+  max r3, r3, ra_k0     ; mov      r0, r1 << 15
+  min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
 
-  max r2, r3, ra_k0
-  min r2, r2, rb_max_y
-  add ra_y2, r3, ra_k1          ; mul24 r2, r2, rb_pitch
-  add t1s, ra_base2, r2         ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
+  mov.ifz r0, r2        ; mul24 r2, r3, rb_pitch
+  add t1s, ra_base2, r2 ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
