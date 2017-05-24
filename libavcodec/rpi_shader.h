@@ -4,15 +4,15 @@
 extern unsigned int rpi_shader[];
 
 #define mc_setup_c (rpi_shader + 0)
-#define mc_filter_uv (rpi_shader + 156)
-#define mc_filter_uv_b0 (rpi_shader + 290)
-#define mc_exit (rpi_shader + 576)
-#define mc_exit_c (rpi_shader + 576)
-#define mc_interrupt_exit12 (rpi_shader + 592)
-#define mc_interrupt_exit12c (rpi_shader + 592)
-#define mc_setup (rpi_shader + 628)
-#define mc_filter (rpi_shader + 906)
-#define mc_filter_b (rpi_shader + 1046)
-#define mc_end (rpi_shader + 1186)
+#define mc_filter_uv (rpi_shader + 154)
+#define mc_filter_uv_b0 (rpi_shader + 288)
+#define mc_exit (rpi_shader + 574)
+#define mc_exit_c (rpi_shader + 574)
+#define mc_interrupt_exit12 (rpi_shader + 594)
+#define mc_interrupt_exit12c (rpi_shader + 594)
+#define mc_setup (rpi_shader + 634)
+#define mc_filter (rpi_shader + 902)
+#define mc_filter_b (rpi_shader + 1042)
+#define mc_end (rpi_shader + 1182)
 
 #endif

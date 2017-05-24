@@ -5,6 +5,9 @@
 # local 4.  As it happens this is what is wanted here as we do not want the
 # constants from the other half of the calc.
 
+.set PREREAD, 4
+
+
 # register allocation
 #
 
@@ -184,25 +187,6 @@
   add r_dma, r0, r1  # DMA out
 .endm
 
-# For chroma use packed H = (qpu_num & 1), Y = (qpu_num >> 1) * 16
-.macro m_calc_dma_regs_c, r_vpm, r_dma
-  mov r2, qpu_num
-  asr r1, r2, 1
-  shl r1, r1, 5
-  and r0, r2, 1
-  or  r0, r0, r1
-
-  mov r1, vpm_setup(0, 2, h16p(0, 0))   # 2 is stride - stride acts on ADDR which is Y[5:0],B[1:0] for 8 bit
-  add r_vpm, r0, r1  # VPM 16bit storage
-
-  # X = H * 8 so the YH from VPMVCD_WR_SETUP[ADDR] drops into
-  # XY VPMVCD_WR_SETUP[VPMBASE] if shifted left 3 (+ 3 for pos of field in reg)
-  mov r1, vdw_setup_0(0, 0, dma_h16p(0,0,0)) # height,width added later
-  shl r0, r0, 6
-  add r_dma, r0, r1  # DMA out
-.endm
-
-
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_c_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
 ::mc_setup_c
@@ -263,26 +247,11 @@
   sub r1, r1, rb_pitch
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        ; mov r1, ra_y
+  add r0, r0, r1
   add ra_base, ra_base, r0
 
-  max r0, r1, 0
-  min r0, r0, rb_max_y
-
-# submit texture requests for first line
-  add r1, r1, ra_k1     ; mul24 r0, r0, rb_pitch
-  add t0s, ra_base, r0
-
-# submit texture requests for 2nd line
-
-  max r0, r1, 0
-  min r0, r0, rb_max_y
-
-  add ra_y, r1, ra_k1   ; mul24 r0, r0, rb_pitch
-  add t0s, ra_base, r0
-
   add rb_wt_den_p15, 9, unif     # denominator
-  mov -, unif           # Unused
+  mov -, unif                                   # Unused
 
 # Compute part of VPM to use for DMA output
   m_calc_dma_regs rb_vpm_init, rb_dma0_base
@@ -319,26 +288,33 @@
   sub r1, r1, rb_pitch  ; mov -, unif           # Unused 4
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        ; mov r1, ra_y2
-  add ra_base2, ra_base2, r0 ; mov - , unif     # Unused 5
+  add r0, r0, r1        ; mov r2, ra_y2
+  add ra_base2, ra_base2, r0 ; mov - , unif          # Unused 5
 
-  max r0, r1, 0
-  min r0, r0, rb_max_y
 
-# submit texture requests for first line
-  add r1, r1, ra_k1     ; mul24 r0, r0, rb_pitch
-  add t1s, ra_base2, r0 ; mov ra_link, unif     # Link
+# Do preloads
+# r0 = ra_y, r2 = ra_y2
+  mov r3, PREREAD       ; mov r0, ra_y
+  mov ra_link, unif                             # link
 
-# submit texture requests for 2nd line
+:c_preload
+  sub.setf r3, r3, 1
+  max r1, r0, 0
+  min r1, r1, rb_max_y
+  add r0, r0, ra_k1     ; mul24 r1, r1, rb_pitch
+  add t0s, ra_base, r1
 
-  max r0, r1, 0                                 # [ra_link delay]
+  max r1, r2, 0
+  brr.anynz -, r:c_preload
+  min r1, r1, rb_max_y
+  add r2, r2, ra_k1     ; mul24 r1, r1, rb_pitch
+  add t1s, ra_base2, r1
+# >>>
 
   bra -, ra_link
-
-  min r0, r0, rb_max_y
-  add ra_y2, r1, ra_k1  ; mul24 r0, r0, rb_pitch
-  add t1s, ra_base2, r0
-
+  mov ra_y, r0
+  mov ra_y2, r2
+  nop
 # >>> ra_link
 
 
@@ -382,7 +358,7 @@
 # set up VPM write
 
   sub rb_dma1, rb_dma1_base, r2    ; mov ra3, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
-  add rb_i_tmu, r1, 1   ; mov ra1, unif         # ; U offset/weight
+  add rb_i_tmu, r1, 3 - PREREAD ; mov ra1, unif         # ; U offset/weight
   add rb_lcount, r1, 3  ; mov.ifnz ra1, unif    # ; V offset/weight
 
 # ; unpack filter coefficients
@@ -530,7 +506,7 @@
 # set up VPM write
 
   sub rb_dma1, rb_dma1_base, r2 ; mov ra3, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
-  add rb_i_tmu, r1, 1
+  add rb_i_tmu, r1, 3 - PREREAD
   add ra_cb_lheight_p3, r1, 3   ; mov rb8,  ra3.8a      # Combine width and height of destination area
 
 # ; unpack filter coefficients
@@ -776,48 +752,37 @@
 # conflicts
 
 # mc_exit()
-.if 0
-::mc_interrupt_exit8c
-  nop                   ; nop           ; ldtmu0
-  nop                   ; nop           ; ldtmu1
-  nop                   ; nop           ; ldtmu0
-  mov  -, vw_wait       ; nop           ; ldtmu1 # wait on the VDW
-
-  mov -,sacq(0) # 1
-  mov -,sacq(0) # 2
-  mov -,sacq(0) # 3
-  mov -,sacq(0) # 4
-  mov -,sacq(0) # 5
-  mov -,sacq(0) # 6
-  mov -,sacq(0) # 7
-
-  nop                   ; nop           ; thrend
-  mov interrupt, 1
-  nop
-# >>> thrend <<<
-.endif
 # Chroma & Luma the same now
 ::mc_exit_c
 ::mc_exit
+  mov.setf r3, PREREAD - 1
+
+:mc_exit_l0
+  brr.anynz -, r:mc_exit_l0
   nop                   ; nop           ; ldtmu0
   nop                   ; nop           ; ldtmu1
-  nop                   ; nop           ; ldtmu0
-  mov  -, vw_wait       ; nop           ; ldtmu1 # wait on the VDW
-
+  sub.setf r3, r3, 1
+ # >>>
+  mov  -, vw_wait
   mov -,srel(0)
 
   nop                   ; nop           ; thrend
   nop
   nop
-# >>> thrend <<<
+
 
 # mc_interrupt_exit12()
 ::mc_interrupt_exit12c
 ::mc_interrupt_exit12
+  mov.setf r3, PREREAD - 1
+
+:mc_exit_l1
+  brr.anynz -, r:mc_exit_l1
   nop                   ; nop           ; ldtmu0
   nop                   ; nop           ; ldtmu1
-  nop                   ; nop           ; ldtmu0
-  mov  -, vw_wait       ; nop           ; ldtmu1  # wait on the VDW
+  sub.setf r3, r3, 1
+ # >>>
+  mov  -, vw_wait
 
   mov -,sacq(0) # 1
   mov -,sacq(0) # 2
@@ -841,6 +806,7 @@
 # The idea is to form B predictions by doing 8 pixels from ref0 in parallel with 8 pixels from ref1.
 # For P frames we make the second x,y coordinates offset by +8
 
+
 ################################################################################
 # mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, tbd, next_kernel)
 ::mc_setup
@@ -849,6 +815,13 @@
   mov ra9, unif         # ref_y_base
   mov ra10, unif        # y2_x2
   mov ra11, unif        # ref_y2_base
+
+# load constants
+
+  mov ra_kff100100, 0xff100100
+  mov rb_k255, 255
+
+# Compute part of VPM to use
 
 # Read image dimensions
   mov ra3, unif         # width_height
@@ -868,7 +841,6 @@
   min r0, r0, rb_max_x
   shl ra_xshift_next, r0, 3 # Compute shifts
 
-
 # In a single 32 bit word we get 4 Y Pels so mask 2 bottom bits of xs
 
   and r0, r0, -4        ; v8subs r2, r2, r2
@@ -877,16 +849,6 @@
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add ra_base, ra9, r0
-
-  mov r1, ra8.16b       # Load y
-  add ra_y, r1, 1       # Set for next
-  max r1, r1, 0
-  min r1, r1, rb_max_y
-
-# submit texture requests for first line
-  nop                   ; mul24 r1, r1, rb_pitch
-  add t0s, ra_base, r1
-
 
   # r3 still contains elem_num
   add r0, ra10.16a, r3  # Load x
@@ -901,47 +863,43 @@
   add r0, r0, r1        # Add stripe offsets
   add ra_base2, ra11, r0
 
-  mov r1, ra10.16b       # Load y
-  add ra_y2, r1, 1       # Set for next
-  max r1, r1, 0
+# Do preloads
+# r0 = ra_y, r2 = ra_y2
+  mov r0, ra8.16b       # Load y
+  mov r2, ra10.16b      # Load y2
+  mov r3, PREREAD
+
+:y_preload
+  sub.setf r3, r3, 1
+  max r1, r0, 0
   min r1, r1, rb_max_y
+  add r0, r0, ra_k1     ; mul24 r1, r1, rb_pitch
+  add t0s, ra_base, r1
 
-# submit texture requests for first line
-  nop                   ; mul24 r1, r1, rb_pitch
+  max r1, r2, 0
+  brr.anynz -, r:y_preload
+  min r1, r1, rb_max_y
+  add r2, r2, ra_k1     ; mul24 r1, r1, rb_pitch
   add t1s, ra_base2, r1
-
-# load constants
-
-  mov ra_kff100100, 0xff100100
-  mov rb_k255, 255
-
-# touch vertical context to keep simulator happy
-
-  mov ra8,  0           ; mov rb8,  0
-  mov ra9,  0           ; mov rb9,  0
-  mov ra10, 0           ; mov rb10, 0
-  mov ra11, 0           ; mov rb11, 0
-
-# Compute part of VPM to use
-  m_calc_dma_regs rb_vpm_init, rb_dma0_base
+# >>>
+  mov ra_y, r0
+  mov ra_y2, r2
 
 # Weighted prediction denom
   add rb_wt_den_p15, unif, 9     # unif = weight denom + 6
 
-# submit texture requests for second line
-  max r1, ra_y, 0
-  min r1, r1, rb_max_y
-  add ra_y, ra_y, 1
-  mov -, unif           ; mul24 r1, r1, rb_pitch  # unused ;
-  add t0s, r1, ra_base  ; mov ra_link, unif     # ; Next fn
+  m_calc_dma_regs rb_vpm_init, rb_dma0_base
 
-  max r1, ra_y2, 0
-  min r1, r1, rb_max_y
+  mov -, unif                                   # unused ;
+  mov ra_link, unif                             # Next fn
+
+# touch vertical context to keep simulator happy
+  mov ra8,  0           ; mov rb8,  0
   bra -, ra_link
-  add ra_y2, ra_y2, 1
-  nop                   ; mul24 r1, r1, rb_pitch
-  add t1s, r1, ra_base2
-# >>>
+  mov ra9,  0           ; mov rb9,  0
+  mov ra10, 0           ; mov rb10, 0
+  mov ra11, 0           ; mov rb11, 0
+# >>> ra_link
 
 # 1st 3 instructions of per_block-setup in branch delay
 .macro luma_setup
@@ -994,7 +952,7 @@
 
 # get width,height of block (unif load above)
   sub rb_dma1, rb_dma1_base, ra_width # Compute vdw_setup1(dst_pitch-width)
-  add rb_i_tmu, ra_height, 5  ; mov r0, ra_height
+  add rb_i_tmu, ra_height, 7 - PREREAD ; mov r0, ra_height
   mov r1, 16
   min r0, r0, r1
   add rb_lcount, r0, 7
