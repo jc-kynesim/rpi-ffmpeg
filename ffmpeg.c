@@ -226,7 +226,7 @@ static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
   mmal_buffer_header_release(buffer);
 }
 
-static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
+static MMAL_COMPONENT_T* display_init(const enum AVPixelFormat fmt, size_t x, size_t y, size_t w, size_t h)
 {
     MMAL_COMPONENT_T* display;
     MMAL_DISPLAYREGION_T region =
@@ -237,7 +237,7 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
-    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(w, h);
+    const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
 
     bcm_host_init();  // TODO is this needed?
     mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &display);
@@ -247,7 +247,7 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
 
     {
         MMAL_ES_FORMAT_T* format = display->input[0]->format;
-        format->encoding = MMAL_ENCODING_I420;
+        format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 : MMAL_ENCODING_I420;
         format->es->video.width = geo.stride_y;
         format->es->video.height = geo.height_y;
         format->es->video.crop.x = 0;
@@ -264,7 +264,7 @@ static MMAL_COMPONENT_T* display_init(size_t x, size_t y, size_t w, size_t h)
     mmal_port_enable(display->input[0],display_cb_input);
     mmal_port_enable(display->control,display_cb_control);
 
-    printf("Allocated display %dx%d in %dx%d\n", w, h, geo.stride_y, geo.height_y);
+    printf("Allocated display %dx%d in %dx%d, fmt=%d\n", w, h, geo.stride_y, geo.height_y, fmt);
 
     return display;
 }
@@ -304,7 +304,14 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
     buf->offset = av_rpi_zc_offset(fr_buf);
     buf->length = av_rpi_zc_length(fr_buf);
     buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
-
+#if 0
+    {
+        unsigned int n;
+        for (n = 0; n < fr->width; n += 128) {
+            memset(fr->data[1] + n * fr->linesize[3], 0x80, 128 * fr->height / 2);
+        }
+    }
+#endif
     ++rpi_display_count;
 }
 #else
@@ -339,6 +346,7 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
 
 static void display_exit(MMAL_COMPONENT_T* display)
 {
+//    sleep(120);
     if (display) {
         mmal_component_destroy(display);
     }
@@ -1149,7 +1157,7 @@ static void do_video_out(AVFormatContext *s,
     if (next_picture && ist != NULL)
     {
         if (!rpi_display)
-           rpi_display = display_init(0,0,next_picture->width,next_picture->height);
+            rpi_display = display_init(next_picture->format, 0, 0, next_picture->width, next_picture->height);
         display_frame(ist->dec_ctx, rpi_display, next_picture);
     }
 #endif

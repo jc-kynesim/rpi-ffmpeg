@@ -303,7 +303,10 @@ enum AVPixelFormat {
     AV_PIX_FMT_GBRAP10BE,  ///< planar GBR 4:4:4:4 40bpp, big-endian
     AV_PIX_FMT_GBRAP10LE,  ///< planar GBR 4:4:4:4 40bpp, little-endian
 
-    AV_PIX_FMT_NB,        ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
+// RPI - not on ifdef so can be got at by calling progs
+    AV_PIX_FMT_SAND128,   ///< 4:2:0 128x*Y stripe, 64x*UV stripe, then next x stripe, mysterious padding
+
+    AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };
 
 #define AV_PIX_FMT_Y400A AV_PIX_FMT_GRAY8A

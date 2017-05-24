@@ -783,6 +783,11 @@ int avcodec_default_get_buffer2(AVCodecContext *avctx, AVFrame *frame, int flags
 {
     int ret;
 
+#ifdef RPI
+    // This is going to end badly if we let it continue
+    av_assert0(frame->format != AV_PIX_FMT_SAND128);
+#endif
+
     if ((ret = update_frame_pool(avctx, frame)) < 0)
         return ret;
 
