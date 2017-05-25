@@ -623,8 +623,6 @@ typedef struct HEVCContext {
     int used_for_ref;  // rpi
 #ifdef RPI
     int enable_rpi;
-    HEVCMvCmd *unif_mv_cmds_y[RPI_MAX_JOBS];
-    HEVCMvCmd *unif_mv_cmds_c[RPI_MAX_JOBS];
     HEVCPredCmd *univ_pred_cmds[RPI_MAX_JOBS];
     int buf_width;
     GPU_MEM_PTR_T coeffs_buf_default[RPI_MAX_JOBS];
