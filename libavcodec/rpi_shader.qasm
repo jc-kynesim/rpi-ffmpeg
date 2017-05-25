@@ -821,9 +821,9 @@
 # mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, tbd, next_kernel)
 ::mc_setup
   # Need to save these because we need to know the frame dimensions before computing texture coordinates
-  mov tmurs, 1          ; mov ra8, unif         # No TMU swap ; y_x
+  mov tmurs, 1          ; mov ra0, unif         # No TMU swap ; x_y
   mov ra9, unif         # ref_y_base
-  mov ra10, unif        # y2_x2
+  mov ra1, unif                                 # x2_y2
   mov ra11, unif        # ref_y2_base
 
 # load constants
@@ -846,7 +846,7 @@
 
 # Compute base address for first and second access
   mov r3, elem_num
-  add r0, ra8.16a, r3   # Load x + elem_num
+  add r0, ra0.16b, r3   # Load x + elem_num
   max r0, r0, 0
   min r0, r0, rb_max_x
   shl ra_xshift_next, r0, 3 # Compute shifts
@@ -861,7 +861,7 @@
   add ra_base, ra9, r0
 
   # r3 still contains elem_num
-  add r0, ra10.16a, r3  # Load x
+  add r0, ra1.16b, r3  # Load x
   max r0, r0, 0
   min r0, r0, rb_max_x
   shl rb_xshift2_next, r0, 3 # Compute shifts
@@ -875,8 +875,8 @@
 
 # Do preloads
 # r0 = ra_y, r2 = ra_y2
-  mov r0, ra8.16b       # Load y
-  mov r2, ra10.16b      # Load y2
+  mov r0, ra0.16a       # Load y
+  mov r2, ra1.16a       # Load y2
   mov r3, PREREAD
 
 :y_preload
@@ -914,9 +914,9 @@
 # 1st 3 instructions of per_block-setup in branch delay
 .macro luma_setup
   brr ra_link, r:per_block_setup
-  mov ra1, unif         ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
-  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1] # [ra1 delay]
-  add r0, ra1.16a, r3   ; mov rb_xshift2, rb_xshift2_next
+  mov ra0, unif         ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
+  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1] # [ra0 delay]
+  add r0, ra0.16b, r3   ; mov rb_xshift2, rb_xshift2_next
 .endm
 
 ################################################################################
@@ -930,6 +930,9 @@
 # get base addresses and per-channel shifts for *next* invocation
 # per-channel shifts were calculated on the *previous* invocation
 
+# ra0: x_y     (loaded in luma_setup macro)
+# ra1: x2_y2   (from uniform)
+
   max r0, r0, 0         ; mov ra_xshift, ra_xshift_next
   min r0, r0, rb_max_x
 
@@ -940,11 +943,11 @@
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
   add ra_base_next, unif, r0              # Base1
-  mov ra_y_next, ra1.16b                      # Load y
+  mov ra_y_next, ra0.16a                      # Load y
   mov ra1, unif         # x2_y2
   nop                   # ra1 delay
 
-  add r0, ra1.16a, r3   # Load x2
+  add r0, ra1.16b, r3   # Load x2
   max r0, r0, 0
   min r0, r0, rb_max_x
 
@@ -953,9 +956,9 @@
   and r1, r0, r2
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        # Add stripe offsets
-  add rb_base2_next, unif, r0              # Base1
-  mov ra_y2_next, ra1.16b                      # Load y
-  mov ra_width_height, unif         # width_height
+  add rb_base2_next, unif, r0                   # Base1
+  mov ra_y2_next, ra1.16a                       # Load y
+  mov ra_width_height, unif                     # width_height
 
 # set up VPM write
   mov vw_setup, rb_vpm_init    # [ra1 delay]
