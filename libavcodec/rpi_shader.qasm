@@ -970,8 +970,9 @@
   shl ra8, r0, 3        ; mov rb_wt_mul_l0, ra5.16a
 
 # Pack the 1st 4 filter coefs for H & V tightly
+# Coeffs are all abs values here as that means mul24 works (no sign extend from .8)
 
-  mov r1,0x00010100  # -ve
+  mov r1,0x00010100  # -ve                      [ra8 delay]
   ror ra2.8a, r1, ra8.8d
   ror ra0.8a, r1, ra8.8c
 
@@ -986,8 +987,7 @@
   ror ra2.8d, r1, ra8.8d
   ror ra0.8d, r1, ra8.8c
 
-# In the 2nd vertical half we use b registers due to
-# using a-side fifo regs
+# In the 2nd vertical half we use b registers due to using a-side fifo regs
 
   mov r1,0x3a281100
   ror r0, r1, ra8.8d    ; mov ra_wt_off_mul_l1, unif
