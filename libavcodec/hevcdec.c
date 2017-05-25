@@ -2295,10 +2295,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
            const int weight_offset,
            AVFrame *const src_frame)
 {
-#if 0
     const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
-
-    printf("%s\n", __func__);
 
 //    rpi_luma_mc_uni(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
 //                    mv, x0, y0, nPbW, nPbH,
@@ -2322,7 +2319,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             int start_x = 0;
             const int bh = FFMIN(nPbH - start_y, Y_P_MAX_H);
 
-#if 0
+#if 1
             // As Y-pred operates on two independant 8-wide src blocks we can merge
             // this pred with the previous one if it the previous one is 8 pel wide,
             // the same height as the current block, immediately to the left of our
@@ -2413,7 +2410,6 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             }
         }
     }
-#endif
 }
 
 static void
@@ -2424,12 +2420,9 @@ rpi_pred_y_b(HEVCContext * const s,
            AVFrame *const src_frame,
            AVFrame *const src_frame2)
 {
-#if 0
     const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
     const Mv * const mv  = mv_field->mv + 0;
     const Mv * const mv2 = mv_field->mv + 1;
-
-    printf("%s\n", __func__);
 
 //    rpi_luma_mc_bi(s, s->frame->data[0] + y_off, s->frame->linesize[0], src_frame,
 //           mv, x0, y0, nPbW, nPbH,
@@ -2507,7 +2500,6 @@ rpi_pred_y_b(HEVCContext * const s,
           dst += s->frame->linesize[0] * 16;
         }
     }
-#endif
 }
 
 
@@ -2534,7 +2526,6 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   const int16_t * const c_offsets,
   AVFrame * const src_frame)
 {
-#if 1
     const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
 #if 0
     av_assert0(s->frame->linesize[1] == s->frame->linesize[2]);
@@ -2547,7 +2538,6 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
                 x0_c, y0_c, nPbW_c, nPbH_c, mv,
                 c_weights[1], c_offsets[1]);
 #endif
-    printf("%s\n", __func__);
 
     {
         const int hshift           = s->ps.sps->hshift[1];
@@ -2592,7 +2582,6 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
         }
     }
   return;
-#endif
 }
 
 static void
@@ -2606,7 +2595,6 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame,
   AVFrame * const src_frame2)
 {
-#if 0
     const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
 #if 0
     rpi_chroma_mc_bi(s, s->frame->data[1] + c_off, s->frame->linesize[1], src_frame, src_frame2,
@@ -2615,7 +2603,6 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
     rpi_chroma_mc_bi(s, s->frame->data[2] + c_off, s->frame->linesize[2], src_frame, src_frame2,
                  x0_c, y0_c, nPbW_c, nPbH_c, mv_field, 1);
 #endif
-    printf("%s\n", __func__);
 
     {
         const int hshift = s->ps.sps->hshift[1];
@@ -2687,7 +2674,6 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
           dst_base_u += s->frame->linesize[1] * 16;
         }
     }
-#endif
 }
 #endif
 
@@ -3652,8 +3638,6 @@ static unsigned int mc_terminate_y(HEVCContext * const s, const int job)
         yp->last_l1 = NULL;
     }
 
-    printf("Y=%d, C=%d, tc_y=%d\n", sizeof(qpu_mc_pred_y_t), sizeof(qpu_mc_pred_c_t), tc);
-
     return tc;
 }
 
@@ -3728,8 +3712,6 @@ static void worker_core(HEVCContext * const s)
 
     const vpu_qpu_job_h vqj = vpu_qpu_job_new();
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
-
-    printf("Core start\n");
 
     if (s->num_coeffs[job][3] + s->num_coeffs[job][2] != 0) {
         vpu_qpu_job_add_vpu(vqj,
@@ -3861,9 +3843,7 @@ static void worker_core(HEVCContext * const s)
     rpi_execute_inter_cmds(s, qpu_luma, qpu_chroma, Y_B_ONLY, 0);
 
     // Wait for transform completion
-    printf("Core wait\n");
 
-    // Perform intra prediction and residual reconstruction
     avpriv_atomic_int_add_and_fetch(&wg->arm_load, -arm_cost);
 #if Y_B_ONLY
     if (!qpu_luma)
@@ -3871,15 +3851,14 @@ static void worker_core(HEVCContext * const s)
 #else
     vpu_qpu_wait(&sync_y);
 #endif
-    printf("Core waited\n");
+
+    // Perform intra prediction and residual reconstruction
     rpi_execute_pred_cmds(s);
 
     // Perform deblocking for CTBs in this row
     rpi_execute_dblk_cmds(s);
 
     avpriv_atomic_int_add_and_fetch(&wg->arm_load, -arm_const_cost);
-
-    printf("Core fin\n");
 }
 
 static void rpi_do_all_passes(HEVCContext *s)
@@ -5288,9 +5267,9 @@ AVCodec ff_hevc_decoder = {
     .update_thread_context = hevc_update_thread_context,
     .init_thread_copy      = hevc_init_thread_copy,
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
-                             0,
+//                             0,
 //                             AV_CODEC_CAP_FRAME_THREADS,
-//                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };

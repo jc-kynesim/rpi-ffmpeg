@@ -776,7 +776,6 @@
  # >>>
   mov  -, vw_wait
 .endif
-  mov -,srel(0)
 .endm
 
 
@@ -785,6 +784,7 @@
 ::mc_exit_c
 ::mc_exit
   m_exit_drain
+  mov -,srel(0)
   nop                   ; nop           ; thrend
   nop
   nop
