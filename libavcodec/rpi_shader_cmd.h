@@ -3,11 +3,15 @@
 
 #pragma pack(push, 4)
 
+typedef struct qpu_mc_src_s
+{
+    int16_t y;
+    int16_t x;
+    uint32_t base;
+} qpu_mc_src_t;
+
 typedef struct qpu_mc_pred_c_s {
-    uint32_t next_fn;
-    int16_t next_src_y;
-    int16_t next_src_x;
-    uint32_t next_src_base_c;
+    qpu_mc_src_t next_src;
     union {
         struct {
             uint16_t h;
@@ -52,15 +56,12 @@ typedef struct qpu_mc_pred_c_s {
             uint32_t dummy5;
         } s1;
     };
+    uint32_t next_fn;
 } qpu_mc_pred_c_t;
 
 typedef struct qpu_mc_pred_y_s {
-    int16_t next_src1_x;
-    int16_t next_src1_y;
-    uint32_t next_src1_base;
-    int16_t next_src2_x;
-    int16_t next_src2_y;
-    uint32_t next_src2_base;
+    qpu_mc_src_t next_src1;
+    qpu_mc_src_t next_src2;
     union {
         struct {
             uint16_t h;

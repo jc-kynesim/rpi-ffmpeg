@@ -553,12 +553,14 @@ typedef struct HEVCPredCmd {
 
 struct qpu_mc_pred_c_s;
 struct qpu_mc_pred_y_s;
+struct qpu_mc_src_s;
 
 typedef struct HEVCRpiLumaPred
 {
     struct qpu_mc_pred_y_s *qpu_mc_base;
     struct qpu_mc_pred_y_s *qpu_mc_curr;
-    struct qpu_mc_pred_y_s *last_lx;
+    struct qpu_mc_src_s *last_l0;
+    struct qpu_mc_src_s *last_l1;
     unsigned int load;
 } HEVCRpiLumaPred;
 
@@ -566,8 +568,8 @@ typedef struct HEVCRpiChromaPred
 {
     struct qpu_mc_pred_c_s *qpu_mc_base;
     struct qpu_mc_pred_c_s *qpu_mc_curr;
-    struct qpu_mc_pred_c_s *last_l0;
-    struct qpu_mc_pred_c_s *last_l1;
+    struct qpu_mc_src_s *last_l0;
+    struct qpu_mc_src_s *last_l1;
     unsigned int load;
 } HEVCRpiChromaPred;
 
@@ -651,7 +653,7 @@ typedef struct HEVCContext {
     HEVCRpiChromaPred * curr_pred_c;
     HEVCRpiLumaPred * curr_pred_y;
     struct qpu_mc_pred_y_s * last_y8_p;
-    struct qpu_mc_pred_y_s * last_y8_lx;
+    struct qpu_mc_src_s * last_y8_l1;
 
     // Function pointers
     uint32_t qpu_filter_uv;
