@@ -3285,9 +3285,6 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
 
           case RPI_PRED_ADD_RESIDUAL:
               s->hevcdsp.add_residual[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
-#ifdef RPI_PRECLEAR
-              memset(cmd->buf, 0, sizeof(int16_t) << (cmd->size * 2)); // Clear coefficients here while they are in the cache
-#endif
               break;
           case RPI_PRED_ADD_RESIDUAL_U:
               s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
@@ -4706,17 +4703,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     return 0;
 }
 
-#ifdef RPI
-#ifdef RPI_PRECLEAR
-static av_cold void memclear16(int16_t *p, int n)
-{
-  vpu_execute_code( vpu_get_fn(), p, n, 0, 0, 0, 1);
-  //int i;
-  //for(i=0;i<n;i++)
-  //  p[i] = 0;
-}
-#endif
-#endif
 
 static av_cold int hevc_init_context(AVCodecContext *avctx)
 {

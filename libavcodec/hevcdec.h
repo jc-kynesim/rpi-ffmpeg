@@ -487,9 +487,6 @@ typedef struct HEVCLocalContext {
 #define RPI_CMD_CHROMA_BI 3
 #define RPI_CMD_V_BI 4
 
-// RPI_PRECLEAR is not working yet - perhaps clearing on VPUs is flawed?
-// #define RPI_PRECLEAR
-
 // Command for inter prediction
 typedef struct HEVCMvCmd {
     uint8_t cmd;
