@@ -5,7 +5,15 @@
 # local 4.  As it happens this is what is wanted here as we do not want the
 # constants from the other half of the calc.
 
-.set PREREAD, 4
+# PREREAD is the number of requests that we have sitting in
+# the TMU request queue.  The h/w limit is 8.  The current s/w limit
+# is also 8 given a min block size of 4 and a chroma fir size of 4.
+# N.B. if we implement 00 pred code then the max will reduce to min block
+# size.
+# However in the current world there seems to be no benefit (and a small
+# overhead) in setting this bigger than 2.
+
+.set PREREAD, 2
 
 
 # register allocation
@@ -751,21 +759,32 @@
 # Exit code used by both Luma & Chroma so place between them to avoid I-cache
 # conflicts
 
-# mc_exit()
-# Chroma & Luma the same now
-::mc_exit_c
-::mc_exit
+.macro m_exit_drain
+.if PREREAD == 2
+# Special case 2 as loop is wasteful
+  nop                   ; nop           ; ldtmu0
+  nop                   ; nop           ; ldtmu1
+  nop                   ; nop           ; ldtmu0
+  mov -, vw_wait        ; nop           ; ldtmu1
+.else
   mov.setf r3, PREREAD - 1
-
-:mc_exit_l0
-  brr.anynz -, r:mc_exit_l0
+:1
+  brr.anynz -, r:1b
   nop                   ; nop           ; ldtmu0
   nop                   ; nop           ; ldtmu1
   sub.setf r3, r3, 1
  # >>>
   mov  -, vw_wait
+.endif
   mov -,srel(0)
+.endm
 
+
+# mc_exit()
+# Chroma & Luma the same now
+::mc_exit_c
+::mc_exit
+  m_exit_drain
   nop                   ; nop           ; thrend
   nop
   nop
@@ -774,16 +793,7 @@
 # mc_interrupt_exit12()
 ::mc_interrupt_exit12c
 ::mc_interrupt_exit12
-  mov.setf r3, PREREAD - 1
-
-:mc_exit_l1
-  brr.anynz -, r:mc_exit_l1
-  nop                   ; nop           ; ldtmu0
-  nop                   ; nop           ; ldtmu1
-  sub.setf r3, r3, 1
- # >>>
-  mov  -, vw_wait
-
+  m_exit_drain
   mov -,sacq(0) # 1
   mov -,sacq(0) # 2
   mov -,sacq(0) # 3
