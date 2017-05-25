@@ -938,46 +938,36 @@
 
   shl ra_xshift_next, r0, 3         # Compute shifts
   and r0, r0, -4        ; v8subs r2, r2, r2
-  sub r2, r2, rb_pitch
+  sub r2, r2, rb_pitch  ; mov ra_base_next, unif # src1.base
+  and r1, r0, r2        ; mov ra_y_next, ra0.16a
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
+  add r0, r0, r1        ; mov ra1, unif         # Add stripe offsets ; src2.x_y
+  add ra_base_next, ra_base_next, r0            # [ra1 delay]
+
+  add r0, ra1.16b, r3                           # Load x2
+  max r0, r0, 0         ; mov ra_y2_next, ra1.16a
+  min r0, r0, rb_max_x  ; mov rb_base2_next, unif # ; src2.base
+  shl rb_xshift2_next, r0, 3                    # Compute shifts
+  and r0, r0, -4        ; mov ra_width_height, unif # ; width_height
   and r1, r0, r2
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        # Add stripe offsets
-  add ra_base_next, unif, r0              # Base1
-  mov ra_y_next, ra0.16a                      # Load y
-  mov ra1, unif         # x2_y2
-  nop                   # ra1 delay
-
-  add r0, ra1.16b, r3   # Load x2
-  max r0, r0, 0
-  min r0, r0, rb_max_x
-
-  shl rb_xshift2_next, r0, 3         # Compute shifts
-  and r0, r0, -4
-  and r1, r0, r2
-  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        # Add stripe offsets
-  add rb_base2_next, unif, r0                   # Base1
-  mov ra_y2_next, ra1.16a                       # Load y
-  mov ra_width_height, unif                     # width_height
-
-# set up VPM write
-  mov vw_setup, rb_vpm_init    # [ra1 delay]
+  add r0, r0, r1        ; mov vw_setup, rb_vpm_init # Add stripe offsets ; set up VPM write
+  add rb_base2_next, rb_base2_next, r0
 
 # get width,height of block (unif load above)
   sub rb_dma1, rb_dma1_base, ra_width # Compute vdw_setup1(dst_pitch-width)
   add rb_i_tmu, ra_height, 7 - PREREAD ; mov r0, ra_height
-  mov r1, 16
-  min r0, r0, r1
+  min r0, r0, ra_k16
   add rb_lcount, r0, 7
   shl r0,   r0, 7
   add r0,   r0, ra_width                        # Combine width and height of destination area
   shl r0,   r0, i_shift16                       # Shift into bits 16 upwards of the vdw_setup0 register
-  add rb_dma0, r0, rb_dma0_base                 ; mov r0, unif   # Packed filter offsets
+  add rb_dma0, r0, rb_dma0_base ; mov r0, unif  # ; Packed filter offsets
 
 # get filter coefficients and discard unused B frame values
-  shl.ifz r0, r0, i_shift16          ; mov ra5, unif    #  Pick half to use ; L0 offset/weight
-  mov r2, 0x01040400                 # [ra5 delay]
-  shl ra8, r0, 3                     ; mov rb_wt_mul_l0, ra5.16a
+  shl.ifz r0, r0, i_shift16 ; mov ra5, unif     #  Pick half to use ; L0 offset/weight
+  mov r2, 0x01040400                            # [ra5 delay]
+  shl ra8, r0, 3        ; mov rb_wt_mul_l0, ra5.16a
 
 # Pack the 1st 4 filter coefs for H & V tightly
 
@@ -997,42 +987,32 @@
   ror ra0.8d, r1, ra8.8c
 
 # In the 2nd vertical half we use b registers due to
-# using a-side fifo regs. The easiest way to achieve this to pack it
-# and then unpack!
+# using a-side fifo regs
 
   mov r1,0x3a281100
-  ror ra3.8a, r1, ra8.8d
-  ror ra1.8a, r1, ra8.8c
+  ror r0, r1, ra8.8d    ; mov ra_wt_off_mul_l1, unif
+  ror ra1.8a, r1, ra8.8c ; v8min rb4, r0, rb_k255
 
   mov r1,0x0a0b0500  # -ve
-  ror ra3.8b, r1, ra8.8d
-  ror ra1.8b, r1, ra8.8c
+  ror r0, r1, ra8.8d
+  ror ra1.8b, r1, ra8.8c ; v8min rb5, r0, rb_k255
 
   mov r1,0x04040100
-  ror ra3.8c, r1, ra8.8d
-  ror ra1.8c, r1, ra8.8c
+  ror r0, r1, ra8.8d
+  ror ra1.8c, r1, ra8.8c ; v8min rb6, r0, rb_k255
+
+  mov.ifnz ra5, ra_wt_off_mul_l1 ; mov rb_dest, unif # ; Destination address
 
   mov r1,0x01010000  # -ve
-  ror ra3.8d, r1, ra8.8d
-  ror ra1.8d, r1, ra8.8c
-
-# Extract weighted prediction information in parallel
-# We are annoyingly A src limited here
-
-  mov rb4, ra3.8a               ; mov ra_wt_off_mul_l1, unif
-  mov rb5, ra3.8b
-  mov rb6, ra3.8c
-  mov.ifnz ra5, ra_wt_off_mul_l1
-
-  mov rb_dest, unif             # Destination address
-
+  ror r0, r1, ra8.8d
   bra -, ra_link
+  ror ra1.8d, r1, ra8.8c ; v8min rb7, r0, rb_k255
 
-  shl r0, ra5.16b, rb_wt_den_p15      # Offset calc
-  asr rb_wt_off, r0, 9          ; mov ra_link, unif # For B l1 & L0 offsets should be identical so it doesn't matter which we use
-  mov r3, 0                     ; mov rb7, ra3.8d
+  shl r0, ra5.16b, rb_wt_den_p15 ; v8subs r3, r3, r3     # Offset calc ; r3 = 0
+  # For B l1 & L0 offsets should be identical so it doesn't matter which we use
+  asr rb_wt_off, r0, 9  ; mov ra_link, unif    # ; link - load after we've used its previous val
 # >>> branch ra_link
-#
+
 # r3 = 0
 # ra_wt_mul_l1  = weight L1
 # ra5.16a       = weight L0/L1 depending on side (wanted for 2x mono-pred)
