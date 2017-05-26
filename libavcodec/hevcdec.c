@@ -3254,7 +3254,13 @@ static void rpi_execute_transform(HEVCContext *s)
 
 // I-pred, transform_and_add for all blocks types done here
 // All ARM
+#define RPI_OPT_SEP_PRED 0
+
+#if RPI_OPT_SEP_PRED
+static void rpi_execute_pred_cmds(HEVCContext * const s, const int do_luma, const int do_chroma)
+#else
 static void rpi_execute_pred_cmds(HEVCContext * const s)
+#endif
 {
   int i;
   int job = s->pass1_job;
@@ -3267,6 +3273,11 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
 
   for(i = s->num_pred_cmds[job]; i > 0; i--, cmd++) {
 //      printf("i=%d cmd=%p job1=%d job0=%d\n",i,cmd,s->pass1_job,s->pass0_job);
+#if RPI_OPT_SEP_PRED
+      if (!(cmd->c_idx == 0 ? do_luma : do_chroma)) {
+          continue;
+      }
+#endif
 
       switch (cmd->type)
       {
@@ -3302,7 +3313,12 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
               abort();
       }
   }
-  s->num_pred_cmds[job] = 0;
+#if RPI_OPT_SEP_PRED
+  if (do_luma)
+#endif
+  {
+      s->num_pred_cmds[job] = 0;
+  }
 }
 
 
@@ -3486,7 +3502,9 @@ static void flush_frame(HEVCContext *s,AVFrame *frame)
 // Core execution tasks
 static void worker_core(HEVCContext * const s)
 {
-//    vpu_qpu_wait_h sync_c;
+#if RPI_OPT_SEP_PRED
+    vpu_qpu_wait_h sync_c;
+#endif
     vpu_qpu_wait_h sync_y;
 
     const int job = s->pass1_job;
@@ -3552,7 +3570,9 @@ static void worker_core(HEVCContext * const s)
 
 // We can take a sync here and try to locally overlap QPU processing with ARM
 // but testing showed a slightly negative benefit with noticable extra complexity
-//    vpu_qpu_job_add_sync_this(vqj, &sync_c);
+#if RPI_OPT_SEP_PRED
+    vpu_qpu_job_add_sync_this(vqj, &sync_c);
+#endif
 
     if (mc_terminate_y(s, job) != 0)
     {
@@ -3590,11 +3610,25 @@ static void worker_core(HEVCContext * const s)
     // no arm/neon sand pred code there doesn't seem a lot of point
     // keeping it around
 
+#if RPI_OPT_SEP_PRED
+    // Wait for transform completion
+    vpu_qpu_wait(&sync_c);
+
+    // Perform intra prediction and residual reconstruction
+    rpi_execute_pred_cmds(s, 0, 1);
+
+    // Wait for transform completion
+    vpu_qpu_wait(&sync_y);
+
+    // Perform intra prediction and residual reconstruction
+    rpi_execute_pred_cmds(s, 1, 0);
+#else
     // Wait for transform completion
     vpu_qpu_wait(&sync_y);
 
     // Perform intra prediction and residual reconstruction
     rpi_execute_pred_cmds(s);
+#endif
 
     // Perform deblocking for CTBs in this row
     rpi_execute_dblk_cmds(s);
