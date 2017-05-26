@@ -1528,13 +1528,31 @@ static void rpi_add_residual(HEVCContext * const s,
             rpi_sliced_frame_pos_c(frame, x, y);
 
     if (s->enable_rpi) {
-        HEVCPredCmd * const cmd = s->univ_pred_cmds[s->pass0_job] + s->num_pred_cmds[s->pass0_job]++;
-        cmd->type = RPI_PRED_ADD_RESIDUAL + (is_sliced ? c_idx : 0);
-        cmd->size = log2_trafo_size;
-        cmd->c_idx = c_idx;
-        cmd->ta.buf = coeffs;
-        cmd->ta.dst = dst;
-        cmd->ta.stride = stride;
+        const unsigned int i = s->num_pred_cmds[s->pass0_job];
+        HEVCPredCmd * const pc = s->univ_pred_cmds[s->pass0_job] + i - 1;
+
+        if (i != 0 && c_idx == 2 && pc->type == RPI_PRED_ADD_RESIDUAL_U &&
+            pc->ta.dst == dst)
+        {
+            av_assert0(pc->size == log2_trafo_size &&
+                       pc->c_idx == 1 &&
+                       pc->ta.buf + (1 << (log2_trafo_size * 2)) &&
+                       pc->ta.stride == stride);
+
+            pc->type = RPI_PRED_ADD_RESIDUAL_C;
+        }
+        else
+        {
+            HEVCPredCmd * const cmd = pc + 1;
+            s->num_pred_cmds[s->pass0_job] = i + 1;
+
+            cmd->type = RPI_PRED_ADD_RESIDUAL + (is_sliced ? c_idx : 0);
+            cmd->size = log2_trafo_size;
+            cmd->c_idx = c_idx;
+            cmd->ta.buf = coeffs;
+            cmd->ta.dst = dst;
+            cmd->ta.stride = stride;
+        }
     }
     else if (!is_sliced || c_idx == 0) {
         s->hevcdsp.add_residual[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
