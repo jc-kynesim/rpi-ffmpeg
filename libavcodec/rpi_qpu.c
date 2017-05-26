@@ -137,7 +137,6 @@ typedef struct trace_time_wait_s
 typedef struct vq_wait_s
 {
   sem_t sem;
-  unsigned int cost;
   struct vq_wait_s * next;
 } vq_wait_t;
 
@@ -156,7 +155,6 @@ typedef struct gpu_env_s
   int open_count;
   int init_count;
   int mb;
-  unsigned int current_load;
   GPU_MEM_PTR_T code_gm_ptr;
   vq_wait_pool_t wait_pool;
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
@@ -638,13 +636,11 @@ static void vq_wait_pool_deinit(vq_wait_pool_t * const wp)
 
 
 // If sem_init actually takes time then maybe we want a pool...
-static vq_wait_t * vq_wait_new(const unsigned int cost)
+static vq_wait_t * vq_wait_new(void)
 {
   gpu_env_t * const ge = gpu_lock_ref();
   vq_wait_t * const wait = ge->wait_pool.head;
   ge->wait_pool.head = wait->next;
-  ge->current_load += cost;
-  wait->cost = cost;
   wait->next = NULL;
 
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
@@ -700,17 +696,13 @@ static void vq_wait_wait(vq_wait_t * const wait)
 
 static void vq_wait_post(vq_wait_t * const wait)
 {
-#if !RPI_TRACE_TIME_VPU_QPU_WAIT
-  if (wait->cost != 0)
-#endif
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
   {
     gpu_env_t *const ge = gpu_lock();
-    ge->current_load -= wait->cost;
-#if RPI_TRACE_TIME_VPU_QPU_WAIT
     tto_end(&ge->ttw.active, ns_time());
-#endif
     gpu_unlock();
   }
+#endif
 
   sem_post(&wait->sem);
 }
@@ -726,7 +718,6 @@ struct vpu_qpu_job_env_s
 {
   unsigned int n;
   unsigned int mask;
-  unsigned int cost;
   struct gpu_job_s j[VPU_QPU_JOB_MAX];
 };
 
@@ -770,12 +761,11 @@ void vpu_qpu_job_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_code,
 }
 
 // flags are QPU_FLAGS_xxx
-void vpu_qpu_job_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const unsigned int cost, const uint32_t * const mail)
+void vpu_qpu_job_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, const uint32_t * const mail)
 {
   if (n != 0) {
     struct gpu_job_s *const j = new_job(vqj);
     vqj->mask |= VPU_QPU_MASK_QPU;
-    vqj->cost += cost;
 
     j->command = EXECUTE_QPU;
     j->u.q.jobs = n;
@@ -805,7 +795,7 @@ void vpu_qpu_job_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * c
   }
 
   // We are going to want a sync object
-  wait = vq_wait_new(vqj->cost);
+  wait = vq_wait_new();
 
   // There are 2 VPU Qs & 1 QPU Q so we can collapse sync
   // If we only posted one thing or only QPU jobs
@@ -827,7 +817,6 @@ void vpu_qpu_job_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * c
     j->callback.cookie = wait;
   }
 
-  vqj->cost = 0;
   vqj->mask = 0;
   *wait_h = wait;
 }
@@ -844,11 +833,6 @@ int vpu_qpu_job_finish(vpu_qpu_job_env_t * const vqj)
   rv = vpu_qpu_job_start(vqj);
   vpu_qpu_job_delete(vqj);
   return rv;
-}
-
-unsigned int vpu_qpu_current_load(void)
-{
-  return gpu_ptr()->current_load;
 }
 
 void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h)

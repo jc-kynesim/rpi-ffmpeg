@@ -172,7 +172,7 @@ vpu_qpu_job_h vpu_qpu_job_new(void);
 void vpu_qpu_job_delete(const vpu_qpu_job_h vqj);
 void vpu_qpu_job_add_vpu(const vpu_qpu_job_h vqj, const uint32_t vpu_code,
   const unsigned r0, const unsigned r1, const unsigned r2, const unsigned r3, const unsigned r4, const unsigned r5);
-void vpu_qpu_job_add_qpu(const vpu_qpu_job_h vqj, const unsigned int n, const unsigned int cost, const uint32_t * const mail);
+void vpu_qpu_job_add_qpu(const vpu_qpu_job_h vqj, const unsigned int n, const uint32_t * const mail);
 void vpu_qpu_job_add_sync_this(const vpu_qpu_job_h vqj, vpu_qpu_wait_h * const wait_h);
 int vpu_qpu_job_start(const vpu_qpu_job_h vqj);
 int vpu_qpu_job_finish(const vpu_qpu_job_h vqj);
@@ -183,7 +183,6 @@ extern unsigned int vpu_get_constants(void);
 
 // Waits for previous post_codee to complete and Will null out *wait_h after use
 void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h);
-unsigned int vpu_qpu_current_load(void);
 int vpu_qpu_init(void);
 void vpu_qpu_term(void);
 
