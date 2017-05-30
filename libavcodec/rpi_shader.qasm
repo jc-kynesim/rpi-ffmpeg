@@ -251,54 +251,46 @@
 # In a single 32 bit word we get 2 UV pairs so mask bottom bit of xs
 
   and r0, r0, -4
-  nop                   ; v8subs r1, r1, r1
-  sub r1, r1, rb_pitch
+  sub r1, ra_k0, rb_pitch
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1
   add ra_base, ra_base, r0
 
   add rb_wt_den_p15, 9, unif     # denominator
-  mov -, unif                                   # Unused
 
 # Compute part of VPM to use for DMA output
   m_calc_dma_regs rb_vpm_init, rb_dma0_base
-
-  mov -, unif                                   # Next fn (ignored)
 
 # -----------------
 # And again for L1, but only worrying about frame2 stuff
 
 
 # Load first request location
-  mov ra0, unif            # next_x_y
+  mov ra0, unif                                 # next_x_y
 
-  mov ra_base2, unif # Store frame c base
+  mov ra_base2, unif                            # [ra0 delay] Store frame c base
 
 # Compute base address for first and second access
 # ra_base ends up with t0s base
 # ra_base2 ends up with t1s base
 
-  mov ra_y2, ra0.16a                            # Store y
   add r0, ra0.16b, ra0.16b                      # Load x
-  add r0, r0, rb_elem_x                         # Add QPU slice offset
-  max r0, r0, 0         ; mov -, unif           # Unused 0
-  min r0, r0, rb_max_x  ; mov -, unif           # Unused 1
+  add r0, r0, rb_elem_x ; mov ra_y2, ra0.16a    # Add QPU slice offset
+  max r0, r0, 0
+  min r0, r0, rb_max_x
 
 # Get shift
-  nop                   ; mov -, unif           # Unused 2
   shl rb_xshift2_next, r0, 3
 
 # In a single 32 bit word we get 2 UV pairs so mask bottom bit of xs
 
-  and r0, r0, -4        ; mov -, unif           # Unused 3
-  nop                   ; v8subs r1, r1, r1
-  sub r1, r1, rb_pitch  ; mov -, unif           # Unused 4
+  and r0, r0, -4
+  sub r1, ra_k0, rb_pitch
   and r1, r0, r1
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        ; mov r2, ra_y2
-  add ra_base2, ra_base2, r0 ; mov - , unif          # Unused 5
-
+  add ra_base2, ra_base2, r0
 
 # Do preloads
 # r0 = ra_y, r2 = ra_y2
@@ -602,8 +594,8 @@
 
   sub.setf -, 15, r3    # 12 + 3 of preroll
   brr.anyn -, r:uv_b0_post_fin                  # h > 12 (n) => 16 (do nothing)
-  sub r3, 11, r3                ; mov -, unif   # r3 = shifts wanted ; Discard u_dst_addr
-  mov r0, i_shift16             ; mov -, unif   # Link from b0 - ignored
+  sub r3, 11, r3                                # r3 = shifts wanted
+  mov r0, i_shift16
   mov r1, 0x10000
 # >>>
   brr.anyz -, r:uv_b0_post12                    # h == 12 deal with specially
@@ -662,7 +654,7 @@
   add r0, r0, rb_elem_x
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, ra_k0     ; mov rb_xshift2, rb_xshift2_next # ; xshift2 used because B
-  min r0, r0, rb_max_x  ; mov -, unif           # ; width_height
+  min r0, r0, rb_max_x
 
   shl rb_xshift2_next, r0, 3
 
@@ -900,7 +892,6 @@
 
   m_calc_dma_regs rb_vpm_init, rb_dma0_base
 
-  mov -, unif                                   # unused ;
   mov ra_link, unif                             # Next fn
 
 # touch vertical context to keep simulator happy

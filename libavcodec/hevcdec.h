@@ -551,6 +551,7 @@ typedef struct HEVCPredCmd {
 
 struct qpu_mc_pred_c_s;
 struct qpu_mc_pred_y_s;
+struct qpu_mc_pred_y_p_s;
 struct qpu_mc_src_s;
 
 typedef struct HEVCRpiLumaPred
@@ -648,7 +649,7 @@ typedef struct HEVCContext {
 #if RPI_INTER
     HEVCRpiChromaPred * curr_pred_c;
     HEVCRpiLumaPred * curr_pred_y;
-    struct qpu_mc_pred_y_s * last_y8_p;
+    struct qpu_mc_pred_y_p_s * last_y8_p;
     struct qpu_mc_src_s * last_y8_l1;
 
     // Function pointers
