@@ -463,8 +463,6 @@ typedef struct HEVCLocalContext {
 #ifdef RPI
 
 // The processing is done in chunks
-// Each chunk corresponds to 24 64x64 luma blocks (24 so it is divisible by 8 for chroma and 12 for luma)
-// This is a distance of 1536 pixels across the screen
 // Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
 // but allocate more memory and increase the latency before data in the next frame can be processed
 #define RPI_NUM_CHUNKS 4

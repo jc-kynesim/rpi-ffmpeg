@@ -95,12 +95,10 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 #define MC_DUMMY_X (-32)
 #define MC_DUMMY_Y (-32)
 
-// Each luma QPU processes 2*RPI_NUM_CHUNKS 64x64 blocks
-// Each chroma QPU processes 3*RPI_NUM_CHUNKS 64x64 blocks, but requires two commands for B blocks
-// For each block of 64*64 the smallest block size is 8x4
-// We also need an extra command for the setup information
+// UV still has min 4x4 pred
+#define UV_COMMANDS_PER_QPU (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 / QPU_N_UV + 1)
+#define Y_COMMANDS_PER_QPU  (((RPI_MAX_WIDTH * 64) / (4 * 4))     / QPU_N_Y  + 1)
 
-#define UV_COMMANDS_PER_QPU (1 + RPI_NUM_CHUNKS*(64*64)*2/(8*4))
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
 
@@ -120,7 +118,6 @@ static const uint32_t rpi_filter_coefs[8] = {
         ENCODE_COEFFS(  2,  10,  58,  2)
 };
 
-#define Y_COMMANDS_PER_QPU ((1+RPI_NUM_CHUNKS*(64*64)/(8*4)))
 
 #endif
 
@@ -4752,13 +4749,11 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     }
 
 #if RPI_INTER
-    // We divide the image into blocks 256 wide and 64 high
-    // We support up to 2048 widths
-    // We compute the number of chroma motion vector commands for 4:4:4 format and 4x4 chroma blocks - assuming all blocks are B predicted
-    // Also add space for the startup command for each stream.
 
     for (job = 0; job < RPI_MAX_JOBS; job++) {
         HEVCRpiJob * const jb = s->jobs + job;
+        // ** Sizeof the union structure might be overkill but at the moment it
+        //    is correct (it certainly isn'y going to be too samll)
 #if RPI_CACHE_UNIF_MVS
         gpu_malloc_cached(QPU_N_UV * UV_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_c_t), &jb->chroma_mvs_gptr);
         gpu_malloc_cached(QPU_N_Y  * Y_COMMANDS_PER_QPU  * sizeof(qpu_mc_pred_y_t), &jb->luma_mvs_gptr);
