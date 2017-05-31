@@ -508,7 +508,7 @@
 
   sub rb_dma1, rb_dma1_base, r2 ; mov ra2, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
   add rb_i_tmu, r1, 3 - PREREAD
-  add ra_cb_lheight_p3, r1, 3                   # Combine width and height of destination area
+  add rb_lcount, r1, 3                   # Combine width and height of destination area
 
 # ; unpack filter coefficients
 
@@ -571,16 +571,15 @@
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0     # loop counter increment
   shr r2, r4, ra_xshift ; mov.ifz ra_base2, rb_base2_next
   shr r1, r2, 8         ; mov.ifz ra_y_y2, ra_y_y2_next
-  nop                   ; mov.ifz ra_base, ra_base_next
+  mov rb4, rb5          ; mov.ifz ra_base, ra_base_next
   add ra_y, 1, ra_y     ; mov r3, ra_y
 
   and.setf -, 1, elem_num
-  max r3, r3, ra_k0
-  nop                   ; mov      r0, r1 << 15
+  max r3, r3, ra_k0     ; mov      r0, r1 << 15
   min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
 
-  mov.ifz r0, r2        ; mul24 r2, r3, rb_pitch
-  add t0s, ra_base, r2  ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
+  mov.ifz r0, r2        ; mul24 r3, r3, rb_pitch
+  add t0s, ra_base, r3  ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -595,21 +594,18 @@
   nop                   ; mul24.ifnz r3, ra0.8c << 12, r1 << 12 @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra0.8d << 6,  r0 << 6  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8d << 14, r1 << 14 @ "mul_used", 0
-  sub ra11, r2, r3
+  sub ra11, r2, r3      ; mov rb5, rb6          ; ldtmu1
 
-
-
-  nop                   ; nop                   ; ldtmu1     # loop counter increment
-  shr r2, r4, rb_xshift2
+  shr r2, r4, rb_xshift2 ; mov ra4, ra5
   shr r1, r2, 8         ; mov r3, ra_y2
-  add r0, r3, ra_k1
+  add ra_y2, r3, ra_k1  ; mov rb6, rb7
 
-  and.setf -, 1, elem_num ; mov ra_y2, r0
+  and.setf -, 1, elem_num
   max r3, r3, ra_k0     ; mov      r0, r1 << 15
   min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
 
-  mov.ifz r0, r2        ; mul24 r2, r3, rb_pitch
-  add t1s, ra_base2, r2 ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
+  mov.ifz r0, r2        ; mul24 r3, r3, rb_pitch
+  add t1s, ra_base2, r3 ; v8min r0, r0, rb_k255  # v8subs masks out all but bottom byte
 
 # generate seven shifted versions
 # interleave with scroll of vertical context
@@ -624,45 +620,34 @@
   nop                   ; mul24.ifnz r3, ra1.8c << 12, r1 << 12 @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8d << 6,  r0 << 6  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra1.8d << 14, r1 << 14 @ "mul_used", 0
-  sub r0, r2, r3
-  sub.setf -, r5, 4
-  mov ra4, ra5          ; mov rb4, rb5
+  sub.setf -, r5, 4     ; mov ra5, ra6
   brr.anyn -, r:uvloop_b
-  mov ra5, ra6          ; mov rb5, rb6
-  mov ra6, ra7          ; mov rb6, rb7
+  sub r0, r2, r3        ; mov ra6, ra7
   mov ra7, r0           ; mov rb7, ra11
+  nop                   ; mul24 r0, rb4, ra2.8a # Start V filter
+
 # >>> .anyn uvloop_b0
 # apply vertical filters
 
-  nop                   ; mul24 r1, rb5, ra2.8b   # rb10 is about to be rb9
-  nop                   ; mul24 r2, rb6, ra2.8c  # ra15 is about to be ra14
-  nop                   ; mul24 r0, rb4, ra2.8a
-  sub r1, r1, r0
-  add r1, r1, r2        ; mul24 r0, rb7, ra2.8d  # N.B. ra15 write gap
-  sub r1, r1, r0
-  asr ra11, r1, 6
+  nop                   ; mul24 r1, rb5, ra2.8b
+  sub r1, r1, r0        ; mul24 r0, rb6, ra2.8c
+  add r1, r1, r0        ; mul24 r0, rb7, ra2.8d
+  sub r1, r1, r0        ; mul24 r0, ra4, rb8
+  asr ra11, r1, 6                               # r1 bits 24.31 are rubbish but we will discard later
+  nop                   ; mul24 r2, ra5, rb9
+  sub r2, r2, r0        ; mul24 r0, ra6, rb10
+  add r2, r2, r0        ; mul24 r0, ra7, rb11
+  sub r2, r2, r0        ; mul24 r0, ra11.16a, rb_wt_mul_l0  # ra11 top bits discarded *** 10 bit fall ***
 
-# apply vertical filter and write to VPM
-
-  nop                   ; mul24 r1, ra5, rb9   # rb10 is about to be rb9
-  nop                   ; mul24 r2, ra6, rb10  # ra15 is about to be ra14
-  nop                   ; mul24 r0, ra4, rb8
-  sub r1, r1, r0
-  add r1, r1, r2        ; mul24 r0, ra7, rb11
-  sub r1, r1, r0        ; mul24 r0, ra11.16a, rb_wt_mul_l0  # ra11 top bits discarded *** 10 bit ***
-
-
-
-  nop                   ; mul24 r1, r1, ra_k256
+  nop                   ; mul24 r1, r2, ra_k256
   asr r1, r1, 14
 
   nop                   ; mul24 r1, r1, ra10.16a
   add r1, r1, r0
 
-  nop                   ; mul24 r1, r1, ra_k256 # Lose bad top 8 bits & sign extend
+  sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256 # Lose bad top 8 bits & sign extend
   add r1, r1, rb_wt_off                         # rb_wt_off = (offsetL0 + offsetL1 + 1) << (rb_wt_den_p15 - 1)
 
-  sub.setf -, r5, ra_cb_lheight_p3
   brr.anyn -, r:uvloop_b
   asr ra11.8as, r1, rb_wt_den_p15
   mov -, vw_wait
