@@ -96,8 +96,10 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 #define MC_DUMMY_Y (-32)
 
 // UV still has min 4x4 pred
-#define UV_COMMANDS_PER_QPU (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 / QPU_N_UV + 1)
-#define Y_COMMANDS_PER_QPU  (((RPI_MAX_WIDTH * 64) / (4 * 4))     / QPU_N_Y  + 1)
+// Allow for even spread +1 for setup, +1 for rounding
+// If we have load sharingw e will want different (bigger) numbers and/or a non-constant chunk size
+#define UV_COMMANDS_PER_QPU (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 / QPU_N_UV + 2)
+#define Y_COMMANDS_PER_QPU  (((RPI_MAX_WIDTH * 64) / (4 * 4))     / QPU_N_Y  + 2)
 
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
@@ -4753,7 +4755,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     for (job = 0; job < RPI_MAX_JOBS; job++) {
         HEVCRpiJob * const jb = s->jobs + job;
         // ** Sizeof the union structure might be overkill but at the moment it
-        //    is correct (it certainly isn'y going to be too samll)
+        //    is correct (it certainly isn't going to be too samll)
 #if RPI_CACHE_UNIF_MVS
         gpu_malloc_cached(QPU_N_UV * UV_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_c_t), &jb->chroma_mvs_gptr);
         gpu_malloc_cached(QPU_N_Y  * Y_COMMANDS_PER_QPU  * sizeof(qpu_mc_pred_y_t), &jb->luma_mvs_gptr);
