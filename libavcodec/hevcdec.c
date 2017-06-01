@@ -2205,7 +2205,35 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
     uint32_t dst_addr = get_vc_address_y(s->frame) + y_off;
     const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
 
-    // Potentially we could change the assembly code to support taller sizes in one go
+    if (my_mx == 0) {
+        for (int start_y = 0; start_y < nPbH; start_y += 16, dst_addr += s->frame->linesize[0] * 16)
+        {
+            const uint32_t src_yx_y = y1_m3 + start_y + 3;
+            int start_x = 0;
+            const int bh = FFMIN(nPbH - start_y, 16);
+
+            for (; start_x < nPbW; start_x += 16)
+            {
+                const int bw = FFMIN(nPbW - start_x, 16);
+                HEVCRpiLumaPred *const yp = rpi_nxt_pred_y(s, bh, s->qpu_filter_y_p00);
+                qpu_mc_src_t *const src1 = yp->last_l0;
+                qpu_mc_pred_y_p00_t *const cmd_y = &yp->qpu_mc_curr->p00;
+
+                src1->x = x1_m3 + start_x + 3;
+                src1->y = src_yx_y;
+                src1->base = src_vc_address_y;
+                cmd_y->w = bw;
+                cmd_y->h = bh;
+                cmd_y->wo1 = wo;
+                cmd_y->dst_addr =  dst_addr + start_x;
+                yp->last_l0 = &cmd_y->next_src1;
+                *(qpu_mc_pred_y_p00_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            }
+        }
+        return;
+    }
+
+
     for (int start_y = 0; start_y < nPbH; start_y += Y_P_MAX_H, dst_addr += s->frame->linesize[0] * 16)
     {
         const uint32_t src_yx_y = y1_m3 + start_y;
@@ -4785,6 +4813,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->qpu_filter_uv_b0 = qpu_fn(mc_filter_uv_b0);
     s->qpu_dummy_frame = qpu_fn(mc_setup_c);  // Use our code as a dummy frame
     s->qpu_filter = qpu_fn(mc_filter);
+    s->qpu_filter_y_p00 = qpu_fn(mc_filter_y_p00);
     s->qpu_filter_b = qpu_fn(mc_filter_b);
 #endif
     //gpu_malloc_uncached(2048*64,&s->dummy);

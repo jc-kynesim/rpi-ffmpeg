@@ -5,11 +5,15 @@
 # local 4.  As it happens this is what is wanted here as we do not want the
 # constants from the other half of the calc.
 
-# PREREAD is the number of requests that we have sitting in
-# the TMU request queue.  The h/w limit is 8.  The current s/w limit
-# is also 8 given a min block size of 4 and a chroma fir size of 4.
-# N.B. if we implement 00 pred code then the max will reduce to min block
-# size.
+# PREREAD is the number of requests that we have sitting in the TMU request
+# queue.
+#
+# There are 8 slots availible in the TMU request Q for tm0s requests, but
+# only 4 output FIFO entries and overflow is bad (corruption or crash)
+# (If threaded then only 2 out FIFO entries, but we aren't.)
+# In s/w we are effectively limited to the min vertical read which is >= 4
+# so output FIFO is the limit.
+#
 # However in the current world there seems to be no benefit (and a small
 # overhead) in setting this bigger than 2.
 
@@ -68,6 +72,7 @@
 .set ra_xshift_next,               ra21.16b
 
 # Loop var: L0 weight (U on left, V on right)
+# _off_ is not used in loop as we want to modify it before use
 .set ra_wt_off_mul_l0,             ra22
 .set ra_wt_mul_l0,                 ra22.16a
 .set ra_wt_off_l0,                 ra22.16b
@@ -165,8 +170,7 @@
 # Setup: pic_height - 1
 .set rb_max_y,                     rb30
 
-# Loop counter - counts up from 0, sometimes in r3
-.set rb_i,                         rb31
+# -- free --                       rb31
 
 
 
@@ -865,7 +869,7 @@
   ror ra2.8a, r1, ra8.8d
   ror ra0.8a, r1, ra8.8c
 
-  mov rq, 0x01040400
+  mov r1, 0x01040400
   ror ra2.8b, r1, ra8.8d
   ror ra0.8b, r1, ra8.8c
 
@@ -898,7 +902,7 @@
   bra -, ra_link
   ror ra1.8d, r1, ra8.8c ; v8min rb7, r0, rb_k255
 
-  shl r0, ra_wt_off_l0, rb_wt_den_p15 ; v8subs r3, r3, r3     # Offset calc ; r3 = 0
+  shl r0, ra_wt_off_l0, rb_wt_den_p15 ; v8subs r5rep, r3, r3     # Offset calc ; r5 = 0
   # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   asr rb_wt_off, r0, 9  ; mov ra_link, unif    # ; link - load after we've used its previous val
 # >>> branch ra_link
@@ -919,11 +923,9 @@
 ::mc_filter
   luma_setup
 
-# ra5.16a = weight << 16; We want weight * 2 in rb_wt_mul_l0
-
   shl ra_wt_mul_l0, ra_wt_mul_l0, 1
 
-# r3 = 0
+# r5 = 0 (loop count)
 
 :yloop
 # retrieve texture results and pick out bytes
@@ -936,7 +938,7 @@
 # the grab for the next block before we finish with this block and that
 # might be B where y != y2 so we must do full processing on both y and y2
 
-  sub.setf -, r3, rb_i_tmu      ; v8adds rb_i, r3, ra_k1             ; ldtmu1
+  sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1            ; ldtmu1
   shr r1, r4, rb_xshift2        ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
   shr r0, r4, ra_xshift         ; mov r3, rb_pitch
 
@@ -972,9 +974,9 @@
   nop                   ; mul24.ifnz r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
-  sub r0, r2, r3        ; mov r3, rb_i
+  sub r0, r2, r3
 
-  sub.setf -, r3, 8     ; mov r1,   ra8
+  sub.setf -, r5, 8     ; mov r1,   ra8
   mov ra8,  ra9         ; mov rb8,  rb9
   brr.anyn -, r:yloop
   mov ra9,  ra10        ; mov rb9,  rb10
@@ -997,7 +999,7 @@
 #  +6, +6 (each pass), +1 (the passes can overflow slightly), +1 (sign)
 # The top 8 bits have rubbish in them as mul24 is unsigned
 # The low 6 bits need discard before weighting
-  sub.setf -, r3, rb_lcount    ; mul24 r1, r1, ra_k256  # x256 - sign extend & discard rubbish
+  sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256  # x256 - sign extend & discard rubbish
   asr r1, r1, 14
   nop                   ; mul24 r1, r1, ra_wt_mul_l0
   add r1, r1, rb_wt_off
@@ -1056,7 +1058,7 @@
 # If we knew there was no clipping then this code would get simpler.
 # Perhaps we could add on the pitch and clip using larger values?
 
-  sub.setf -, r3, rb_i_tmu      ; v8adds rb_i, r3, ra_k1             ; ldtmu1
+  sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1             ; ldtmu1
   shr r1, r4, rb_xshift2        ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
   shr r0, r4, ra_xshift         ; mov r3, rb_pitch
 
@@ -1092,9 +1094,9 @@
   nop                   ; mul24.ifnz r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
-  sub r0, r2, r3        ; mov r3, rb_i
+  sub r0, r2, r3
 
-  sub.setf -, r3, 8     ; mov r1,   ra8
+  sub.setf -, r5, 8     ; mov r1,   ra8
   mov ra8,  ra9         ; mov rb8,  rb9
   brr.anyn -, r:yloopb
   mov ra9,  ra10        ; mov rb9,  rb10
@@ -1114,7 +1116,7 @@
   sub r1, r1, r0        ; mov r2, rb_wt_off
 # As with P-pred r1 is a 22-bit signed quantity in 32-bits
 # Top 8 bits are bad - low 6 bits should be discarded
-  sub.setf -, r3, rb_lcount ; mul24 r1, r1, ra_k256
+  sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256
 
   asr r1, r1, 14
   nop                   ; mul24 r0, r1, ra_wt_mul_l0
@@ -1132,7 +1134,7 @@
   # rb_dma1 (stride) remains constant
   # rb_i_tmu remains const (based on total height)
   # recalc rb_dma0, rb_lcount based on new segment height
-  # N.B. r3 is loop counter still
+  # N.B. r5 is loop counter still
 
   max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
 
@@ -1151,6 +1153,84 @@
   add rb_dest, rb_dest, r0
   mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
 # >>> yloopb
+
+################################################################################
+#
+# typedef struct qpu_mc_pred_y_p00_s {
+#    qpu_mc_src_t next_src1;
+#    uint16_t h;
+#    uint16_t w;
+#    uint32_t wo1;
+#    uint32_t dst_addr;
+#    uint32_t next_fn;
+# } qpu_mc_pred_y_p00_t;
+
+::mc_filter_y_p00
+
+
+  mov ra0, unif         ; mov r3, elem_num      # y_x ; elem_num has implicit unpack??
+  mov ra_xshift, ra_xshift_next                 # [ra0 delay]
+  add r0, ra0.16b, r3
+
+  max r0, r0, 0
+  min r0, r0, rb_max_x
+
+  shl ra_xshift_next, r0, 3                     # Compute shifts
+  and r0, r0, -4        ; v8subs r2, r2, r2
+  sub r2, r2, rb_pitch  ; mov ra_base_next, unif # src1.base
+  and r1, r0, r2        ; mov ra_y_next, ra0.16a
+  xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
+  add r0, r0, r1                                # Add stripe offsets
+  add ra_base_next, ra_base_next, r0
+
+  mov ra_width_height, unif                     # width_height
+  mov vw_setup, rb_vpm_init                     # set up VPM write
+
+# get width,height of block (unif load above)
+  sub rb_dma1, rb_dma1_base, ra_width # Compute vdw_setup1(dst_pitch-width)
+  sub rb_i_tmu, ra_height, PREREAD ; mov r0, ra_height
+  min r0, r0, ra_k16
+  add rb_lcount, r0, 0
+  shl r0,   r0, 7
+  add r0,   r0, ra_width                        # Combine width and height of destination area
+  shl r0,   r0, i_shift16                       # Shift into bits 16 upwards of the vdw_setup0 register
+  add rb_dma0, r0, rb_dma0_base
+
+  mov ra_wt_off_mul_l0, unif
+  mov rb_dest, unif                             # Destination address
+
+  shl r0, ra_wt_off_l0, rb_wt_den_p15 ; v8subs r5rep, r3, r3     # Offset calc ; r5 = 0
+  # For B l1 & L0 offsets should be identical so it doesn't matter which we use
+  asr rb_wt_off, r0, 1  ; mov ra_link, unif    # ; link
+
+:yloop_p00
+
+  sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1
+  nop                           ; mov.ifz ra_y, ra_y_next      ; ldtmu0
+  shr r0, r4, ra_xshift         ; mov r3, rb_pitch
+
+  max r2, ra_y, 0  # y
+  min r2, r2, rb_max_y          ; mov.ifz ra_base, ra_base_next
+  add ra_y, ra_y, 1             ; mul24 r2, r2, r3
+  add t0s, ra_base, r2          ; v8min r0, r0, rb_k255
+
+  nop                   ; mul24 r0, r0, ra_wt_mul_l0
+  shl r0, r0, 15
+  add r0, r0, rb_wt_off
+
+  sub.setf -, r5, rb_lcount
+  brr.anyn -, r:yloop_p00
+
+  asr ra3.8as, r0, rb_wt_den_p15
+  nop
+  mov vpm, ra3.8a
+# >>>
+
+  bra -, ra_link
+  mov vw_setup, rb_dma0 # VDW setup 0
+  mov vw_setup, rb_dma1 # Stride
+  mov vw_addr, rb_dest  # start the VDW
+
 
 
 ################################################################################

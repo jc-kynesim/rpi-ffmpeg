@@ -72,6 +72,15 @@ typedef struct qpu_mc_pred_y_p_s {
     uint32_t next_fn;
 } qpu_mc_pred_y_p_t;
 
+typedef struct qpu_mc_pred_y_p00_s {
+    qpu_mc_src_t next_src1;
+    uint16_t h;
+    uint16_t w;
+    uint32_t wo1;
+    uint32_t dst_addr;
+    uint32_t next_fn;
+} qpu_mc_pred_y_p00_t;
+
 typedef struct qpu_mc_pred_y_s_s {
     qpu_mc_src_t next_src1;
     qpu_mc_src_t next_src2;
@@ -87,6 +96,7 @@ typedef struct qpu_mc_pred_y_s_s {
 typedef struct qpu_mc_pred_y_s {
     union {
         qpu_mc_pred_y_p_t p;
+        qpu_mc_pred_y_p00_t p00;
         qpu_mc_pred_y_s_t s;
     };
 } qpu_mc_pred_y_t;

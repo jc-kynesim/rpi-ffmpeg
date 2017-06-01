@@ -656,6 +656,7 @@ typedef struct HEVCContext {
     uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
     uint32_t qpu_filter;
     uint32_t qpu_filter_b;
+    uint32_t qpu_filter_y_p00;
 #endif
 
 #ifdef RPI_WORKER
