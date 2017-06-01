@@ -1166,8 +1166,6 @@
 # } qpu_mc_pred_y_p00_t;
 
 ::mc_filter_y_p00
-
-
   mov ra0, unif         ; mov r3, elem_num      # y_x ; elem_num has implicit unpack??
   mov ra_xshift, ra_xshift_next                 # [ra0 delay]
   add r0, ra0.16b, r3
@@ -1180,52 +1178,42 @@
   sub r2, r2, rb_pitch  ; mov ra_base_next, unif # src1.base
   and r1, r0, r2        ; mov ra_y_next, ra0.16a
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1                                # Add stripe offsets
-  add ra_base_next, ra_base_next, r0
-
-  mov ra_width_height, unif                     # width_height
-  mov vw_setup, rb_vpm_init                     # set up VPM write
+  add r0, r0, r1        ; mov ra_width_height, unif # Add stripe offsets ; width_height
+  add ra_base_next, ra_base_next, r0 ; mov vw_setup, rb_vpm_init  # ; set up VPM write
 
 # get width,height of block (unif load above)
   sub rb_dma1, rb_dma1_base, ra_width # Compute vdw_setup1(dst_pitch-width)
   sub rb_i_tmu, ra_height, PREREAD ; mov r0, ra_height
   min r0, r0, ra_k16
-  add rb_lcount, r0, 0
-  shl r0,   r0, 7
+  add rb_lcount, r0, 0  ; mov ra_wt_off_mul_l0, unif
+  shl r0,   r0, 7       ; mov rb_dest, unif     # Destination address
   add r0,   r0, ra_width                        # Combine width and height of destination area
   shl r0,   r0, i_shift16                       # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base
-
-  mov ra_wt_off_mul_l0, unif
-  mov rb_dest, unif                             # Destination address
 
   shl r0, ra_wt_off_l0, rb_wt_den_p15 ; v8subs r5rep, r3, r3     # Offset calc ; r5 = 0
   # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   asr rb_wt_off, r0, 1  ; mov ra_link, unif    # ; link
 
 :yloop_p00
-
-  sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1
-  nop                           ; mov.ifz ra_y, ra_y_next      ; ldtmu0
-  shr r0, r4, ra_xshift         ; mov r3, rb_pitch
+  sub.setf -, r5, rb_i_tmu  ; v8adds r5rep, r5, ra_k1
+  nop                   ; mov.ifz ra_y, ra_y_next      ; ldtmu0
+  shr r0, r4, ra_xshift ; mov r3, rb_pitch
 
   max r2, ra_y, 0  # y
-  min r2, r2, rb_max_y          ; mov.ifz ra_base, ra_base_next
-  add ra_y, ra_y, 1             ; mul24 r2, r2, r3
-  add t0s, ra_base, r2          ; v8min r0, r0, rb_k255
+  min r2, r2, rb_max_y  ; mov.ifz ra_base, ra_base_next
+  add ra_y, ra_y, 1     ; mul24 r2, r2, r3
+  add t0s, ra_base, r2  ; v8min r0, r0, rb_k255
 
-  nop                   ; mul24 r1, r0, ra_wt_mul_l0
-  shl r1, r1, 15
+  sub.setf -, r5, rb_lcount ; mul24 r1, r0, ra_wt_mul_l0
+  shl r1, r1, 15        ; mov r0, ra_height
   add r1, r1, rb_wt_off
 
-  sub.setf -, r5, rb_lcount
-  mov -, vw_wait
-  mov r0, ra_height
   brr.anyn -, r:yloop_p00
   asr ra3.8as, r1, rb_wt_den_p15
-  mov r1, 16
+  mov r1, ra_k16        ; mov -, vw_wait
   sub r0, r0, r1        ; mov vpm, ra3.8a
-# >>> branch.anyn yloop
+# >>> branch.anyn yloop_p00
 
 # If looping again the we consumed 16 height last loop
   # rb_dma1 (stride) remains constant
@@ -1249,7 +1237,7 @@
   nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
   add rb_dest, rb_dest, r0
   mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
-# >>> yloopb
+# >>> yloop_p00
 
 ################################################################################
 
@@ -1265,41 +1253,30 @@
   mov r0, 8
   shl rb_wt_off, rb_wt_off, r0
 
-:yloopb00
-# retrieve texture results and pick out bytes
-# then submit two more texture requests
-
-# If we knew there was no clipping then this code would get simpler.
-# Perhaps we could add on the pitch and clip using larger values?
-
+:yloop_b00
   sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1             ; ldtmu1
-  shr r1, r4, rb_xshift2        ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
-  shr r0, r4, ra_xshift         ; mov r3, rb_pitch
+  shr r1, r4, rb_xshift2 ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
+  shr r0, r4, ra_xshift ; mov r3, rb_pitch
 
   max r2, ra_y, 0  # y
-  min r2, r2, rb_max_y          ; mov.ifz ra_base, ra_base_next
-  add ra_y, ra_y, 1             ; mul24 r2, r2, r3
-  add t0s, ra_base, r2          ; mov.ifz ra_base2, rb_base2_next
+  min r2, r2, rb_max_y  ; mov.ifz ra_base, ra_base_next
+  add ra_y, ra_y, 1     ; mul24 r2, r2, r3
+  add t0s, ra_base, r2  ; mov.ifz ra_base2, rb_base2_next
 
   max r2, ra_y2, 0
   min r2, r2, rb_max_y
-  add ra_y2, ra_y2, 1           ; mul24 r2, r2, r3
-  add t1s, ra_base2, r2         ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
-  and r1, r1, ra_k255
+  add ra_y2, ra_y2, 1   ; mul24 r2, r2, r3
+  add t1s, ra_base2, r2 ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
+  and r1, r1, rb_k255   ; mul24 r0, r0, ra_wt_mul_l0
 
-  nop                   ; mul24 r0, r0, ra_wt_mul_l0
-  nop                   ; mul24 r1, r1, ra_wt_mul_l1
+  sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_wt_mul_l1
   add r1, r0, r1
   shl r1, r1, 14
-  add r1, r1, rb_wt_off
+  add r1, r1, rb_wt_off ; mov r0, ra_height
 
-  sub.setf -, r5, rb_lcount
-
-  mov -, vw_wait
-  mov r0, ra_height
-  brr.anyn -, r:yloopb00
+  brr.anyn -, r:yloop_b00
   asr ra3.8as, r1, rb_wt_den_p15
-  mov r1, 16
+  mov r1, ra_k16        ; mov -, vw_wait
   sub r0, r0, r1        ; mov vpm, ra3.8a
 # >>> branch.anyn yloop
 
@@ -1321,7 +1298,7 @@
   add rb_lcount, rb_lcount, r0
   shl r0, r2, i_shift23
   add rb_dma0, rb_dma0, r0
-  brr -, r:yloopb00
+  brr -, r:yloop_b00
   nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
   add rb_dest, rb_dest, r0
   mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
