@@ -1214,24 +1214,118 @@
   add ra_y, ra_y, 1             ; mul24 r2, r2, r3
   add t0s, ra_base, r2          ; v8min r0, r0, rb_k255
 
-  nop                   ; mul24 r0, r0, ra_wt_mul_l0
-  shl r0, r0, 15
-  add r0, r0, rb_wt_off
+  nop                   ; mul24 r1, r0, ra_wt_mul_l0
+  shl r1, r1, 15
+  add r1, r1, rb_wt_off
 
   sub.setf -, r5, rb_lcount
+  mov -, vw_wait
+  mov r0, ra_height
   brr.anyn -, r:yloop_p00
+  asr ra3.8as, r1, rb_wt_den_p15
+  mov r1, 16
+  sub r0, r0, r1        ; mov vpm, ra3.8a
+# >>> branch.anyn yloop
 
-  asr ra3.8as, r0, rb_wt_den_p15
-  nop
-  mov vpm, ra3.8a
-# >>>
+# If looping again the we consumed 16 height last loop
+  # rb_dma1 (stride) remains constant
+  # rb_i_tmu remains const (based on total height)
+  # recalc rb_dma0, rb_lcount based on new segment height
+  # N.B. r5 is loop counter still
 
-  bra -, ra_link
-  mov vw_setup, rb_dma0 # VDW setup 0
-  mov vw_setup, rb_dma1 # Stride
-  mov vw_addr, rb_dest  # start the VDW
+  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
 
+# DMA out
+  bra.anyz -, ra_link
+  min r0, r0, r1        ; mov vw_setup, rb_dma0 # VDW setup 0
+  sub r2, r0, r1        ; mov vw_setup, rb_dma1 # Stride
+  nop                   ; mov vw_addr, rb_dest  # start the VDW
+# >>> .anyz ra_link
 
+  add rb_lcount, rb_lcount, r0
+  shl r0, r2, i_shift23
+  add rb_dma0, rb_dma0, r0
+  brr -, r:yloop_p00
+  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
+  add rb_dest, rb_dest, r0
+  mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
+# >>> yloopb
+
+################################################################################
+
+::mc_filter_y_b00
+# luma setup does a fair bit more than we need calculating fileter coeffs
+# that we will never use but it saves I-cache to use it (also simple!)
+  luma_setup
+
+# Fix up vals that were expecting a filter
+  mov r0, 7
+  sub rb_i_tmu, rb_i_tmu, r0
+  sub rb_lcount, rb_lcount, r0
+  mov r0, 8
+  shl rb_wt_off, rb_wt_off, r0
+
+:yloopb00
+# retrieve texture results and pick out bytes
+# then submit two more texture requests
+
+# If we knew there was no clipping then this code would get simpler.
+# Perhaps we could add on the pitch and clip using larger values?
+
+  sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1             ; ldtmu1
+  shr r1, r4, rb_xshift2        ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
+  shr r0, r4, ra_xshift         ; mov r3, rb_pitch
+
+  max r2, ra_y, 0  # y
+  min r2, r2, rb_max_y          ; mov.ifz ra_base, ra_base_next
+  add ra_y, ra_y, 1             ; mul24 r2, r2, r3
+  add t0s, ra_base, r2          ; mov.ifz ra_base2, rb_base2_next
+
+  max r2, ra_y2, 0
+  min r2, r2, rb_max_y
+  add ra_y2, ra_y2, 1           ; mul24 r2, r2, r3
+  add t1s, ra_base2, r2         ; v8min r0, r0, rb_k255 # v8subs masks out all but bottom byte
+  and r1, r1, ra_k255
+
+  nop                   ; mul24 r0, r0, ra_wt_mul_l0
+  nop                   ; mul24 r1, r1, ra_wt_mul_l1
+  add r1, r0, r1
+  shl r1, r1, 14
+  add r1, r1, rb_wt_off
+
+  sub.setf -, r5, rb_lcount
+
+  mov -, vw_wait
+  mov r0, ra_height
+  brr.anyn -, r:yloopb00
+  asr ra3.8as, r1, rb_wt_den_p15
+  mov r1, 16
+  sub r0, r0, r1        ; mov vpm, ra3.8a
+# >>> branch.anyn yloop
+
+# If looping again the we consumed 16 height last loop
+  # rb_dma1 (stride) remains constant
+  # rb_i_tmu remains const (based on total height)
+  # recalc rb_dma0, rb_lcount based on new segment height
+  # N.B. r5 is loop counter still
+
+  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
+
+# DMA out
+  bra.anyz -, ra_link
+  min r0, r0, r1        ; mov vw_setup, rb_dma0 # VDW setup 0
+  sub r2, r0, r1        ; mov vw_setup, rb_dma1 # Stride
+  nop                   ; mov vw_addr, rb_dest  # start the VDW
+# >>> .anyz ra_link
+
+  add rb_lcount, rb_lcount, r0
+  shl r0, r2, i_shift23
+  add rb_dma0, rb_dma0, r0
+  brr -, r:yloopb00
+  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
+  add rb_dest, rb_dest, r0
+  mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
+# >>> yloopb00
 
 ################################################################################
 

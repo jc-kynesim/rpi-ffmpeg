@@ -657,6 +657,7 @@ typedef struct HEVCContext {
     uint32_t qpu_filter;
     uint32_t qpu_filter_b;
     uint32_t qpu_filter_y_p00;
+    uint32_t qpu_filter_y_b00;
 #endif
 
 #ifdef RPI_WORKER

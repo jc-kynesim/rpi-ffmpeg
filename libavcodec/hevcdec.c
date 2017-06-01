@@ -2206,11 +2206,11 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
     const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
 
     if (my_mx == 0) {
-        for (int start_y = 0; start_y < nPbH; start_y += 16, dst_addr += s->frame->linesize[0] * 16)
+        for (int start_y = 0; start_y < nPbH; start_y += Y_P_MAX_H, dst_addr += s->frame->linesize[0] * Y_P_MAX_H)
         {
             const uint32_t src_yx_y = y1_m3 + start_y + 3;
             int start_x = 0;
-            const int bh = FFMIN(nPbH - start_y, 16);
+            const int bh = FFMIN(nPbH - start_y, Y_P_MAX_H);
 
             for (; start_x < nPbW; start_x += 16)
             {
@@ -2234,7 +2234,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
     }
 
 
-    for (int start_y = 0; start_y < nPbH; start_y += Y_P_MAX_H, dst_addr += s->frame->linesize[0] * 16)
+    for (int start_y = 0; start_y < nPbH; start_y += Y_P_MAX_H, dst_addr += s->frame->linesize[0] * Y_P_MAX_H)
     {
         const uint32_t src_yx_y = y1_m3 + start_y;
         int start_x = 0;
@@ -2364,6 +2364,38 @@ rpi_pred_y_b(HEVCContext * const s,
     uint32_t dst = get_vc_address_y(s->frame) + y_off;
     const uint32_t src1_base = get_vc_address_y(src_frame);
     const uint32_t src2_base = get_vc_address_y(src_frame2);
+
+    if (my2_mx2_my_mx == 0) {
+        for (int start_y = 0; start_y < nPbH; start_y += Y_B_MAX_H)
+        {
+            const unsigned int bh = FFMIN(nPbH - start_y, Y_B_MAX_H);
+
+            for (int start_x=0; start_x < nPbW; start_x += 16)
+            { // B blocks work 8 at a time
+                HEVCRpiLumaPred *const yp = rpi_nxt_pred_y(s, bh, s->qpu_filter_y_b00);
+                qpu_mc_src_t *const src1 = yp->last_l0;
+                qpu_mc_src_t *const src2 = yp->last_l1;
+                qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->p;
+                src1->x = x1 + start_x + 3;
+                src1->y = y1 + start_y + 3;
+                src1->base = src1_base;
+                src2->x = x2 + start_x + 3;
+                src2->y = y2 + start_y + 3;
+                src2->base = src2_base;
+                cmd_y->w = FFMIN(nPbW - start_x, 16);
+                cmd_y->h = bh;
+                cmd_y->mymx21 = my2_mx2_my_mx;
+                cmd_y->wo1 = wo1;
+                cmd_y->wo2 = wo2;
+                cmd_y->dst_addr =  dst + start_x;
+                yp->last_l0 = &cmd_y->next_src1;
+                yp->last_l1 = &cmd_y->next_src2;
+                *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            }
+            dst += s->frame->linesize[0] * 16;
+        }
+        return;
+    }
 
     for (int start_y=0; start_y < nPbH; start_y += Y_B_MAX_H)
     {
@@ -4814,6 +4846,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->qpu_dummy_frame = qpu_fn(mc_setup_c);  // Use our code as a dummy frame
     s->qpu_filter = qpu_fn(mc_filter);
     s->qpu_filter_y_p00 = qpu_fn(mc_filter_y_p00);
+    s->qpu_filter_y_b00 = qpu_fn(mc_filter_y_b00);
     s->qpu_filter_b = qpu_fn(mc_filter_b);
 #endif
     //gpu_malloc_uncached(2048*64,&s->dummy);

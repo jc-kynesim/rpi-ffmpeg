@@ -14,6 +14,7 @@ extern unsigned int rpi_shader[];
 #define mc_filter (rpi_shader + 774)
 #define mc_filter_b (rpi_shader + 914)
 #define mc_filter_y_p00 (rpi_shader + 1054)
-#define mc_end (rpi_shader + 1144)
+#define mc_filter_y_b00 (rpi_shader + 1164)
+#define mc_end (rpi_shader + 1254)
 
 #endif
