@@ -24,7 +24,7 @@
 # or temp in loop. Check usage on an individual basis.
 
 # ra4-7
-# C-B: (with rb4-7) stash between L0 & L1 processing
+# C:   L0 H filter out FIFO
 # otherwise -- free --
 
 # ra8-11
@@ -32,8 +32,7 @@
 # Y:   (with rb8-11) horiz out FIFO
 
 # ra12-15
-# C:   horiz out FIFO
-# Y:  -- free --
+# -- free --
 
 # uniform: width:height
 .set ra_width_height,              ra16
@@ -48,6 +47,7 @@
 # uniform: L1 weight (U on left, V on right)
 # Only used in Y B
 .set ra_wt_off_mul_l1,             ra18
+.set ra_wt_off_l1,                 ra18.16b
 .set ra_wt_mul_l1,                 ra18.16a
 
 # y_next:y2_next same layout as y_y2 so we can update both together
@@ -67,7 +67,11 @@
 .set ra_xshift,                    ra21.16a
 .set ra_xshift_next,               ra21.16b
 
-# -- free --                       ra22
+# Loop var: L0 weight (U on left, V on right)
+.set ra_wt_off_mul_l0,             ra22
+.set ra_wt_mul_l0,                 ra22.16a
+.set ra_wt_off_l0,                 ra22.16b
+
 # -- free --                       ra23
 
 # Loop:  src frame base (L0)
@@ -97,7 +101,7 @@
 # -- free --                       rb3
 
 # rb4-7
-# C-B: (with ra4-7) stash between L0 & L1 processing
+# C-B: L1 H filter out FIFO
 # Y:   (with ra2.8x) Y vertical filter coeffs
 
 # rb8-11
@@ -111,9 +115,7 @@
 # Setup: denom + 6 + 9
 .set rb_wt_den_p15,                rb13
 
-# Loop var: L0 weight (U on left, V on right)
-.set rb_wt_mul_l0,                 rb14
-
+# -- free --                       rb14
 # -- free --                       rb15
 
 # Line pitch (128 for sand128)
@@ -356,15 +358,15 @@
 
 # set up VPM write
 
-  sub rb_dma1, rb_dma1_base, r2    ; mov ra3, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
-  add rb_i_tmu, r1, 3 - PREREAD ; mov ra1, unif         # ; U offset/weight
-  add rb_lcount, r1, 3  ; mov.ifnz ra1, unif    # ; V offset/weight
+  sub rb_dma1, rb_dma1_base, r2 ; mov ra3, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
+  add rb_i_tmu, r1, 3 - PREREAD ; mov ra_wt_off_mul_l0, unif         # ; U offset/weight
+  add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
 
 # ; unpack filter coefficients
 
   add r0, r0, r2      ; mov rb8,  ra3.8a      # Combine width and height of destination area (r0=h<<8, r2=w*2)
   shl r0, r0, i_shift16 ; mov rb9,  ra3.8b      # Shift into bits 16 upwards of the vdw_setup0 register
-  add rb_dma0, r0, rb_dma0_base ; mov r1, ra1.16b       # ; r1=weight
+  add rb_dma0, r0, rb_dma0_base ; mov r1, ra_wt_off_l0       # ; r1=weight
 
   mov rb_dest, unif     ; mov ra9, rb_max_y     # dst_addr ; alias rb_max_y
 
@@ -372,10 +374,10 @@
   mov r5quad, 0             ; mov rb11, ra3.8d      # Loop count (r5rep is B, r5quad is A)
 
   asr rb_wt_off, r1, 1  ; mov ra_link, unif     # Link
-  shl rb_wt_mul_l0, ra1.16a, 1                  # b14 = weight*2
+  shl ra_wt_mul_l0, ra_wt_mul_l0, 1             # weight*2
 
 # ra9 alias for rb_max_y
-# rb_wt_mul_l0 - weight L0 * 2
+# ra_wt_mul_l0 - weight L0 * 2
 # rb_wt_den_p15 = weight denom + 6 + 9
 # rb_wt_off = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb_wt_den_p15 - 1)
 
@@ -424,21 +426,21 @@
   add r2, r2, r3        ; mul24      r3, ra0.8d << 6,  r0 << 6  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8d << 14, r1 << 14 @ "mul_used", 0
   sub r0, r2, r3
-  sub.setf -, r5, 4     ; mov ra12, ra13
+  sub.setf -, r5, 4     ; mov ra4, ra5
   brr.anyn -, r:uvloop
-  mov ra13, ra14        ; mul24 r1, ra14, rb9
-  mov ra14, ra15
-  mov ra15, r0          ; mul24 r0, ra12, rb8
+  mov ra5, ra6          ; mul24 r1, ra6, rb9
+  mov ra6, ra7
+  mov ra7, r0           ; mul24 r0, ra4, rb8
 # >>> .anyn uvloop
 
 # apply vertical filter and write to VPM
 
-  sub r1, r1, r0        ; mul24 r0, ra14, rb10
-  add r1, r1, r0        ; mul24 r0, ra15, rb11
+  sub r1, r1, r0        ; mul24 r0, ra6, rb10
+  add r1, r1, r0        ; mul24 r0, ra7, rb11
   sub r1, r1, r0
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256
   asr r1, r1, 14
-  nop                   ; mul24 r1, r1, rb_wt_mul_l0
+  nop                   ; mul24 r1, r1, ra_wt_mul_l0
   shl r1, r1, 8
 
   add r1, r1, rb_wt_off
@@ -506,8 +508,8 @@
   add rb_i_tmu, r1, 3 - PREREAD
   add rb_lcount, r1, 3
 
-  add r0, r0, r2        ; mov rb_wt_mul_l0, unif # ; U weight
-  shl r0, r0, ra_k16    ; mov.ifnz rb_wt_mul_l0, unif  # Shift into bits 16 upwards of the vdw_setup0 register ; V weight
+  add r0, r0, r2        ; mov ra_wt_mul_l0, unif # ; U weight
+  shl r0, r0, ra_k16    ; mov.ifnz ra_wt_mul_l0, unif  # Shift into bits 16 upwards of the vdw_setup0 register ; V weight
   add rb_dma0, r0, rb_dma0_base ; mov ra3, unif  # ; x2_y2
 
 # L1 - uniform layout could possibly be optimized
@@ -528,13 +530,13 @@
   add r0, r0, r1        ; mov rb8,  ra3.8a      # Add stripe offsets ; start unpacking filter coeffs
   add rb_base2_next, r3, r0
 
-  mov ra10, unif        ; mov rb9,  ra3.8b      # U offset/weight
-  mov.ifnz ra10, unif   ; mov rb10, ra3.8c      # V offset/weight
+  mov ra_wt_off_mul_l1, unif        ; mov rb9,  ra3.8b      # U offset/weight
+  mov.ifnz ra_wt_off_mul_l1, unif   ; mov rb10, ra3.8c      # V offset/weight
 
   mov rb_dest, unif                             # dst_addr
   mov r5quad,0          ; mov rb11, ra3.8d
-  shl r1, ra10.16b, rb_wt_den_p15
-  asr rb_wt_off, r1, 1  ; mov ra_link, unif     # link
+  shl r1, ra_wt_off_l1, rb_wt_den_p15
+  asr rb_wt_off, r1, 9  ; mov ra_link, unif     # link
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -548,7 +550,6 @@
 # rb4-7     L1 H FIFO
 # rb8-rb11  V coeffs L1
 # ra9       rb_max_y alias
-# ra10.16a  L1 weight
 
 :uvloop_b
 # retrieve texture results and pick out bytes
@@ -618,21 +619,19 @@
   nop                   ; mul24 r1, rb5, ra2.8b
   sub r1, r1, r0        ; mul24 r0, rb6, ra2.8c
   add r1, r1, r0        ; mul24 r0, rb7, ra2.8d
-  sub r1, r1, r0        ; mul24 r0, ra4, rb8
-  asr ra3, r1, 6                               # r1 bits 24.31 are rubbish but we will discard later
-  nop                   ; mul24 r2, ra5, rb9
-  sub r2, r2, r0        ; mul24 r0, ra6, rb10
-  add r2, r2, r0        ; mul24 r0, ra7, rb11
-  sub r2, r2, r0        ; mul24 r0, ra3.16a, rb_wt_mul_l0  # ra11 top bits discarded *** 10 bit fall ***
+  sub r2, r1, r0        ; mul24 r0, ra4, rb8
+  nop                   ; mul24 r1, ra5, rb9
+  sub r1, r1, r0        ; mul24 r0, ra6, rb10
+  add r1, r1, r0        ; mul24 r0, ra7, rb11
+  sub r1, r1, r0        ; mul24 r2, r2, ra_k256
 
-  nop                   ; mul24 r1, r2, ra_k256
-  asr r1, r1, 14
+  asr r2, r2, 14        ; mul24 r1, r1, ra_k256
+  asr r1, r1, 14        ; mul24 r2, r2, ra_wt_mul_l0
 
-  nop                   ; mul24 r1, r1, ra10.16a
-  add r1, r1, r0
+  add r2, r2, rb_wt_off ; mul24 r1, r1, ra_wt_mul_l1   # rb_wt_off = (offsetL0 + offsetL1 + 1) << (rb_wt_den_p15 - 9)
+  add r1, r1, r2
 
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256 # Lose bad top 8 bits & sign extend
-  add r1, r1, rb_wt_off                         # rb_wt_off = (offsetL0 + offsetL1 + 1) << (rb_wt_den_p15 - 1)
 
   brr.anyn -, r:uvloop_b
   asr ra3.8as, r1, rb_wt_den_p15
@@ -856,9 +855,8 @@
   add rb_dma0, r0, rb_dma0_base ; mov r0, unif  # ; Packed filter offsets
 
 # get filter coefficients and discard unused B frame values
-  shl.ifz r0, r0, i_shift16 ; mov ra5, unif     #  Pick half to use ; L0 offset/weight
-  mov r2, 0x01040400                            # [ra5 delay]
-  shl ra8, r0, 3        ; mov rb_wt_mul_l0, ra5.16a
+  shl.ifz r0, r0, i_shift16 ; mov ra_wt_off_mul_l0, unif     #  Pick half to use ; L0 offset/weight
+  shl ra8, r0, 3
 
 # Pack the 1st 4 filter coefs for H & V tightly
 # Coeffs are all abs values here as that means mul24 works (no sign extend from .8)
@@ -867,8 +865,9 @@
   ror ra2.8a, r1, ra8.8d
   ror ra0.8a, r1, ra8.8c
 
-  ror ra2.8b, r2, ra8.8d
-  ror ra0.8b, r2, ra8.8c
+  mov rq, 0x01040400
+  ror ra2.8b, r1, ra8.8d
+  ror ra0.8b, r1, ra8.8c
 
   mov r1,0x050b0a00  # -ve
   ror ra2.8c, r1, ra8.8d
@@ -892,14 +891,14 @@
   ror r0, r1, ra8.8d
   ror ra1.8c, r1, ra8.8c ; v8min rb6, r0, rb_k255
 
-  mov.ifnz ra5, ra_wt_off_mul_l1 ; mov rb_dest, unif # ; Destination address
+  mov.ifnz ra_wt_off_mul_l0, ra_wt_off_mul_l1 ; mov rb_dest, unif # ; Destination address
 
   mov r1,0x01010000  # -ve
   ror r0, r1, ra8.8d
   bra -, ra_link
   ror ra1.8d, r1, ra8.8c ; v8min rb7, r0, rb_k255
 
-  shl r0, ra5.16b, rb_wt_den_p15 ; v8subs r3, r3, r3     # Offset calc ; r3 = 0
+  shl r0, ra_wt_off_l0, rb_wt_den_p15 ; v8subs r3, r3, r3     # Offset calc ; r3 = 0
   # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   asr rb_wt_off, r0, 9  ; mov ra_link, unif    # ; link - load after we've used its previous val
 # >>> branch ra_link
@@ -922,7 +921,7 @@
 
 # ra5.16a = weight << 16; We want weight * 2 in rb_wt_mul_l0
 
-  shl rb_wt_mul_l0, ra5.16a, 1
+  shl ra_wt_mul_l0, ra_wt_mul_l0, 1
 
 # r3 = 0
 
@@ -1000,7 +999,7 @@
 # The low 6 bits need discard before weighting
   sub.setf -, r3, rb_lcount    ; mul24 r1, r1, ra_k256  # x256 - sign extend & discard rubbish
   asr r1, r1, 14
-  nop                   ; mul24 r1, r1, rb_wt_mul_l0
+  nop                   ; mul24 r1, r1, ra_wt_mul_l0
   add r1, r1, rb_wt_off
 
   shl r1, r1, 8         ; mov r0, ra_height
@@ -1049,9 +1048,6 @@
 
 ::mc_filter_b
   luma_setup
-
-  # r0 = weightL0 << 16, we want it in rb_wt_mul_l0
-#  asr rb_wt_mul_l0, r0, i_shift16
 
 :yloopb
 # retrieve texture results and pick out bytes
@@ -1121,7 +1117,7 @@
   sub.setf -, r3, rb_lcount ; mul24 r1, r1, ra_k256
 
   asr r1, r1, 14
-  nop                   ; mul24 r0, r1, rb_wt_mul_l0
+  nop                   ; mul24 r0, r1, ra_wt_mul_l0
   add r0, r0, r2        ; mul24 r1, r1 << 8, ra_wt_mul_l1 << 8    @ "mul_used", 0
 
   add r1, r1, r0        ; mov -, vw_wait
