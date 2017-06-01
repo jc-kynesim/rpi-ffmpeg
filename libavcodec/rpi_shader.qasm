@@ -1246,12 +1246,13 @@
 # that we will never use but it saves I-cache to use it (also simple!)
   luma_setup
 
-# Fix up vals that were expecting a filter
+# Fix up vals that were expecting a filter (somewhat icky)
   mov r0, 7
   sub rb_i_tmu, rb_i_tmu, r0
   sub rb_lcount, rb_lcount, r0
-  mov r0, 8
+  mov r0, 8             ; mov r1, ra_wt_off_mul_l0
   shl rb_wt_off, rb_wt_off, r0
+  nop                   ; mov.ifnz ra_wt_off_mul_l0, r1 << 8
 
 :yloop_b00
   sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1             ; ldtmu1

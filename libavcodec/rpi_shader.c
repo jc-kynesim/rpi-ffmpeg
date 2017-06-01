@@ -623,41 +623,42 @@ unsigned int rpi_shader[] = {
 /* [0x00001218] */ 0x00000007, 0xe0020827, // mov r0, 7
 /* [0x00001220] */ 0x0d9d1e00, 0x10021467, // sub rb_i_tmu, rb_i_tmu, r0
 /* [0x00001228] */ 0x0d9d2e00, 0x100214a7, // sub rb_lcount, rb_lcount, r0
-/* [0x00001230] */ 0x00000008, 0xe0020827, // mov r0, 8
+/* [0x00001230] */ 0x95588ff6, 0xd0024821, // mov r0, 8             ; mov r1, ra_wt_off_mul_l0
 /* [0x00001238] */ 0x119cce00, 0x10021327, // shl rb_wt_off, rb_wt_off, r0
+/* [0x00001240] */ 0x809f8009, 0xd000d9d6, // nop                   ; mov.ifnz ra_wt_off_mul_l0, r1 << 8
 // :yloop_b00
-/* [0x00001240] */ 0xcd511bee, 0xba0269e5, // sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1             ; ldtmu1
-/* [0x00001248] */ 0x8e4c09f6, 0xa0029851, // shr r1, r4, rb_xshift2 ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
-/* [0x00001250] */ 0x8e5509bf, 0x12024823, // shr r0, r4, ra_xshift ; mov r3, rb_pitch
-/* [0x00001258] */ 0x13440dc0, 0xd40208a7, // max r2, ra_y, 0
-/* [0x00001260] */ 0x9269e5f6, 0x10029898, // min r2, r2, rb_max_y  ; mov.ifz ra_base, ra_base_next
-/* [0x00001268] */ 0x4c441dd3, 0xd4224462, // add ra_y, ra_y, 1     ; mul24 r2, r2, r3
-/* [0x00001270] */ 0x8c613cbf, 0x10029e19, // add t0s, ra_base, r2  ; mov.ifz ra_base2, rb_base2_next
-/* [0x00001278] */ 0x13440dc0, 0xd20208a7, // max r2, ra_y2, 0
-/* [0x00001280] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_max_y
-/* [0x00001288] */ 0x4c441dd3, 0xd2124462, // add ra_y2, ra_y2, 1   ; mul24 r2, r2, r3
-/* [0x00001290] */ 0x8c656c87, 0x10024f20, // add t1s, ra_base2, r2 ; v8min r0, r0, rb_k255
-/* [0x00001298] */ 0x545963c6, 0x12024860, // and r1, r1, rb_k255   ; mul24 r0, r0, ra_wt_mul_l0
-/* [0x000012a0] */ 0x4d492bce, 0x120269e1, // sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_wt_mul_l1
-/* [0x000012a8] */ 0x0c9e7040, 0x10020867, // add r1, r0, r1
-/* [0x000012b0] */ 0x119ce3c0, 0xd0020867, // shl r1, r1, 14
-/* [0x000012b8] */ 0x8c40c3f6, 0x12024860, // add r1, r1, rb_wt_off ; mov r0, ra_height
-/* [0x000012c0] */ 0xffffff60, 0xf06809e7, // brr.anyn -, r:yloop_b00
-/* [0x000012c8] */ 0x0f9cd3c0, 0x10c200e7, // asr ra3.8as, r1, rb_wt_den_p15
-/* [0x000012d0] */ 0x95532dbf, 0x1c020867, // mov r1, ra_k16        ; mov -, vw_wait
-/* [0x000012d8] */ 0x8d0e7076, 0x18024830, // sub r0, r0, r1        ; mov vpm, ra3.8a
-/* [0x000012e0] */ 0x939c01c0, 0xd01279d0, // max.setf -, r0, 0     ; mov ra_height, r0
-/* [0x000012e8] */ 0x00000000, 0xf027c9e7, // bra.anyz -, ra_link
-/* [0x000012f0] */ 0x929da07f, 0x10024831, // min r0, r0, r1        ; mov vw_setup, rb_dma0
-/* [0x000012f8] */ 0x8d9dd07f, 0x100248b1, // sub r2, r0, r1        ; mov vw_setup, rb_dma1
-/* [0x00001300] */ 0x809d703f, 0x100049f2, // nop                   ; mov vw_addr, rb_dest
-/* [0x00001308] */ 0x0c9d2e00, 0x100214a7, // add rb_lcount, rb_lcount, r0
-/* [0x00001310] */ 0x119d75c0, 0xd0020827, // shl r0, r2, i_shift23
-/* [0x00001318] */ 0x0c9dae00, 0x100216a7, // add rb_dma0, rb_dma0, r0
-/* [0x00001320] */ 0xffffff00, 0xf0f809e7, // brr -, r:yloop_b00
-/* [0x00001328] */ 0x409d000f, 0x100049e0, // nop                   ; mul24 r0, r1, rb_pitch
-/* [0x00001330] */ 0x0c9d7e00, 0x100215e7, // add rb_dest, rb_dest, r0
-/* [0x00001338] */ 0x159dcfc0, 0x10021c67, // mov vw_setup, rb_vpm_init
+/* [0x00001248] */ 0xcd511bee, 0xba0269e5, // sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1             ; ldtmu1
+/* [0x00001250] */ 0x8e4c09f6, 0xa0029851, // shr r1, r4, rb_xshift2 ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
+/* [0x00001258] */ 0x8e5509bf, 0x12024823, // shr r0, r4, ra_xshift ; mov r3, rb_pitch
+/* [0x00001260] */ 0x13440dc0, 0xd40208a7, // max r2, ra_y, 0
+/* [0x00001268] */ 0x9269e5f6, 0x10029898, // min r2, r2, rb_max_y  ; mov.ifz ra_base, ra_base_next
+/* [0x00001270] */ 0x4c441dd3, 0xd4224462, // add ra_y, ra_y, 1     ; mul24 r2, r2, r3
+/* [0x00001278] */ 0x8c613cbf, 0x10029e19, // add t0s, ra_base, r2  ; mov.ifz ra_base2, rb_base2_next
+/* [0x00001280] */ 0x13440dc0, 0xd20208a7, // max r2, ra_y2, 0
+/* [0x00001288] */ 0x129de5c0, 0x100208a7, // min r2, r2, rb_max_y
+/* [0x00001290] */ 0x4c441dd3, 0xd2124462, // add ra_y2, ra_y2, 1   ; mul24 r2, r2, r3
+/* [0x00001298] */ 0x8c656c87, 0x10024f20, // add t1s, ra_base2, r2 ; v8min r0, r0, rb_k255
+/* [0x000012a0] */ 0x545963c6, 0x12024860, // and r1, r1, rb_k255   ; mul24 r0, r0, ra_wt_mul_l0
+/* [0x000012a8] */ 0x4d492bce, 0x120269e1, // sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_wt_mul_l1
+/* [0x000012b0] */ 0x0c9e7040, 0x10020867, // add r1, r0, r1
+/* [0x000012b8] */ 0x119ce3c0, 0xd0020867, // shl r1, r1, 14
+/* [0x000012c0] */ 0x8c40c3f6, 0x12024860, // add r1, r1, rb_wt_off ; mov r0, ra_height
+/* [0x000012c8] */ 0xffffff60, 0xf06809e7, // brr.anyn -, r:yloop_b00
+/* [0x000012d0] */ 0x0f9cd3c0, 0x10c200e7, // asr ra3.8as, r1, rb_wt_den_p15
+/* [0x000012d8] */ 0x95532dbf, 0x1c020867, // mov r1, ra_k16        ; mov -, vw_wait
+/* [0x000012e0] */ 0x8d0e7076, 0x18024830, // sub r0, r0, r1        ; mov vpm, ra3.8a
+/* [0x000012e8] */ 0x939c01c0, 0xd01279d0, // max.setf -, r0, 0     ; mov ra_height, r0
+/* [0x000012f0] */ 0x00000000, 0xf027c9e7, // bra.anyz -, ra_link
+/* [0x000012f8] */ 0x929da07f, 0x10024831, // min r0, r0, r1        ; mov vw_setup, rb_dma0
+/* [0x00001300] */ 0x8d9dd07f, 0x100248b1, // sub r2, r0, r1        ; mov vw_setup, rb_dma1
+/* [0x00001308] */ 0x809d703f, 0x100049f2, // nop                   ; mov vw_addr, rb_dest
+/* [0x00001310] */ 0x0c9d2e00, 0x100214a7, // add rb_lcount, rb_lcount, r0
+/* [0x00001318] */ 0x119d75c0, 0xd0020827, // shl r0, r2, i_shift23
+/* [0x00001320] */ 0x0c9dae00, 0x100216a7, // add rb_dma0, rb_dma0, r0
+/* [0x00001328] */ 0xffffff00, 0xf0f809e7, // brr -, r:yloop_b00
+/* [0x00001330] */ 0x409d000f, 0x100049e0, // nop                   ; mul24 r0, r1, rb_pitch
+/* [0x00001338] */ 0x0c9d7e00, 0x100215e7, // add rb_dest, rb_dest, r0
+/* [0x00001340] */ 0x159dcfc0, 0x10021c67, // mov vw_setup, rb_vpm_init
 // ::mc_end
 };
 #ifdef __HIGHC__

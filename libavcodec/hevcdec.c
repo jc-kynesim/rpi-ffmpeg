@@ -2392,7 +2392,7 @@ rpi_pred_y_b(HEVCContext * const s,
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
             }
-            dst += s->frame->linesize[0] * 16;
+            dst += s->frame->linesize[0] * Y_B_MAX_H;
         }
         return;
     }
@@ -2443,7 +2443,7 @@ rpi_pred_y_b(HEVCContext * const s,
             yp->last_l1 = &cmd_y->next_src2;
             *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
         }
-        dst += s->frame->linesize[0] * 16;
+        dst += s->frame->linesize[0] * Y_B_MAX_H;
     }
 }
 
