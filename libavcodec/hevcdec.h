@@ -463,8 +463,6 @@ typedef struct HEVCLocalContext {
 #ifdef RPI
 
 // The processing is done in chunks
-// Each chunk corresponds to 24 64x64 luma blocks (24 so it is divisible by 8 for chroma and 12 for luma)
-// This is a distance of 1536 pixels across the screen
 // Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
 // but allocate more memory and increase the latency before data in the next frame can be processed
 #define RPI_NUM_CHUNKS 4
@@ -551,6 +549,7 @@ typedef struct HEVCPredCmd {
 
 struct qpu_mc_pred_c_s;
 struct qpu_mc_pred_y_s;
+struct qpu_mc_pred_y_p_s;
 struct qpu_mc_src_s;
 
 typedef struct HEVCRpiLumaPred
@@ -648,7 +647,7 @@ typedef struct HEVCContext {
 #if RPI_INTER
     HEVCRpiChromaPred * curr_pred_c;
     HEVCRpiLumaPred * curr_pred_y;
-    struct qpu_mc_pred_y_s * last_y8_p;
+    struct qpu_mc_pred_y_p_s * last_y8_p;
     struct qpu_mc_src_s * last_y8_l1;
 
     // Function pointers
@@ -657,6 +656,8 @@ typedef struct HEVCContext {
     uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
     uint32_t qpu_filter;
     uint32_t qpu_filter_b;
+    uint32_t qpu_filter_y_p00;
+    uint32_t qpu_filter_y_b00;
 #endif
 
 #ifdef RPI_WORKER
