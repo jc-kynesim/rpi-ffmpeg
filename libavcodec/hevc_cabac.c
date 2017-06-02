@@ -1557,12 +1557,14 @@ static void rpi_add_residual(HEVCContext * const s,
     else if (!is_sliced || c_idx == 0) {
         s->hevcdsp.add_residual[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
     }
+#if RPI_HEVC_SAND
     else if (c_idx == 1) {
         s->hevcdsp.add_residual_u[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
     }
     else {
         s->hevcdsp.add_residual_v[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
     }
+#endif
 }
 #endif
 

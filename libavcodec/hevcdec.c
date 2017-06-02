@@ -1670,7 +1670,7 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
     if (ret < 0)
         return ret;
 
-#ifdef RPI_HEVC_SAND
+#if RPI_HEVC_SAND
     if (rpi_sliced_frame(s->frame)) {
         s->hevcdsp.put_pcm(rpi_sliced_frame_pos_y(s->frame, x0, y0),
                            s->frame->linesize[0],
@@ -3297,6 +3297,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
           case RPI_PRED_ADD_RESIDUAL:
               s->hevcdsp.add_residual[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
+#if RPI_HEVC_SAND
           case RPI_PRED_ADD_RESIDUAL_U:
               s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
@@ -3306,7 +3307,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
           case RPI_PRED_ADD_RESIDUAL_C:
               s->hevcdsp.add_residual_c[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
-
+#endif
           case RPI_PRED_I_PCM:
               pcm_extract(s, cmd->i_pcm.src, cmd->i_pcm.src_len, cmd->i_pcm.x, cmd->i_pcm.y, 1 << cmd->size);
               break;
