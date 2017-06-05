@@ -30,7 +30,7 @@
 
 // Add profile flags to all QPU requests - generates output in "vcdbg log msg"
 // Beware this is expensive and will probably throw off all other timing by >10%
-#define RPI_TRACE_QPU_PROFILE_ALL       0
+#define RPI_TRACE_QPU_PROFILE_ALL       1
 
 // QPU "noflush" flags
 // a mixture of flushing & profiling
@@ -41,26 +41,13 @@
 #define QPU_FLAGS_OUTPUT_QPU_TIMES      8       // Print QPU times - independant of the profiling
 #define QPU_FLAGS_NO_FLUSH_QPU          16      // If unset flush QPU caches & TMUs (uniforms always flushed)
 
-// On Pi2 there is no way to access the VPU L2 cache
-// GPU_MEM_FLG should be 4 for uncached memory.  (Or C for alias to allocate in the VPU L2 cache)
-// However, if using VCSM allocated buffers, need to use C at the moment because VCSM does not allocate uncached memory correctly
-// The QPU crashes if we mix L2 cached and L2 uncached accesses due to a HW bug.
-#define GPU_MEM_FLG 0x4
-// GPU_MEM_MAP is meaningless on the Pi2 and should be left at 0  (On Pi1 it allows ARM to access VPU L2 cache)
-#define GPU_MEM_MAP 0x0
-
 #define vcos_verify_ge0(x) ((x)>=0)
-
-/*static const unsigned code[] =
-{
-  #include "rpi_shader.hex"
-};*/
 
 // Size in 32bit words
 #define QPU_CODE_SIZE 2048
 #define VPU_CODE_SIZE 2048
 
-const short rpi_transMatrix2even[32][16] = { // Even rows first
+static const short rpi_transMatrix2even[32][16] = { // Even rows first
 {64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64},
 {90,  87,  80,  70,  57,  43,  25,   9,  -9, -25, -43, -57, -70, -80, -87, -90},
 {89,  75,  50,  18, -18, -50, -75, -89, -89, -75, -50, -18,  18,  50,  75,  89},

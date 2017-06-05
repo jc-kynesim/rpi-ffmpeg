@@ -157,6 +157,7 @@ uint32_t qpu_fn(const int * const mc_fn);
 #define QPU_N_UV     12
 #define QPU_N_GRP_Y  4  // 4 QPUs per TMU
 #define QPU_N_Y      12
+#define QPU_N_MAX    12
 
 #define QPU_MAIL_EL_VALS  2
 

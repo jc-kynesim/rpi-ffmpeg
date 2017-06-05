@@ -547,34 +547,32 @@ typedef struct HEVCPredCmd {
 
 #ifdef RPI
 
-struct qpu_mc_pred_c_s;
-struct qpu_mc_pred_y_s;
+union qpu_mc_pred_cmd_s;
 struct qpu_mc_pred_y_p_s;
 struct qpu_mc_src_s;
 
-typedef struct HEVCRpiLumaPred
+typedef struct HEVCRpiInterPredQ
 {
-    struct qpu_mc_pred_y_s *qpu_mc_base;
-    struct qpu_mc_pred_y_s *qpu_mc_curr;
+    union qpu_mc_pred_cmd_u *qpu_mc_base;
+    union qpu_mc_pred_cmd_u *qpu_mc_curr;
     struct qpu_mc_src_s *last_l0;
     struct qpu_mc_src_s *last_l1;
     unsigned int load;
-} HEVCRpiLumaPred;
+    uint32_t code_setup;
+    uint32_t code_sync;
+    uint32_t code_exit;
+} HEVCRpiInterPredQ;
 
-typedef struct HEVCRpiChromaPred
+typedef struct HEVCRpiInterPredEnv
 {
-    struct qpu_mc_pred_c_s *qpu_mc_base;
-    struct qpu_mc_pred_c_s *qpu_mc_curr;
-    struct qpu_mc_src_s *last_l0;
-    struct qpu_mc_src_s *last_l1;
-    unsigned int load;
-} HEVCRpiChromaPred;
+    HEVCRpiInterPredQ * q;
+    unsigned int n;
+    GPU_MEM_PTR_T gptr;
+} HEVCRpiInterPredEnv;
 
 typedef struct HEVCRpiJob {
-    GPU_MEM_PTR_T chroma_mvs_gptr;
-    GPU_MEM_PTR_T luma_mvs_gptr;
-    HEVCRpiChromaPred chroma_mvs[QPU_N_UV];
-    HEVCRpiLumaPred luma_mvs[QPU_N_Y];
+    HEVCRpiInterPredEnv chroma_ip;
+    HEVCRpiInterPredEnv luma_ip;
 } HEVCRpiJob;
 
 #if RPI_TSTATS
@@ -645,8 +643,8 @@ typedef struct HEVCContext {
     HEVCRpiStats tstats;
 #endif
 #if RPI_INTER
-    HEVCRpiChromaPred * curr_pred_c;
-    HEVCRpiLumaPred * curr_pred_y;
+    HEVCRpiInterPredQ * curr_pred_c;
+    HEVCRpiInterPredQ * curr_pred_y;
     struct qpu_mc_pred_y_p_s * last_y8_p;
     struct qpu_mc_src_s * last_y8_l1;
 

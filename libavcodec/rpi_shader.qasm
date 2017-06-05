@@ -673,6 +673,43 @@
 .endif
 .endm
 
+::mc_sync_a
+  mov ra_link, unif
+  m_exit_drain
+  mov -, srel(0)
+  mov -, sacq(1)
+  bra -, ra_link
+  nop
+  nop
+  nop
+
+::mc_sync_a0
+  mov ra_link, unif
+  m_exit_drain
+  mov -,sacq(0) # 1
+  mov -,sacq(0) # 2
+  mov -,sacq(0) # 3
+  mov -,sacq(0) # 4
+  mov -,sacq(0) # 5
+  mov -,sacq(0) # 6
+  mov -,sacq(0) # 7
+  mov -,sacq(0) # 8
+  mov -,sacq(0) # 9
+  mov -,sacq(0) # 10
+  mov -,sacq(0) # 11
+  mov -,srel(1) # 1
+  mov -,srel(1) # 2
+  mov -,srel(1) # 3
+  mov -,srel(1) # 4
+  mov -,srel(1) # 5
+  mov -,srel(1) # 6
+  mov -,srel(1) # 7
+  mov -,srel(1) # 8
+  bra -, ra_link
+  mov -,srel(1) # 9
+  mov -,srel(1) # 10
+  mov -,srel(1) # 11
+
 
 # mc_exit()
 # Chroma & Luma the same now

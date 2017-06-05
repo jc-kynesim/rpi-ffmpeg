@@ -101,6 +101,11 @@ typedef struct qpu_mc_pred_y_s {
     };
 } qpu_mc_pred_y_t;
 
+typedef union qpu_mc_pred_cmd_u {
+    qpu_mc_pred_y_t y;
+    qpu_mc_pred_c_t c;
+} qpu_mc_pred_cmd_t;
+
 #pragma pack(pop)
 
 #endif
