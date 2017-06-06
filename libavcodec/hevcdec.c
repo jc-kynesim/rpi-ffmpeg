@@ -3427,6 +3427,13 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
 #endif
 
 #ifdef RPI
+
+static inline void rpi_inter_pred_add_sync_fn(HEVCRpiInterPredQ * const q, const uint32_t fn)
+{
+    ((uint32_t *)q->qpu_mc_curr)[-1] = fn;
+    q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)((uint32_t *)q->qpu_mc_curr + 1);
+}
+
 // Set initial uniform job values & zero ctu_count
 static void rpi_begin(HEVCContext *s)
 {
@@ -3463,6 +3470,8 @@ static void rpi_begin(HEVCContext *s)
         cp->load = 0;
         *(qpu_mc_pred_c_s_t **)&cp->qpu_mc_curr = u + 1;
     }
+
+    rpi_inter_pred_add_sync_fn(s->jobs[job].chroma_ip.q + 0, qpu_fn(mc_sync_init_0));
     s->curr_pred_c = NULL;
 
     for(i=0;i < QPU_N_Y;i++) {
@@ -3487,6 +3496,8 @@ static void rpi_begin(HEVCContext *s)
         yp->load = 0;
         *(qpu_mc_pred_y_s_t **)&yp->qpu_mc_curr = y + 1;
     }
+
+    rpi_inter_pred_add_sync_fn(s->jobs[job].luma_ip.q + 0, qpu_fn(mc_sync_init_0));
     s->curr_pred_y = NULL;
     s->last_y8_p = NULL;
     s->last_y8_l1 = NULL;

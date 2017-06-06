@@ -677,15 +677,27 @@
 .macro m_sync_q, n_qpu
   mov ra_link, unif
   mov -, vw_wait
+
 .set n_sem_sync, n_qpu - (n_qpu % 4)
 .set n_sem_in, n_qpu
 .set n_sem_out, n_qpu + 1
+
 .if n_qpu % 4 == 0
+
+.set n_sem_quad_in,  12 + n_qpu / 4
+.set n_sem_quad_out, 12 + (((n_qpu / 4) + 1) % 3)
+
   sacq -, n_sem_sync
-  bra -, ra_link
   sacq -, n_sem_sync
   sacq -, n_sem_sync
+  sacq -, n_sem_quad_in
   srel -, n_sem_out
+  srel -, n_sem_quad_out
+  bra -, ra_link
+  nop
+  nop
+  nop
+
 .else
   bra -, ra_link
   srel -, n_sem_sync
@@ -697,6 +709,15 @@
 .endif
 .endif
 .endm
+
+::mc_sync_init_0
+  mov ra_link, unif
+  srel -, 12
+  nop
+  bra -, ra_link
+  nop
+  nop
+  nop
 
 ::mc_sync_q0
   m_sync_q 0
@@ -723,7 +744,7 @@
 ::mc_sync_q11
   m_sync_q 11
 
-.set n_sem_exit, 12
+.set n_sem_exit, 15
 
 # mc_exit()
 # Chroma & Luma the same now
@@ -750,6 +771,7 @@
   sacq -, n_sem_exit # 9
   sacq -, n_sem_exit # 10
   sacq -, n_sem_exit # 11
+  sacq -, 12
 
   nop                   ; nop           ; thrend
   mov interrupt, 1
