@@ -673,70 +673,83 @@
 .endif
 .endm
 
-::mc_sync_a
-  mov ra_link, unif
-  m_exit_drain
-  mov -, srel(0)
-  mov -, sacq(1)
-  bra -, ra_link
-  nop
-  nop
-  nop
 
-::mc_sync_a0
+.macro m_sync_q, n_qpu
   mov ra_link, unif
-  m_exit_drain
-  mov -,sacq(0) # 1
-  mov -,sacq(0) # 2
-  mov -,sacq(0) # 3
-  mov -,sacq(0) # 4
-  mov -,sacq(0) # 5
-  mov -,sacq(0) # 6
-  mov -,sacq(0) # 7
-  mov -,sacq(0) # 8
-  mov -,sacq(0) # 9
-  mov -,sacq(0) # 10
-  mov -,sacq(0) # 11
-  mov -,srel(1) # 1
-  mov -,srel(1) # 2
-  mov -,srel(1) # 3
-  mov -,srel(1) # 4
-  mov -,srel(1) # 5
-  mov -,srel(1) # 6
-  mov -,srel(1) # 7
-  mov -,srel(1) # 8
+  mov -, vw_wait
+.set n_sem_sync, n_qpu - (n_qpu % 4)
+.set n_sem_in, n_qpu
+.set n_sem_out, n_qpu + 1
+.if n_qpu % 4 == 0
+  sacq -, n_sem_sync
   bra -, ra_link
-  mov -,srel(1) # 9
-  mov -,srel(1) # 10
-  mov -,srel(1) # 11
+  sacq -, n_sem_sync
+  sacq -, n_sem_sync
+  srel -, n_sem_out
+.else
+  bra -, ra_link
+  srel -, n_sem_sync
+  sacq -, n_sem_in
+.if n_sem_out % 4 != 0
+  srel -, n_sem_out
+.else
+  nop
+.endif
+.endif
+.endm
 
+::mc_sync_q0
+  m_sync_q 0
+::mc_sync_q1
+  m_sync_q 1
+::mc_sync_q2
+  m_sync_q 2
+::mc_sync_q3
+  m_sync_q 3
+::mc_sync_q4
+  m_sync_q 4
+::mc_sync_q5
+  m_sync_q 5
+::mc_sync_q6
+  m_sync_q 6
+::mc_sync_q7
+  m_sync_q 7
+::mc_sync_q8
+  m_sync_q 8
+::mc_sync_q9
+  m_sync_q 9
+::mc_sync_q10
+  m_sync_q 10
+::mc_sync_q11
+  m_sync_q 11
+
+.set n_sem_exit, 12
 
 # mc_exit()
 # Chroma & Luma the same now
 ::mc_exit_c
 ::mc_exit
   m_exit_drain
-  mov -,srel(0)
+  srel -, n_sem_exit
   nop                   ; nop           ; thrend
   nop
   nop
-
 
 # mc_interrupt_exit12()
 ::mc_interrupt_exit12c
 ::mc_interrupt_exit12
   m_exit_drain
-  mov -,sacq(0) # 1
-  mov -,sacq(0) # 2
-  mov -,sacq(0) # 3
-  mov -,sacq(0) # 4
-  mov -,sacq(0) # 5
-  mov -,sacq(0) # 6
-  mov -,sacq(0) # 7
-  mov -,sacq(0) # 8
-  mov -,sacq(0) # 9
-  mov -,sacq(0) # 10
-  mov -,sacq(0) # 11
+  sacq -, n_sem_exit # 1
+  sacq -, n_sem_exit # 2
+  sacq -, n_sem_exit # 3
+  sacq -, n_sem_exit # 4
+  sacq -, n_sem_exit # 5
+  sacq -, n_sem_exit # 6
+  sacq -, n_sem_exit # 7
+  sacq -, n_sem_exit # 8
+  sacq -, n_sem_exit # 9
+  sacq -, n_sem_exit # 10
+  sacq -, n_sem_exit # 11
 
   nop                   ; nop           ; thrend
   mov interrupt, 1

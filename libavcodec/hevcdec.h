@@ -568,6 +568,7 @@ typedef struct HEVCRpiInterPredEnv
     HEVCRpiInterPredQ * q;
     unsigned int n;
     GPU_MEM_PTR_T gptr;
+    unsigned int q1_size;  // size of 1 uniform Q
 } HEVCRpiInterPredEnv;
 
 typedef struct HEVCRpiJob {
