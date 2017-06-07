@@ -2281,6 +2281,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
     const uint32_t src_vc_address_y = get_vc_address_y(src_frame);
     uint32_t dst_addr = get_vc_address_y(s->frame) + y_off;
     const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
+    HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].luma_ip;
 
     if (my_mx == 0)
     {
@@ -2294,7 +2295,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             for (int start_x = 0; start_x < nPbW; start_x += 16)
             {
                 const int bw = FFMIN(nPbW - start_x, 16);
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh, s->qpu_filter_y_p00);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh, s->qpu_filter_y_p00);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_pred_y_p00_t *const cmd_y = &yp->qpu_mc_curr->y.p00;
 
@@ -2369,7 +2370,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             for (; start_x < nPbW; start_x += 16)
             {
                 const int bw = FFMIN(nPbW - start_x, 16);
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh + 7, s->qpu_filter);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh + 7, s->qpu_filter);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2459,6 +2460,7 @@ rpi_pred_y_b(HEVCContext * const s,
     uint32_t dst = get_vc_address_y(s->frame) + y_off;
     const uint32_t src1_base = get_vc_address_y(src_frame);
     const uint32_t src2_base = get_vc_address_y(src_frame2);
+    HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].luma_ip;
 
     if (my2_mx2_my_mx == 0)
     {
@@ -2474,7 +2476,7 @@ rpi_pred_y_b(HEVCContext * const s,
             // Can do chunks a full 16 wide if we don't want the H filter
             for (int start_x=0; start_x < nPbW; start_x += 16)
             {
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh, s->qpu_filter_y_b00);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh, s->qpu_filter_y_b00);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2522,7 +2524,9 @@ rpi_pred_y_b(HEVCContext * const s,
 
             for (int start_x=0; start_x < nPbW; start_x += 8)
             { // B blocks work 8 at a time
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh + 7, s->qpu_filter_b);
+                // B weights aren't doubled as the QPU code does the same
+                // amount of work as it does for P
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh + 7, s->qpu_filter_b);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2588,6 +2592,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
     const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
     const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
     uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
+    HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
 
     for(int start_y=0;start_y < nPbH_c;start_y+=16)
     {
@@ -2595,7 +2600,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
 
         for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH)
         {
-            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(&s->jobs[s->pass0_job].chroma_ip, bh + 3, s->qpu_filter_uv);
+            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh + 3, s->qpu_filter_uv);
             qpu_mc_pred_c_p_t * const u = &cp->qpu_mc_curr->c.p;
             qpu_mc_src_t * const last_l0 = cp->last_l0;
             const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
@@ -2652,38 +2657,36 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
     const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
 
     uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
+    const uint32_t src1_base = get_vc_address_u(src_frame);
+    const uint32_t src2_base = get_vc_address_u(src_frame2);
+    HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
 
     for (int start_y = 0; start_y < nPbH_c; start_y += 16)
     {
         const unsigned int bh = FFMIN(nPbH_c-start_y, 16);
 
-        // We are allowed 3/4 powers of two as well as powers of 2
-        av_assert2(bh == 16 || bh == 12 || bh == 8 || bh == 6 || bh == 4 || bh == 2);
-
         for (int start_x=0; start_x < nPbW_c; start_x += RPI_CHROMA_BLOCK_WIDTH)
         {
             const unsigned int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
 
-            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(&s->jobs[s->pass0_job].chroma_ip, bh * 2 + 3, s->qpu_filter_uv_b0);
+            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh * 2 + 3, s->qpu_filter_uv_b0);
             qpu_mc_pred_c_b_t * const u = &cp->qpu_mc_curr->c.b;
             qpu_mc_src_t * const src_l0 = cp->last_l0;
             qpu_mc_src_t * const src_l1 = cp->last_l1;
 
             src_l0->x = x1_c + start_x;
             src_l0->y = y1_c + start_y;
-            src_l0->base = get_vc_address_u(src_frame);
+            src_l0->base = src1_base;
+            src_l1->x = x2_c + start_x;
+            src_l1->y = y2_c + start_y;
+            src_l1->base = src2_base;
 
-            u[0].h = (bh<16 ? bh : 16);
-            u[0].w = (bw<RPI_CHROMA_BLOCK_WIDTH ? bw : RPI_CHROMA_BLOCK_WIDTH);
+            u[0].h = bh;
+            u[0].w = bw;
             u[0].coeffs_x1 = coefs0_x;
             u[0].coeffs_y1 = coefs0_y;
             u[0].weight_u1 = c_weights[0]; // Weight L0 U
             u[0].weight_v1 = c_weights[1]; // Weight L0 V
-
-            src_l1->x = x2_c + start_x;
-            src_l1->y = y2_c + start_y;
-            src_l1->base = get_vc_address_u(src_frame2);
-
             u[0].coeffs_x2 = coefs1_x;
             u[0].coeffs_y2 = coefs1_y;
             u[0].wo_u2 = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
