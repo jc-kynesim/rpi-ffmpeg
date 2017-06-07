@@ -200,9 +200,18 @@
   add r_dma, r0, r1  # DMA out
 .endm
 
+.macro m_setup_q0
+  srel -, 12
+.endm
+
+# Code start label
+::mc_start
+
 ################################################################################
 # mc_setup_uv(next_kernel, x, y, ref_c_base, frame_width, frame_height, pitch, dst_pitch, offset, denom, vpm_id)
-::mc_setup_c
+::mc_setup_c_q0
+  m_setup_q0
+::mc_setup_c_qn
   mov tmurs, 1                                  # No swap TMUs
 
 # Load first request location
@@ -707,16 +716,6 @@
 .endif
 .endm
 
-# We must have Quad 0 signalled at the start - and we have to remember
-# to sink it on exit or we overflow & stall
-::mc_sync_init_0
-  mov ra_link, unif
-  srel -, 12
-  bra -, ra_link
-  nop
-  nop
-  nop
-
 ::mc_sync_q0
   m_sync_q 0
 ::mc_sync_q1
@@ -742,14 +741,11 @@
 ::mc_sync_q11
   m_sync_q 11
 
-.set n_sem_exit, 15
-
 # mc_exit()
 # Chroma & Luma the same now
 ::mc_exit_c
 ::mc_exit
   m_exit_drain
-  srel -, n_sem_exit
   nop                   ; nop           ; thrend
   nop
   nop
@@ -758,19 +754,7 @@
 ::mc_interrupt_exit12c
 ::mc_interrupt_exit12
   m_exit_drain
-  sacq -, n_sem_exit # 1
-  sacq -, n_sem_exit # 2
-  sacq -, n_sem_exit # 3
-  sacq -, n_sem_exit # 4
-  sacq -, n_sem_exit # 5
-  sacq -, n_sem_exit # 6
-  sacq -, n_sem_exit # 7
-  sacq -, n_sem_exit # 8
-  sacq -, n_sem_exit # 9
-  sacq -, n_sem_exit # 10
-  sacq -, n_sem_exit # 11
   sacq -, 12
-
   nop                   ; nop           ; thrend
   mov interrupt, 1
   nop
@@ -784,7 +768,9 @@
 
 ################################################################################
 # mc_setup(y_x, ref_y_base, y2_x2, ref_y2_base, frame_width_height, pitch, dst_pitch, offset_shift, tbd, next_kernel)
-::mc_setup
+::mc_setup_y_q0
+  m_setup_q0
+::mc_setup_y_qn
   # Need to save these because we need to know the frame dimensions before computing texture coordinates
   mov tmurs, 1          ; mov ra0, unif         # No TMU swap ; x_y
   mov ra9, unif         # ref_y_base

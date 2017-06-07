@@ -30,7 +30,7 @@
 
 // Add profile flags to all QPU requests - generates output in "vcdbg log msg"
 // Beware this is expensive and will probably throw off all other timing by >10%
-#define RPI_TRACE_QPU_PROFILE_ALL       1
+#define RPI_TRACE_QPU_PROFILE_ALL       0
 
 // QPU "noflush" flags
 // a mixture of flushing & profiling
