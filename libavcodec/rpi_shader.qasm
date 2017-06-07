@@ -690,13 +690,10 @@
   sacq -, n_sem_sync
   sacq -, n_sem_sync
   sacq -, n_sem_sync
+  bra -, ra_link
   sacq -, n_sem_quad_in
   srel -, n_sem_out
   srel -, n_sem_quad_out
-  bra -, ra_link
-  nop
-  nop
-  nop
 
 .else
   bra -, ra_link
@@ -710,10 +707,11 @@
 .endif
 .endm
 
+# We must have Quad 0 signalled at the start - and we have to remember
+# to sink it on exit or we overflow & stall
 ::mc_sync_init_0
   mov ra_link, unif
   srel -, 12
-  nop
   bra -, ra_link
   nop
   nop

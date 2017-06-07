@@ -566,7 +566,11 @@ typedef struct HEVCRpiInterPredQ
 typedef struct HEVCRpiInterPredEnv
 {
     HEVCRpiInterPredQ * q;
-    unsigned int n;
+    unsigned int n;        // Number of Qs
+    unsigned int n_grp;    // Number of Q in a group
+    unsigned int curr;     // Current Q number (0..n-1)
+    int used;              // 0 if nothing in any Q, 1 otherwise
+    int used_grp;          // 0 if nothing in any Q in the current group
     GPU_MEM_PTR_T gptr;
     unsigned int q1_size;  // size of 1 uniform Q
 } HEVCRpiInterPredEnv;
@@ -644,8 +648,6 @@ typedef struct HEVCContext {
     HEVCRpiStats tstats;
 #endif
 #if RPI_INTER
-    HEVCRpiInterPredQ * curr_pred_c;
-    HEVCRpiInterPredQ * curr_pred_y;
     struct qpu_mc_pred_y_p_s * last_y8_p;
     struct qpu_mc_src_s * last_y8_l1;
 

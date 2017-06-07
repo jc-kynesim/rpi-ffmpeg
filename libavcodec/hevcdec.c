@@ -2170,21 +2170,96 @@ static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
 #if RPI_INTER
 
 static HEVCRpiInterPredQ *
-rpi_nxt_pred_y(HEVCContext *const s, const unsigned int load_val, const uint32_t fn)
+rpi_nxt_pred(HEVCRpiInterPredEnv * const ipe, const unsigned int load_val, const uint32_t fn)
 {
-    HEVCRpiInterPredQ * yp = s->curr_pred_y;
+    HEVCRpiInterPredQ * yp = ipe->q + ipe->curr;
     HEVCRpiInterPredQ * ypt = yp + 1;
     for (unsigned int i = 1; i != QPU_N_GRP_Y; ++i, ++ypt) {
         if (ypt->load < yp->load)
             yp = ypt;
     }
 
-//        yp->load += load_val;
-    ++yp->load;
+    yp->load += load_val;
+    ipe->used_grp = 1;
+//    ++yp->load;
     ((uint32_t *)yp->qpu_mc_curr)[-1] = fn;  // Link is always last el of previous cmd
 
     return yp;
 }
+
+
+static void rpi_inter_pred_sync(HEVCRpiInterPredEnv * const ipe)
+{
+    unsigned int i;
+    for (i = 0; i != ipe->n; ++i) {
+        HEVCRpiInterPredQ * const q = ipe->q + i;
+        ((uint32_t *)q->qpu_mc_curr)[-1] = q->code_sync;
+        q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)((uint32_t *)q->qpu_mc_curr + 1);
+        if (q->load != 0) {
+            q->load = 1;
+        }
+    }
+}
+
+static void rpi_inter_pred_next_ctu(HEVCRpiInterPredEnv * const ipe)
+{
+    if (!ipe->used_grp)
+        return;
+
+    if ((ipe->curr += ipe->n_grp) >= ipe->n)
+    {
+        ipe->curr = 0;
+        rpi_inter_pred_sync(ipe);
+    }
+    ipe->used = 1;
+    ipe->used_grp = 0;
+}
+
+static void rpi_inter_pred_reset(HEVCRpiInterPredEnv * const ipe)
+{
+    unsigned int i;
+    ipe->curr = 0;
+    ipe->used = 0;
+    ipe->used_grp = 0;
+    for (i = 0; i != ipe->n; ++i) {
+        HEVCRpiInterPredQ * const q = ipe->q + i;
+        q->qpu_mc_curr = q->qpu_mc_base;
+        q->load = 0;
+        q->last_l0 = NULL;
+        q->last_l1 = NULL;
+    }
+}
+
+static void rpi_alloc_inter_pred(HEVCRpiInterPredEnv * const ipe,
+                                 const unsigned int n, const unsigned int n_grp, const unsigned int q1_size,
+                                 const int * const * const setup_fns,
+                                 const int * const * const sync_fns,
+                                 const int * const * const exit_fns)
+{
+    unsigned int i;
+
+    memset(ipe, 0, sizeof(*ipe));
+    av_assert0((ipe->q = av_mallocz(n * sizeof(*ipe->q))) != NULL);
+    ipe->n = n;
+    ipe->n_grp = n_grp;
+    ipe->q1_size = q1_size;
+
+#if RPI_CACHE_UNIF_MVS
+    gpu_malloc_cached(n * q1_size, &ipe->gptr);
+#else
+    gpu_malloc_uncached(n * q1_size, &ipe->gptr);
+#endif
+
+    for(i = 0; i < n; i++) {
+        HEVCRpiInterPredQ * const q = ipe->q + i;
+        q->qpu_mc_curr = q->qpu_mc_base =
+            (qpu_mc_pred_cmd_t *)(ipe->gptr.arm + i * q1_size);
+        q->code_setup = qpu_fn(setup_fns[i]);
+        q->code_sync = qpu_fn(sync_fns[i]);
+        q->code_exit = qpu_fn(exit_fns[i]);
+    }
+}
+
 
 static void
 rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
@@ -2215,7 +2290,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             for (int start_x = 0; start_x < nPbW; start_x += 16)
             {
                 const int bw = FFMIN(nPbW - start_x, 16);
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred_y(s, bh, s->qpu_filter_y_p00);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh, s->qpu_filter_y_p00);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_pred_y_p00_t *const cmd_y = &yp->qpu_mc_curr->y.p00;
 
@@ -2290,7 +2365,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             for (; start_x < nPbW; start_x += 16)
             {
                 const int bw = FFMIN(nPbW - start_x, 16);
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred_y(s, bh + 7, s->qpu_filter);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh + 7, s->qpu_filter);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2395,7 +2470,7 @@ rpi_pred_y_b(HEVCContext * const s,
             // Can do chunks a full 16 wide if we don't want the H filter
             for (int start_x=0; start_x < nPbW; start_x += 16)
             {
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred_y(s, bh, s->qpu_filter_y_b00);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh, s->qpu_filter_y_b00);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2443,7 +2518,7 @@ rpi_pred_y_b(HEVCContext * const s,
 
             for (int start_x=0; start_x < nPbW; start_x += 8)
             { // B blocks work 8 at a time
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred_y(s, bh + 7, s->qpu_filter_b);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(&s->jobs[s->pass0_job].luma_ip, bh + 7, s->qpu_filter_b);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2489,22 +2564,6 @@ rpi_pred_y_b(HEVCContext * const s,
 }
 
 
-static HEVCRpiInterPredQ *
-rpi_nxt_pred_c(HEVCContext *const s, const unsigned int load_val, const uint32_t fn)
-{
-    HEVCRpiInterPredQ * cp = s->curr_pred_c;
-    HEVCRpiInterPredQ * cpt = cp + 1;
-    for (unsigned int i = 1; i != QPU_N_GRP_UV; ++i, ++cpt) {
-        if (cpt->load < cp->load)
-            cp = cpt;
-    }
-    // Actual use of load_val is noticably better but we haven't sorted Q length problems yet
-    ++cp->load;
-//    cp->load += load_val;
-    ((uint32_t *)cp->qpu_mc_curr)[-1] = fn;
-    return cp;
-}
-
 static void
 rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
@@ -2532,7 +2591,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
 
         for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH)
         {
-            HEVCRpiInterPredQ * const cp = rpi_nxt_pred_c(s, bh + 3, s->qpu_filter_uv);
+            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(&s->jobs[s->pass0_job].chroma_ip, bh + 3, s->qpu_filter_uv);
             qpu_mc_pred_c_p_t * const u = &cp->qpu_mc_curr->c.p;
             qpu_mc_src_t * const last_l0 = cp->last_l0;
             const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
@@ -2601,7 +2660,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
         {
             const unsigned int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
 
-            HEVCRpiInterPredQ * const cp = rpi_nxt_pred_c(s, bh * 2 + 3, s->qpu_filter_uv_b0);
+            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(&s->jobs[s->pass0_job].chroma_ip, bh * 2 + 3, s->qpu_filter_uv_b0);
             qpu_mc_pred_c_b_t * const u = &cp->qpu_mc_curr->c.b;
             qpu_mc_src_t * const src_l0 = cp->last_l0;
             qpu_mc_src_t * const src_l1 = cp->last_l1;
@@ -3440,6 +3499,9 @@ static void rpi_begin(HEVCContext *s)
 #if RPI_INTER
     int job = s->pass0_job;
     int i;
+    HEVCRpiJob * const jb = s->jobs + job;
+    HEVCRpiInterPredEnv *const cipe = &jb->chroma_ip;
+    HEVCRpiInterPredEnv *const yipe = &jb->luma_ip;
 
     const uint16_t pic_width_y        = s->ps.sps->width;
     const uint16_t pic_height_y       = s->ps.sps->height;
@@ -3447,8 +3509,9 @@ static void rpi_begin(HEVCContext *s)
     const uint16_t pic_width_c        = s->ps.sps->width >> s->ps.sps->hshift[1];
     const uint16_t pic_height_c       = s->ps.sps->height >> s->ps.sps->vshift[1];
 
+    rpi_inter_pred_reset(cipe);
     for(i=0; i < QPU_N_UV;i++) {
-        HEVCRpiInterPredQ * const cp = s->jobs[job].chroma_ip.q + i;
+        HEVCRpiInterPredQ * const cp = cipe->q + i;
         qpu_mc_pred_c_s_t * const u = &cp->qpu_mc_base->c.s;
 
         u->next_src1.x = 0;
@@ -3467,13 +3530,11 @@ static void rpi_begin(HEVCContext *s)
         u->next_src2.base = 0;
         cp->last_l1 = &u->next_src2;
 
-        cp->load = 0;
         *(qpu_mc_pred_c_s_t **)&cp->qpu_mc_curr = u + 1;
     }
-
     rpi_inter_pred_add_sync_fn(s->jobs[job].chroma_ip.q + 0, qpu_fn(mc_sync_init_0));
-    s->curr_pred_c = NULL;
 
+    rpi_inter_pred_reset(yipe);
     for(i=0;i < QPU_N_Y;i++) {
         HEVCRpiInterPredQ * const yp = s->jobs[job].luma_ip.q + i;
         qpu_mc_pred_y_s_t * const y = &yp->qpu_mc_base->y.s;
@@ -3493,12 +3554,10 @@ static void rpi_begin(HEVCContext *s)
         yp->last_l0 = &y->next_src1;
         yp->last_l1 = &y->next_src2;
 
-        yp->load = 0;
         *(qpu_mc_pred_y_s_t **)&yp->qpu_mc_curr = y + 1;
     }
 
     rpi_inter_pred_add_sync_fn(s->jobs[job].luma_ip.q + 0, qpu_fn(mc_sync_init_0));
-    s->curr_pred_y = NULL;
     s->last_y8_p = NULL;
     s->last_y8_l1 = NULL;
 #endif
@@ -3679,34 +3738,6 @@ static void rpi_do_all_passes(HEVCContext *s)
     rpi_begin(s);
 }
 
-#if 0
-static void rpi_inter_pred_sync(HEVCRpiInterPredEnv * const ipe)
-{
-}
-#elif 1
-static void rpi_inter_pred_sync(HEVCRpiInterPredEnv * const ipe)
-{
-    unsigned int i;
-    for (i = 0; i != ipe->n; ++i) {
-        HEVCRpiInterPredQ * const q = ipe->q + i;
-        ((uint32_t *)q->qpu_mc_curr)[-1] = q->code_sync;
-        q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)((uint32_t *)q->qpu_mc_curr + 1);
-    }
-}
-
-#else
-
-static void rpi_inter_pred_sync4(HEVCRpiInterPredEnv * const ipe, const unsigned int n)
-{
-    unsigned int i;
-    for (i = n * 4; i != n * 4 + 4; ++i) {
-        HEVCRpiInterPredQ * const q = ipe->q + i;
-        ((uint32_t *)q->qpu_mc_curr)[-1] = q->code_sync;
-        q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)((uint32_t *)q->qpu_mc_curr + 1);
-    }
-}
-#endif
-
 
 #endif
 
@@ -3768,61 +3799,41 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         s->deblock[ctb_addr_rs].tc_offset   = s->sh.tc_offset;
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
-#if RPI_INTER
-        if (s->enable_rpi) {
-            const unsigned int cc = s->ctu_count;
-            s->curr_pred_c = s->jobs[s->pass0_job].chroma_ip.q + (cc * QPU_N_GRP_UV) % QPU_N_UV;
-            s->curr_pred_y = s->jobs[s->pass0_job].luma_ip.q + (cc * QPU_N_GRP_Y) % QPU_N_Y;
-            if (cc > 2 && cc + 3 < s->max_ctu_count) {
-#if 0
-                rpi_inter_pred_sync4(&s->jobs[s->pass0_job].luma_ip, cc % 3, QPU_N_GRP_Y);
-                rpi_inter_pred_sync4(&s->jobs[s->pass0_job].chroma_ip, cc % 3, QPU_N_GRP_UV);
-#else
-                if ((cc * QPU_N_GRP_Y) % QPU_N_Y == 0)
-                    rpi_inter_pred_sync(&s->jobs[s->pass0_job].luma_ip);
-                if ((cc * QPU_N_GRP_UV) % QPU_N_UV == 0)
-                    rpi_inter_pred_sync(&s->jobs[s->pass0_job].chroma_ip);
-#endif
-            }
-        }
-#endif
-
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
 #ifdef RPI
         if (s->enable_rpi) {
-          //av_assert0(s->num_dblk_cmds[s->pass0_job]>=0);
-          //av_assert0(s->num_dblk_cmds[s->pass0_job]<RPI_MAX_DEBLOCK_CMDS);
-          //av_assert0(s->pass0_job<RPI_MAX_JOBS);
-          //av_assert0(s->pass0_job>=0);
-          s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]][0] = x_ctb;
-          s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]++][1] = y_ctb;
-          s->ctu_count++;
+            rpi_inter_pred_next_ctu(&s->jobs[s->pass0_job].luma_ip);
+            rpi_inter_pred_next_ctu(&s->jobs[s->pass0_job].chroma_ip);
 
-          if ( s->ctu_count >= s->max_ctu_count ) {
+            s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]][0] = x_ctb;
+            s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]++][1] = y_ctb;
+            s->ctu_count++;
+
+            if ( s->ctu_count >= s->max_ctu_count ) {
 #ifdef RPI_WORKER
-            if (s->used_for_ref)
-            {
-//              printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
+                if (s->used_for_ref)
+                {
+//                  printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
 
-//                worker_wait(s);
-              // Split work load onto separate threads so we make as rapid progress as possible with this frame
-              // Pass on this job to worker thread
-              worker_submit_job(s);
+//                  worker_wait(s);
+                    // Split work load onto separate threads so we make as rapid progress as possible with this frame
+                    // Pass on this job to worker thread
+                    worker_submit_job(s);
 
-              // Make sure we have space to prepare the next job
-              worker_pass0_ready(s);
+                    // Make sure we have space to prepare the next job
+                    worker_pass0_ready(s);
 
-              // Prepare the next batch of commands
-              rpi_begin(s);
-            } else {
-              // Non-ref frame so do it all on this thread
-              rpi_do_all_passes(s);
-            }
+                    // Prepare the next batch of commands
+                    rpi_begin(s);
+                } else {
+                    // Non-ref frame so do it all on this thread
+                    rpi_do_all_passes(s);
+                }
 #else
-            rpi_do_all_passes(s);
+                rpi_do_all_passes(s);
 #endif
-          }
+            }
 
         }
 #endif
@@ -4822,52 +4833,35 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     return 0;
 }
 
-#if 0
-static const int * const inter_pred_sync_qpu[12] = {
-    mc_sync4_0, mc_sync_0, mc_sync_0, mc_sync_0,
-    mc_sync4_1, mc_sync_1, mc_sync_1, mc_sync_1,
-    mc_sync4_2, mc_sync_2, mc_sync_2, mc_sync_2
+static const int * const inter_pred_setup_c_qpu[12] = {
+    mc_setup_c, mc_setup_c, mc_setup_c, mc_setup_c,
+    mc_setup_c, mc_setup_c, mc_setup_c, mc_setup_c,
+    mc_setup_c, mc_setup_c, mc_setup_c, mc_setup_c
 };
-#elif 0
-static const int * const inter_pred_sync_qpu[12] = {
-    mc_sync12_0, mc_sync_0, mc_sync_0, mc_sync_0,
-    mc_sync_0, mc_sync_0, mc_sync_0, mc_sync_0,
-    mc_sync_0, mc_sync_0, mc_sync_0, mc_sync_0
+
+static const int * const inter_pred_setup_y_qpu[12] = {
+    mc_setup, mc_setup, mc_setup, mc_setup,
+    mc_setup, mc_setup, mc_setup, mc_setup,
+    mc_setup, mc_setup, mc_setup, mc_setup
 };
-#else
+
 static const int * const inter_pred_sync_qpu[12] = {
     mc_sync_q0, mc_sync_q1, mc_sync_q2, mc_sync_q3,
     mc_sync_q4, mc_sync_q5, mc_sync_q6, mc_sync_q7,
     mc_sync_q8, mc_sync_q9, mc_sync_q10, mc_sync_q11
 };
-#endif
 
-static void rpi_alloc_inter_pred(HEVCRpiInterPredEnv * const ipe,
-                                const unsigned int n, const unsigned int q1_size,
-                                 const uint32_t code_setup,
-                                 const uint32_t code_exit, const uint32_t code_exit2)
-{
-    unsigned int i;
+static const int * const inter_pred_exit_c_qpu[12] = {
+    mc_interrupt_exit12c, mc_exit_c, mc_exit_c, mc_exit_c,
+    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c,
+    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c
+};
 
-    av_assert0((ipe->q = av_mallocz(n * sizeof(*ipe->q))) != NULL);
-    ipe->n = n;
-    ipe->q1_size = q1_size;
-
-#if RPI_CACHE_UNIF_MVS
-    gpu_malloc_cached(n * q1_size, &ipe->gptr);
-#else
-    gpu_malloc_uncached(n * q1_size, &ipe->gptr);
-#endif
-
-    for(i = 0; i < n; i++) {
-        HEVCRpiInterPredQ * const q = ipe->q + i;
-        q->qpu_mc_curr = q->qpu_mc_base =
-            (qpu_mc_pred_cmd_t *)(ipe->gptr.arm + i * q1_size);
-        q->code_setup = code_setup;
-        q->code_sync = qpu_fn(inter_pred_sync_qpu[i]);
-        q->code_exit = (i == n - 1) ? code_exit2 : code_exit;
-    }
-}
+static const int * const inter_pred_exit_y_qpu[12] = {
+    mc_interrupt_exit12, mc_exit, mc_exit, mc_exit,
+    mc_exit,   mc_exit, mc_exit, mc_exit,
+    mc_exit,   mc_exit, mc_exit, mc_exit
+};
 
 
 static av_cold int hevc_init_context(AVCodecContext *avctx)
@@ -4910,13 +4904,11 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         //    is correct (it certainly isn't going to be too samll)
 
         rpi_alloc_inter_pred(&jb->chroma_ip,
-                             QPU_N_UV, UV_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_c_t),
-                             qpu_fn(mc_setup_c),
-                             qpu_fn(mc_exit_c), qpu_fn(mc_interrupt_exit12c));
+                             QPU_N_UV, QPU_N_GRP_UV, UV_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_c_t),
+                             inter_pred_setup_c_qpu, inter_pred_sync_qpu, inter_pred_exit_c_qpu);
         rpi_alloc_inter_pred(&jb->luma_ip,
-                             QPU_N_Y,  Y_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_y_t),
-                             qpu_fn(mc_setup),
-                             qpu_fn(mc_exit), qpu_fn(mc_interrupt_exit12));
+                             QPU_N_Y,  QPU_N_GRP_Y,  Y_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_y_t),
+                             inter_pred_setup_y_qpu, inter_pred_sync_qpu, inter_pred_exit_y_qpu);
     }
 
     s->qpu_filter_uv = qpu_fn(mc_filter_uv);
