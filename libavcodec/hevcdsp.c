@@ -307,9 +307,24 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 0, put_hevc_qpel_bi_w_v, depth);          \
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 1, put_hevc_qpel_bi_w_hv, depth)
 
-#ifndef RPI
+#if !RPI_HEVC_SAND
 #define SLICED_LOOP_FILTERS(depth)
+#define SLICED_ADD_RESIDUAL(depth)
 #else
+#define SLICED_ADD_RESIDUAL(depth)\
+    hevcdsp->add_residual_u[0]      = FUNC(add_residual4x4_u, depth);         \
+    hevcdsp->add_residual_u[1]      = FUNC(add_residual8x8_u, depth);         \
+    hevcdsp->add_residual_u[2]      = FUNC(add_residual16x16_u, depth);       \
+    hevcdsp->add_residual_u[3]      = FUNC(add_residual32x32_u, depth);       \
+    hevcdsp->add_residual_v[0]      = FUNC(add_residual4x4_v, depth);         \
+    hevcdsp->add_residual_v[1]      = FUNC(add_residual8x8_v, depth);         \
+    hevcdsp->add_residual_v[2]      = FUNC(add_residual16x16_v, depth);       \
+    hevcdsp->add_residual_v[3]      = FUNC(add_residual32x32_v, depth);       \
+    hevcdsp->add_residual_c[0]      = FUNC(add_residual4x4_c, depth);         \
+    hevcdsp->add_residual_c[1]      = FUNC(add_residual8x8_c, depth);         \
+    hevcdsp->add_residual_c[2]      = FUNC(add_residual16x16_c, depth);       \
+    hevcdsp->add_residual_c[3]      = FUNC(add_residual32x32_c, depth);       \
+    hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth);
 #define SLICED_LOOP_FILTERS(depth)\
     hevcdsp->hevc_v_loop_filter_luma2 = FUNC(hevc_v_loop_filter_luma2, depth); \
     hevcdsp->hevc_h_loop_filter_uv    = FUNC(hevc_h_loop_filter_uv, depth);    \
@@ -319,19 +334,11 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
 
 #define HEVC_DSP(depth)                                                     \
     hevcdsp->put_pcm                = FUNC(put_pcm, depth);                 \
-    hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth);                 \
     hevcdsp->add_residual[0]        = FUNC(add_residual4x4, depth);         \
     hevcdsp->add_residual[1]        = FUNC(add_residual8x8, depth);         \
     hevcdsp->add_residual[2]        = FUNC(add_residual16x16, depth);       \
     hevcdsp->add_residual[3]        = FUNC(add_residual32x32, depth);       \
-    hevcdsp->add_residual_u[0]      = FUNC(add_residual4x4_u, depth);         \
-    hevcdsp->add_residual_u[1]      = FUNC(add_residual8x8_u, depth);         \
-    hevcdsp->add_residual_u[2]      = FUNC(add_residual16x16_u, depth);       \
-    hevcdsp->add_residual_u[3]      = FUNC(add_residual32x32_u, depth);       \
-    hevcdsp->add_residual_v[0]      = FUNC(add_residual4x4_v, depth);         \
-    hevcdsp->add_residual_v[1]      = FUNC(add_residual8x8_v, depth);         \
-    hevcdsp->add_residual_v[2]      = FUNC(add_residual16x16_v, depth);       \
-    hevcdsp->add_residual_v[3]      = FUNC(add_residual32x32_v, depth);       \
+    SLICED_ADD_RESIDUAL(depth);                                             \
     hevcdsp->dequant                = FUNC(dequant, depth);                 \
     hevcdsp->transform_rdpcm        = FUNC(transform_rdpcm, depth);         \
     hevcdsp->transform_4x4_luma     = FUNC(transform_4x4_luma, depth);      \

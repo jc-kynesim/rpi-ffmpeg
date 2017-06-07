@@ -85,7 +85,8 @@ static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
     }
 }
 
-static av_always_inline void FUNC(add_residual_uv)(uint8_t *_dst, int16_t *res,
+#if RPI_HEVC_SAND
+static av_always_inline void FUNC(add_residual_u_v)(uint8_t *_dst, const int16_t *res,
                                                 ptrdiff_t stride, int size)
 {
     int x, y;
@@ -102,6 +103,25 @@ static av_always_inline void FUNC(add_residual_uv)(uint8_t *_dst, int16_t *res,
     }
 }
 
+static av_always_inline void FUNC(add_residual_c)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, unsigned int size)
+{
+    unsigned int x, y;
+    pixel *dst = (pixel *)_dst;
+    const int16_t * ru = res;
+    const int16_t * rv = res + size * size;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x + 0] = av_clip_pixel(dst[x + 0] + *ru++);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + *rv++);
+        }
+        dst += stride;
+    }
+}
+#endif
 
 static void FUNC(add_residual4x4)(uint8_t *_dst, int16_t *res,
                                   ptrdiff_t stride)
@@ -127,58 +147,88 @@ static void FUNC(add_residual32x32)(uint8_t *_dst, int16_t *res,
     FUNC(add_residual)(_dst, res, stride, 32);
 }
 
+#if RPI_HEVC_SAND
 // -- U -- (plaited)
 
-static void FUNC(add_residual4x4_u)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual4x4_u)(uint8_t *_dst, const int16_t * res,
                                   ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst, res, stride, 4);
+    FUNC(add_residual_u_v)(_dst, res, stride, 4);
 }
 
-static void FUNC(add_residual8x8_u)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual8x8_u)(uint8_t *_dst, const int16_t * res,
                                   ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst, res, stride, 8);
+    FUNC(add_residual_u_v)(_dst, res, stride, 8);
 }
 
-static void FUNC(add_residual16x16_u)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual16x16_u)(uint8_t *_dst, const int16_t * res,
                                     ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst, res, stride, 16);
+    FUNC(add_residual_u_v)(_dst, res, stride, 16);
 }
 
-static void FUNC(add_residual32x32_u)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual32x32_u)(uint8_t *_dst, const int16_t * res,
                                     ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst, res, stride, 32);
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
 }
 
 // -- V -- (plaited)
 
-static void FUNC(add_residual4x4_v)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual4x4_v)(uint8_t *_dst, const int16_t * res,
                                   ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst + 1, res, stride, 4);
+    FUNC(add_residual_u_v)(_dst + 1, res, stride, 4);
 }
 
-static void FUNC(add_residual8x8_v)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual8x8_v)(uint8_t *_dst, const int16_t * res,
                                   ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst + 1, res, stride, 8);
+    FUNC(add_residual_u_v)(_dst + 1, res, stride, 8);
 }
 
-static void FUNC(add_residual16x16_v)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual16x16_v)(uint8_t *_dst, const int16_t * res,
                                     ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst + 1, res, stride, 16);
+    FUNC(add_residual_u_v)(_dst + 1, res, stride, 16);
 }
 
-static void FUNC(add_residual32x32_v)(uint8_t *_dst, int16_t *res,
+static void FUNC(add_residual32x32_v)(uint8_t *_dst, const int16_t * res,
                                     ptrdiff_t stride)
 {
-    FUNC(add_residual_uv)(_dst + 1, res, stride, 32);
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
 }
 
+// -- C -- (plaited - both U & V)
+
+static void FUNC(add_residual4x4_c)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_c)(_dst, res, stride, 4);
+}
+
+static void FUNC(add_residual8x8_c)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_c)(_dst, res, stride, 8);
+}
+
+static void FUNC(add_residual16x16_c)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride)
+{
+    FUNC(add_residual_c)(_dst, res, stride, 16);
+}
+
+static void FUNC(add_residual32x32_c)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride)
+{
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
+}
+#endif
 
 
 static void FUNC(transform_rdpcm)(int16_t *_coeffs, int16_t log2_size, int mode)
