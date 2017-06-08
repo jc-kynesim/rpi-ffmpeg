@@ -1113,7 +1113,7 @@ $(SUBDIR)sinewin.o: $(SUBDIR)sinewin_tables.h
 $(SUBDIR)sinewin_fixed.o: $(SUBDIR)sinewin_fixed_tables.h
 endif
 
-QASM_PY := ../local/qasm.py
+QASM_PY := ../local/bin/qasm.py
 
 ifneq ("$(wildcard $(QASM_PY))","")
 $(SUBDIR)rpi_shader.c: $(SUBDIR)rpi_shader.qasm
