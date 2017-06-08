@@ -4035,7 +4035,8 @@ int ff_thread_ref_frame(ThreadFrame *dst, ThreadFrame *src)
 {
     int ret;
 
-    dst->owner = src->owner;
+    dst->owner[0] = src->owner[0];
+    dst->owner[1] = src->owner[1];
 
     ret = av_frame_ref(dst->f, src->f);
     if (ret < 0)
@@ -4045,7 +4046,7 @@ int ff_thread_ref_frame(ThreadFrame *dst, ThreadFrame *src)
 
     if (src->progress &&
         !(dst->progress = av_buffer_ref(src->progress))) {
-        ff_thread_release_buffer(dst->owner, dst);
+        ff_thread_release_buffer(dst->owner[0], dst);
         return AVERROR(ENOMEM);
     }
 
@@ -4061,7 +4062,7 @@ enum AVPixelFormat ff_thread_get_format(AVCodecContext *avctx, const enum AVPixe
 
 int ff_thread_get_buffer(AVCodecContext *avctx, ThreadFrame *f, int flags)
 {
-    f->owner = avctx;
+    f->owner[0] = f->owner[1] = avctx;
     return ff_get_buffer(avctx, f->f, flags);
 }
 

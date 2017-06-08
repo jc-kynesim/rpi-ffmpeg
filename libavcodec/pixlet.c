@@ -154,7 +154,7 @@ static int read_low_coeffs(AVCodecContext *avctx, int16_t *dst, int size, int wi
         state = 120 * (escape + flag) + state - (120 * state >> 8);
         flag = 0;
 
-        if (state * 4 > 0xFF || i >= size)
+        if (state * 4ULL > 0xFF || i >= size)
             continue;
 
         nbits = ((state + 8) >> 5) + (state ? ff_clz(state) : 32) - 24;
@@ -173,7 +173,7 @@ static int read_low_coeffs(AVCodecContext *avctx, int16_t *dst, int size, int wi
             }
         }
 
-        if (i + rlen > size)
+        if (rlen > size - i)
             return AVERROR_INVALIDDATA;
         i += rlen;
 
@@ -256,11 +256,11 @@ static int read_high_coeffs(AVCodecContext *avctx, uint8_t *src, int16_t *dst, i
             j = 0;
             dst += stride;
         }
-        state += (int64_t)d * yflag - (d * state >> 8);
+        state += (int64_t)d * (uint64_t)yflag - ((int64_t)(d * (uint64_t)state) >> 8);
 
         flag = 0;
 
-        if (state * 4 > 0xFF || i >= size)
+        if (state * 4ULL > 0xFF || i >= size)
             continue;
 
         pfx = ((state + 8) >> 5) + (state ? ff_clz(state): 32) - 24;
