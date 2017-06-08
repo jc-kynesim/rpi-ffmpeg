@@ -63,8 +63,9 @@
 
   // We can pred any block height, but caching may make some heights better than others
   // Currently it doesn't seem to make a lot of difference
-  #define Y_P_MAX_H     64
-  #define Y_B_MAX_H     64
+  // 0 => any height
+  #define Y_P_MAX_H     0
+  #define Y_B_MAX_H     0
 #endif
 
 #define DEBUG_DECODE_N 0   // 0 = do all, n = frames idr onwards
@@ -2288,9 +2289,14 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
         const int x1 = x0 + (mv->x >> 2);
         const int y1 = y0 + (mv->y >> 2);
 
+#if Y_P_MAX_H == 0
+        const int bh = nPbH;
+        const int start_y = 0;
+#else
         for (int start_y = 0; start_y < nPbH; start_y += Y_P_MAX_H, dst_addr += s->frame->linesize[0] * Y_P_MAX_H)
         {
             const int bh = FFMIN(nPbH - start_y, Y_P_MAX_H);
+#endif
 
             for (int start_x = 0; start_x < nPbW; start_x += 16)
             {
@@ -2326,18 +2332,25 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 yp->last_l0 = &cmd_y->next_src1;
                 *(qpu_mc_pred_y_p00_t **)&yp->qpu_mc_curr = cmd_y + 1;
             }
+#if Y_P_MAX_H != 0
         }
+#endif
     }
     else
     {
         const int x1_m3 = x0 + (mv->x >> 2) - 3;
         const int y1_m3 = y0 + (mv->y >> 2) - 3;
 
+#if Y_P_MAX_H == 0
+        const int bh = nPbH;
+        const int start_y = 0;
+#else
         for (int start_y = 0; start_y < nPbH; start_y += Y_P_MAX_H, dst_addr += s->frame->linesize[0] * Y_P_MAX_H)
         {
+            const int bh = FFMIN(nPbH - start_y, Y_P_MAX_H);
+#endif
             const uint32_t src_yx_y = y1_m3 + start_y;
             int start_x = 0;
-            const int bh = FFMIN(nPbH - start_y, Y_P_MAX_H);
 
 #if 1
             // As Y-pred operates on two independant 8-wide src blocks we can merge
@@ -2427,7 +2440,9 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                     s->last_y8_p = cmd_y;
                 }
             }
+#if Y_P_MAX_H != 0
         }
+#endif
     }
 }
 
@@ -2469,10 +2484,14 @@ rpi_pred_y_b(HEVCContext * const s,
         const int x2 = x0 + (mv2->x >> 2);
         const int y2 = y0 + (mv2->y >> 2);
 
-        for (int start_y = 0; start_y < nPbH; start_y += Y_B_MAX_H)
+#if Y_B_MAX_H == 0
+        const int bh = nPbH;
+        const int start_y = 0;
+#else
+        for (int start_y = 0; start_y < nPbH; start_y += Y_B_MAX_H, dst += s->frame->linesize[0] * Y_B_MAX_H)
         {
             const unsigned int bh = FFMIN(nPbH - start_y, Y_B_MAX_H);
-
+#endif
             // Can do chunks a full 16 wide if we don't want the H filter
             for (int start_x=0; start_x < nPbW; start_x += 16)
             {
@@ -2507,8 +2526,9 @@ rpi_pred_y_b(HEVCContext * const s,
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
             }
-            dst += s->frame->linesize[0] * Y_B_MAX_H;
+#if Y_P_MAX_H != 0
         }
+#endif
     }
     else
     {
@@ -2518,10 +2538,14 @@ rpi_pred_y_b(HEVCContext * const s,
         const int x2 = x0 + (mv2->x >> 2) - 3;
         const int y2 = y0 + (mv2->y >> 2) - 3;
 
-        for (int start_y=0; start_y < nPbH; start_y += Y_B_MAX_H)
+#if Y_B_MAX_H == 0
+        const int bh = nPbH;
+        const int start_y = 0;
+#else
+        for (int start_y=0; start_y < nPbH; start_y += Y_B_MAX_H, dst += s->frame->linesize[0] * Y_B_MAX_H)
         {
             const unsigned int bh = FFMIN(nPbH - start_y, Y_B_MAX_H);
-
+#endif
             for (int start_x=0; start_x < nPbW; start_x += 8)
             { // B blocks work 8 at a time
                 // B weights aren't doubled as the QPU code does the same
@@ -2566,8 +2590,9 @@ rpi_pred_y_b(HEVCContext * const s,
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
             }
-            dst += s->frame->linesize[0] * Y_B_MAX_H;
+#if Y_B_MAX_H != 0
         }
+#endif
     }
 }
 
