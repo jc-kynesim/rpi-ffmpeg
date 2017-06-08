@@ -104,7 +104,6 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 
 #define ENCODE_COEFFS(c0, c1, c2, c3) (((c0) & 0xff) | ((c1) & 0xff) << 8 | ((c2) & 0xff) << 16 | ((c3) & 0xff) << 24)
 
-// TODO Chroma only needs 4 taps
 
 // Actual filter goes -ve, +ve, +ve, -ve using these values
 static const uint32_t rpi_filter_coefs[8] = {
@@ -116,6 +115,38 @@ static const uint32_t rpi_filter_coefs[8] = {
         ENCODE_COEFFS(  4,  28,  46,  6),
         ENCODE_COEFFS(  2,  16,  54,  4),
         ENCODE_COEFFS(  2,  10,  58,  2)
+};
+
+// Function arrays by QPU
+
+static const int * const inter_pred_setup_c_qpu[12] = {
+    mc_setup_c_q0, mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn,
+    mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn,
+    mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn
+};
+
+static const int * const inter_pred_setup_y_qpu[12] = {
+    mc_setup_y_q0, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn,
+    mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn,
+    mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn
+};
+
+static const int * const inter_pred_sync_qpu[12] = {
+    mc_sync_q0, mc_sync_q1, mc_sync_q2, mc_sync_q3,
+    mc_sync_q4, mc_sync_q5, mc_sync_q6, mc_sync_q7,
+    mc_sync_q8, mc_sync_q9, mc_sync_q10, mc_sync_q11
+};
+
+static const int * const inter_pred_exit_c_qpu[12] = {
+    mc_interrupt_exit12c, mc_exit_c, mc_exit_c, mc_exit_c,
+    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c,
+    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c
+};
+
+static const int * const inter_pred_exit_y_qpu[12] = {
+    mc_interrupt_exit12, mc_exit, mc_exit, mc_exit,
+    mc_exit,   mc_exit, mc_exit, mc_exit,
+    mc_exit,   mc_exit, mc_exit, mc_exit
 };
 
 
@@ -4861,36 +4892,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     return 0;
 }
-
-static const int * const inter_pred_setup_c_qpu[12] = {
-    mc_setup_c_q0, mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn,
-    mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn,
-    mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn
-};
-
-static const int * const inter_pred_setup_y_qpu[12] = {
-    mc_setup_y_q0, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn,
-    mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn,
-    mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn
-};
-
-static const int * const inter_pred_sync_qpu[12] = {
-    mc_sync_q0, mc_sync_q1, mc_sync_q2, mc_sync_q3,
-    mc_sync_q4, mc_sync_q5, mc_sync_q6, mc_sync_q7,
-    mc_sync_q8, mc_sync_q9, mc_sync_q10, mc_sync_q11
-};
-
-static const int * const inter_pred_exit_c_qpu[12] = {
-    mc_interrupt_exit12c, mc_exit_c, mc_exit_c, mc_exit_c,
-    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c,
-    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c
-};
-
-static const int * const inter_pred_exit_y_qpu[12] = {
-    mc_interrupt_exit12, mc_exit, mc_exit, mc_exit,
-    mc_exit,   mc_exit, mc_exit, mc_exit,
-    mc_exit,   mc_exit, mc_exit, mc_exit
-};
 
 
 static av_cold int hevc_init_context(AVCodecContext *avctx)
