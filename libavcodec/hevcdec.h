@@ -463,8 +463,6 @@ typedef struct HEVCLocalContext {
 #ifdef RPI
 
 // The processing is done in chunks
-// Each chunk corresponds to 24 64x64 luma blocks (24 so it is divisible by 8 for chroma and 12 for luma)
-// This is a distance of 1536 pixels across the screen
 // Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
 // but allocate more memory and increase the latency before data in the next frame can be processed
 #define RPI_NUM_CHUNKS 4
@@ -486,9 +484,6 @@ typedef struct HEVCLocalContext {
 #define RPI_CMD_LUMA_BI 2
 #define RPI_CMD_CHROMA_BI 3
 #define RPI_CMD_V_BI 4
-
-// RPI_PRECLEAR is not working yet - perhaps clearing on VPUs is flawed?
-// #define RPI_PRECLEAR
 
 // Command for inter prediction
 typedef struct HEVCMvCmd {
@@ -517,6 +512,7 @@ enum rpi_pred_cmd_e
     RPI_PRED_ADD_RESIDUAL,
     RPI_PRED_ADD_RESIDUAL_U, // = RPI_PRED_TRANSFORM_ADD + c_idx
     RPI_PRED_ADD_RESIDUAL_V, // = RPI_PRED_TRANSFORM_ADD + c_idx
+    RPI_PRED_ADD_RESIDUAL_C, // Merged U+V
     RPI_PRED_INTRA,
     RPI_PRED_I_PCM,
     RPI_PRED_CMD_MAX
@@ -551,31 +547,38 @@ typedef struct HEVCPredCmd {
 
 #ifdef RPI
 
-struct qpu_mc_pred_c_s;
-struct qpu_mc_pred_y_s;
+union qpu_mc_pred_cmd_s;
+struct qpu_mc_pred_y_p_s;
+struct qpu_mc_src_s;
 
-typedef struct HEVCRpiLumaPred
+typedef struct HEVCRpiInterPredQ
 {
-    struct qpu_mc_pred_y_s *qpu_mc_base;
-    struct qpu_mc_pred_y_s *qpu_mc_curr;
-    struct qpu_mc_pred_y_s *last_lx;
+    union qpu_mc_pred_cmd_u *qpu_mc_base;
+    union qpu_mc_pred_cmd_u *qpu_mc_curr;
+    struct qpu_mc_src_s *last_l0;
+    struct qpu_mc_src_s *last_l1;
     unsigned int load;
-} HEVCRpiLumaPred;
+    uint32_t code_setup;
+    uint32_t code_sync;
+    uint32_t code_exit;
+} HEVCRpiInterPredQ;
 
-typedef struct HEVCRpiChromaPred
+typedef struct HEVCRpiInterPredEnv
 {
-    struct qpu_mc_pred_c_s *qpu_mc_base;
-    struct qpu_mc_pred_c_s *qpu_mc_curr;
-    struct qpu_mc_pred_c_s *last_l0;
-    struct qpu_mc_pred_c_s *last_l1;
-    unsigned int load;
-} HEVCRpiChromaPred;
+    HEVCRpiInterPredQ * q;
+    unsigned int n;        // Number of Qs
+    unsigned int n_grp;    // Number of Q in a group
+    unsigned int curr;     // Current Q number (0..n-1)
+    int used;              // 0 if nothing in any Q, 1 otherwise
+    int used_grp;          // 0 if nothing in any Q in the current group
+    unsigned int max_fill;
+    GPU_MEM_PTR_T gptr;
+    unsigned int q1_size;  // size of 1 uniform Q
+} HEVCRpiInterPredEnv;
 
 typedef struct HEVCRpiJob {
-    GPU_MEM_PTR_T chroma_mvs_gptr;
-    GPU_MEM_PTR_T luma_mvs_gptr;
-    HEVCRpiChromaPred chroma_mvs[QPU_N_UV];
-    HEVCRpiLumaPred luma_mvs[QPU_N_Y];
+    HEVCRpiInterPredEnv chroma_ip;
+    HEVCRpiInterPredEnv luma_ip;
 } HEVCRpiJob;
 
 #if RPI_TSTATS
@@ -621,8 +624,6 @@ typedef struct HEVCContext {
     int used_for_ref;  // rpi
 #ifdef RPI
     int enable_rpi;
-    HEVCMvCmd *unif_mv_cmds_y[RPI_MAX_JOBS];
-    HEVCMvCmd *unif_mv_cmds_c[RPI_MAX_JOBS];
     HEVCPredCmd *univ_pred_cmds[RPI_MAX_JOBS];
     int buf_width;
     GPU_MEM_PTR_T coeffs_buf_default[RPI_MAX_JOBS];
@@ -648,10 +649,8 @@ typedef struct HEVCContext {
     HEVCRpiStats tstats;
 #endif
 #if RPI_INTER
-    HEVCRpiChromaPred * curr_pred_c;
-    HEVCRpiLumaPred * curr_pred_y;
-    struct qpu_mc_pred_y_s * last_y8_p;
-    struct qpu_mc_pred_y_s * last_y8_lx;
+    struct qpu_mc_pred_y_p_s * last_y8_p;
+    struct qpu_mc_src_s * last_y8_l1;
 
     // Function pointers
     uint32_t qpu_filter_uv;
@@ -659,6 +658,8 @@ typedef struct HEVCContext {
     uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
     uint32_t qpu_filter;
     uint32_t qpu_filter_b;
+    uint32_t qpu_filter_y_p00;
+    uint32_t qpu_filter_y_b00;
 #endif
 
 #ifdef RPI_WORKER

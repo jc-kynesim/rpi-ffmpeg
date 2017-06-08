@@ -25,6 +25,7 @@
 #ifndef AVCODEC_HEVCDSP_H
 #define AVCODEC_HEVCDSP_H
 
+#include "hevc.h"
 #include "get_bits.h"
 
 #define MAX_PB_SIZE 64
@@ -56,12 +57,16 @@ typedef struct MvField {
 typedef struct HEVCDSPContext {
     void (*put_pcm)(uint8_t *_dst, ptrdiff_t _stride, int width, int height,
                     struct GetBitContext *gb, int pcm_bit_depth);
-    void (*put_pcm_c)(uint8_t *_dst, ptrdiff_t _stride, int width, int height,
-                    struct GetBitContext *gb, int pcm_bit_depth);
 
     void (*add_residual[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
-    void (*add_residual_u[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
-    void (*add_residual_v[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
+#if RPI_HEVC_SAND
+    void (*add_residual_u[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride);
+    void (*add_residual_v[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride);
+
+    void (*add_residual_c[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride);
+    void (*put_pcm_c)(uint8_t *_dst, ptrdiff_t _stride, int width, int height,
+                    struct GetBitContext *gb, int pcm_bit_depth);
+#endif
 
     void (*dequant)(int16_t *coeffs, int16_t log2_size);
 
