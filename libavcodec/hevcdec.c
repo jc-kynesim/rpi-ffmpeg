@@ -3726,14 +3726,13 @@ static void worker_core(HEVCContext * const s)
             flush_start = FFMIN(flush_start, y);
             high=FFMAX(high,y);
         }
-        // Avoid flushing past end of frame
-        flush_count = FFMIN(high + (1 << s->ps.sps->log2_ctb_size), s->frame->height) - flush_start;
+        flush_count = FFMIN(high + (1 << s->ps.sps->log2_ctb_size), s->ps.sps->height) - flush_start;
     }
 
     if (mc_terminate_add(s, vqj, rfe, &s->jobs[job].chroma_ip) != 0)
     {
-        rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-          flush_start, flush_count, s->ps.sps->vshift[1], 0, 1);
+        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+          0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 0, 1);
     }
 
 // We can take a sync here and try to locally overlap QPU processing with ARM
@@ -3744,8 +3743,8 @@ static void worker_core(HEVCContext * const s)
 
     if (mc_terminate_add(s, vqj, rfe, &s->jobs[job].luma_ip) != 0)
     {
-        rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-          flush_start, flush_count, s->ps.sps->vshift[1], 1, 0);
+        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+          0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 1, 0);
     }
 #endif
 

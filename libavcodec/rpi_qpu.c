@@ -534,21 +534,25 @@ void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame 
   }
 }
 
-void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
-  const unsigned int start_line, const unsigned int n, const unsigned int uv_shift, const int do_luma, const int do_chroma)
+void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
+  const unsigned int x0, const unsigned int y0, const unsigned int width, const unsigned int height,
+  const unsigned int uv_shift, const int do_luma, const int do_chroma)
 {
-  const unsigned int y_offset = frame->linesize[0] * start_line;
-  const unsigned int y_size = frame->linesize[0] * n;
+  const unsigned int y_offset = frame->linesize[0] * y0;
+  const unsigned int y_size = frame->linesize[0] * height;
   // Round UV up/down to get everything
   const unsigned int uv_rnd = (1U << uv_shift) >> 1;
-  const unsigned int uv_offset = frame->linesize[1] * (start_line >> uv_shift);
-  const unsigned int uv_size = frame->linesize[1] * ((start_line + n + uv_rnd) >> uv_shift) - uv_offset;
+  const unsigned int uv_offset = frame->linesize[1] * (y0 >> uv_shift);
+  const unsigned int uv_size = frame->linesize[1] * ((y0 + height + uv_rnd) >> uv_shift) - uv_offset;
 
+#if 0
+  // *** frame->height is cropped height so not good
   // As all unsigned they will also reject -ve
   // Test individually as well as added to reject overflow
-  av_assert0(start_line <= (unsigned int)frame->height);
+  av_assert0(start_line <= (unsigned int)frame->height);  // ***** frame height cropped
   av_assert0(n <= (unsigned int)frame->height);
   av_assert0(start_line + n <= (unsigned int)frame->height);
+#endif
 
   if (!gpu_is_buf1(frame))
   {
@@ -575,13 +579,14 @@ void rpi_cache_flush_add_frame_lines(rpi_cache_flush_env_t * const rfe, const AV
   {
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
 //    printf("%s: start_line=%d, lines=%d, %c%c\n", __func__, start_line, n, do_luma ? 'l' : ' ', do_chroma ? 'c' : ' ');
-    for (int x = 0; x < frame->width; x += frame->linesize[0]) {
+    // **** Use x0!
+    for (int x = 0; x < x0 + width; x += frame->linesize[0]) {
       if (do_luma) {
-        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sliced_frame_off_y(frame, x, start_line), y_size);
+        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sliced_frame_off_y(frame, x, y0), y_size);
       }
       if (do_chroma) {
         rpi_cache_flush_add_gm_range(rfe, gm, mode,
-                                     (frame->data[1] - gm->arm) + rpi_sliced_frame_off_c(frame, x >> 1, start_line >> 1), uv_size);
+                                     (frame->data[1] - gm->arm) + rpi_sliced_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
       }
     }
   }

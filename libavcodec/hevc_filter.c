@@ -1082,8 +1082,8 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
 static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
 {
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
-    rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-      start, end - start, s->ps.sps->vshift[1], flush_luma, flush_chroma);
+    rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+      0, start, s->ps.sps->width, end - start, 0, s->ps.sps->vshift[1], flush_luma, flush_chroma);
     rpi_cache_flush_finish(rfe);
 }
 #endif
@@ -1097,10 +1097,11 @@ void rpi_flush_ref_frame_progress(HEVCContext * const s, ThreadFrame * const f, 
         const int d0 = ((int *)f->progress->data)[0];
         const unsigned int curr_y = d0 == -1 ? 0 : d0;  // At start of time progress is -1
 
-        if (curr_y < (unsigned int)f->f->height) {
+        if (curr_y < (unsigned int)s->ps.sps->height) {
             rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
-            rpi_cache_flush_add_frame_lines(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-              curr_y, FFMIN(n, (unsigned int)f->f->height) - curr_y, s->ps.sps->vshift[1], 1, 1);
+            rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+              0, curr_y, s->ps.sps->width, FFMIN(n, (unsigned int)s->ps.sps->height) - curr_y,
+              s->ps.sps->vshift[1], 1, 1);
             rpi_cache_flush_finish(rfe);
         }
     }
