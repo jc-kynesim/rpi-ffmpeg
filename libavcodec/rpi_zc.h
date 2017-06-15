@@ -19,12 +19,13 @@ typedef struct AVZcEnv * AVZcEnvPtr;
 
 typedef struct AVRpiZcFrameGeometry
 {
-    unsigned int stride_y;
-    unsigned int height_y;
-    unsigned int stride_c;
-    unsigned int height_c;
-    unsigned int planes_c;
-    unsigned int stripes;
+    unsigned int stride_y;  // Luma stride (bytes)
+    unsigned int height_y;  // Luma height (lines)
+    unsigned int stride_c;  // Chroma stride (bytes)
+    unsigned int height_c;  // Chroma stride (lines)
+    unsigned int planes_c;  // Chroma plane count (U, V = 2, interleaved = 1)
+    unsigned int stripes;   // Number of stripes (sand)
+    unsigned int bytes_per_pel;
 } AVRpiZcFrameGeometry;
 
 

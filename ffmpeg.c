@@ -200,8 +200,6 @@ static volatile int rpi_display_count = 0;
 static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 {
     MMAL_POOL_T* pool;
-    size_t i;
-    size_t size = (w*h*3)/2;
 #ifdef RPI_ZERO_COPY
     mmal_port_parameter_set_boolean(port, MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE); // Does this mark that the buffer contains a vc_handle?  Would have expected a vc_image?
     pool = mmal_port_pool_create(port, NUM_BUFFERS, 0);
@@ -209,7 +207,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 #else
     pool = mmal_port_pool_create(port, NUM_BUFFERS, size);
 
-    for (i = 0; i < NUM_BUFFERS; ++i)
+    for (size_t i = 0; i < NUM_BUFFERS; ++i)
     {
        MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
        char * bufPtr = buffer->data;
@@ -233,9 +231,10 @@ static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
   mmal_buffer_header_release(buffer);
 }
 
-static MMAL_COMPONENT_T* display_init(const enum AVPixelFormat fmt, size_t x, size_t y, size_t w, size_t h)
+static MMAL_COMPONENT_T* display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, size_t h)
 {
-    MMAL_COMPONENT_T* display;
+    MMAL_COMPONENT_T* display = NULL;
+    MMAL_COMPONENT_T* isp = NULL;
     MMAL_DISPLAYREGION_T region =
     {
         .hdr = {MMAL_PARAMETER_DISPLAYREGION, sizeof(region)},
@@ -244,6 +243,7 @@ static MMAL_COMPONENT_T* display_init(const enum AVPixelFormat fmt, size_t x, si
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
+    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
 
     bcm_host_init();  // TODO is this needed?
