@@ -219,7 +219,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
             geo.bytes_per_pel = 1;
             break;
 
-        case AV_PIX_FMT_YUV420P10LE:
+        case AV_PIX_FMT_YUV420P10:
             geo.stride_y = ((video_width * 2 + 64 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
             geo.stride_c = geo.stride_y / 2;
             geo.height_y = (video_height + 32 + 31) & ~31;
@@ -273,7 +273,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
         case AV_PIX_FMT_SAND64_16:
         case AV_PIX_FMT_SAND64_10:
         {
-            const unsigned int stripe_w = 64;
+            const unsigned int stripe_w = 128;  // bytes
 
             static pthread_mutex_t sand_lock = PTHREAD_MUTEX_INITIALIZER;
             static VC_IMAGE_T img = {0};
@@ -302,7 +302,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
             geo.height_y = ((intptr_t)img.extra.uv.u - (intptr_t)img.image_data) / stripe_w;
             geo.height_c = img.pitch / stripe_w - geo.height_y;
             geo.planes_c = 1;
-            geo.stripes = (video_width + stripe_w - 1) / stripe_w;
+            geo.stripes = (video_width * 2 + stripe_w - 1) / stripe_w;
             geo.bytes_per_pel = 2;
 
             pthread_mutex_unlock(&sand_lock);
@@ -381,8 +381,12 @@ static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
     frame->linesize[0] = geo.stride_y;
     frame->linesize[1] = geo.stride_c;
     frame->linesize[2] = geo.stride_c;
+    // abuse: linesize[3] = "stripe stride"
+    // stripe_stride is NOT the stride between slices it is (that / geo.stride_y).
+    // In a general case this makes the calculation an xor and multiply rather
+    // than a divide and multiply
     if (geo.stripes > 1)
-        frame->linesize[3] = (geo.height_y + geo.height_c) * geo.bytes_per_pel;      // abuse: linesize[3] = stripe stride
+        frame->linesize[3] = geo.height_y + geo.height_c;
 
     frame->data[0] = buf->data;
     frame->data[1] = frame->data[0] + size_y;

@@ -97,6 +97,8 @@ static inline unsigned int rpi_sliced_frame_stride2(const AVFrame * const frame)
     return frame->linesize[3];
 }
 
+// If x is measured in bytes (not pixels) then this works for sand64_16 as
+// well as sand128
 static inline unsigned int rpi_sliced_frame_off_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
 {
     const unsigned int stride1 = frame->linesize[0];

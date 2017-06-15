@@ -25,7 +25,6 @@
 
 #ifdef RPI
 #define RPI_DISPLAY
-#define RPI_ZERO_COPY
 #endif
 
 #include "config.h"
@@ -87,9 +86,7 @@
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_util_params.h>
 #pragma GCC diagnostic pop
-#ifdef RPI_ZERO_COPY
 #include "libavcodec/rpi_qpu.h"
-#endif
 #include "libavcodec/rpi_zc.h"
 #endif
 
@@ -200,30 +197,16 @@ static volatile int rpi_display_count = 0;
 static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
 {
     MMAL_POOL_T* pool;
-#ifdef RPI_ZERO_COPY
     mmal_port_parameter_set_boolean(port, MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE); // Does this mark that the buffer contains a vc_handle?  Would have expected a vc_image?
     pool = mmal_port_pool_create(port, NUM_BUFFERS, 0);
     assert(pool);
-#else
-    pool = mmal_port_pool_create(port, NUM_BUFFERS, size);
-
-    for (size_t i = 0; i < NUM_BUFFERS; ++i)
-    {
-       MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
-       char * bufPtr = buffer->data;
-       memset(bufPtr, i*30, w*h);
-       memset(bufPtr+w*h, 128, (w*h)/2);
-    }
-#endif
 
     return pool;
 }
 
 static void display_cb_input(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer) {
-#ifdef RPI_ZERO_COPY
     av_rpi_zc_unref(buffer->user_data);
     --rpi_display_count;
-#endif
     mmal_buffer_header_release(buffer);
 }
 
@@ -298,47 +281,20 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
     buf->cmd = 0;
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
-#ifdef RPI_ZERO_COPY
-{
-    const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
-    if (fr_buf == NULL) {
-        mmal_buffer_header_release(buf);
-        return;
-    }
-
-    buf->user_data = fr_buf;
-    buf->data = av_rpi_zc_vc_handle(fr_buf);
-    buf->offset = av_rpi_zc_offset(fr_buf);
-    buf->length = av_rpi_zc_length(fr_buf);
-    buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
-#if 0
     {
-        unsigned int n;
-        for (n = 0; n < fr->width; n += 128) {
-            memset(fr->data[1] + n * fr->linesize[3], 0x80, 128 * fr->height / 2);
+        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
+        if (fr_buf == NULL) {
+            mmal_buffer_header_release(buf);
+            return;
         }
+
+        buf->user_data = fr_buf;
+        buf->data = av_rpi_zc_vc_handle(fr_buf);
+        buf->offset = av_rpi_zc_offset(fr_buf);
+        buf->length = av_rpi_zc_length(fr_buf);
+        buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
+        ++rpi_display_count;
     }
-#endif
-    ++rpi_display_count;
-}
-#else
-{
-#error YYY
-    int w = fr->width;
-    int h = fr->height;
-    int w2 = (w+31)&~31;
-    int h2 = (h+15)&~15;
-
-    buf->length = (w2 * h2 * 3)/2;
-    buf->user_data = NULL;
-
-    //mmal_buffer_header_mem_lock(buf);
-    memcpy(buf->data, fr->data[0], w2 * h);
-    memcpy(buf->data+w2*h2, fr->data[1], w2 * h / 4);
-    memcpy(buf->data+w2*h2*5/4, fr->data[2], w2 * h / 4);
-    //mmal_buffer_header_mem_unlock(buf);
-}
-#endif
 
     while (rpi_display_count >= 3) {
         usleep(5000);
@@ -792,8 +748,7 @@ static void ffmpeg_cleanup(int ret)
         av_freep(&ist->filters);
         av_freep(&ist->hwaccel_device);
         av_freep(&ist->dts_buffer);
-
-#ifdef RPI_ZERO_COPY
+#ifdef RPI_DISPLAY
         av_rpi_zc_uninit(ist->dec_ctx);
 #endif
         avcodec_free_context(&ist->dec_ctx);
@@ -3103,7 +3058,7 @@ static int init_input_stream(int ist_index, char *error, int error_len)
         ist->dec_ctx->get_format            = get_format;
         ist->dec_ctx->get_buffer2           = get_buffer;
 
-#ifdef RPI_ZERO_COPY
+#ifdef RPI_DISPLAY
         // Overrides the above get_buffer2
         av_rpi_zc_init(ist->dec_ctx);
 #endif
