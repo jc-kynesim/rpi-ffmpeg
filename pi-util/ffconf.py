@@ -8,7 +8,6 @@ import sys
 import csv
 from stat import *
 
-conf_root = "/opt/conform/h265"
 ffmpeg_exec = "./ffmpeg"
 
 def testone(fileroot, name, es_file, md5_file):
@@ -58,10 +57,10 @@ def testone(fileroot, name, es_file, md5_file):
 
 def scandir(root):
     aconf = []
-    ents = os.listdir(conf_root)
+    ents = os.listdir(root)
     ents.sort(key=str.lower)
     for name in ents:
-        test_path = os.path.join(conf_root, name)
+        test_path = os.path.join(root, name)
         if S_ISDIR(os.stat(test_path).st_mode):
             files = os.listdir(test_path)
             es_file = "?"
@@ -72,7 +71,7 @@ def scandir(root):
                     pass
                 elif ext == ".bit" or ext == ".bin":
                     es_file = f
-                elif ext == ".md5":
+                elif ext == ".md5" or (ext == ".txt" and base[-4:] == "_md5"):
                     if md5_file == "?":
                         md5_file = f
                     elif base[-3:] == "yuv":
@@ -88,9 +87,11 @@ def runtest(name, tests):
             return True
         return False
 
-def doconf(csva, tests):
-    failures = []
+def doconf(csva, tests, test_root):
+    unx_failures = []
     unx_success = []
+    failures = 0
+    successes = 0
     for a in csva:
         exp_test = int(a[0])
         if (exp_test and runtest(a[1], tests)):
@@ -98,17 +99,25 @@ def doconf(csva, tests):
             print "==== ", name,
             sys.stdout.flush()
 
-            rv = testone(os.path.join(conf_root, name), name, a[2], a[3])
+            rv = testone(os.path.join(test_root, name), name, a[2], a[3])
+            if (rv == 0):
+                successes += 1
+            else:
+                failures += 1
+
             if (rv == 0):
                 if exp_test == 2:
                     print ": * OK *"
                     unx_success.append(name)
                 else:
                     print ": ok"
-            elif exp_test > 1 and rv == 1:
+            elif exp_test == 2 and rv == 1:
                 print ": fail"
+            elif exp_test == 3 and rv == 2:
+                # Call an expected "crash" an abort
+                print ": abort"
             else:
-                failures.append(name)
+                unx_failures.append(name)
                 if rv == 1:
                     print ": * FAIL *"
                 elif (rv == 2) :
@@ -118,11 +127,11 @@ def doconf(csva, tests):
                 else :
                     print ": * BANG *"
 
-    if failures or unx_success:
-        print "Unexpected Failures:", failures
+    if unx_failures or unx_success:
+        print "Unexpected Failures:", unx_failures
         print "Unexpected Success: ", unx_success
     else:
-        print "All tests normal"
+        print "All tests normal:", successes, "ok,", failures, "failed"
 
 
 class ConfCSVDialect(csv.Dialect):
@@ -138,17 +147,18 @@ if __name__ == '__main__':
 
     argp = argparse.ArgumentParser(description="FFmpeg h265 conformance tester")
     argp.add_argument("tests", nargs='*')
+    argp.add_argument("--test_root", default="/opt/conform/h265", help="Root dir for test")
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
     argp.add_argument("--csv", default="pi-util/conf_h265.csv", help="CSV filename")
     args = argp.parse_args()
 
     if args.csvgen:
-        csv.writer(sys.stdout).writerows(scandir(conf_root))
+        csv.writer(sys.stdout).writerows(scandir(args.test_root))
         exit(0)
 
     with open(args.csv, 'rt') as csvfile:
         csva = [a for a in csv.reader(csvfile, ConfCSVDialect())]
 
 
-    doconf(csva, args.tests)
+    doconf(csva, args.tests, args.test_root)
 
