@@ -9,7 +9,6 @@
 // display has finished with it.
 
 #include "libavutil/frame.h"
-//#include "libavcodec/avcodec.h"
 struct AVBufferRef;
 struct AVFrame;
 struct AVCodecContext;
