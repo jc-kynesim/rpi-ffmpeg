@@ -9,10 +9,13 @@
 // display has finished with it.
 
 #include "libavutil/frame.h"
-#include "libavcodec/avcodec.h"
+//#include "libavcodec/avcodec.h"
+struct AVBufferRef;
+struct AVFrame;
+struct AVCodecContext;
 
 // "Opaque" pointer to whatever we are using as a buffer reference
-typedef AVBufferRef * AVRpiZcRefPtr;
+typedef struct AVBufferRef * AVRpiZcRefPtr;
 
 struct AVZcEnv;
 typedef struct AVZcEnv * AVZcEnvPtr;
@@ -51,7 +54,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 //     the data, then allocate a new buffer and copy the data into it
 //   Otherwise return NULL
 AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
-    const AVFrame * const frame, const int maycopy);
+    const struct AVFrame * const frame, const int maycopy);
 
 // Get the vc_handle from the frame ref
 // Returns -1 if ref doesn't look valid

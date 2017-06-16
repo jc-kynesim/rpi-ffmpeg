@@ -1,5 +1,6 @@
 #include "config.h"
 #ifdef RPI
+#include "libavcodec/avcodec.h"
 #include "rpi_qpu.h"
 #include "rpi_mailbox.h"
 #include "rpi_zc.h"

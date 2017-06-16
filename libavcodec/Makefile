@@ -8,6 +8,7 @@ HEADERS = avcodec.h                                                     \
           rpi_qpu.h                                                     \
           rpi_shader.h                                                  \
 	  rpi_shader_cmd.h                                              \
+	  rpi_shader_template.h                                         \
           rpi_mailbox.h                                                 \
           rpi_hevc_transform.h                                          \
           rpi_zc.h                                                      \
@@ -55,6 +56,7 @@ OBJS = allcodecs.o                                                      \
        utils.o                                                          \
        rpi_qpu.o                                                        \
        rpi_shader.o                                                     \
+       rpi_shader_template.o                                            \
        rpi_mailbox.o                                                    \
        rpi_zc.o                                                         \
        vorbis_parser.o                                                  \
@@ -1124,4 +1126,4 @@ $(SUBDIR)rpi_shader.h: $(SUBDIR)rpi_shader.qasm
 	$(QASM_PY) -mc_h:rpi_shader,rpi_shader,rpi_shader $< > $@
 endif
 
-$(SUBDIR)rpi_qpu.o $(SUBDIR)hevc.o: $(SUBDIR)rpi_shader.h
+$(SUBDIR)rpi_shader_template.o $(SUBDIR)rpi_qpu.o $(SUBDIR)hevc.o: $(SUBDIR)rpi_shader.h
