@@ -57,6 +57,9 @@
   #define RPI_HEVC_SAND      0
   #endif
 
+
+  #define RPI_QPU_EMU        1
+
   #define RPI_TSTATS 0
 #endif
 

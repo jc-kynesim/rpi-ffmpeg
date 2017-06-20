@@ -3,11 +3,19 @@
 
 #pragma pack(push, 4)
 
+#if RPI_QPU_EMU
+typedef const uint8_t * qpu_mc_src_addr_t;
+typedef uint8_t * qpu_mc_dst_addr_t;
+#else
+typedef const uint32_t qpu_mc_src_addr_t;
+typedef const uint32_t qpu_mc_dst_addr_t;
+#endif
+
 typedef struct qpu_mc_src_s
 {
     int16_t y;
     int16_t x;
-    uint32_t base;
+    qpu_mc_src_addr_t base;
 } qpu_mc_src_t;
 
 
@@ -19,7 +27,7 @@ typedef struct qpu_mc_pred_c_p_s {
     uint32_t coeffs_y;
     uint32_t wo_u;
     uint32_t wo_v;
-    uint32_t dst_addr_c;
+    qpu_mc_dst_addr_t dst_addr_c;
     uint32_t next_fn;
 } qpu_mc_pred_c_p_t;
 
@@ -36,7 +44,7 @@ typedef struct qpu_mc_pred_c_b_s {
     uint32_t coeffs_y2;
     uint32_t wo_u2;
     uint32_t wo_v2;
-    uint32_t dst_addr_c;
+    qpu_mc_dst_addr_t dst_addr_c;
     uint32_t next_fn;
 } qpu_mc_pred_c_b_t;
 
@@ -68,7 +76,7 @@ typedef struct qpu_mc_pred_y_p_s {
     uint32_t mymx21;
     uint32_t wo1;
     uint32_t wo2;
-    uint32_t dst_addr;
+    qpu_mc_dst_addr_t dst_addr;
     uint32_t next_fn;
 } qpu_mc_pred_y_p_t;
 
@@ -77,7 +85,7 @@ typedef struct qpu_mc_pred_y_p00_s {
     uint16_t h;
     uint16_t w;
     uint32_t wo1;
-    uint32_t dst_addr;
+    qpu_mc_dst_addr_t dst_addr;
     uint32_t next_fn;
 } qpu_mc_pred_y_p00_t;
 

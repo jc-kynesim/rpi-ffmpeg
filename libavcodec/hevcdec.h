@@ -653,11 +653,15 @@ typedef struct HEVCContext {
     struct qpu_mc_src_s * last_y8_l1;
 
     // Function pointers
-    uint32_t qpu_filter_uv;
-    uint32_t qpu_filter_uv_b0;
+    uint32_t qpu_filter_uv_pxx;
+    uint32_t qpu_filter_uv_bxx;
+#if RPI_QPU_EMU
+    const uint8_t * qpu_dummy_frame;
+#else
     uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
-    uint32_t qpu_filter;
-    uint32_t qpu_filter_b;
+#endif
+    uint32_t qpu_filter_y_pxx;
+    uint32_t qpu_filter_y_bxx;
     uint32_t qpu_filter_y_p00;
     uint32_t qpu_filter_y_b00;
 #endif
