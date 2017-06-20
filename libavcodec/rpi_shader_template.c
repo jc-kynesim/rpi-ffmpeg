@@ -399,9 +399,34 @@ static int wtoidx(const unsigned int w)
 
 static const int fctom(uint32_t x)
 {
+    int rv;
     // As it happens we can take the 2nd filter term & divide it by 8
     // (dropping fractions) to get the fractional move
-    return 8 - ((x >> 11) & 0xf);
+    rv = 8 - ((x >> 11) & 0xf);
+    av_assert0(rv >= 0 && rv <= 7);
+    return rv;
+}
+
+// w, y, w, h in pixels
+// stried1, stride2 in bytes
+static void dump_y(const pixel * const base, const int stride1, const int stride2, int x, int y, int w, int h)
+{
+    const int mask = stride2 == 0 ? ~0 : stride1 - 1;
+    for (int i = y; i != y + h; ++i) {
+        for (int j = x; j != x + w; ++j) {
+            const pixel * p = base + ((j*pw) & mask) + i * stride1 + ((j*pw) & ~mask) * stride2;
+            if (j < 0 || i < 0)
+                printf(".. ");
+            else
+                printf("%02x ", *p);
+        }
+        printf("\n");
+    }
+}
+
+static inline int32_t ext(int32_t x, unsigned int shl, unsigned int shr)
+{
+    return (x << shl) >> shr;
 }
 
 
@@ -485,7 +510,7 @@ void rpi_shader_c(HEVCContext *const s,
                         // wo[offset] = offset*2+1
                         s->hevcdsp.put_hevc_qpel_uni_w[wtoidx(c->w)][(c->mymx21 & 0xff00) != 0][(c->mymx21 & 0xff) != 0](
                             c->dst_addr, st->stride1, patch_y1, PATCH_STRIDE,
-                            c->h, st->wdenom, c->wo1 >> 16, (c->wo1 >> 1) & 0xffff, (c->mymx21 & 0xff), ((c->mymx21 >> 8) & 0xff), c->w);
+                            c->h, st->wdenom, ext(c->wo1, 0, 16), ext(c->wo1, 16, 17), (c->mymx21 & 0xff), ((c->mymx21 >> 8) & 0xff), c->w);
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -514,8 +539,8 @@ void rpi_shader_c(HEVCContext *const s,
 
                         s->hevcdsp.put_hevc_qpel_bi_w[wtoidx(c->w)][(c->mymx21 & 0xff000000) != 0][(c->mymx21 & 0xff0000) != 0](
                             c->dst_addr, st->stride1, patch_y2, PATCH_STRIDE, patch_y3,
-                            c->h, st->wdenom, c->wo1 >> 16, 0,
-                            c->wo2 >> 16, (c->wo2 & 0xffff) - 1, ((c->mymx21 >> 16) & 0xff), ((c->mymx21 >> 24) & 0xff), c->w);
+                            c->h, st->wdenom, ext(c->wo1, 0, 16), 0,
+                            ext(c->wo2, 0, 16), ext(c->wo2, 16, 16) - 1, ((c->mymx21 >> 16) & 0xff), ((c->mymx21 >> 24) & 0xff), c->w);
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -535,7 +560,7 @@ void rpi_shader_c(HEVCContext *const s,
                         // wo[offset] = offset*2+1
                         s->hevcdsp.put_hevc_qpel_uni_w[wtoidx(c->w)][0][0](
                             c->dst_addr, st->stride1, patch_y1, PATCH_STRIDE,
-                            c->h, st->wdenom, c->wo1 >> 16, (c->wo1 >> 1) & 0xffff, 0, 0, c->w);
+                            c->h, st->wdenom, ext(c->wo1, 0, 16), ext(c->wo1, 16, 17), 0, 0, c->w);
 
                         st->last_l0 = &c->next_src1;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -566,8 +591,8 @@ void rpi_shader_c(HEVCContext *const s,
 
                         s->hevcdsp.put_hevc_qpel_bi_w[wtoidx(c->w)][0][0](
                             c->dst_addr, st->stride1, patch_y2, PATCH_STRIDE, patch_y3,
-                            c->h, st->wdenom, c->wo1 >> 16, 0,
-                            c->wo2 >> 16, (c->wo2 & 0xffff) - 1, 0, 0, c->w);
+                            c->h, st->wdenom, ext(c->wo1, 0, 16), 0,
+                            ext(c->wo2, 0, 16), ext(c->wo2, 16, 16) - 1, 0, 0, c->w);
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -584,14 +609,14 @@ void rpi_shader_c(HEVCContext *const s,
 
                         printf("Filter C-Pxx: base=%p,x=%d.%d,y=%d.%d,w=%d,h=%d\n", st->last_l0->base, st->last_l0->x, mx, st->last_l0->y, my, c->w, c->h);
 
-                        get_patch_c(st, patch_u1, patch_v1, PATCH_STRIDE, st->last_l0, 8, c->h + 3);
+                        get_patch_c(st, patch_u1, patch_v1, PATCH_STRIDE, st->last_l0, 19, c->h + 3);
 
                         s->hevcdsp.put_hevc_qpel_uni_w[wtoidx(c->w)][my != 0][mx != 0](
                             patch_u3, 16 * pw, patch_u1, PATCH_STRIDE,
-                            c->h, st->wdenom, c->wo_u >> 16, (c->wo_u >> 1) & 0xffff, mx, my, c->w);
+                            c->h, st->wdenom, ext(c->wo_u, 0, 16), ext(c->wo_u, 16, 17), mx, my, c->w);
                         s->hevcdsp.put_hevc_qpel_uni_w[wtoidx(c->w)][my != 0][mx != 0](
                             patch_v3, 16 * pw, patch_v1, PATCH_STRIDE,
-                            c->h, st->wdenom, c->wo_v >> 16, (c->wo_v >> 1) & 0xffff, mx, my, c->w);
+                            c->h, st->wdenom, ext(c->wo_v, 0, 16), ext(c->wo_v, 16, 17), mx, my, c->w);
 
                         planar_to_sand_c(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
                         st->last_l0 = &c->next_src;
@@ -599,7 +624,6 @@ void rpi_shader_c(HEVCContext *const s,
                     }
                     else if (link == s->qpu_filter_uv_bxx) {
                         const qpu_mc_pred_c_b_t *const c = &cmd->c.b;
-#if 1
                         const int mx1 = fctom(c->coeffs_x1);
                         const int my1 = fctom(c->coeffs_y1);
                         const int mx2 = fctom(c->coeffs_x2);
@@ -614,10 +638,23 @@ void rpi_shader_c(HEVCContext *const s,
                         uint16_t patch_u4[MAX_PB_SIZE * MAX_PB_SIZE];
                         uint16_t patch_v4[MAX_PB_SIZE * MAX_PB_SIZE];
 
-                        printf("Filter C-Bxx\n");
+                        printf("Filter C-Bxx; (%d,%d) (%d,%d) d=%d; w/o=%d/%d, %d/%d; w/o=%d/%d, %d/%d\n",
+                               st->last_l0->x, st->last_l0->y,
+                               st->last_l1->x, st->last_l1->y,
+                               st->wdenom,
+                               c->weight_u1, 0, ext(c->wo_u2, 0, 16), ext(c->wo_u2, 16, 16) - 1,
+                               c->weight_v1, 0, ext(c->wo_v2, 0, 16), ext(c->wo_v2, 16, 16) - 1);
 
-                        get_patch_c(st, patch_u1, patch_v1, PATCH_STRIDE, st->last_l0, 8, c->h + 3);
-                        get_patch_c(st, patch_u2, patch_v2, PATCH_STRIDE, st->last_l1, 8, c->h + 3);
+                        printf("L0in:\n");
+                        dump_y(st->last_l0->base, st->stride1, st->stride2, st->last_l0->x * 2, st->last_l0->y, c->w * 2, c->h);
+                        get_patch_c(st, patch_u1, patch_v1, PATCH_STRIDE, st->last_l0, 19, c->h + 3);
+                        get_patch_c(st, patch_u2, patch_v2, PATCH_STRIDE, st->last_l1, 19, c->h + 3);
+
+                        printf("L0u:\n");
+                        dump_y(patch_u1, PATCH_STRIDE, 0, 0, 0, c->w, c->h);
+                        printf("L0v:\n");
+                        dump_y(patch_v1, PATCH_STRIDE, 0, 0, 0, c->w, c->h);
+
 
                         s->hevcdsp.put_hevc_epel[wtoidx(c->w)][my1 != 0][mx1 != 0](
                            patch_u4, patch_u1, PATCH_STRIDE,
@@ -629,14 +666,20 @@ void rpi_shader_c(HEVCContext *const s,
                         s->hevcdsp.put_hevc_qpel_bi_w[wtoidx(c->w)][my2 != 0][mx2 != 0](
                             patch_u3, 16 * pw, patch_u2, PATCH_STRIDE, patch_u4,
                             c->h, st->wdenom, c->weight_u1, 0,
-                            c->wo_u2 >> 16, (c->wo_u2 & 0xffff) - 1, mx2, my2, c->w);
+                            ext(c->wo_u2, 0, 16), ext(c->wo_u2, 16, 16) - 1, mx2, my2, c->w);
                         s->hevcdsp.put_hevc_qpel_bi_w[wtoidx(c->w)][my2 != 0][mx2 != 0](
                             patch_v3, 16 * pw, patch_v2, PATCH_STRIDE, patch_v4,
                             c->h, st->wdenom, c->weight_v1, 0,
-                            c->wo_v2 >> 16, (c->wo_v2 & 0xffff) - 1, mx2, my2, c->w);
+                            ext(c->wo_v2, 0, 16), ext(c->wo_v2, 16, 16) - 1, mx2, my2, c->w);
 
+                        printf("U\n");
+                        dump_y(patch_u3, 16 * pw, 0, 0, 0, c->w, c->h);
+                        printf("V\n");
+                        dump_y(patch_v3, 16 * pw, 0, 0, 0, c->w, c->h);
                         planar_to_sand_c(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
-#endif
+                        printf("Out\n");
+                        dump_y(c->dst_addr_c, st->stride1, 0, 0, 0, c->w * 2, c->h);
+
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
