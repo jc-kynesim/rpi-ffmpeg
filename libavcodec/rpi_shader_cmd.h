@@ -7,8 +7,8 @@
 typedef const uint8_t * qpu_mc_src_addr_t;
 typedef uint8_t * qpu_mc_dst_addr_t;
 #else
-typedef const uint32_t qpu_mc_src_addr_t;
-typedef const uint32_t qpu_mc_dst_addr_t;
+typedef uint32_t qpu_mc_src_addr_t;
+typedef uint32_t qpu_mc_dst_addr_t;
 #endif
 
 typedef struct qpu_mc_src_s
