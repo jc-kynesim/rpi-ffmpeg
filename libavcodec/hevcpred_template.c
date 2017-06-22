@@ -28,7 +28,7 @@
 #include "hevcpred.h"
 
 #ifdef RPI
-#include "rpi_zc.h"
+#include "libavutil/rpi_sand_fns.h"
 #endif
 
 #define DUMP_PRED 0

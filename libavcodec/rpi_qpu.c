@@ -17,7 +17,7 @@
 #include "rpi_qpu.h"
 #include "rpi_shader.h"
 #include "rpi_hevc_transform.h"
-#include "rpi_zc.h"
+#include "libavutil/rpi_sand_fns.h"
 
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files

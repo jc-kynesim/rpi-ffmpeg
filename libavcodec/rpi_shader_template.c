@@ -1,9 +1,23 @@
 #include "hevc.h"
 #include "hevcdec.h"
+#include "libavutil/rpi_sand_fns.h"
 #include "rpi_shader_cmd.h"
 #include "rpi_shader_template.h"
 
-#include "rpi_zc.h"
+
+#define PW 1
+
+#define STRCAT(x,y) x##y
+
+#if PW == 1
+#define pixel uint8_t
+#define FUNC(f) STRCAT(f, 8)
+#elif PW == 2
+#define pixel uint16_t
+#define FUNC(f) STRCAT(f, 16)
+#else
+#error Unexpected PW
+#endif
 
 #define PATCH_STRIDE 16
 
@@ -21,181 +35,18 @@ typedef struct shader_track_s
 
 const unsigned int pw = 1; // Pixel width
 
-// Fetches a single patch - offscreen fixup not done here
-// w <= stride1
-// unclipped
-static void sand_to_planar_y(uint8_t * dst, const unsigned int dst_stride,
-                             const uint8_t * src,
-                             unsigned int stride1, unsigned int stride2,
-                             unsigned int _x, unsigned int y,
-                             unsigned int _w, unsigned int h)
-{
-    const unsigned int x = _x;
-    const unsigned int w = _w;
-    const unsigned int mask = stride1 - 1;
-
-    if ((x & ~mask) == ((x + w) & ~mask)) {
-        // All in one sand stripe
-        const uint8_t * p = src + (x & mask) + y * stride1 + (x & ~mask) * stride2;
-        for (unsigned int i = 0; i != h; ++i, dst += dst_stride, p += stride1) {
-            memcpy(dst, p, w);
-        }
-    }
-    else
-    {
-        // Two+ stripe
-        const unsigned int sstride = stride1 * stride2;
-        const uint8_t * p1 = src + (x & mask) + y * stride1 + (x & ~mask) * stride2;
-        const uint8_t * p2 = p1 + sstride - (x & mask);
-        const unsigned int w1 = stride1 - (x & mask);
-        const unsigned int w3 = (x + w) & mask;
-        const unsigned int w2 = w - (w1 + w3);
-
-        for (unsigned int i = 0; i != h; ++i, dst += dst_stride, p1 += stride1, p2 += stride1) {
-            unsigned int j;
-            const uint8_t * p = p2;
-            uint8_t * d = dst;
-            memcpy(d, p1, w1);
-            d += w1;
-            for (j = stride1; j < w2; j += stride1, d += stride1, p += sstride) {
-                memcpy(d, p, stride1);
-            }
-            memcpy(d, p, w3);
-        }
-    }
-}
-
-// x & w in bytes but not of interleave (i.e. offset = x*2 for U&V)
-
-typedef uint8_t pixel; //*********
-static void sand_to_planar_c(uint8_t * dst_u, const unsigned int dst_stride_u,
-                             uint8_t * dst_v, const unsigned int dst_stride_v,
-                             const uint8_t * src,
-                             unsigned int stride1, unsigned int stride2,
-                             unsigned int _x, unsigned int y,
-                             unsigned int _w, unsigned int h)
-{
-    const unsigned int x = _x * 2;
-    const unsigned int w = _w * 2;
-    const unsigned int mask = stride1 - 1;
-
-    if ((x & ~mask) == ((x + w) & ~mask)) {
-        // All in one sand stripe
-        const uint8_t * p1 = src + (x & mask) + y * stride1 + (x & ~mask) * stride2;
-        for (unsigned int i = 0; i != h; ++i, dst_u += dst_stride_u, dst_v += dst_stride_v, p1 += stride1) {
-            pixel * du = (pixel *)dst_u;
-            pixel * dv = (pixel *)dst_v;
-            const pixel * p = (const pixel *)p1;
-            for (unsigned int k = 0; k < w; k += 2 * pw) {
-                *du++ = *p++;
-                *dv++ = *p++;
-            }
-        }
-    }
-    else
-    {
-        // Two+ stripe
-        const unsigned int sstride = stride1 * stride2;
-        const unsigned int sstride_p = (sstride - stride1) / pw;
-
-        const uint8_t * p1 = src + (x & mask) + y * stride1 + (x & ~mask) * stride2;
-        const uint8_t * p2 = p1 + sstride - (x & mask);
-        const unsigned int w1 = stride1 - (x & mask);
-        const unsigned int w3 = (x + w) & mask;
-        const unsigned int w2 = w - (w1 + w3);
-
-        for (unsigned int i = 0; i != h; ++i, dst_u += dst_stride_u, dst_v += dst_stride_v, p1 += stride1, p2 += stride1) {
-            unsigned int j;
-            const pixel * p = (const pixel *)p1;
-            pixel * du = (pixel *)dst_u;
-            pixel * dv = (pixel *)dst_v;
-            for (unsigned int k = 0; k < w1; k += 2 * pw) {
-                *du++ = *p++;
-                *dv++ = *p++;
-            }
-            for (j = stride1, p = (const pixel *)p2; j < w2; j += stride1, p += sstride_p) {
-                for (unsigned int k = 0; k < stride1; k += 2 * pw) {
-                    *du++ = *p++;
-                    *dv++ = *p++;
-                }
-            }
-            for (unsigned int k = 0; k < w3; k += 2 * pw) {
-                *du++ = *p++;
-                *dv++ = *p++;
-            }
-        }
-    }
-}
-
-static void planar_to_sand_c(uint8_t * dst_c,
-                             unsigned int stride1, unsigned int stride2,
-                             const uint8_t * src_u, const unsigned int src_stride_u,
-                             const uint8_t * src_v, const unsigned int src_stride_v,
-                             unsigned int _x, unsigned int y,
-                             unsigned int _w, unsigned int h)
-{
-    const unsigned int x = _x * 2;
-    const unsigned int w = _w * 2;
-    const unsigned int mask = stride1 - 1;
-    if ((x & ~mask) == ((x + w) & ~mask)) {
-        // All in one sand stripe
-        uint8_t * p1 = dst_c + (x & mask) + y * stride1 + (x & ~mask) * stride2;
-        for (unsigned int i = 0; i != h; ++i, src_u += src_stride_u, src_v += src_stride_v, p1 += stride1) {
-            const pixel * su = (const pixel *)src_u;
-            const pixel * sv = (const pixel *)src_v;
-            pixel * p = (pixel *)p1;
-            for (unsigned int k = 0; k < w; k += 2 * pw) {
-                *p++ = *su++;
-                *p++ = *sv++;
-            }
-        }
-    }
-    else
-    {
-        // Two+ stripe
-        const unsigned int sstride = stride1 * stride2;
-        const unsigned int sstride_p = (sstride - stride1) / pw;
-
-        const uint8_t * p1 = dst_c + (x & mask) + y * stride1 + (x & ~mask) * stride2;
-        const uint8_t * p2 = p1 + sstride - (x & mask);
-        const unsigned int w1 = stride1 - (x & mask);
-        const unsigned int w2 = w - w1;
-
-        for (unsigned int i = 0; i != h; ++i, src_u += src_stride_u, src_v += src_stride_v, p1 += stride1, p2 += stride1) {
-            unsigned int j;
-            const pixel * su = (const pixel *)src_u;
-            const pixel * sv = (const pixel *)src_v;
-            pixel * p = (pixel *)p1;
-            for (unsigned int k = 0; k < w1; k += 2 * pw) {
-                *p++ = *su++;
-                *p++ = *sv++;
-            }
-            for (j = stride1, p = (pixel *)p2; j < w2; j += stride1, p += sstride_p) {
-                for (unsigned int k = 0; k < stride1; k += 2 * pw) {
-                    *p++ = *su++;
-                    *p++ = *sv++;
-                }
-            }
-            for (unsigned int k = 0; k < w2; k += 2 * pw) {
-                *p++ = *su++;
-                *p++ = *sv++;
-            }
-        }
-    }
-}
-
-static void dup_lr(uint8_t * dst, const uint8_t * src, unsigned int w, unsigned int h, unsigned int stride)
+static void FUNC(dup_lr)(uint8_t * dst, const uint8_t * src, unsigned int w, unsigned int h, unsigned int stride)
 {
     for (unsigned int i = 0; i != h; ++i, dst += stride, src += stride) {
         const pixel s = *(const pixel *)src;
         pixel * d = (pixel *)dst;
-        for (unsigned int j = 0; j < w; j += pw) {
+        for (unsigned int j = 0; j < w; j += PW) {
             *d++ = s;
         }
     }
 }
 
-static void dup_tb(uint8_t * dst, const uint8_t * src, unsigned int w, unsigned int h, unsigned int stride)
+static void FUNC(dup_tb)(uint8_t * dst, const uint8_t * src, unsigned int w, unsigned int h, unsigned int stride)
 {
     for (unsigned int i = 0; i != h; ++i, dst += stride) {
         memcpy(dst, src, w);
@@ -207,9 +58,9 @@ static void get_patch_y(const shader_track_t * const st,
                          const qpu_mc_src_t *src,
                          unsigned int _w, unsigned int _h)
 {
-    int x = src->x * pw;
+    int x = src->x * PW;
     int y = src->y;
-    int w = _w * pw;
+    int w = _w * PW;
     int h = _h;
     int dl = 0;
     int dr = 0;
@@ -218,14 +69,14 @@ static void get_patch_y(const shader_track_t * const st,
 
     if (x < 0) {
         if (-x >= w)
-            x = pw - w;
+            x = PW - w;
         dl = -x;
         w += x;
         x = 0;
     }
-    if (x + w > st->width) {  // ******* width*pw?? or maybe st->width already like that
+    if (x + w > st->width) {  // ******* width*PW?? or maybe st->width already like that
         if (x >= st->width)
-            x = st->width - pw;
+            x = st->width - PW;
         dr = (x + w) - st->width;
         w = st->width - x;
     }
@@ -246,20 +97,20 @@ static void get_patch_y(const shader_track_t * const st,
     }
 
     dst += dl + dt * dst_stride;
-    sand_to_planar_y(dst, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
+    FUNC(rpi_sand_to_planar_y)(dst, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
 
     // Edge dup
     if (dl != 0)
-        dup_lr(dst - dl, dst, dl, h, dst_stride);
+        FUNC(dup_lr)(dst - dl, dst, dl, h, dst_stride);
     if (dr != 0)
-        dup_lr(dst + w, dst + w - pw, dr, h, dst_stride);
+        FUNC(dup_lr)(dst + w, dst + w - PW, dr, h, dst_stride);
     w += dl + dr;
     dst -= dl;
 
     if (dt != 0)
-        dup_tb(dst - dt * dst_stride, dst, w, dt, dst_stride);
+        FUNC(dup_tb)(dst - dt * dst_stride, dst, w, dt, dst_stride);
     if (db != 0)
-        dup_tb(dst + h * dst_stride, dst + (h - 1) * dst_stride, w, db, dst_stride);
+        FUNC(dup_tb)(dst + h * dst_stride, dst + (h - 1) * dst_stride, w, db, dst_stride);
 }
 
 
@@ -269,27 +120,27 @@ static void get_patch_c(const shader_track_t * const st,
                          const qpu_mc_src_t *src,
                          unsigned int _w, unsigned int _h)
 {
-    int x = src->x * pw;
+    int x = src->x * PW;
     int y = src->y;
-    int w = _w * pw;
+    int w = _w * PW;
     int h = _h;
     int dl = 0;
     int dr = 0;
     int dt = 0;
     int db = 0;
-    const int width = st->width;  // ?????? *pw??
+    const int width = st->width;  // ?????? *PW??
     const int height = st->height;
 
     if (x < 0) {
         if (-x >= w)
-            x = pw - w;
+            x = PW - w;
         dl = -x;
         w += x;
         x = 0;
     }
     if (x + w > width) {
         if (x >= width)
-            x = width - pw;
+            x = width - PW;
         dr = (x + w) - width;
         w = width - x;
     }
@@ -311,18 +162,18 @@ static void get_patch_c(const shader_track_t * const st,
 
     dst_u += dl + dt * dst_stride;
     dst_v += dl + dt * dst_stride;
-    sand_to_planar_c(dst_u, dst_stride, dst_v, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
+    FUNC(rpi_sand_to_planar_c)(dst_u, dst_stride, dst_v, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
 
     // Edge dup
     if (dl != 0)
     {
-        dup_lr(dst_u - dl, dst_u, dl, h, dst_stride);
-        dup_lr(dst_v - dl, dst_v, dl, h, dst_stride);
+        FUNC(dup_lr)(dst_u - dl, dst_u, dl, h, dst_stride);
+        FUNC(dup_lr)(dst_v - dl, dst_v, dl, h, dst_stride);
     }
     if (dr != 0)
     {
-        dup_lr(dst_u + w, dst_u + w - pw, dr, h, dst_stride);
-        dup_lr(dst_v + w, dst_v + w - pw, dr, h, dst_stride);
+        FUNC(dup_lr)(dst_u + w, dst_u + w - PW, dr, h, dst_stride);
+        FUNC(dup_lr)(dst_v + w, dst_v + w - PW, dr, h, dst_stride);
     }
     w += dl + dr;
     dst_u -= dl;
@@ -330,13 +181,13 @@ static void get_patch_c(const shader_track_t * const st,
 
     if (dt != 0)
     {
-        dup_tb(dst_u - dt * dst_stride, dst_u, w, dt, dst_stride);
-        dup_tb(dst_v - dt * dst_stride, dst_v, w, dt, dst_stride);
+        FUNC(dup_tb)(dst_u - dt * dst_stride, dst_u, w, dt, dst_stride);
+        FUNC(dup_tb)(dst_v - dt * dst_stride, dst_v, w, dt, dst_stride);
     }
     if (db != 0)
     {
-        dup_tb(dst_u + h * dst_stride, dst_u + (h - 1) * dst_stride, w, db, dst_stride);
-        dup_tb(dst_v + h * dst_stride, dst_v + (h - 1) * dst_stride, w, db, dst_stride);
+        FUNC(dup_tb)(dst_u + h * dst_stride, dst_u + (h - 1) * dst_stride, w, db, dst_stride);
+        FUNC(dup_tb)(dst_v + h * dst_stride, dst_v + (h - 1) * dst_stride, w, db, dst_stride);
     }
 }
 
@@ -579,7 +430,7 @@ void rpi_shader_c(HEVCContext *const s,
                             patch_v3, 16 * pw, patch_v1 + PATCH_STRIDE + 1, PATCH_STRIDE,
                             c->h, st->wdenom, wweight(c->wo_v), woff_p(c->wo_v), mx, my, c->w);
 
-                        planar_to_sand_c(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
+                        FUNC(rpi_planar_to_sand_c)(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
 
                         st->last_l0 = &c->next_src;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -619,7 +470,7 @@ void rpi_shader_c(HEVCContext *const s,
                             c->h, st->wdenom, c->weight_v1, wweight(c->wo_v2),
                             0, woff_b(c->wo_v2), mx2, my2, c->w);
 
-                        planar_to_sand_c(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
+                        FUNC(rpi_planar_to_sand_c)(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
 
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;

@@ -5,6 +5,7 @@
 #include "rpi_mailbox.h"
 #include "rpi_zc.h"
 #include "libavutil/avassert.h"
+#include "libavutil/rpi_sand_fns.h"
 #include <pthread.h>
 
 #include "libavutil/buffer_internal.h"

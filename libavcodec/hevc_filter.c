@@ -38,7 +38,7 @@
 
 #ifdef RPI
 #include "rpi_qpu.h"
-#include "rpi_zc.h"
+#include "libavutil/rpi_sand_fns.h"
 #endif
 
 #define LUMA 0

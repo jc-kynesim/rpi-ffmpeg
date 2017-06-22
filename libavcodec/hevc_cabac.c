@@ -32,7 +32,7 @@
 #include "hevcdec.h"
 
 #ifdef RPI
-#include "rpi_zc.h"
+#include "libavutil/rpi_sand_fns.h"
 #endif
 
 // BY22 is probably faster than simple bypass if the processor has
