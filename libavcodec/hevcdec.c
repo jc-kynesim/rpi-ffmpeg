@@ -1283,7 +1283,7 @@ static int hls_cross_component_pred(HEVCContext *s, int idx) {
 static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, int c_idx)
 {
     // U & V done on U call in the case of sliced frames
-    if (rpi_sliced_frame(s->frame) && c_idx > 1)
+    if (rpi_is_sand_frame(s->frame) && c_idx > 1)
         return;
 
     if (s->enable_rpi) {
@@ -1297,7 +1297,7 @@ static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, 
         cmd->i_pred.y = y0;
         cmd->i_pred.mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
     }
-    else if (rpi_sliced_frame(s->frame) && c_idx != 0) {
+    else if (rpi_is_sand_frame(s->frame) && c_idx != 0) {
         s->hpc.intra_pred_c[log2_trafo_size - 2](s, x0, y0, c_idx);
     }
     else {
@@ -1701,12 +1701,12 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
         return ret;
 
 #if RPI_HEVC_SAND
-    if (rpi_sliced_frame(s->frame)) {
-        s->hevcdsp.put_pcm(rpi_sliced_frame_pos_y(s->frame, x0, y0),
+    if (rpi_is_sand_frame(s->frame)) {
+        s->hevcdsp.put_pcm(rpi_sand_frame_pos_y(s->frame, x0, y0),
                            s->frame->linesize[0],
                            cb_size, cb_size, &gb, s->ps.sps->pcm.bit_depth);
 
-        s->hevcdsp.put_pcm_c(rpi_sliced_frame_pos_c(s->frame, x0 >> s->ps.sps->hshift[1], y0 >> s->ps.sps->vshift[1]),
+        s->hevcdsp.put_pcm_c(rpi_sand_frame_pos_c(s->frame, x0 >> s->ps.sps->hshift[1], y0 >> s->ps.sps->vshift[1]),
                            s->frame->linesize[1],
                            cb_size >> s->ps.sps->hshift[1],
                            cb_size >> s->ps.sps->vshift[1],
@@ -2315,7 +2315,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
            const int weight_offset,
            AVFrame *const src_frame)
 {
-    const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
+    const unsigned int y_off = rpi_sand_frame_off_y(s->frame, x0, y0);
     const unsigned int mx          = mv->x & 3;
     const unsigned int my          = mv->y & 3;
     const unsigned int my_mx       = (my << 8) | mx;
@@ -2495,7 +2495,7 @@ rpi_pred_y_b(HEVCContext * const s,
            AVFrame *const src_frame,
            AVFrame *const src_frame2)
 {
-    const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
+    const unsigned int y_off = rpi_sand_frame_off_y(s->frame, x0, y0);
     const Mv * const mv  = mv_field->mv + 0;
     const Mv * const mv2 = mv_field->mv + 1;
 
@@ -2646,7 +2646,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   const int16_t * const c_offsets,
   AVFrame * const src_frame)
 {
-    const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
+    const unsigned int c_off = rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
     const int hshift           = s->ps.sps->hshift[1];
     const int vshift           = s->ps.sps->vshift[1];
 
@@ -2701,7 +2701,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame,
   AVFrame * const src_frame2)
 {
-    const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
+    const unsigned int c_off = rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
     const int hshift = s->ps.sps->hshift[1];
     const int vshift = s->ps.sps->vshift[1];
     const Mv * const mv = mv_field->mv + 0;
@@ -3518,7 +3518,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
               lc->na.cand_up_left      = (cmd->na >> 2) & 1;
               lc->na.cand_up           = (cmd->na >> 1) & 1;
               lc->na.cand_up_right     = (cmd->na >> 0) & 1;
-              if (!rpi_sliced_frame(s->frame) || cmd->c_idx == 0)
+              if (!rpi_is_sand_frame(s->frame) || cmd->c_idx == 0)
                   s->hpc.intra_pred[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
               else
                   s->hpc.intra_pred_c[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
@@ -3586,7 +3586,7 @@ static void rpi_begin(HEVCContext *s)
         u->next_src1.base = 0;
         u->pic_cw = pic_width_c;
         u->pic_ch = pic_height_c;
-        u->stride2 = rpi_sliced_frame_stride2(s->frame);
+        u->stride2 = rpi_sand_frame_stride2(s->frame);
         u->stride1 = s->frame->linesize[1];
         u->wdenom = s->sh.chroma_log2_weight_denom + 6;
         cp->last_l0 = &u->next_src1;
@@ -3613,7 +3613,7 @@ static void rpi_begin(HEVCContext *s)
         y->next_src2.base = 0;
         y->pic_h = pic_height_y;
         y->pic_w = pic_width_y;
-        y->stride2 = rpi_sliced_frame_stride2(s->frame);
+        y->stride2 = rpi_sand_frame_stride2(s->frame);
         y->stride1 = s->frame->linesize[0];
         y->wdenom = s->sh.luma_log2_weight_denom + 6;
         y->next_fn = 0;

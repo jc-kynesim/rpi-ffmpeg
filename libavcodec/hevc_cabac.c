@@ -1520,12 +1520,12 @@ static void rpi_add_residual(HEVCContext * const s,
     unsigned int stride = frame->linesize[c_idx];
     unsigned int x = x0 >> s->ps.sps->hshift[c_idx];
     unsigned int y = y0 >> s->ps.sps->vshift[c_idx];
-    const int is_sliced = rpi_sliced_frame(frame);
+    const int is_sliced = rpi_is_sand_frame(frame);
     uint8_t * dst = !is_sliced ?
             s->frame->data[c_idx] + y * stride + (x << s->ps.sps->pixel_shift) :
         c_idx == 0 ?
-            rpi_sliced_frame_pos_y(frame, x, y) :
-            rpi_sliced_frame_pos_c(frame, x, y);
+            rpi_sand_frame_pos_y(frame, x, y) :
+            rpi_sand_frame_pos_c(frame, x, y);
 
     if (s->enable_rpi) {
         const unsigned int i = s->num_pred_cmds[s->pass0_job];

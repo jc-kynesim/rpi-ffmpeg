@@ -66,8 +66,6 @@ static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
     if (sd != NULL) {
         const AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
 
-//        printf("PScan: h/w=%d/%d, off=%d,%d\n", pscan->height, pscan->width, pscan->position[0][0], pscan->position[0][0]);
-
         x0 = si->left_offset;
         y0 = si->top_offset;
     }
@@ -81,9 +79,42 @@ static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
     rpi_sand_to_planar_y8(dst, width, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
     dst += width * height;
     rpi_sand_to_planar_c8(dst, width / 2, dst + width * height / 4, width / 2,
-                          frame->data[1], frame->linesize[1], frame->linesize[3], x0 / 2, y0 / 2, width / 2, height / 2);
+                          frame->data[1], frame->linesize[1], rpi_sand_frame_stride2(frame), x0 / 2, y0 / 2, width / 2, height / 2);
     return 0;
 }
+
+static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
+                      const AVFrame *frame)
+{
+    const AVFrameSideData *const sd = av_frame_get_side_data(frame, AV_FRAME_DATA_SAND_INFO);
+    int size;
+    int width = frame->width;
+    int height = frame->height;
+    int x0 = 0;
+    int y0 = 0;
+    uint8_t * dst;
+    int ret;
+
+    if (sd != NULL) {
+        const AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
+
+        x0 = si->left_offset;
+        y0 = si->top_offset;
+    }
+
+    size = width * height * 3;
+    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+        return ret;
+
+    dst = pkt->data;
+
+    rpi_sand_to_planar_y8(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0 * 2, y0, width * 2, height);
+    dst += width * height * 2;
+    rpi_sand_to_planar_c8(dst, width, dst + width * height / 2, width,
+                          frame->data[1], frame->linesize[1], rpi_sand_frame_stride2(frame), x0, y0 / 2, width, height / 2);
+    return 0;
+}
+
 
 static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame, int *got_packet)
@@ -94,8 +125,8 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
     if (ret < 0)
         return ret;
 
-    if (frame->format == AV_PIX_FMT_SAND128) {
-        ret = raw_sand8_as_yuv420(avctx, pkt, frame);
+    if (rpi_is_sand_frame(frame)) {
+        ret = rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) : raw_sand16_as_yuv420(avctx, pkt, frame);
         *got_packet = (ret == 0);
         return ret;
     }

@@ -564,7 +564,7 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
       rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
     }
   }
-  else if (!rpi_sliced_frame(frame))
+  else if (!rpi_is_sand_frame(frame))
   {
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
     if (do_luma) {
@@ -582,11 +582,11 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
     // **** Use x0!
     for (int x = 0; x < x0 + width; x += frame->linesize[0]) {
       if (do_luma) {
-        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sliced_frame_off_y(frame, x, y0), y_size);
+        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sand_frame_off_y(frame, x, y0), y_size);
       }
       if (do_chroma) {
         rpi_cache_flush_add_gm_range(rfe, gm, mode,
-                                     (frame->data[1] - gm->arm) + rpi_sliced_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
+                                     (frame->data[1] - gm->arm) + rpi_sand_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
       }
     }
   }

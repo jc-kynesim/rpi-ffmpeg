@@ -35,6 +35,13 @@
 
 #define POS(x, y) src[(x) + stride * (y)]
 
+// Get PW prior to horrid PRED_C trickery
+#if BIT_DEPTH == 8
+#define PW 1
+#else
+#define PW 2
+#endif
+
 #if PRED_C
 
 typedef uint8_t (* c8_dst_ptr_t)[2];
@@ -133,11 +140,11 @@ do {                                  \
 
     const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
 #if defined(RPI)
-    pixel *const src = s->frame->format != AV_PIX_FMT_SAND128 ?
+    pixel *const src = !rpi_is_sand_frame(s->frame) ?
             (pixel*)s->frame->data[c_idx] + x + y * stride :
         c_idx == 0 ?
-            (pixel *)rpi_sliced_frame_pos_y(s->frame, x, y) :
-            (pixel *)rpi_sliced_frame_pos_c(s->frame, x, y);
+            (pixel *)rpi_sand_frame_pos_y(s->frame, x * PW, y) :
+            (pixel *)rpi_sand_frame_pos_c(s->frame, x * PW, y);
 #else
     pixel *src = (pixel*)s->frame->data[c_idx] + x + y * stride;
 #endif
@@ -182,14 +189,14 @@ do {                                  \
 #endif
 
 #if defined(RPI)
-    if (s->frame->format == AV_PIX_FMT_SAND128) {
+    if (rpi_is_sand_frame(s->frame)) {
         const AVFrame * const frame = s->frame;
         const unsigned int mask = stride - 1; // For chroma pixel=uint16 so stride_c is stride_y / 2
-        const unsigned int stripe_adj = (frame->linesize[3] - 1) * stride;
-        if ((x & mask) == 0)
-            src_l -= stripe_adj;
+        const unsigned int stripe_adj = (rpi_sand_frame_stride2(frame) - 1) * stride;
+        if (((x * PW) & mask) == 0)
+            src_l -= stripe_adj / PW;
         if (((x + size) & mask) == 0)
-            src_ur += stripe_adj;
+            src_ur += stripe_adj / PW;
     }
 #endif
 
@@ -371,7 +378,7 @@ do {                                  \
     top[-1] = left[-1];
 
     // Filtering process
-    // Sand128 can only apply to chroma_format_idc == 1 so we don't need to
+    // Sand can only apply to chroma_format_idc == 1 so we don't need to
     // worry about chroma smoothing for that case
 #if !PRED_C
     if (!s->ps.sps->intra_smoothing_disabled_flag && (c_idx == 0  || s->ps.sps->chroma_format_idc == 3)) {
@@ -818,3 +825,4 @@ static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
 #undef EXTEND
 #undef MIN_TB_ADDR_ZS
 #undef POS
+#undef PW
