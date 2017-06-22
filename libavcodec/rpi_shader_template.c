@@ -34,8 +34,6 @@ static void sand_to_planar_y(uint8_t * dst, const unsigned int dst_stride,
     const unsigned int w = _w;
     const unsigned int mask = stride1 - 1;
 
-    printf("%s: x=%u,y=%u,w=%u,h=%u\n", __func__, x, y, w, h);
-
     if ((x & ~mask) == ((x + w) & ~mask)) {
         // All in one sand stripe
         const uint8_t * p = src + (x & mask) + y * stride1 + (x & ~mask) * stride2;
@@ -80,8 +78,6 @@ static void sand_to_planar_c(uint8_t * dst_u, const unsigned int dst_stride_u,
     const unsigned int x = _x * 2;
     const unsigned int w = _w * 2;
     const unsigned int mask = stride1 - 1;
-
-    printf("%s: (%d,%d) %dx%d\n", __func__, _x,y, _w,h);
 
     if ((x & ~mask) == ((x + w) & ~mask)) {
         // All in one sand stripe
@@ -317,9 +313,6 @@ static void get_patch_c(const shader_track_t * const st,
     dst_v += dl + dt * dst_stride;
     sand_to_planar_c(dst_u, dst_stride, dst_v, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
 
-    printf("dlrtb: %d,%d,%d,%d\n", dl, dr, dt, db);
-
-
     // Edge dup
     if (dl != 0)
     {
@@ -363,6 +356,7 @@ static const int fctom(uint32_t x)
     return rv;
 }
 
+#if 0
 // w, y, w, h in pixels
 // stried1, stride2 in bytes
 static void dump_y(const pixel * const base, const int stride1, const int stride2, int x, int y, int w, int h, const int is_c)
@@ -384,6 +378,7 @@ static void dump_y(const pixel * const base, const int stride1, const int stride
         printf("\n");
     }
 }
+#endif
 
 static inline int32_t ext(int32_t x, unsigned int shl, unsigned int shr)
 {
@@ -425,21 +420,14 @@ void rpi_shader_c(HEVCContext *const s,
                 const HEVCRpiInterPredQ * const q = ipe->q + i;
                 shader_track_t * const st = tracka + i;
                 const qpu_mc_pred_cmd_t * cmd = st->qpu_mc_curr == NULL ? q->qpu_mc_base : st->qpu_mc_curr;
-                const uint32_t * t = (const uint32_t *)cmd;
-                printf("setup=%x sync=%x exit=%x \n", q->code_setup, q->code_sync, q->code_exit);
-                printf("[] %08x %08x %08x %08x %08x %08x %08x %08x \n", t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7]);
 
                 for (;;) {
                     const uint32_t link = (cmd == q->qpu_mc_base) ? q->code_setup : ((uint32_t *)cmd)[-1];
-
-                    printf("[%d,%d] link=%#x, cmd=%p \n", c_idx, i, link, cmd);
 
                     if (link == q->code_setup) {
                         if (c_idx == 0) {
                             // Luma
                             const qpu_mc_pred_y_s_t *const c = &cmd->y.s;
-
-                            printf("Luma setup\n");
 
                             st->height = c->pic_h;
                             st->width = c->pic_w;
@@ -453,8 +441,6 @@ void rpi_shader_c(HEVCContext *const s,
                         else {
                             // Chroma
                             const qpu_mc_pred_c_s_t *const c = &cmd->c.s;
-
-                            printf("Chroma setup\n");
 
                             st->height = c->pic_ch;
                             st->width = c->pic_cw;
@@ -473,8 +459,6 @@ void rpi_shader_c(HEVCContext *const s,
 
                         uint8_t patch_y1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
                         uint8_t patch_y2[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
-
-                        printf("Filter Y-Pxx\n");
 
                         get_patch_y(st,
                                     patch_y1, PATCH_STRIDE,
@@ -507,8 +491,6 @@ void rpi_shader_c(HEVCContext *const s,
                         uint8_t patch_y2[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
                         int16_t patch_y3[MAX_PB_SIZE * MAX_PB_SIZE];
 
-                        printf("Filter Y-Bxx\n");
-
                         get_patch_y(st,
                                     patch_y1, PATCH_STRIDE,
                                     st->last_l0,
@@ -535,8 +517,6 @@ void rpi_shader_c(HEVCContext *const s,
 
                         uint8_t patch_y1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
 
-                        printf("Filter Y-P00: base=%p,x=%d,y=%d,w=%d,h=%d\n", st->last_l0->base, st->last_l0->x, st->last_l0->y, c->w, c->h);
-
                         get_patch_y(st,
                                     patch_y1, PATCH_STRIDE,
                                     st->last_l0,
@@ -556,8 +536,6 @@ void rpi_shader_c(HEVCContext *const s,
                         uint8_t patch_y1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
                         uint8_t patch_y2[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
                         int16_t patch_y3[MAX_PB_SIZE * MAX_PB_SIZE];
-
-                        printf("Filter Y-B00: w=%d,h=%d\n", c->w, c->h);
 
                         av_assert0(c->w <= 16 && c->h <= 64);
 
@@ -592,18 +570,7 @@ void rpi_shader_c(HEVCContext *const s,
                         pixel patch_u3[16 * 16];
                         pixel patch_v3[16 * 16];
 
-                        printf("Filter C-Pxx: base=%p, x=%d.%d, y=%d.%d, w=%d, h=%d, d=%d wo=%#x:%d,%d/%#x:%d,%d\n",
-                               st->last_l0->base, st->last_l0->x, mx, st->last_l0->y, my, c->w, c->h,
-                               st->wdenom,
-                               c->wo_u, ext(c->wo_u, 0, 16), ext(c->wo_u, 16, 17),
-                               c->wo_v, ext(c->wo_v, 0, 16), ext(c->wo_v, 16, 17));
-                        printf("L0in:\n");
-                        dump_y(st->last_l0->base, st->stride1, st->stride2, st->last_l0->x, st->last_l0->y, c->w + 3, c->h + 3, 1);
-
                         get_patch_c(st, patch_u1, patch_v1, PATCH_STRIDE, st->last_l0, 8+3, c->h + 3);
-
-                        printf("L0u:\n");
-                        dump_y(patch_u1, PATCH_STRIDE, 0, 0, 0, c->w+3, c->h+3, 0);
 
                         s->hevcdsp.put_hevc_epel_uni_w[wtoidx(c->w)][my != 0][mx != 0](
                             patch_u3, 16 * pw, patch_u1 + PATCH_STRIDE + 1, PATCH_STRIDE,
@@ -612,12 +579,7 @@ void rpi_shader_c(HEVCContext *const s,
                             patch_v3, 16 * pw, patch_v1 + PATCH_STRIDE + 1, PATCH_STRIDE,
                             c->h, st->wdenom, wweight(c->wo_v), woff_p(c->wo_v), mx, my, c->w);
 
-                        printf("U:\n");
-                        dump_y(patch_u3, 16*pw, 0, 0, 0, c->w, c->h, 0);
-
                         planar_to_sand_c(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
-                        printf("Out @ %p\n", c->dst_addr_c);
-                        dump_y(c->dst_addr_c, st->stride1, 0, 0, 0, c->w, c->h, 1);
 
                         st->last_l0 = &c->next_src;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -638,29 +600,8 @@ void rpi_shader_c(HEVCContext *const s,
                         uint16_t patch_u4[MAX_PB_SIZE * MAX_PB_SIZE];
                         uint16_t patch_v4[MAX_PB_SIZE * MAX_PB_SIZE];
 
-                        printf("Filter C-Bxx; (%d.%d,%d.%d) (%d.%d,%d.%d) d=%d; w/o=%d/%d, %d/%d; w/o=%d/%d, %d/%d\n",
-                               st->last_l0->x, mx1, st->last_l0->y, my1,
-                               st->last_l1->x, mx2, st->last_l1->y, my2,
-                               st->wdenom,
-                               c->weight_u1, 0, ext(c->wo_u2, 0, 16), ext(c->wo_u2, 16, 16) - 1,
-                               c->weight_v1, 0, ext(c->wo_v2, 0, 16), ext(c->wo_v2, 16, 16) - 1);
-
-                        printf("L0in:\n");
-                        dump_y(st->last_l0->base, st->stride1, st->stride2, st->last_l0->x, st->last_l0->y, c->w + 3, c->h + 3, 1);
-                        printf("L1in:\n");
-                        dump_y(st->last_l1->base, st->stride1, st->stride2, st->last_l1->x, st->last_l1->y, c->w+3, c->h+3, 1);
                         get_patch_c(st, patch_u1, patch_v1, PATCH_STRIDE, st->last_l0, 8+3, c->h + 3);
                         get_patch_c(st, patch_u2, patch_v2, PATCH_STRIDE, st->last_l1, 8+3, c->h + 3);
-
-                        printf("L0u:\n");
-                        dump_y(patch_u1, PATCH_STRIDE, 0, 0, 0, c->w+3, c->h+3, 0);
-                        printf("L0v:\n");
-                        dump_y(patch_v1, PATCH_STRIDE, 0, 0, 0, c->w+3, c->h+3, 0);
-                        printf("L1u:\n");
-                        dump_y(patch_u2, PATCH_STRIDE, 0, 0, 0, c->w+3, c->h+3, 0);
-                        printf("L1v:\n");
-                        dump_y(patch_v2, PATCH_STRIDE, 0, 0, 0, c->w+3, c->h+3, 0);
-
 
                         s->hevcdsp.put_hevc_epel[wtoidx(c->w)][my1 != 0][mx1 != 0](
                            patch_u4, patch_u1 + PATCH_STRIDE + 1, PATCH_STRIDE,
@@ -669,7 +610,6 @@ void rpi_shader_c(HEVCContext *const s,
                            patch_v4, patch_v1 + PATCH_STRIDE + 1, PATCH_STRIDE,
                            c->h, mx1, my1, c->w);
 
-                        printf("d:%d; w/o %d,%d:%d,%d\n", st->wdenom, c->weight_u1, 0,ext(c->wo_u2, 0, 16), ext(c->wo_u2, 16, 16) - 1);
                         s->hevcdsp.put_hevc_epel_bi_w[wtoidx(c->w)][my2 != 0][mx2 != 0](
                             patch_u3, 16 * pw, patch_u2 + PATCH_STRIDE + 1, PATCH_STRIDE, patch_u4,
                             c->h, st->wdenom, c->weight_u1, wweight(c->wo_u2),
@@ -679,29 +619,17 @@ void rpi_shader_c(HEVCContext *const s,
                             c->h, st->wdenom, c->weight_v1, wweight(c->wo_v2),
                             0, woff_b(c->wo_v2), mx2, my2, c->w);
 
-                        printf("U\n");
-                        dump_y(patch_u3, 16 * pw, 0, 0, 0, c->w, c->h, 0);
-                        printf("V\n");
-                        dump_y(patch_v3, 16 * pw, 0, 0, 0, c->w, c->h, 0);
                         planar_to_sand_c(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 16, patch_v3, 16, 0, 0, c->w, c->h);
-                        printf("Out @ %p\n", c->dst_addr_c);
-                        dump_y(c->dst_addr_c, st->stride1, 0, 0, 0, c->w, c->h, 1);
 
-                        if (0) {
-                            static int z = 0;
-                            av_assert0(++z < 50);
-                        }
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                     }
                     else if (link == q->code_sync) {
-                        printf("Sync\n");
                         cmd = (const qpu_mc_pred_cmd_t *)((uint32_t *)cmd + 1);
                         break;
                     }
                     else if (link == q->code_exit) {
-                        printf("Exit\n");
                         // We expect exit to occur without other sync
                         av_assert0(i == exit_n);
                         ++exit_n;

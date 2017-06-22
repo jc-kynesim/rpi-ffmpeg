@@ -2659,8 +2659,6 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
     qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
 
-    printf("%s[%d]: Dst:%p (%d,%d): %p: mv: %d,%d\n", __func__, s->poc, s->frame->data[1], x0_c, y0_c, s->frame->data[1] + c_off, mv->x, mv->y);
-
     for(int start_y=0;start_y < nPbH_c;start_y+=16)
     {
         const int bh = FFMIN(nPbH_c-start_y, 16);
@@ -2727,8 +2725,6 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
     const qpu_mc_src_addr_t src1_base = get_mc_address_u(src_frame);
     const qpu_mc_src_addr_t src2_base = get_mc_address_u(src_frame2);
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
-
-    printf("%s[%d]: Dst:%p (%d,%d)\n", __func__, s->poc, s->frame->data[1], x0_c, y0_c);
 
     for (int start_y = 0; start_y < nPbH_c; start_y += 16)
     {
