@@ -26,10 +26,6 @@
 #include "bit_depth_template.c"
 #include "hevcdsp.h"
 
-#ifdef RPI
-#include "rpi_zc.h"
-#endif
-
 static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
 {
@@ -630,17 +626,6 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
 // --- Plaited chroma versions
 
-#if BIT_DEPTH != 8
-static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
-                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
-                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
-                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
-                                  int width, int height)
-{
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-#else
 static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
@@ -653,6 +638,8 @@ static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
     int offset_table_v[32] = { 0 };
     int k, y, x;
     int shift  = BIT_DEPTH - 5;
+
+    printf("%s: %dx%d stride_src=%d stride_dst=%d src=%p dst=%p\n", __func__, width, height, stride_src, stride_dst, src, dst);
 
     stride_dst /= sizeof(pixel);
     stride_src /= sizeof(pixel);
@@ -673,16 +660,6 @@ static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
         src += stride_src;
     }
 }
-#endif
-
-#if BIT_DEPTH != 8
-static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
-                                  const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v,
-                                  int eo, int width, int height) {
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-#else
 
 static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
                                   const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v,
@@ -720,7 +697,6 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
         dst += stride_dst;
     }
 }
-#endif
 
 #if BIT_DEPTH != 8
 static void FUNC(sao_edge_restore_c_0)(uint8_t *_dst, uint8_t *_src,
@@ -729,6 +705,7 @@ static void FUNC(sao_edge_restore_c_0)(uint8_t *_dst, uint8_t *_src,
                                     int c_idx, uint8_t *vert_edge,
                                     uint8_t *horiz_edge, uint8_t *diag_edge)
 {
+    // *** Need a 4byte version...
     av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
     abort();                                                                        \
 }

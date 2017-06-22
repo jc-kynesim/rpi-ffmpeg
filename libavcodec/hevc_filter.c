@@ -347,10 +347,10 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         uint8_t *dst;
 
 #ifdef RPI
-        const unsigned int sh = (sliced && c_idx != 0) ? 1 : s->ps.sps->pixel_shift;
+        const unsigned int sh = s->ps.sps->pixel_shift + (sliced && c_idx != 0);
         const int wants_lr = sao->type_idx[c_idx] == SAO_EDGE && sao->eo_class[c_idx] != 1 /* Vertical */;
         uint8_t * const src = !sliced ?
-                &s->frame->data[c_idx][y0 * stride_src + (x0 << s->ps.sps->pixel_shift)] :
+                &s->frame->data[c_idx][y0 * stride_src + (x0 << sh)] :
             c_idx == 0 ?
                 rpi_sand_frame_pos_y(s->frame, x0, y0) :
                 rpi_sand_frame_pos_c(s->frame, x0, y0);

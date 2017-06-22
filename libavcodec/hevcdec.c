@@ -704,6 +704,12 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
 #endif
         break;
     case AV_PIX_FMT_YUV420P10:
+#if RPI_HEVC_SAND
+        // Currently geometry calc is stuffed for big sizes
+        if (sps->width < 2048 && sps->height <= 1088) {
+            *fmt++ = AV_PIX_FMT_SAND64_10;
+        }
+#endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
 #endif
@@ -1394,6 +1400,7 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
 
         lc->tu.cross_pf = 0;
 
+        printf("log2_trafo_size=%d/%d\n", log2_trafo_size, log2_trafo_size_c);
         if (cbf_luma)
             ff_hevc_hls_residual_coding(s, x0, y0, log2_trafo_size, scan_idx, 0);
         if (s->ps.sps->chroma_format_idc && (log2_trafo_size > 2 || s->ps.sps->chroma_format_idc == 3)) {
@@ -3825,8 +3832,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
-    s->enable_rpi = s->ps.sps->bit_depth == 8 &&
-        s->frame->format == AV_PIX_FMT_SAND128 &&
+    s->enable_rpi =
+        ((s->ps.sps->bit_depth == 8 && s->frame->format == AV_PIX_FMT_SAND128) ||
+         (s->ps.sps->bit_depth == 10 && s->frame->format == AV_PIX_FMT_SAND64_10)) &&
         !s->ps.pps->cross_component_prediction_enabled_flag;
 
     if (!s->enable_rpi) {

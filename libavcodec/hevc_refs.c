@@ -23,7 +23,7 @@
 
 #include "libavutil/avassert.h"
 #include "libavutil/pixdesc.h"
-
+#include "libavutil/rpi_sand_fns.h"
 #include "internal.h"
 #include "thread.h"
 #include "hevc.h"
@@ -218,7 +218,7 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
             if (ret < 0)
                 return ret;
 
-            if (fmt == AV_PIX_FMT_SAND128)
+            if (rpi_is_sand_format(fmt))
             {
                 // Sand cannot be windowed by offset so add side data if we have an offset
                 const HEVCWindow * const window = &frame->window;

@@ -416,7 +416,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
         rv = avcodec_default_get_buffer2(s, frame, flags);
     }
     else if (frame->format == AV_PIX_FMT_YUV420P ||
-             frame->format == AV_PIX_FMT_SAND128)
+             rpi_is_sand_frame(frame))
     {
         rv = rpi_get_display_buffer(s->get_buffer_context, frame);
     }
