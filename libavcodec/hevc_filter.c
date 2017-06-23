@@ -407,6 +407,8 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
 #ifdef RPI
                 if (sliced && c_idx != 0)
                 {
+//                    printf("x,y=%d,%d data[1]=%p, src=%p\n", x0, y0, s->frame->data[1], src);
+
                     s->hevcdsp.sao_band_filter_c[tab](src, src, stride_src, stride_src,
                                                     sao->offset_val[1], sao->band_position[1],
                                                     sao->offset_val[2], sao->band_position[2],

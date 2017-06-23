@@ -497,6 +497,29 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
     }
 }
 
+
+#if BIT_DEPTH == 10
+#undef pixel
+#undef BIT_DEPTH
+#define pixel uint32_t
+#define BIT_DEPTH 32
+// All 16 bit variations are the same
+#define sao_edge_restore_0_10 sao_edge_restore_0_9
+#define sao_edge_restore_1_10 sao_edge_restore_1_9
+#define sao_edge_restore_0_11 sao_edge_restore_0_9
+#define sao_edge_restore_1_11 sao_edge_restore_1_9
+#define sao_edge_restore_0_12 sao_edge_restore_0_9
+#define sao_edge_restore_1_12 sao_edge_restore_1_9
+#define sao_edge_restore_0_13 sao_edge_restore_0_9
+#define sao_edge_restore_1_13 sao_edge_restore_1_9
+#define sao_edge_restore_0_14 sao_edge_restore_0_9
+#define sao_edge_restore_1_14 sao_edge_restore_1_9
+#define sao_edge_restore_0_15 sao_edge_restore_0_9
+#define sao_edge_restore_1_15 sao_edge_restore_1_9
+#define sao_edge_restore_0_16 sao_edge_restore_0_9
+#define sao_edge_restore_1_16 sao_edge_restore_1_9
+#endif
+#if BIT_DEPTH <= 9 || BIT_DEPTH == 32
 static void FUNC(sao_edge_restore_0)(uint8_t *_dst, uint8_t *_src,
                                     ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
                                     int *borders, int _width, int _height,
@@ -622,7 +645,13 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
     }
 }
-
+#endif
+#if BIT_DEPTH == 32
+#undef BIT_DEPTH
+#undef pixel
+#define BIT_DEPTH 10
+#define pixel uint16_t
+#endif
 
 // --- Plaited chroma versions
 
@@ -653,8 +682,12 @@ static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
     for (y = 0; y < height; y++) {
         for (x = 0; x < width; x += 2)
         {
-            dst[x + 0] = av_clip_pixel(src[x + 0] + offset_table_u[src[x + 0] >> shift]);
-            dst[x + 1] = av_clip_pixel(src[x + 1] + offset_table_v[src[x + 1] >> shift]);
+//            printf("dst=%p, src=%p, x=%d, shift=%d\n", dst, src, x, shift);
+//            printf("offsets=%x,%x\n", src[x + 0], src[x + 1]);
+            // *** & 31 shouldn't be wanted but just now we generate broken input that
+            // crashes us in 10-bit world
+            dst[x + 0] = av_clip_pixel(src[x + 0] + offset_table_u[(src[x + 0] >> shift) & 31]);
+            dst[x + 1] = av_clip_pixel(src[x + 1] + offset_table_v[(src[x + 1] >> shift) & 31]);
         }
         dst += stride_dst;
         src += stride_src;
@@ -698,30 +731,28 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
     }
 }
 
-#if BIT_DEPTH != 8
-static void FUNC(sao_edge_restore_c_0)(uint8_t *_dst, uint8_t *_src,
-                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
-                                    int *borders, int _width, int _height,
-                                    int c_idx, uint8_t *vert_edge,
-                                    uint8_t *horiz_edge, uint8_t *diag_edge)
-{
-    // *** Need a 4byte version...
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-static void FUNC(sao_edge_restore_c_1)(uint8_t *_dst, uint8_t *_src,
-                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
-                                    int *borders, int _width, int _height,
-                                    int c_idx, uint8_t *vert_edge,
-                                    uint8_t *horiz_edge, uint8_t *diag_edge)
-{
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-#else
+// Do once
+#if BIT_DEPTH == 8
 // Any old 2 byte 'normal' restore will work for these
-#define sao_edge_restore_c_0_8 sao_edge_restore_0_10
-#define sao_edge_restore_c_1_8 sao_edge_restore_1_10
+#define sao_edge_restore_c_0_8  sao_edge_restore_0_16
+#define sao_edge_restore_c_1_8  sao_edge_restore_1_16
+// We need 32 bit for 9 bit+
+#define sao_edge_restore_c_0_9  sao_edge_restore_0_32
+#define sao_edge_restore_c_1_9  sao_edge_restore_1_32
+#define sao_edge_restore_c_0_10 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_10 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_11 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_11 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_12 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_12 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_13 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_13 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_14 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_14 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_15 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_15 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_16 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_16 sao_edge_restore_1_32
 #endif
 
 
