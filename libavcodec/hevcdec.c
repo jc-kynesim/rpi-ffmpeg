@@ -1400,7 +1400,6 @@ static int hls_transform_unit(HEVCContext *s, int x0, int y0,
 
         lc->tu.cross_pf = 0;
 
-        printf("log2_trafo_size=%d/%d\n", log2_trafo_size, log2_trafo_size_c);
         if (cbf_luma)
             ff_hevc_hls_residual_coding(s, x0, y0, log2_trafo_size, scan_idx, 0);
         if (s->ps.sps->chroma_format_idc && (log2_trafo_size > 2 || s->ps.sps->chroma_format_idc == 3)) {

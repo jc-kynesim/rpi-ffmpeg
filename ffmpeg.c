@@ -87,6 +87,7 @@
 #include <interface/mmal/util/mmal_util_params.h>
 #pragma GCC diagnostic pop
 #include "libavcodec/rpi_qpu.h"
+#include "libavutil/rpi_sand_fns.h"
 #include "libavcodec/rpi_zc.h"
 #endif
 
@@ -226,7 +227,7 @@ static MMAL_COMPONENT_T* display_init(const enum AVPixelFormat req_fmt, size_t x
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
-    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
+    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
 
     bcm_host_init();  // TODO is this needed?

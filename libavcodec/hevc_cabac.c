@@ -1527,8 +1527,6 @@ static void rpi_add_residual(HEVCContext * const s,
             rpi_sand_frame_pos_y(frame, x, y) :
             rpi_sand_frame_pos_c(frame, x, y);
 
-        printf("c_idx=%d, l2ts=%d, %d,%d; c_idc=%d\n", c_idx, log2_trafo_size, x0, y0, s->ps.sps->chroma_format_idc);
-
     if (s->enable_rpi) {
         const unsigned int i = s->num_pred_cmds[s->pass0_job];
         HEVCPredCmd * const pc = s->univ_pred_cmds[s->pass0_job] + i - 1;

@@ -499,6 +499,7 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
 
 
 #if BIT_DEPTH == 10
+// We need a 32 bit variation for the _c restores so hijack bit depth 10
 #undef pixel
 #undef BIT_DEPTH
 #define pixel uint32_t

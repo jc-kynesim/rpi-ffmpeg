@@ -478,7 +478,6 @@ static AVBufferRef * zc_copy(struct AVCodecContext * const s,
 }
 
 
-
 static AVBufferRef * zc_420p10_to_sand128(struct AVCodecContext * const s,
     const AVFrame * const src)
 {
@@ -537,6 +536,36 @@ static AVBufferRef * zc_420p10_to_sand128(struct AVCodecContext * const s,
 }
 
 
+static AVBufferRef * zc_sand64_16_to_sand128(struct AVCodecContext * const s,
+    const AVFrame * const src, const unsigned int src_bits)
+{
+    AVFrame dest_frame = {
+        .format = AV_PIX_FMT_SAND128,
+        .width = src->width,
+        .height = src->height
+    };
+    AVFrame * const dest = &dest_frame;
+    const unsigned int shr = src_bits - 8;
+
+    if (rpi_get_display_buffer(s->get_buffer_context, dest) != 0)
+    {
+        return NULL;
+    }
+
+    // Y
+    rpi_sand16_to_sand8(dest->data[0], dest->linesize[0], rpi_sand_frame_stride2(dest),
+                        src->data[0], src->linesize[0], rpi_sand_frame_stride2(dest),
+                        src->width, src->height, shr);
+    // C
+    rpi_sand16_to_sand8(dest->data[1], dest->linesize[1], rpi_sand_frame_stride2(dest),
+                        src->data[1], src->linesize[1], rpi_sand_frame_stride2(dest),
+                        src->width, src->height / 2, shr);
+
+    return dest->buf[0];
+}
+
+
+
 AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
     const AVFrame * const frame, const int maycopy)
 {
@@ -544,13 +573,13 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
 
     if (frame->format != AV_PIX_FMT_YUV420P &&
         frame->format != AV_PIX_FMT_YUV420P10 &&
-        frame->format != AV_PIX_FMT_SAND128)
+        !rpi_is_sand_frame(frame))
     {
         av_log(s, AV_LOG_WARNING, "%s: *** Format not SAND/YUV420P: %d\n", __func__, frame->format);
         return NULL;
     }
 
-    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10)
+    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10 || rpi_is_sand16_frame(frame))
     {
         if (maycopy)
         {
@@ -559,6 +588,9 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
             {
                 case AV_PIX_FMT_YUV420P10:
                     return zc_420p10_to_sand128(s, frame);
+
+                case AV_PIX_FMT_SAND64_10:
+                    return zc_sand64_16_to_sand128(s, frame, 10);
 
                 default:
                     return zc_copy(s, frame);
