@@ -176,19 +176,19 @@ static void FUNC(add_residual32x32_u)(uint8_t *_dst, const int16_t * res,
 static void FUNC(add_residual4x4_v)(uint8_t *_dst, const int16_t * res,
                                   ptrdiff_t stride)
 {
-    FUNC(add_residual_u_v)(_dst + 1, res, stride, 4);
+    FUNC(add_residual_u_v)(_dst + sizeof(pixel), res, stride, 4);
 }
 
 static void FUNC(add_residual8x8_v)(uint8_t *_dst, const int16_t * res,
                                   ptrdiff_t stride)
 {
-    FUNC(add_residual_u_v)(_dst + 1, res, stride, 8);
+    FUNC(add_residual_u_v)(_dst + sizeof(pixel), res, stride, 8);
 }
 
 static void FUNC(add_residual16x16_v)(uint8_t *_dst, const int16_t * res,
                                     ptrdiff_t stride)
 {
-    FUNC(add_residual_u_v)(_dst + 1, res, stride, 16);
+    FUNC(add_residual_u_v)(_dst + sizeof(pixel), res, stride, 16);
 }
 
 static void FUNC(add_residual32x32_v)(uint8_t *_dst, const int16_t * res,

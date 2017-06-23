@@ -70,7 +70,7 @@
   #define Y_B_MAX_H     0
 #endif
 
-#define DEBUG_DECODE_N 0   // 0 = do all, n = frames idr onwards
+#define DEBUG_DECODE_N 2   // 0 = do all, n = frames idr onwards
 
 #define PACK2(hi,lo) (((hi) << 16) | ((lo) & 0xffff))
 
