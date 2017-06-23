@@ -70,7 +70,7 @@
   #define Y_B_MAX_H     0
 #endif
 
-#define DEBUG_DECODE_N 2   // 0 = do all, n = frames idr onwards
+#define DEBUG_DECODE_N 0   // 0 = do all, n = frames idr onwards
 
 #define PACK2(hi,lo) (((hi) << 16) | ((lo) & 0xffff))
 
@@ -2330,6 +2330,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
     qpu_mc_dst_addr_t dst_addr = get_mc_address_y(s->frame) + y_off;
     const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].luma_ip;
+    const unsigned int xshl = rpi_sand_frame_xshl(s->frame);
 
     if (my_mx == 0)
     {
@@ -2375,7 +2376,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 cmd_y->w = bw;
                 cmd_y->h = bh;
                 cmd_y->wo1 = wo;
-                cmd_y->dst_addr =  dst_addr + start_x;
+                cmd_y->dst_addr =  dst_addr + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 *(qpu_mc_pred_y_p00_t **)&yp->qpu_mc_curr = cmd_y + 1;
             }
@@ -2477,7 +2478,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 cmd_y->mymx21 = my2_mx2_my_mx;
                 cmd_y->wo1 = wo;
                 cmd_y->wo2 = wo;
-                cmd_y->dst_addr =  dst_addr + start_x;
+                cmd_y->dst_addr =  dst_addr + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
@@ -2519,6 +2520,7 @@ rpi_pred_y_b(HEVCContext * const s,
     const uint32_t wo1 = PACK2(wt_offset, s->sh.luma_weight_l0[ref_idx0]);
     const uint32_t wo2 = PACK2(wt_offset, s->sh.luma_weight_l1[ref_idx1]);
 
+    const unsigned int xshl = rpi_sand_frame_xshl(s->frame);
     qpu_mc_dst_addr_t dst = get_mc_address_y(s->frame) + y_off;
     const qpu_mc_src_addr_t src1_base = get_mc_address_y(src_frame);
     const qpu_mc_src_addr_t src2_base = get_mc_address_y(src_frame2);
@@ -2568,7 +2570,7 @@ rpi_pred_y_b(HEVCContext * const s,
                 cmd_y->mymx21 = 0;
                 cmd_y->wo1 = wo1;
                 cmd_y->wo2 = wo2;
-                cmd_y->dst_addr =  dst + start_x;
+                cmd_y->dst_addr =  dst + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
@@ -2632,7 +2634,7 @@ rpi_pred_y_b(HEVCContext * const s,
                 cmd_y->mymx21 = my2_mx2_my_mx;
                 cmd_y->wo1 = wo1;
                 cmd_y->wo2 = wo2;
-                cmd_y->dst_addr =  dst + start_x;
+                cmd_y->dst_addr =  dst + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
@@ -2665,6 +2667,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
     const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
     qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
+    const unsigned int xshl = rpi_sand_frame_xshl(s->frame) + 1;
 
     for(int start_y=0;start_y < nPbH_c;start_y+=16)
     {
@@ -2686,7 +2689,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
             u[0].coeffs_y = y_coeffs;
             u[0].wo_u = wo_u;
             u[0].wo_v = wo_v;
-            u[0].dst_addr_c = dst_base_u + start_x * 2;
+            u[0].dst_addr_c = dst_base_u + (start_x << xshl);
             cp->last_l0 = &u->next_src;
             *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = u + 1;
         }
@@ -2732,6 +2735,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
     const qpu_mc_src_addr_t src1_base = get_mc_address_u(src_frame);
     const qpu_mc_src_addr_t src2_base = get_mc_address_u(src_frame2);
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
+    const unsigned int xshl = rpi_sand_frame_xshl(s->frame) + 1;
 
     for (int start_y = 0; start_y < nPbH_c; start_y += 16)
     {
@@ -2763,7 +2767,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
             u[0].coeffs_y2 = coefs1_y;
             u[0].wo_u2 = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
             u[0].wo_v2 = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
-            u[0].dst_addr_c = dst_base_u + start_x * 2;
+            u[0].dst_addr_c = dst_base_u + (start_x << xshl);
 
             cp->last_l0 = &u[0].next_src1;
             cp->last_l1 = &u[0].next_src2;
@@ -3783,7 +3787,10 @@ static void worker_core(HEVCContext * const s)
     // no arm/neon sand pred code there doesn't seem a lot of point
     // keeping it around
 #if RPI_QPU_EMU
-    rpi_shader_c(s, &jb->luma_ip, &jb->chroma_ip);
+    if (rpi_is_sand8_frame(s->frame))
+        rpi_shader_c8(s, &jb->luma_ip, &jb->chroma_ip);
+    else
+        rpi_shader_c16(s, &jb->luma_ip, &jb->chroma_ip);
 #endif
 
 #if RPI_OPT_SEP_PRED

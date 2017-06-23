@@ -111,5 +111,10 @@ static inline uint8_t * rpi_sand_frame_pos_c(const AVFrame * const frame, const 
     return frame->data[1] + rpi_sand_frame_off_c(frame, x, y);
 }
 
+static inline int rpi_sand_frame_xshl(const AVFrame * const frame)
+{
+    return rpi_is_sand8_frame(frame) ? 0 : 1;
+}
+
 #endif
 
