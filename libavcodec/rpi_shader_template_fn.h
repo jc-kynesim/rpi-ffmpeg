@@ -168,16 +168,20 @@ static void FUNC(get_patch_c)(const shader_track_t * const st,
     }
 }
 
-#if 0
 // w, y, w, h in pixels
 // stride1, stride2 in bytes
-static void FUNC(dump_y)(const uint8_t * const base, const int stride1, const int stride2, int x, int y, int w, int h, const int is_c)
+void FUNC(rpi_sand_dump)(const char * const name,
+                         const uint8_t * const base, const int stride1, const int stride2, int x, int y, int w, int h, const int is_c)
 {
     const int mask = stride2 == 0 ? ~0 : stride1 - 1;
+
+    printf("%s (%d,%d) %dx%d\n", name, x, y, w, h);
+
     if (is_c) {
         x *= 2;
         w *= 2;
     }
+
     for (int i = y; i != y + h; ++i) {
         for (int j = x; j != x + w; ++j) {
             const uint8_t * p = base + ((j*PW) & mask) + i * stride1 + ((j*PW) & ~mask) * stride2;
@@ -197,7 +201,6 @@ static void FUNC(dump_y)(const uint8_t * const base, const int stride1, const in
         printf("\n");
     }
 }
-#endif
 
 
 void FUNC(rpi_shader_c)(HEVCContext *const s,

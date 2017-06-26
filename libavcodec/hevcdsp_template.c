@@ -26,6 +26,8 @@
 #include "bit_depth_template.c"
 #include "hevcdsp.h"
 
+#include "rpi_shader_template.h"
+
 static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
 {
@@ -107,6 +109,10 @@ static av_always_inline void FUNC(add_residual_c)(uint8_t *_dst, const int16_t *
     const int16_t * ru = res;
     const int16_t * rv = res + size * size;
 
+//    rpi_sand_dump16("ARC In Pred", _dst, stride, 0, 0, 0, size, size, 1);
+//    rpi_sand_dump16("ARC In RU", ru, size * 2, 0, 0, 0, size, size, 0);
+//    rpi_sand_dump16("ARC In RV", rv, size * 2, 0, 0, 0, size, size, 0);
+
     stride /= sizeof(pixel);
 
     for (y = 0; y < size; y++) {
@@ -116,6 +122,8 @@ static av_always_inline void FUNC(add_residual_c)(uint8_t *_dst, const int16_t *
         }
         dst += stride;
     }
+
+//    rpi_sand_dump16("ARC Out", _dst, stride * 2, 0, 0, 0, size, size, 1);
 }
 #endif
 
