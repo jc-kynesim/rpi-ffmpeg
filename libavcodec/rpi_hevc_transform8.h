@@ -1,4 +1,4 @@
-unsigned char rpi_hevc_transform [] = {
+static const unsigned char rpi_hevc_transform8 [] = {
 21,
 106,
 0,

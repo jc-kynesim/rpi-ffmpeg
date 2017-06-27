@@ -1824,8 +1824,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #ifdef RPI
         use_vpu = 0;
         if (s->enable_rpi) {
-            // VPU only currently works @ bit depth 8
-            use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size >= 4 && s->ps.sps->bit_depth == 8;
+            use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size >= 4;
             coeffs = rpi_alloc_coeff_buf(s, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
 #if HAVE_NEON
             rpi_zap_coeff_vals_neon(coeffs, log2_trafo_size - 2);

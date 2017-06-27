@@ -1166,7 +1166,7 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   // Call VPU
   {
       const vpu_qpu_job_h vqj = vpu_qpu_job_new();
-      vpu_qpu_job_add_vpu(vqj, vpu_get_fn(), s->dvq->vpu_cmds_vc, 3, 0, 0, 0, 5);  // 5 means to do all the commands
+      vpu_qpu_job_add_vpu(vqj, vpu_get_fn(s->ps.sps->bit_depth), s->dvq->vpu_cmds_vc, 3, 0, 0, 0, 5);  // 5 means to do all the commands
       vpu_qpu_job_add_sync_this(vqj, &s->dvq->cmd_id);
       vpu_qpu_job_finish(vqj);
   }

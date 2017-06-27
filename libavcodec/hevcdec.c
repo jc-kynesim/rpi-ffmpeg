@@ -3734,7 +3734,7 @@ static void worker_core(HEVCContext * const s)
 
     if (s->num_coeffs[job][3] + s->num_coeffs[job][2] != 0) {
         vpu_qpu_job_add_vpu(vqj,
-            vpu_get_fn(),
+            vpu_get_fn(s->ps.sps->bit_depth),
             vpu_get_constants(),
             s->coeffs_buf_vc[job][2],
             s->num_coeffs[job][2] >> 8,

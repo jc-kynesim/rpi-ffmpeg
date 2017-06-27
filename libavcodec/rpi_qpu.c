@@ -16,7 +16,8 @@
 #include "rpi_mailbox.h"
 #include "rpi_qpu.h"
 #include "rpi_shader.h"
-#include "rpi_hevc_transform.h"
+#include "rpi_hevc_transform8.h"
+#include "rpi_hevc_transform10.h"
 #include "libavutil/rpi_sand_fns.h"
 
 #pragma GCC diagnostic push
@@ -87,7 +88,8 @@ static const short rpi_transMatrix2even[32][16] = { // Even rows first
 struct GPU
 {
   unsigned int qpu_code[QPU_CODE_SIZE];
-  unsigned int vpu_code[VPU_CODE_SIZE];
+  unsigned int vpu_code8[VPU_CODE_SIZE];
+  unsigned int vpu_code10[VPU_CODE_SIZE];
   short transMatrix2even[16*16*2];
 };
 
@@ -303,9 +305,14 @@ static int gpu_init(gpu_env_t ** const gpu) {
   }
   // And the VPU code
   {
-    int num_bytes = sizeof(rpi_hevc_transform);
+    int num_bytes = sizeof(rpi_hevc_transform8);
     av_assert0(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
-    memcpy((void*)ptr->vpu_code, rpi_hevc_transform, num_bytes);
+    memcpy((void*)ptr->vpu_code8, rpi_hevc_transform8, num_bytes);
+  }
+  {
+    int num_bytes = sizeof(rpi_hevc_transform10);
+    av_assert0(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
+    memcpy((void*)ptr->vpu_code10, rpi_hevc_transform10, num_bytes);
   }
   // And the transform coefficients
   memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
@@ -396,10 +403,18 @@ void gpu_free(GPU_MEM_PTR_T * const p) {
   gpu_unlock_unref(ge);
 }
 
-unsigned int vpu_get_fn(void) {
+unsigned int vpu_get_fn(const unsigned int bit_depth) {
   // Make sure that the gpu is initialized
   av_assert0(gpu != NULL);
-  return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code);
+  switch (bit_depth){
+    case 8:
+      return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code8);
+    case 10:
+      return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code10);
+    default:
+      av_assert0(0);
+  }
+  return 0;
 }
 
 unsigned int vpu_get_constants(void) {

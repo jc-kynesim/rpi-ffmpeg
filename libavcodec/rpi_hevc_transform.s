@@ -7,7 +7,7 @@
 # ******************************************************************************
 
 # HEVC VPU Transform
-#
+#             fe
 # Transform matrix can be thought of as
 #   output row vector = input row vector * transMatrix2
 #
@@ -80,6 +80,12 @@
 # num32: number of 32x32 transforms
 # command 0 for transform, 1 for memclear16(int16_t *dst,num16)
 #
+
+.equ TRANS_SHIFT, 20 - BIT_DEPTH
+.equ TRANS_RND2, 1 << (TRANS_SHIFT - 1)
+.equ TRANS_ASL2, 16 - TRANS_SHIFT
+
+
 hevc_trans_16x16:
   cmp r5,1
   beq memclear16
@@ -109,7 +115,7 @@ hevc_trans_16x16:
   mov r8,64*16 # Value used to swap from current to next VRF location
   vldh HX(0++,0)+r0,(r1 += r3) REP 16
   mov r4,64 # Constant used for rounding first pass
-  mov r5,1<<11 # Constant used for rounding second pass
+  mov r5,TRANS_RND2 # Constant used for rounding second pass
 
   # At start of block r0,r1 point to the current block (that has already been loaded)
 block_loop:
@@ -130,7 +136,7 @@ block_loop:
   bl col_trans_16
   vadd HY(0++,0)+r0,HY(0++,0)+r0,r5 REP 16   # Now add on rounding, shift down by 7, and saturate
   #vsasls HY(0++,0)+r0,HY(0++,0)+r0,4 REP 16 # 4+12=16 so this ends up with the output saturated and in the top half of the word.
-  vasl HY(0++,0)+r0,HY(0++,0)+r0,4 REP 16    # This should be saturating, but the instruction above does not assemble?  (Probably because it ends with ls which is interpreted as a condition flag)
+  vasl HY(0++,0)+r0,HY(0++,0)+r0,TRANS_ASL2 REP 16    # This should be saturating, but the instruction above does not assemble?  (Probably because it ends with ls which is interpreted as a condition flag)
 
   # Save results - note there has been a transposition during the processing so we save columns
   vsth VX(0,32++)+r0, (r1 += r3) REP 16
@@ -213,8 +219,8 @@ block_loop32:
   bl trans32
 
   # ROW TRANSFORM
-  mov r4, 1<<11 # Constant used for rounding second pass
-  mov r5, 4 # left shift used for rounding second pass
+  mov r4, TRANS_RND2 # Constant used for rounding second pass
+  mov r5, TRANS_ASL2 # left shift used for rounding second pass
 
   mov r1,r9  # Input temporary storage
   mov r8,r10   # Output Coefficient buffer

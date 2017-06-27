@@ -7,9 +7,9 @@ HEADERS = avcodec.h                                                     \
           avfft.h                                                       \
           rpi_qpu.h                                                     \
           rpi_shader.h                                                  \
-	  rpi_shader_cmd.h                                              \
-	  rpi_shader_template.h                                         \
-	  rpi_shader_template_fn.h                                      \
+          rpi_shader_cmd.h                                              \
+          rpi_shader_template.h                                         \
+          rpi_shader_template_fn.h                                      \
           rpi_mailbox.h                                                 \
           rpi_hevc_transform.h                                          \
           rpi_zc.h                                                      \
@@ -1118,6 +1118,7 @@ $(SUBDIR)sinewin_fixed.o: $(SUBDIR)sinewin_fixed_tables.h
 endif
 
 QASM_PY := ../local/bin/qasm.py
+VASMVIDCORE := ../local/bin/vasmvidcore_std
 
 ifneq ("$(wildcard $(QASM_PY))","")
 $(SUBDIR)rpi_shader.c: $(SUBDIR)rpi_shader.qasm
@@ -1127,4 +1128,19 @@ $(SUBDIR)rpi_shader.h: $(SUBDIR)rpi_shader.qasm
 	$(QASM_PY) -mc_h:rpi_shader,rpi_shader,rpi_shader $< > $@
 endif
 
+ifneq ("$(wildcard $(VASMVIDCORE))","")
+$(SUBDIR)rpi_hevc_transform8.bin: $(SUBDIR)rpi_hevc_transform.s
+	$(VASMVIDCORE) -Fbin -DBIT_DEPTH=8 $< -o $@
+$(SUBDIR)rpi_hevc_transform10.bin: $(SUBDIR)rpi_hevc_transform.s
+	$(VASMVIDCORE) -Fbin -DBIT_DEPTH=10 $< -o $@
+
+$(SUBDIR)rpi_hevc_transform8.h: $(SUBDIR)rpi_hevc_transform8.bin
+	python pi-util/make_array.py $<
+$(SUBDIR)rpi_hevc_transform10.h: $(SUBDIR)rpi_hevc_transform10.bin
+	python pi-util/make_array.py $<
+
+endif
+
+$(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_hevc_transform8.h $(SUBDIR)rpi_hevc_transform10.h
 $(SUBDIR)rpi_shader_template.o $(SUBDIR)rpi_qpu.o $(SUBDIR)hevc.o: $(SUBDIR)rpi_shader.h
+

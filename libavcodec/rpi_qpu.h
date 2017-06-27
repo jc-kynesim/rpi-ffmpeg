@@ -179,8 +179,7 @@ void vpu_qpu_job_add_sync_this(const vpu_qpu_job_h vqj, vpu_qpu_wait_h * const w
 int vpu_qpu_job_start(const vpu_qpu_job_h vqj);
 int vpu_qpu_job_finish(const vpu_qpu_job_h vqj);
 
-
-extern unsigned int vpu_get_fn(void);
+extern unsigned int vpu_get_fn(const unsigned int bit_depth);
 extern unsigned int vpu_get_constants(void);
 
 // Waits for previous post_codee to complete and Will null out *wait_h after use
