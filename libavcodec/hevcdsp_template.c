@@ -677,8 +677,6 @@ static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
     int k, y, x;
     int shift  = BIT_DEPTH - 5;
 
-    printf("%s: %dx%d stride_src=%d stride_dst=%d src=%p dst=%p\n", __func__, width, height, stride_src, stride_dst, src, dst);
-
     stride_dst /= sizeof(pixel);
     stride_src /= sizeof(pixel);
     width *= 2;

@@ -666,7 +666,7 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
 {
     #define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + CONFIG_HEVC_D3D11VA_HWACCEL + CONFIG_HEVC_VAAPI_HWACCEL + CONFIG_HEVC_VDPAU_HWACCEL)
     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 4], *fmt = pix_fmts;
-    int ret, i;
+    int ret;
 
     pic_arrays_free(s);
     s->ps.sps = NULL;
@@ -740,26 +740,32 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
     ff_hevc_dsp_init (&s->hevcdsp, sps->bit_depth);
     ff_videodsp_init (&s->vdsp,    sps->bit_depth);
 
-    for (i = 0; i < 3; i++) {
-        av_freep(&s->sao_pixel_buffer_h[i]);
-        av_freep(&s->sao_pixel_buffer_v[i]);
-    }
+    av_freep(&s->sao_pixel_buffer_h[0]);
+    av_freep(&s->sao_pixel_buffer_v[0]);
 
     if (sps->sao_enabled && !s->avctx->hwaccel) {
-        int c_count = (sps->chroma_format_idc != 0) ? 3 : 1;
-        int c_idx;
+        const unsigned int c_count = (sps->chroma_format_idc != 0) ? 3 : 1;
+        unsigned int c_idx;
+        size_t vsize[3] = {0};
+        size_t hsize[3] = {0};
 
         for(c_idx = 0; c_idx < c_count; c_idx++) {
             int w = sps->width >> sps->hshift[c_idx];
             int h = sps->height >> sps->vshift[c_idx];
-            // ******** Very very nasty allocation kludge for plaited Chroma
-            s->sao_pixel_buffer_h[c_idx] =
-                av_malloc((w * 2 * sps->ctb_height * (1 + (c_idx == 1))) <<
-                          sps->pixel_shift);
-            s->sao_pixel_buffer_v[c_idx] =
-                av_malloc((h * 2 * sps->ctb_width  * (1 + (c_idx == 1))) <<
-                          sps->pixel_shift);
+            // ctb height & width are a min of 8 so this must a multiple of 16
+            // so no point rounding up!
+            hsize[c_idx] = (w * 2 * sps->ctb_height) << sps->pixel_shift;
+            vsize[c_idx] = (h * 2 * sps->ctb_width) << sps->pixel_shift;
         }
+
+        // Allocate as a single lump so we can extend h[1] & v[1] into h[2] & v[2]
+        // when we have plaited chroma
+        s->sao_pixel_buffer_h[0] = av_malloc(hsize[0] + hsize[1] + hsize[2]);
+        s->sao_pixel_buffer_v[0] = av_malloc(vsize[0] + vsize[1] + vsize[2]);
+        s->sao_pixel_buffer_h[1] = s->sao_pixel_buffer_h[0] + hsize[0];
+        s->sao_pixel_buffer_h[2] = s->sao_pixel_buffer_h[1] + hsize[1];
+        s->sao_pixel_buffer_v[1] = s->sao_pixel_buffer_v[0] + vsize[0];
+        s->sao_pixel_buffer_v[2] = s->sao_pixel_buffer_v[1] + vsize[1];
     }
 
     s->ps.sps = sps;
@@ -4885,10 +4891,8 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     av_rpi_zc_uninit(avctx);
 #endif
 
-    for (i = 0; i < 3; i++) {
-        av_freep(&s->sao_pixel_buffer_h[i]);
-        av_freep(&s->sao_pixel_buffer_v[i]);
-    }
+    av_freep(&s->sao_pixel_buffer_h[0]);  // [1] & [2] allocated with [0]
+    av_freep(&s->sao_pixel_buffer_v[0]);
     av_frame_free(&s->output_frame);
 
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++) {
@@ -5206,9 +5210,9 @@ AVCodec ff_hevc_decoder = {
     .update_thread_context = hevc_update_thread_context,
     .init_thread_copy      = hevc_init_thread_copy,
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
-                             0,
+//                             0,
 //                             AV_CODEC_CAP_FRAME_THREADS,
-//                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };
