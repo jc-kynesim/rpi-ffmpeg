@@ -722,6 +722,8 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
     stride_dst /= sizeof(pixel);
     width *= 2;
 
+    av_assert0(width <= 64);
+
     a_stride = pos[eo][0][0] * 2 + pos[eo][0][1] * stride_src;
     b_stride = pos[eo][1][0] * 2 + pos[eo][1][1] * stride_src;
     for (y = 0; y < height; y++) {

@@ -152,7 +152,7 @@ static int get_qPy(HEVCContext *s, int xC, int yC)
 static inline unsigned int pixel_shift(const HEVCContext * const s, const unsigned int c_idx)
 {
 #ifdef RPI
-    return c_idx != 0 && rpi_is_sand_frame(s->frame) ? 1 : s->ps.sps->pixel_shift;
+    return c_idx != 0 && rpi_is_sand_frame(s->frame) ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
 #else
     return s->ps.sps->pixel_shift;
 #endif
@@ -180,12 +180,21 @@ int i, j;
     }
 }
 
+// "DSP" these?
 static void copy_pixel(uint8_t *dst, const uint8_t *src, int pixel_shift)
 {
-    if (pixel_shift)
-        *(uint16_t *)dst = *(uint16_t *)src;
-    else
-        *dst = *src;
+    switch (pixel_shift)
+    {
+        case 2:
+            *(uint32_t *)dst = *(uint32_t *)src;
+            break;
+        case 1:
+            *(uint16_t *)dst = *(uint16_t *)src;
+            break;
+        default:
+            *dst = *src;
+            break;
+    }
 }
 
 static void copy_vert(uint8_t *dst, const uint8_t *src,
@@ -193,18 +202,29 @@ static void copy_vert(uint8_t *dst, const uint8_t *src,
                       ptrdiff_t stride_dst, ptrdiff_t stride_src)
 {
     int i;
-    if (pixel_shift == 0) {
-        for (i = 0; i < height; i++) {
-            *dst = *src;
-            dst += stride_dst;
-            src += stride_src;
-        }
-    } else {
-        for (i = 0; i < height; i++) {
-            *(uint16_t *)dst = *(uint16_t *)src;
-            dst += stride_dst;
-            src += stride_src;
-        }
+    switch (pixel_shift)
+    {
+        case 2:
+            for (i = 0; i < height; i++) {
+                *(uint32_t *)dst = *(uint32_t *)src;
+                dst += stride_dst;
+                src += stride_src;
+            }
+            break;
+        case 1:
+            for (i = 0; i < height; i++) {
+                *(uint16_t *)dst = *(uint16_t *)src;
+                dst += stride_dst;
+                src += stride_src;
+            }
+            break;
+        default:
+            for (i = 0; i < height; i++) {
+                *dst = *src;
+                dst += stride_dst;
+                src += stride_src;
+            }
+            break;
     }
 }
 
@@ -426,6 +446,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
             break;
         case SAO_EDGE:
         {
+#if 1
             int w = s->ps.sps->width >> s->ps.sps->hshift[c_idx];
             int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
             int top_edge = edges[1];
@@ -539,10 +560,12 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                                                     horiz_edge,
                                                     diag_edge);
             }
+            // ??? Does this actually work for chroma ???
             restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
                                x, y, width, height, c_idx);
             sao->type_idx[c_idx] = SAO_APPLIED;
             break;
+#endif
         }
         }
     }
