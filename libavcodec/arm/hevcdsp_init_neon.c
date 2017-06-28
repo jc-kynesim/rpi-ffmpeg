@@ -58,6 +58,16 @@ void ff_hevc_add_residual_16x16_neon_8(uint8_t *_dst, int16_t *coeffs,
 void ff_hevc_add_residual_32x32_neon_8(uint8_t *_dst, int16_t *coeffs,
                                        ptrdiff_t stride);
 
+void ff_hevc_add_residual_4x4_neon_10(uint8_t *_dst, int16_t *coeffs,
+                                     ptrdiff_t stride);
+void ff_hevc_add_residual_8x8_neon_10(uint8_t *_dst, int16_t *coeffs,
+                                     ptrdiff_t stride);
+void ff_hevc_add_residual_16x16_neon_10(uint8_t *_dst, int16_t *coeffs,
+                                       ptrdiff_t stride);
+void ff_hevc_add_residual_32x32_neon_10(uint8_t *_dst, int16_t *coeffs,
+                                       ptrdiff_t stride);
+
+
 #if RPI_HEVC_SAND
 void ff_hevc_add_residual_4x4_u_neon_8(uint8_t *_dst, const int16_t * residual,
                                        ptrdiff_t stride);
@@ -548,6 +558,12 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->put_hevc_qpel_uni[7][0][0]  = ff_hevc_put_qpel_uw_pixels_w32_neon_8;
         c->put_hevc_qpel_uni[8][0][0]  = ff_hevc_put_qpel_uw_pixels_w48_neon_8;
         c->put_hevc_qpel_uni[9][0][0]  = ff_hevc_put_qpel_uw_pixels_w64_neon_8;
+    }
+    else if (bit_depth == 10) {
+        c->add_residual[0]             = ff_hevc_add_residual_4x4_neon_10;
+        c->add_residual[1]             = ff_hevc_add_residual_8x8_neon_10;
+        c->add_residual[2]             = ff_hevc_add_residual_16x16_neon_10;
+        c->add_residual[3]             = ff_hevc_add_residual_32x32_neon_10;
     }
 
     assert(offsetof(MvField, mv) == 0);
