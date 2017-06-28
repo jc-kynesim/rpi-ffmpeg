@@ -143,3 +143,42 @@ function JOIN(ff_hevc_add_residual_32x32_neon_, BIT_DEPTH), export=1
 
 endfunc
 
+@ =============================================================================
+
+@ add_residual16x16_c(
+@   uint8_t *_dst,        [r0]
+@   const int16_t *res,   [r1]
+@   ptrdiff_t stride)     [r2]
+
+function JOIN(ff_hevc_add_residual_16x16_c_neon_, BIT_DEPTH), export=1
+	movw        r3,  #(1 << BIT_DEPTH) - 1
+	vmov.i64    q8,  #0
+        mov         r12, #16
+	vdup.i16    q9,  r3
+        add         r3,  r1, #(16*16*2)  @ Offset to V
+	sub	    r2,  #32
+1:
+        vld2.16     {q0, q1}, [r0, :256]!
+        vld2.16     {q2, q3}, [r0, :256]
+        vld1.16     {q10, q11}, [r1, :256]!
+        vld1.16     {q12, q13}, [r3, :256]!
+        subs        r12, #1
+        vqadd.s16   q0,  q10
+        vqadd.s16   q2,  q11
+        vqadd.s16   q1,  q12
+        vqadd.s16   q3,  q13
+	sub         r0,  #32
+	vmax.s16    q0,  q0,  q8
+	vmax.s16    q1,  q1,  q8
+	vmax.s16    q2,  q2,  q8
+	vmax.s16    q3,  q3,  q8
+	vmin.s16    q0,  q0,  q9
+	vmin.s16    q1,  q1,  q9
+	vmin.s16    q2,  q2,  q9
+	vmin.s16    q3,  q3,  q9
+        vst2.16     {q0, q1}, [r0, :256]!
+        vst2.16     {q2, q3}, [r0, :256], r2
+        bne         1b
+        bx          lr
+endfunc
+

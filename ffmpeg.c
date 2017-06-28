@@ -243,7 +243,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
     const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
     rpi_display_env_t * de;
-    int isp_req = 1;
+    int isp_req = 0;
 
     bcm_host_init();  // Needs to be done by someone...
 
@@ -369,8 +369,11 @@ static void display_exit(rpi_display_env_t ** const pde)
     *pde = NULL;
 
     if (de != NULL) {
+        unsigned int i = 0;
 //    sleep(120);
-        while (de->rpi_display_count > 0) {
+
+        // ****************** Check why we lock up here  **********
+        while (de->rpi_display_count > 0 && ++i < 128) {
             usleep(5000);
         }
 
