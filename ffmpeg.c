@@ -243,7 +243,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
     const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
     rpi_display_env_t * de;
-    int isp_req = 0;
+    int isp_req = 1;
 
     bcm_host_init();  // Needs to be done by someone...
 
@@ -269,7 +269,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         port->userdata = (struct MMAL_PORT_USERDATA_T *)de;
         format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 : MMAL_ENCODING_I420;
         format->es->video.width = geo.stride_y;
-        format->es->video.height = geo.height_y;
+        format->es->video.height = (h+15)&~15;  // Magic
         format->es->video.crop.x = 0;
         format->es->video.crop.y = 0;
         format->es->video.crop.width = w;
@@ -359,7 +359,7 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
     if (mmal_port_send_buffer(de->port_in, buf) != MMAL_SUCCESS)
     {
         printf("** send failed: depth=%d\n", de->rpi_display_count);
-        display_cb_input(NULL, buf);
+        display_cb_input(de->port_in, buf);
     }
 }
 
@@ -370,6 +370,9 @@ static void display_exit(rpi_display_env_t ** const pde)
 
     if (de != NULL) {
 //    sleep(120);
+        while (de->rpi_display_count > 0) {
+            usleep(5000);
+        }
 
         if (de->conn != NULL) {
             mmal_connection_destroy(de->conn);
