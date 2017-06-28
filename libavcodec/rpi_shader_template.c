@@ -30,7 +30,7 @@ static const int fctom(uint32_t x)
     // As it happens we can take the 2nd filter term & divide it by 8
     // (dropping fractions) to get the fractional move
     rv = 8 - ((x >> 11) & 0xf);
-    av_assert0(rv >= 0 && rv <= 7);
+    av_assert2(rv >= 0 && rv <= 7);
     return rv;
 }
 
