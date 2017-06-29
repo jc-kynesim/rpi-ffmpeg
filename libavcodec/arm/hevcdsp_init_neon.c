@@ -49,6 +49,15 @@ void ff_hevc_idct_8x8_dc_neon_8(int16_t *coeffs);
 void ff_hevc_idct_16x16_dc_neon_8(int16_t *coeffs);
 void ff_hevc_idct_32x32_dc_neon_8(int16_t *coeffs);
 void ff_hevc_transform_luma_4x4_neon_8(int16_t *coeffs);
+
+void ff_hevc_transform_4x4_neon_10(int16_t *coeffs, int col_limit);
+void ff_hevc_transform_8x8_neon_10(int16_t *coeffs, int col_limit);
+void ff_hevc_idct_4x4_dc_neon_10(int16_t *coeffs);
+void ff_hevc_idct_8x8_dc_neon_10(int16_t *coeffs);
+void ff_hevc_idct_16x16_dc_neon_10(int16_t *coeffs);
+void ff_hevc_idct_32x32_dc_neon_10(int16_t *coeffs);
+void ff_hevc_transform_luma_4x4_neon_10(int16_t *coeffs);
+
 void ff_hevc_add_residual_4x4_neon_8(uint8_t *_dst, int16_t *coeffs,
                                      ptrdiff_t stride);
 void ff_hevc_add_residual_8x8_neon_8(uint8_t *_dst, int16_t *coeffs,
@@ -580,6 +589,12 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->put_hevc_qpel_uni[9][0][0]  = ff_hevc_put_qpel_uw_pixels_w64_neon_8;
     }
     else if (bit_depth == 10) {
+        c->idct[0]                     = ff_hevc_transform_4x4_neon_10;
+        c->idct[1]                     = ff_hevc_transform_8x8_neon_10;
+        c->idct_dc[0]                  = ff_hevc_idct_4x4_dc_neon_10;
+        c->idct_dc[1]                  = ff_hevc_idct_8x8_dc_neon_10;
+        c->idct_dc[2]                  = ff_hevc_idct_16x16_dc_neon_10;
+        c->idct_dc[3]                  = ff_hevc_idct_32x32_dc_neon_10;
         c->add_residual[0]             = ff_hevc_add_residual_4x4_neon_10;
         c->add_residual[1]             = ff_hevc_add_residual_8x8_neon_10;
         c->add_residual[2]             = ff_hevc_add_residual_16x16_neon_10;
@@ -595,6 +610,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[1]           = ff_hevc_add_residual_8x8_c_neon_10;
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_10;
 #endif
+        c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_10;
     }
 
     assert(offsetof(MvField, mv) == 0);
