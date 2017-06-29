@@ -47,6 +47,7 @@
 #include "libavformat/avformat.h"
 #include "libavdevice/avdevice.h"
 #include "libswresample/swresample.h"
+#include "libavutil/atomic.h"
 #include "libavutil/opt.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/parseutils.h"
@@ -220,7 +221,7 @@ static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port)
 static void display_cb_input(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer) {
     rpi_display_env_t *const de = (rpi_display_env_t *)port->userdata;
     av_rpi_zc_unref(buffer->user_data);
-    --de->rpi_display_count;
+    avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, -1);
     mmal_buffer_header_release(buffer);
 }
 
@@ -269,7 +270,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         port->userdata = (struct MMAL_PORT_USERDATA_T *)de;
         format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 : MMAL_ENCODING_I420;
         format->es->video.width = geo.stride_y;
-        format->es->video.height = (h+15)&~15;  // Magic
+        format->es->video.height = fmt == AV_PIX_FMT_SAND128 ? (h + 15) & ~15 : geo.height_y;  // Magic
         format->es->video.crop.x = 0;
         format->es->video.crop.y = 0;
         format->es->video.crop.width = w;
@@ -322,7 +323,7 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
     if (de == NULL)
         return;
 
-    if (de->rpi_display_count >= 3) {
+    if (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
         av_log(s, AV_LOG_VERBOSE, "Frame dropped\n");
         return;
     }
@@ -349,16 +350,16 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
         buf->offset = av_rpi_zc_offset(fr_buf);
         buf->length = av_rpi_zc_length(fr_buf);
         buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
-        ++de->rpi_display_count;
+        avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, 1);
     }
 
-    while (de->rpi_display_count >= 3) {
+    while (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
         usleep(5000);
     }
 
     if (mmal_port_send_buffer(de->port_in, buf) != MMAL_SUCCESS)
     {
-        printf("** send failed: depth=%d\n", de->rpi_display_count);
+        av_log(s, AV_LOG_ERROR, "mmal_port_send_buffer failed: depth=%d\n", de->rpi_display_count);
         display_cb_input(de->port_in, buf);
     }
 }
@@ -369,12 +370,15 @@ static void display_exit(rpi_display_env_t ** const pde)
     *pde = NULL;
 
     if (de != NULL) {
-        unsigned int i = 0;
 //    sleep(120);
 
-        // ****************** Check why we lock up here  **********
-        while (de->rpi_display_count > 0 && ++i < 128) {
-            usleep(5000);
+        if (de->port_in != NULL) {
+            mmal_port_disable(de->port_in);
+        }
+
+        // The above disable should kick out all buffers - check that
+        if (avpriv_atomic_int_get(&de->rpi_display_count) != 0) {
+            av_log(NULL, AV_LOG_WARNING, "Exiting with display count non-zero:%d\n", avpriv_atomic_int_get(&de->rpi_display_count));
         }
 
         if (de->conn != NULL) {
