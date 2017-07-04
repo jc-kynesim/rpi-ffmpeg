@@ -30,6 +30,9 @@ extern unsigned int rpi_shader[];
 #define mc_filter_b (rpi_shader + 1022)
 #define mc_filter_y_p00 (rpi_shader + 1160)
 #define mc_filter_y_b00 (rpi_shader + 1256)
-#define mc_end (rpi_shader + 1340)
+#define mc_setup_c10_q0 (rpi_shader + 1340)
+#define mc_setup_c10_qn (rpi_shader + 1340)
+#define mc_filter_c10_p (rpi_shader + 1472)
+#define mc_end (rpi_shader + 1598)
 
 #endif

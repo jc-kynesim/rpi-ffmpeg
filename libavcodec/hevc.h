@@ -58,7 +58,7 @@
   #endif
 
 
-  #define RPI_QPU_EMU        1
+  #define RPI_QPU_EMU        0
 
   #define RPI_TSTATS 0
 #endif
