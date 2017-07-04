@@ -78,6 +78,8 @@
 .set ra_wt_off_l0,                 ra22.16b
 
 # Max pel value (for 8 bit we can get awaay with sat ops but not 9+)
+# * Could merge with rb_pmask. For 10 bit Logically pmask needs 0xff in the
+#   2nd byte   but as the source should never be > 3 there 0x3ff should do
 .set ra_pmax,                      ra23.16a
 # -- free --                       ra23.16b
 
@@ -562,19 +564,18 @@
 
 .if v_bit_depth <= 8
 .set v_x_shift,         1
-.set v_x_mul,           2
 .set v_v_shift,         8
 # Shifts to get width & height in the right place in rb_dma0
 .set v_dma_h_shift,     7
 .set v_dma_wh_shift,    i_shift16
 .else
 .set v_x_shift,         2
-.set v_x_mul,           4
 .set v_v_shift,         i_shift16
 # Shifts to get width & height in the right place in rb_dma0
 .set v_dma_h_shift,     8
 .set v_dma_wh_shift,    15
 .endif
+.set v_x_mul,           (1 << v_x_shift)
 
 # per-channel shifts were calculated on the *previous* invocation
 
@@ -583,7 +584,7 @@
 
   and.setf -, elem_num, 1                       # [ra2 delay]
 
-  add r0, ra2.16b, ra2.16b ; v8subs r1, r1, r1  # x ; r1=0
+  shl r0, ra2.16b, v_x_shift ; v8subs r1, r1, r1  # x ; r1=0
   add r0, r0, rb_elem_x ; mov ra_y_next, ra2.16a
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, 0         ; mov ra_xshift, ra_xshift_next
@@ -594,11 +595,11 @@
 .endif
 
   and r0, r0, -4        ; mov ra0, unif         # L0 H filter coeffs
-  and r1, r0, r1        ; mul24 r2, ra1.16b, 2  # r2=x*2 (we are working in pel pairs)
+  and r1, r0, r1        ; mul24 r2, ra1.16b, v_x_mul  # r2=x*2 (we are working in pel pairs)
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        ; mov r1, ra1.16a       # Add stripe offsets ; r1=height
   add ra_base_next, r3, r0
-  shl r0, r1, v_dma_h_shift ; mov ra2, unif         # ; L0 V filter coeffs
+  shl r0, r1, v_dma_h_shift ; mov ra2, unif     # ; L0 V filter coeffs
 
 # set up VPM write
 
@@ -614,7 +615,7 @@
 
   mov ra9, rb_max_y                             # [ra3 delay]
 
-  add r0, ra3.16b, ra3.16b ; v8subs r1, r1, r1  # r0=x*2 ; r1=0
+  shl r0, ra3.16b, v_x_shift ; v8subs r1, r1, r1  # r0=x*2 ; r1=0
   add r0, r0, rb_elem_x ; mov ra_y2_next, ra3.16a
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, ra_k0     ; mov rb_xshift2, rb_xshift2_next # ; xshift2 used because B
@@ -655,7 +656,7 @@
 # then submit two more texture requests
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0     # loop counter increment
   shr r2, r4, ra_xshift ; mov.ifz ra_base2, rb_base2_next
-  shr r1, r2, 8         ; mov.ifz ra_y_y2, ra_y_y2_next
+  shr r1, r2, v_v_shift ; mov.ifz ra_y_y2, ra_y_y2_next
   mov rb4, rb5          ; mov.ifz ra_base, ra_base_next
   add ra_y, 1, ra_y     ; mov r3, ra_y
 
@@ -670,16 +671,21 @@
 # H FIFO scrolls are spread all over this loop
   mov.setf -, rb3       ; mov ra4, ra5
 
-  and r1, r1, rb_pmask   ; mul24      r3, ra0.8a,       r0
+  and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,       r0
   nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
   nop                   ; mul24.ifnz r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 4,  r0 << 4  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8c << 14, r1 << 14 @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra0.8d,       r1
+.if v_bit_depth <= 8
   sub ra3, r2, r3       ; mov rb5, rb6          ; ldtmu1
+.else
+  sub r2, r2, r3        ; mov rb5, rb6          ; ldtmu1
+  asr ra3, r2, (v_bit_depth - 8)
+.endif
 
   shr r2, r4, rb_xshift2 ; mov ra5, ra6
-  shr r1, r2, 8         ; mov r3, ra_y2
+  shr r1, r2, v_v_shift ; mov r3, ra_y2
   add ra_y2, r3, ra_k1  ; mov rb6, rb7
 
   and.setf -, 1, elem_num
@@ -692,17 +698,25 @@
 # L1 H-filter
   mov.setf -, rb3       ; mov rb7, ra3
 
-  and r1, r1, rb_pmask   ; mul24      r3, ra1.8a,       r0
+  and r1, r1, rb_pmask  ; mul24      r3, ra1.8a,       r0
   nop                   ; mul24      r2, ra1.8b << 2,  r0 << 2  @ "mul_used", 0
   nop                   ; mul24.ifnz r2, ra1.8b << 12, r1 << 12 @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra1.8c << 4,  r0 << 4  @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra1.8c << 14, r1 << 14 @ "mul_used", 0
   sub.setf -, r5, 4     ; mul24      r0, ra1.8d,       r1
-  brr.anyn -, r:1b
 # V filters - start in branch delay slots of H
+.if v_bit_depth <= 8
+  brr.anyn -, r:1b
   add r2, r2, r3        ; mul24 r1, rb5, ra2.8b
   mov ra6, ra7          ; mul24 r3, ra7, rb10
   sub ra7, r2, r0       ; mul24 r0, rb4, ra2.8a
+.else
+  add r2, r2, r3        ; mul24 r1, rb5, ra2.8b
+  brr.anyn -, r:1b
+  mov ra6, ra7          ; mul24 r3, ra7, rb10
+  sub r2, r2, r0        ; mul24 r0, rb4, ra2.8a
+  asr ra7, r2, (v_bit_depth - 8)
+.endif
 # >>> .anyn 1b
 
   sub r1, r1, r0        ; mul24 r0, rb6, ra2.8c
@@ -721,9 +735,9 @@
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256     # Lose bad top 8 bits & sign extend
 
   brr.anyn -, r:1b
-  asr ra3.8as, r1, rb_wt_den_p15
-  mov -, vw_wait
-  mov vpm, ra3.8a
+  asr r1, r1, rb_wt_den_p15
+  min r1, r1, ra_pmax   ; mov -, vw_wait
+  max vpm, r1, 0
 # >>> .anyn 1b
 
 # DMA out
