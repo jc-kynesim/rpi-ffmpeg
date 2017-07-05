@@ -641,8 +641,6 @@ typedef struct HEVCContext {
     int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
-//    int ctu_per_y_chan; // Number of CTUs per luma QPU
-//    int ctu_per_uv_chan; // Number of CTUs per chroma QPU
 
     HEVCRpiJob jobs[RPI_MAX_JOBS];
 #if RPI_TSTATS
@@ -673,9 +671,8 @@ typedef struct HEVCContext {
     int kill_worker; // set to 1 to terminate the worker
 #endif
 
-#define RPI_DEBLOCK_VPU_Q_COUNT 2
-
 #ifdef RPI_DEBLOCK_VPU
+#define RPI_DEBLOCK_VPU_Q_COUNT 2
     int enable_rpi_deblock;
 
     int uv_setup_width;
