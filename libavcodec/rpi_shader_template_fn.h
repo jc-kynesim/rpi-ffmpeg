@@ -213,7 +213,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
         shader_track_t tracka[QPU_N_MAX] = {{NULL}};
         unsigned int exit_n = 0;
 
-        if (!ipe->used) {
+        if (ipe == NULL || !ipe->used) {
             continue;
         }
 
@@ -254,7 +254,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                             cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                         }
                     }
-                    else if (link == s->qpu_filter_y_pxx) {
+                    else if (link == s->qpu.y_pxx) {
                         const qpu_mc_pred_y_p_t *const c = &cmd->y.p;
                         const int w1 = FFMIN(c->w, 8);
                         const int w2 = c->w - w1;
@@ -286,7 +286,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                     }
-                    else if (link == s->qpu_filter_y_bxx) {
+                    else if (link == s->qpu.y_bxx) {
                         const qpu_mc_pred_y_p_t *const c = &cmd->y.p;
 
                         uint8_t patch_y1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
@@ -314,7 +314,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                     }
-                    else if (link == s->qpu_filter_y_p00) {
+                    else if (link == s->qpu.y_p00) {
                         const qpu_mc_pred_y_p00_t *const c = &cmd->y.p00;
 
                         uint8_t patch_y1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
@@ -332,7 +332,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         st->last_l0 = &c->next_src1;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                     }
-                    else if (link == s->qpu_filter_y_b00) {
+                    else if (link == s->qpu.y_b00) {
                         const qpu_mc_pred_y_p_t *const c = &cmd->y.p;
 
                         uint8_t patch_y1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
@@ -362,7 +362,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                     }
-                    else if (link == s->qpu_filter_uv_pxx) {
+                    else if (link == s->qpu.c_pxx) {
                         const qpu_mc_pred_c_p_t *const c = &cmd->c.p;
                         const int mx = fctom(c->coeffs_x);
                         const int my = fctom(c->coeffs_y);
@@ -386,7 +386,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         st->last_l0 = &c->next_src;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                     }
-                    else if (link == s->qpu_filter_uv_bxx) {
+                    else if (link == s->qpu.c_bxx) {
                         const qpu_mc_pred_c_b_t *const c = &cmd->c.b;
                         const int mx1 = fctom(c->coeffs_x1);
                         const int my1 = fctom(c->coeffs_y1);

@@ -550,12 +550,12 @@
 # >>> ra_link
 .endm
 
-::mc_filter_uv
+::mc_filter_c8_p
   m_filter_c_p 8
 
 ################################################################################
 
-# mc_filter_uv_b0(next_kernel, x, y, frame_c_base, height, hcoeffs[0], hcoeffs[1], vcoeffs[0], vcoeffs[1], this_u_dst, this_v_dst)
+# mc_filter_c_b
 
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
@@ -748,7 +748,7 @@
 # >>> ra_link
 .endm
 
-::mc_filter_uv_b0
+::mc_filter_c8_b
   m_filter_c_b 8
 
 ################################################################################
@@ -788,7 +788,9 @@
 # The code stalled when I had many waiters on a single sem so we have a
 # "ripple" of srels to restart.  Unsure why, may have been bug, but this works
 # and we currently have both the memory & sems to support it.
-.macro m_sync_q, n_qpu
+.macro m_sync_q, n_qpu, n_quads
+# Do not generate code for qpu >= quads * 4 -  fns should never be called
+.if n_qpu < n_quads * 4
   mov ra_link, unif
   mov -, vw_wait
 
@@ -799,7 +801,7 @@
 .if n_qpu % 4 == 0
 
 .set n_sem_quad_in,  12 + n_qpu / 4
-.set n_sem_quad_out, 12 + (((n_qpu / 4) + 1) % 3)
+.set n_sem_quad_out, 12 + (((n_qpu / 4) + 1) % n_quads)
 
   sacq -, n_sem_sync
   sacq -, n_sem_sync
@@ -819,51 +821,65 @@
   nop
 .endif
 .endif
+.endif
 .endm
 
 ::mc_sync_q0
-  m_sync_q 0
+  m_sync_q 0, 3
 ::mc_sync_q1
-  m_sync_q 1
+  m_sync_q 1, 3
 ::mc_sync_q2
-  m_sync_q 2
+  m_sync_q 2, 3
 ::mc_sync_q3
-  m_sync_q 3
+  m_sync_q 3, 3
 ::mc_sync_q4
-  m_sync_q 4
+  m_sync_q 4, 3
 ::mc_sync_q5
-  m_sync_q 5
+  m_sync_q 5, 3
 ::mc_sync_q6
-  m_sync_q 6
+  m_sync_q 6, 3
 ::mc_sync_q7
-  m_sync_q 7
+  m_sync_q 7, 3
 ::mc_sync_q8
-  m_sync_q 8
+  m_sync_q 8, 3
 ::mc_sync_q9
-  m_sync_q 9
+  m_sync_q 9, 3
 ::mc_sync_q10
-  m_sync_q 10
+  m_sync_q 10, 3
 ::mc_sync_q11
-  m_sync_q 11
+  m_sync_q 11, 3
 
 # mc_exit()
 # Chroma & Luma the same now
-::mc_exit_c
-::mc_exit
+
+.macro m_exit_qn
   m_exit_drain
   nop                   ; nop           ; thrend
   nop
   nop
+# >>> thrend <<<
+.endm
+
+::mc_exit_c_qn
+::mc_exit
+  m_exit_qn
+
+
 
 # mc_interrupt_exit12()
-::mc_interrupt_exit12c
-::mc_interrupt_exit12
+
+.macro m_exit_q0
   m_exit_drain
   sacq -, 12
   nop                   ; nop           ; thrend
   mov interrupt, 1
   nop
 # >>> thrend <<<
+.endm
+
+::mc_exit_c_q0
+::mc_interrupt_exit12
+  m_exit_q0
 
 # LUMA CODE
 
@@ -1480,9 +1496,11 @@
 # >>> yloopb00
 
 ################################################################################
+################################################################################
 # 10 BIT
 
 ::mc_setup_c10_q0
+  m_setup_q0
 ::mc_setup_c10_qn
   m_setup_c 10
 
@@ -1491,6 +1509,43 @@
 
 ::mc_filter_c10_b
   m_filter_c_b 10
+
+# Even if these fns are the same as for other bit depths we want our own copy
+# to keep the code we are using in a single lump to avoid (direct map) cache
+# thrashing
+.set v_quads10, 2
+
+::mc_sync10_q0
+  m_sync_q 0, v_quads10
+::mc_sync10_q1
+  m_sync_q 1, v_quads10
+::mc_sync10_q2
+  m_sync_q 2, v_quads10
+::mc_sync10_q3
+  m_sync_q 3, v_quads10
+::mc_sync10_q4
+  m_sync_q 4, v_quads10
+::mc_sync10_q5
+  m_sync_q 5, v_quads10
+::mc_sync10_q6
+  m_sync_q 6, v_quads10
+::mc_sync10_q7
+  m_sync_q 7, v_quads10
+::mc_sync10_q8
+  m_sync_q 8, v_quads10
+::mc_sync10_q9
+  m_sync_q 9, v_quads10
+::mc_sync10_q10
+  m_sync_q 10, v_quads10
+::mc_sync10_q11
+  m_sync_q 11, v_quads10
+
+::mc_exit_c10_q0
+  m_exit_q0
+
+::mc_exit_c10_qn
+  m_exit_qn
+
 
 ::mc_end
 # Do not add code here because mc_end must appear after all other code.

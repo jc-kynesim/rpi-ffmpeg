@@ -45,7 +45,7 @@
 #define vcos_verify_ge0(x) ((x)>=0)
 
 // Size in 32bit words
-#define QPU_CODE_SIZE 2048
+#define QPU_CODE_SIZE 4098
 #define VPU_CODE_SIZE 2048
 
 static const short rpi_transMatrix2even[32][16] = { // Even rows first
@@ -888,6 +888,36 @@ void vpu_qpu_term()
 uint32_t qpu_fn(const int * const mc_fn)
 {
   return gpu->code_gm_ptr.vc + ((const char *)mc_fn - (const char *)rpi_shader) + offsetof(struct GPU, qpu_code);
+}
+
+
+int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
+{
+  // Dummy values we can catch with emulation
+  qf->y_pxx = ~1U;
+  qf->y_bxx = ~2U;
+  qf->y_p00 = ~3U;
+  qf->y_b00 = ~4U;
+  qf->c_pxx = ~5U;
+  qf->c_bxx = ~6U;
+
+  switch (bit_depth) {
+    case 8:
+      qf->y_pxx = qpu_fn(mc_filter);
+      qf->y_bxx = qpu_fn(mc_filter_b);
+      qf->y_p00 = qpu_fn(mc_filter_y_p00);
+      qf->y_b00 = qpu_fn(mc_filter_y_b00);
+      qf->c_pxx = qpu_fn(mc_filter_c8_p);
+      qf->c_bxx = qpu_fn(mc_filter_c8_b);
+      break;
+    case 10:
+      qf->c_pxx = qpu_fn(mc_filter_c10_p);
+      qf->c_bxx = qpu_fn(mc_filter_c10_b);
+      break;
+    default:
+      return -1;
+  }
+  return 0;
 }
 
 #endif // RPI

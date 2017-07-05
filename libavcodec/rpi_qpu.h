@@ -152,6 +152,18 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T * const p, const rpi_cache_f
 
 
 // QPU specific functions
+
+typedef struct HEVCRpiQpu {
+    uint32_t c_pxx;
+    uint32_t c_bxx;
+    uint32_t y_pxx;
+    uint32_t y_bxx;
+    uint32_t y_p00;
+    uint32_t y_b00;
+} HEVCRpiQpu;
+
+int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth);
+
 uint32_t qpu_fn(const int * const mc_fn);
 
 #define QPU_N_GRP_UV 4
@@ -186,12 +198,6 @@ extern unsigned int vpu_get_constants(void);
 void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h);
 int vpu_qpu_init(void);
 void vpu_qpu_term(void);
-
-// Simple test of shader code
-extern int rpi_test_shader(void);
-
-extern void rpi_do_block(const unsigned char *in_buffer_vc, int src_pitch, unsigned char *dst_vc, int dst_pitch, unsigned char *dst);
-extern void rpi_do_block_arm(const unsigned char *in_buffer, int src_pitch, unsigned char *dst, int dst_pitch);
 
 extern int gpu_get_mailbox(void);
 void gpu_ref(void);
