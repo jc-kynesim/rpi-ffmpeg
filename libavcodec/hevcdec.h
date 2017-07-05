@@ -572,6 +572,7 @@ typedef struct HEVCRpiInterPredEnv
     int used;              // 0 if nothing in any Q, 1 otherwise
     int used_grp;          // 0 if nothing in any Q in the current group
     unsigned int max_fill;
+    unsigned int min_gap;
     GPU_MEM_PTR_T gptr;
     unsigned int q1_size;  // size of 1 uniform Q
 } HEVCRpiInterPredEnv;

@@ -98,8 +98,8 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 #define QPU_Y_CMD_PER_CTU_MAX (8 * 8)
 #define QPU_C_CMD_PER_CTU_MAX (4 * 4)
 
-#define UV_COMMANDS_PER_QPU (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 / QPU_N_UV + 2)
-#define Y_COMMANDS_PER_QPU  (((RPI_MAX_WIDTH * 64) / (4 * 4))     / QPU_N_Y  + 2)
+#define QPU_C_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 + 2 * QPU_N_MAX)
+#define QPU_Y_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4))     + 2 * QPU_N_MAX)
 
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
@@ -2365,22 +2365,19 @@ static void rpi_inter_pred_reset(HEVCRpiInterPredEnv * const ipe)
     }
 }
 
-// ********** Total size & gap only?
-static void rpi_alloc_inter_pred(HEVCRpiInterPredEnv * const ipe,
-                                 const unsigned int n, const unsigned int n_grp,
-                                 const unsigned int q1_size, const unsigned int min_gap)
+static void rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
+                                 const unsigned int n_max, const unsigned int n_grp,
+                                 const unsigned int total_size, const unsigned int min_gap)
 {
     memset(ipe, 0, sizeof(*ipe));
-    av_assert0((ipe->q = av_mallocz(n * sizeof(*ipe->q))) != NULL);
-    ipe->n = n;
+    av_assert0((ipe->q = av_mallocz(n_max * sizeof(*ipe->q))) != NULL);
     ipe->n_grp = n_grp;
-    ipe->q1_size = q1_size;
-    ipe->max_fill = ipe->q1_size - min_gap;
+    ipe->min_gap = min_gap;
 
 #if RPI_CACHE_UNIF_MVS
-    gpu_malloc_cached(n * q1_size, &ipe->gptr);
+    gpu_malloc_cached(total_size, &ipe->gptr);
 #else
-    gpu_malloc_uncached(n * q1_size, &ipe->gptr);
+    gpu_malloc_uncached(total_size, &ipe->gptr);
 #endif
 }
 
@@ -3753,8 +3750,6 @@ static unsigned int mc_terminate_add_qpu(HEVCContext * const s,
 
         ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
 
-        av_assert0((char *)yp->qpu_mc_curr - (char *)yp->qpu_mc_base <= ipe->q1_size);
-
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->x = MC_DUMMY_X;
         p0->y = MC_DUMMY_Y;
@@ -3802,8 +3797,6 @@ static unsigned int mc_terminate_add_emu(HEVCContext * const s,
         qpu_mc_src_t *const p1 = yp->last_l1;
 
         ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
-
-        av_assert0((char *)yp->qpu_mc_curr - (char *)yp->qpu_mc_base <= ipe->q1_size);
 
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->x = MC_DUMMY_X;
@@ -5112,13 +5105,13 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         // ** Sizeof the union structure might be overkill but at the moment it
         //    is correct (it certainly isn't going to be too small)
 
-        rpi_alloc_inter_pred(&jb->chroma_ip,
-                             QPU_N_MAX, QPU_N_GRP_UV,
-                             UV_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_c_t),
+        rpi_inter_pred_alloc(&jb->chroma_ip,
+                             QPU_N_MAX, QPU_N_GRP,
+                             QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t),
                              QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t));
-        rpi_alloc_inter_pred(&jb->luma_ip,
-                             QPU_N_MAX,  QPU_N_GRP_Y,
-                             Y_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_y_t),
+        rpi_inter_pred_alloc(&jb->luma_ip,
+                             QPU_N_MAX,  QPU_N_GRP,
+                             QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
                              QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
     }
 
@@ -5345,9 +5338,9 @@ AVCodec ff_hevc_decoder = {
     .update_thread_context = hevc_update_thread_context,
     .init_thread_copy      = hevc_init_thread_copy,
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
-                             0,
+//                             0,
 //                             AV_CODEC_CAP_FRAME_THREADS,
-//                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
+                             AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS,
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };
