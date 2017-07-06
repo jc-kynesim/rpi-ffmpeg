@@ -216,8 +216,6 @@ static void set_ipe_from_ici(HEVCRpiInterPredEnv * const ipe, const ipe_chan_inf
     const unsigned int n = ici->n;
     const unsigned int q1_size = (ipe->gptr.numbytes / n) & ~3;  // Round down to word
 
-    printf("n=%d, size=%d\n", n, q1_size);
-
     ipe->n = n;
     ipe->q1_size = q1_size;
     for(unsigned int i = 0; i < n; i++) {
@@ -833,7 +831,6 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
     ff_hevc_pred_init(&s->hpc,     sps->bit_depth);
     ff_hevc_dsp_init (&s->hevcdsp, sps->bit_depth);
     ff_videodsp_init (&s->vdsp,    sps->bit_depth);
-    printf("*** set_sps: bit_depth=%d\n", sps->bit_depth);
 #ifdef RPI
     rpi_hevc_qpu_set_fns(s, sps->bit_depth);
 #endif
@@ -4064,7 +4061,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
             if (q_full) {
 #ifdef RPI_WORKER
-                if (s->used_for_ref && 0)
+                if (s->used_for_ref)
                 {
 //                  printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
 
