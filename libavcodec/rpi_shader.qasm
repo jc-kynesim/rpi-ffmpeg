@@ -568,7 +568,7 @@
 # weight mul and then removing the offset with the weighting offset (I think
 # this should work) or splitting the rounding & offsetting
 
-::mc_filter_c8_p
+::mc_filter_c_p
   m_filter_c_p 8
 
 ################################################################################
@@ -766,7 +766,7 @@
 # >>> ra_link
 .endm
 
-::mc_filter_c8_b
+::mc_filter_c_b
   m_filter_c_b 8
 
 ################################################################################
@@ -879,7 +879,7 @@
 .endm
 
 ::mc_exit_c_qn
-::mc_exit
+::mc_exit_y_qn
   m_exit_qn
 
 
@@ -896,7 +896,7 @@
 .endm
 
 ::mc_exit_c_q0
-::mc_interrupt_exit12
+::mc_exit_y_q0
   m_exit_q0
 
 # LUMA CODE
@@ -1281,46 +1281,45 @@
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256  # x256 - sign extend & discard rubbish
   asr r1, r1, 14
   nop                   ; mul24 r1, r1, ra_wt_mul_l0
-  add r1, r1, rb_wt_off
+  add r1, r1, rb_wt_off ; mov r3, ra_k16        # ; r3 = block height for outside loop
 
-  shl r1, r1, 8         ; mov r0, ra_height
+  shl r1, r1, 8         ; v8subs r0, ra_height, r3
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
   min r1, r1, ra_pmax   ; mov -, vw_wait
   max vpm, r1, 0
 
-# ######## optimise
-  mov r1, ra_k16
-  sub r0, r0, r1
-
 # >>> branch.anyn yloop
 
-# If looping again the we consumed 16 height last loop
-  # rb_dma1 (stride) remains constant
-  # rb_i_tmu remains const (based on total height)
-  # recalc rb_dma0, rb_lcount based on new segment height
-  # N.B. r3 is loop counter still
+# r0 = remaining height
+# r3 = block_height (currently always 16)
 
-  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
+# If looping again then we consumed 16 height last loop
+# rb_dma1 (stride) remains constant
+# rb_i_tmu remains const (based on total height)
+# recalc rb_dma0, rb_lcount based on new segment height
+
+  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r1        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r2, r0, r1        ; mov vw_setup, rb_dma1 # Stride
+  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
+  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
   nop                   ; mov vw_addr, rb_dest  # start the VDW
 # >>> .anyz ra_link
 
+# Here r1 = cur_blk_height - 16 so it will be 0 or -ve
+# We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r0, r2, i_shift23
-  add rb_dma0, rb_dma0, r0
+  shl r1, r1, i_shift23
   brr -, r:1b
-  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
-  add rb_dest, rb_dest, r0
+  add rb_dma0, rb_dma0, r1
+  add rb_dest, rb_dest, r2
   mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
-# >>> yloop
+# >>> 1b
 .endm
 
-::mc_filter
+::mc_filter_y_pxx
   m_filter_y_pxx 8
 
 
@@ -1418,44 +1417,43 @@
   nop                   ; mul24 r0, r1, ra_wt_mul_l0
   add r0, r0, r2        ; mul24 r1, r1 << 8, ra_wt_mul_l1 << 8    @ "mul_used", 0
 
-  add r1, r1, r0
-  shl r1, r1, 8         ; mov r0, ra_height
+  add r1, r1, r0        ; mov r3, ra_k16
+  shl r1, r1, 8         ; v8subs r0, ra_height, r3
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
   min r1, r1, ra_pmax   ; mov -, vw_wait
   max vpm, r1, 0
 # >>> branch.anyn 1b
 
-# ######## optimise
-  mov r1, ra_k16
-  sub r0, r0, r1
+# r0 = remaining height
+# r3 = block_height (currently always 16)
 
-# If looping again the we consumed 16 height last loop
-  # rb_dma1 (stride) remains constant
-  # rb_i_tmu remains const (based on total height)
-  # recalc rb_dma0, rb_lcount based on new segment height
-  # N.B. r5 is loop counter still
+# If looping again then we consumed 16 height last loop
+# rb_dma1 (stride) remains constant
+# rb_i_tmu remains const (based on total height)
+# recalc rb_dma0, rb_lcount based on new segment height
 
-  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
+  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r1        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r2, r0, r1        ; mov vw_setup, rb_dma1 # Stride
+  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
+  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
   nop                   ; mov vw_addr, rb_dest  # start the VDW
 # >>> .anyz ra_link
 
+# Here r1 = cur_blk_height - 16 so it will be 0 or -ve
+# We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r0, r2, i_shift23
-  add rb_dma0, rb_dma0, r0
+  shl r1, r1, i_shift23
   brr -, r:1b
-  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
-  add rb_dest, rb_dest, r0
+  add rb_dma0, rb_dma0, r1
+  add rb_dest, rb_dest, r2
   mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
-# >>> yloopb
+# >>> 1b
 .endm
 
-::mc_filter_b
+::mc_filter_y_bxx
   m_filter_y_bxx 8
 
 ################################################################################
@@ -1530,8 +1528,8 @@
   add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask
 
   sub.setf -, r5, rb_lcount ; mul24 r1, r0, ra_wt_mul_l0
-  shl r1, r1, 23 - v_bit_depth ; mov r0, ra_height
-  add r1, r1, rb_wt_off
+  shl r1, r1, 23 - v_bit_depth ; mov r3, ra_k16
+  add r1, r1, rb_wt_off ; v8subs r0, ra_height, r3
 
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
@@ -1539,30 +1537,30 @@
   max vpm, r1, 0
 # >>> branch.anyn 1b
 
-  mov r1, ra_k16
-  sub r0, r0, r1
+# r0 = remaining height
+# r3 = block_height (currently always 16)
 
-# If looping again the we consumed 16 height last loop
-  # rb_dma1 (stride) remains constant
-  # rb_i_tmu remains const (based on total height)
-  # recalc rb_dma0, rb_lcount based on new segment height
-  # N.B. r5 is loop counter still
+# If looping again then we consumed 16 height last loop
+# rb_dma1 (stride) remains constant
+# rb_i_tmu remains const (based on total height)
+# recalc rb_dma0, rb_lcount based on new segment height
 
-  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
+  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r1        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r2, r0, r1        ; mov vw_setup, rb_dma1 # Stride
+  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
+  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
   nop                   ; mov vw_addr, rb_dest  # start the VDW
 # >>> .anyz ra_link
 
+# Here r1 = cur_blk_height - 16 so it will be 0 or -ve
+# We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r0, r2, i_shift23
-  add rb_dma0, rb_dma0, r0
+  shl r1, r1, i_shift23
   brr -, r:1b
-  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
-  add rb_dest, rb_dest, r0
+  add rb_dma0, rb_dma0, r1
+  add rb_dest, rb_dest, r2
   mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
 # >>> 1b
 .endm
@@ -1603,8 +1601,8 @@
 
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_wt_mul_l1
   add r1, r0, r1
-  shl r1, r1, 22 - v_bit_depth
-  add r1, r1, rb_wt_off ; mov r0, ra_height
+  shl r1, r1, 22 - v_bit_depth ; mov r3, ra_k16
+  add r1, r1, rb_wt_off ; v8subs r0, ra_height, r3
 
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
@@ -1612,30 +1610,30 @@
   max vpm, r1, 0
 # >>> branch.anyn 1b
 
-  mov r1, ra_k16
-  sub r0, r0, r1
+# r0 = remaining height
+# r3 = block_height (currently always 16)
 
-# If looping again the we consumed 16 height last loop
-  # rb_dma1 (stride) remains constant
-  # rb_i_tmu remains const (based on total height)
-  # recalc rb_dma0, rb_lcount based on new segment height
-  # N.B. r5 is loop counter still
+# If looping again then we consumed 16 height last loop
+# rb_dma1 (stride) remains constant
+# rb_i_tmu remains const (based on total height)
+# recalc rb_dma0, rb_lcount based on new segment height
 
-  max.setf -, r0, 0     ; mov ra_height, r0     # Done if Z now
+  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r1        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r2, r0, r1        ; mov vw_setup, rb_dma1 # Stride
+  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
+  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
   nop                   ; mov vw_addr, rb_dest  # start the VDW
 # >>> .anyz ra_link
 
+# Here r1 = cur_blk_height - 16 so it will be 0 or -ve
+# We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r0, r2, i_shift23
-  add rb_dma0, rb_dma0, r0
+  shl r1, r1, i_shift23
   brr -, r:1b
-  nop                   ; mul24 r0, r1, rb_pitch # r0 = pitch*16
-  add rb_dest, rb_dest, r0
+  add rb_dma0, rb_dma0, r1
+  add rb_dest, rb_dest, r2
   mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
 # >>> 1b
 .endm

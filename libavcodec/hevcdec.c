@@ -170,9 +170,9 @@ static const int * const inter_pred_exit_c10_qpu[12] = {
 };
 
 static const int * const inter_pred_exit_y_qpu[12] = {
-    mc_interrupt_exit12, mc_exit, mc_exit, mc_exit,
-    mc_exit,   mc_exit, mc_exit, mc_exit,
-    mc_exit,   mc_exit, mc_exit, mc_exit
+    mc_exit_y_q0, mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn,
+    mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn,
+    mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn
 };
 
 static const int * const inter_pred_exit_y10_qpu[12] = {

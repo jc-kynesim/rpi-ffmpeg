@@ -3,7 +3,8 @@
 
 #pragma pack(push, 4)
 
-#if RPI_QPU_EMU
+#if RPI_QPU_EMU_C && RPI_QPU_EMU_Y
+// If mixed then we are just confused and get a lot of warnings....
 typedef const uint8_t * qpu_mc_src_addr_t;
 typedef uint8_t * qpu_mc_dst_addr_t;
 #else
