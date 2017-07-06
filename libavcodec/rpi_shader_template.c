@@ -39,14 +39,14 @@ static inline int32_t ext(int32_t x, unsigned int shl, unsigned int shr)
     return (x << shl) >> shr;
 }
 
-static inline int woff_p(int32_t x)
+static inline int woff_p(HEVCContext *const s, int32_t x)
 {
-    return ext(x, 0, 17);
+    return ext(x, 0, 17 + s->ps.sps->bit_depth - 8);
 }
 
-static inline int woff_b(int32_t x)
+static inline int woff_b(HEVCContext *const s, int32_t x)
 {
-    return ext(x, 0, 16) - 1;
+    return ext(x - 0x10000, 0, 16 + s->ps.sps->bit_depth - 8);
 }
 
 static inline int wweight(int32_t x)

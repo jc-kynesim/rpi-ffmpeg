@@ -52,7 +52,7 @@ unsigned int rpi_shader[] = {
 /* [0x000000c8] */ 0x569d404f, 0x10024821, // xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
 /* [0x000000d0] */ 0x0c9e7040, 0x10020827, // add r0, r0, r1
 /* [0x000000d8] */ 0x0c627c00, 0x10020627, // add ra_base, ra_base, r0
-/* [0x000000e0] */ 0x0c809f80, 0xd0021367, // add rb_wt_den_p15, 17 - v_bit_depth, unif
+/* [0x000000e0] */ 0x0c80ff80, 0xd0021367, // add rb_wt_den_p15, 23 - v_bit_depth, unif
 /* [0x000000e8] */ 0x159e6fc0, 0x100208a7, // mov r2, qpu_num
 /* [0x000000f0] */ 0x0f9c25c0, 0xd0020867, // asr r1, r2, 2
 /* [0x000000f8] */ 0x119c63c0, 0xd0020867, // shl r1, r1, 6
@@ -119,8 +119,8 @@ unsigned int rpi_shader[] = {
 /* [0x000002d0] */ 0x9581edbf, 0x100255c9, // mov rb_dest, unif     ; mov ra9, rb_max_y
 /* [0x000002d8] */ 0x910cd3f6, 0x1c02484a, // shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
 /* [0x000002e0] */ 0x950c0ff6, 0xde02494b, // mov r5quad, 0         ; mov rb11, ra3.8d
-/* [0x000002e8] */ 0x8f8013f6, 0xd002531e, // asr rb_wt_off, r1, 1  ; mov ra_link, unif
-/* [0x000002f0] */ 0x11581dc0, 0xd21205a7, // shl ra_wt_mul_l0, ra_wt_mul_l0, 1
+/* [0x000002e8] */ 0x8f8023f6, 0xd002531e, // asr rb_wt_off, r1, 2  ; mov ra_link, unif
+/* [0x000002f0] */ 0x0d50df80, 0x1a0200e7, // sub ra3, rb_wt_den_p15, ra_k1
 /* [0x000002f8] */ 0x0000ff00, 0xe20210e7, // mov rb3, [0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1]
 // :1
 /* [0x00000300] */ 0xcd511bee, 0xaa0269e5, // sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0
@@ -152,7 +152,7 @@ unsigned int rpi_shader[] = {
 /* [0x000003d0] */ 0x119c83c0, 0xd0020867, // shl r1, r1, 8
 /* [0x000003d8] */ 0x0c9cc3c0, 0x10020867, // add r1, r1, rb_wt_off
 /* [0x000003e0] */ 0xffffff00, 0xf06809e7, // brr.anyn -, r:1b
-/* [0x000003e8] */ 0x0f9cd3c0, 0x10020867, // asr r1, r1, rb_wt_den_p15
+/* [0x000003e8] */ 0x0f0e7380, 0x10020867, // asr r1, r1, ra3
 /* [0x000003f0] */ 0x925f23bf, 0x12020867, // min r1, r1, ra_pmax   ; mov -, vw_wait
 /* [0x000003f8] */ 0x139c03c0, 0xd0020c27, // max vpm, r1, 0
 /* [0x00000400] */ 0x00000000, 0xf0f7c9e7, // bra -, ra_link
@@ -417,7 +417,7 @@ unsigned int rpi_shader[] = {
 /* [0x00000b70] */ 0x129de3c0, 0x10020867, // min r1, r1, rb_max_y
 /* [0x00000b78] */ 0x4c51058f, 0x1a0248a1, // add r2, r2, ra_k1     ; mul24 r1, r1, rb_pitch
 /* [0x00000b80] */ 0x8c667c52, 0x10125f11, // add t1s, ra_base2, r1 ; mov ra_y2, r2
-/* [0x00000b88] */ 0x0c809dc0, 0xd0021367, // add rb_wt_den_p15, unif, 9
+/* [0x00000b88] */ 0x0c80fdc0, 0xd0021367, // add rb_wt_den_p15, unif, 15
 /* [0x00000b90] */ 0x159e6fc0, 0x100208a7, // mov r2, qpu_num
 /* [0x00000b98] */ 0x0f9c25c0, 0xd0020867, // asr r1, r2, 2
 /* [0x00000ba0] */ 0x119c63c0, 0xd0020867, // shl r1, r1, 6
@@ -757,7 +757,7 @@ unsigned int rpi_shader[] = {
 /* [0x000015b8] */ 0x569d404f, 0x10024821, // xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
 /* [0x000015c0] */ 0x0c9e7040, 0x10020827, // add r0, r0, r1
 /* [0x000015c8] */ 0x0c627c00, 0x10020627, // add ra_base, ra_base, r0
-/* [0x000015d0] */ 0x0c807f80, 0xd0021367, // add rb_wt_den_p15, 17 - v_bit_depth, unif
+/* [0x000015d0] */ 0x0c80df80, 0xd0021367, // add rb_wt_den_p15, 23 - v_bit_depth, unif
 /* [0x000015d8] */ 0x159e6fc0, 0x100208a7, // mov r2, qpu_num
 /* [0x000015e0] */ 0x0f9c15c0, 0xd0020867, // asr r1, r2, 1
 /* [0x000015e8] */ 0x119c53c0, 0xd0020867, // shl r1, r1, 5
@@ -821,8 +821,8 @@ unsigned int rpi_shader[] = {
 /* [0x000017a8] */ 0x9581edbf, 0x100255c9, // mov rb_dest, unif     ; mov ra9, rb_max_y
 /* [0x000017b0] */ 0x910cd3f6, 0x1c02484a, // shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
 /* [0x000017b8] */ 0x950c0ff6, 0xde02494b, // mov r5quad, 0         ; mov rb11, ra3.8d
-/* [0x000017c0] */ 0x8f8013f6, 0xd002531e, // asr rb_wt_off, r1, 1  ; mov ra_link, unif
-/* [0x000017c8] */ 0x11581dc0, 0xd21205a7, // shl ra_wt_mul_l0, ra_wt_mul_l0, 1
+/* [0x000017c0] */ 0x8f8023f6, 0xd002531e, // asr rb_wt_off, r1, 2  ; mov ra_link, unif
+/* [0x000017c8] */ 0x0d50df80, 0x1a0200e7, // sub ra3, rb_wt_den_p15, ra_k1
 /* [0x000017d0] */ 0x0000ff00, 0xe20210e7, // mov rb3, [0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1]
 // :1
 /* [0x000017d8] */ 0xcd511bee, 0xaa0269e5, // sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0
@@ -855,7 +855,7 @@ unsigned int rpi_shader[] = {
 /* [0x000018b0] */ 0x119c83c0, 0xd0020867, // shl r1, r1, 8
 /* [0x000018b8] */ 0x0c9cc3c0, 0x10020867, // add r1, r1, rb_wt_off
 /* [0x000018c0] */ 0xfffffef8, 0xf06809e7, // brr.anyn -, r:1b
-/* [0x000018c8] */ 0x0f9cd3c0, 0x10020867, // asr r1, r1, rb_wt_den_p15
+/* [0x000018c8] */ 0x0f0e7380, 0x10020867, // asr r1, r1, ra3
 /* [0x000018d0] */ 0x925f23bf, 0x12020867, // min r1, r1, ra_pmax   ; mov -, vw_wait
 /* [0x000018d8] */ 0x139c03c0, 0xd0020c27, // max vpm, r1, 0
 /* [0x000018e0] */ 0x00000000, 0xf0f7c9e7, // bra -, ra_link

@@ -310,7 +310,7 @@
   add r0, r0, r1
   add ra_base, ra_base, r0
 
-  add rb_wt_den_p15, 17 - v_bit_depth, unif                    # denominator
+  add rb_wt_den_p15, 23 - v_bit_depth, unif     # denominator
 
 # Compute part of VPM to use for DMA output
 # * We only get 8 QPUs if 16 bit - maybe reduce height and auto-loop?
@@ -444,14 +444,14 @@
 
 # set up VPM write
 
-  sub rb_dma1, rb_dma1_base, r2 ; mov ra3, unif         # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
+  sub rb_dma1, rb_dma1_base, r2 ; mov ra3, unif # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
   add rb_i_tmu, r1, 3 - PREREAD ; mov ra_wt_off_mul_l0, unif # ; U offset/weight
   add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
 
 # ; unpack filter coefficients
 
   add r0, r0, r2        ; mov rb8, ra3.8a       # Combine width and height of destination area (r0=h<<8, r2=w*2)
-  shl r0, r0, v_dma_wh_shift ; mov rb9, ra3.8b       # Shift into bits 16 upwards of the vdw_setup0 register
+  shl r0, r0, v_dma_wh_shift ; mov rb9, ra3.8b  # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base ; mov r1, ra_wt_off_l0       # ; r1=weight
 
   mov rb_dest, unif     ; mov ra9, rb_max_y     # dst_addr ; alias rb_max_y
@@ -459,13 +459,13 @@
   shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
   mov r5quad, 0         ; mov rb11, ra3.8d      # Loop count (r5rep is B, r5quad is A)
 
-  asr rb_wt_off, r1, 1  ; mov ra_link, unif     # Link
-  shl ra_wt_mul_l0, ra_wt_mul_l0, 1             # weight*2
+  asr rb_wt_off, r1, 2  ; mov ra_link, unif     # Link
+  sub ra3, rb_wt_den_p15, ra_k1
 
 # ra9 alias for rb_max_y
-# ra_wt_mul_l0 - weight L0 * 2
-# rb_wt_den_p15 = weight denom + 6 + 9
-# rb_wt_off = (((is P) ? offset L0 * 2 : offset L1 + offset L0) + 1) << (rb_wt_den_p15 - 1)
+# ra_wt_mul_l0 = weight L0
+# ra3          = weight denom + 22 - bit_depth [= rb_wt_den_p15 - 1, max 19]
+# rb_wt_off    = (offset * 2 + 1) << (ra3 - 1)
 
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -534,10 +534,9 @@
   asr r1, r1, 14
   nop                   ; mul24 r1, r1, ra_wt_mul_l0
   shl r1, r1, 8
-
   add r1, r1, rb_wt_off
   brr.anyn -, r:1b
-  asr r1, r1, rb_wt_den_p15
+  asr r1, r1, ra3
   min r1, r1, ra_pmax   ; mov -, vw_wait
   max vpm, r1, 0
 # >>> .anyn 1b
@@ -549,6 +548,21 @@
   mov vw_addr, rb_dest
 # >>> ra_link
 .endm
+
+# At 10 bits
+# Worst case +ve after 1st filter = 74 * 0x3ff >> 2 = 18925 0x49ed (15 bits)
+# Worst case -ve after 1st filter = -10 * 0x3ff >> 2 = -10230
+# after 2nd (really we can't get this) = 74 * 18925 + 10 * 10230 >> 6 = 23480 = 0x5bb8 (15 bits)
+# (P)
+# * weight (255) = 5987400 = 0x5b5c48 (23 bits)
+# + 0x3ff << (13 - bit_depth + 7) = 0x6b5848 (23 bits)
+# ... should be OK
+#
+# (B)
+# *2 (L0+L1) = 5963920 = 0x5b0090 (23 bits)
+# + (offset * 2 + 1) << (15 - bit_depth + 7) = 5963920 + (0x3ff << 12) = 5963920 + 4190208 = 10154128 = 0x9af090 (24 bits)
+# So signed overflow if we sign extend here :-(
+
 
 ::mc_filter_c8_p
   m_filter_c_p 8
@@ -975,7 +989,7 @@
   add t1s, ra_base2, r1 ; mov ra_y2, r2
 # >>> .anynz y_preload
 
-  add rb_wt_den_p15, unif, 9                    # weight denom + 6
+  add rb_wt_den_p15, unif, 15                   # weight denom
 
   m_calc_dma_regs rb_vpm_init, rb_dma0_base
 

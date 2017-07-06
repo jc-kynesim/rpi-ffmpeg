@@ -235,7 +235,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                             st->width = c->pic_w * PW;
                             st->stride1 = c->stride1;
                             st->stride2 = c->stride2;
-                            st->wdenom = c->wdenom - 6; // QPU uses denom + 6
+                            st->wdenom = c->wdenom;
                             st->last_l0 = &c->next_src1;
                             st->last_l1 = &c->next_src2;
                             cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -248,7 +248,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                             st->width = c->pic_cw * PW;
                             st->stride1 = c->stride1;
                             st->stride2 = c->stride2;
-                            st->wdenom = c->wdenom - 6; // QPU uses denom + 6
+                            st->wdenom = c->wdenom;
                             st->last_l0 = &c->next_src1;
                             st->last_l1 = &c->next_src2;
                             cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -276,11 +276,11 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         // wo[offset] = offset*2+1
                         s->hevcdsp.put_hevc_qpel_uni_w[wtoidx(w1)][(c->mymx21 & 0xff00) != 0][(c->mymx21 & 0xff) != 0](
                             c->dst_addr, st->stride1, patch_y1 + 3 * (PATCH_STRIDE + PW), PATCH_STRIDE,
-                            c->h, st->wdenom, wweight(c->wo1), woff_p(c->wo1), (c->mymx21 & 0xff), ((c->mymx21 >> 8) & 0xff), w1);
+                            c->h, st->wdenom, wweight(c->wo1), woff_p(s, c->wo1), (c->mymx21 & 0xff), ((c->mymx21 >> 8) & 0xff), w1);
                         if (w2 > 0) {
                             s->hevcdsp.put_hevc_qpel_uni_w[wtoidx(w2)][(c->mymx21 & 0xff000000) != 0][(c->mymx21 & 0xff0000) != 0](
                                 c->dst_addr + 8 * PW, st->stride1, patch_y2 + 3 * (PATCH_STRIDE + PW), PATCH_STRIDE,
-                                c->h, st->wdenom, wweight(c->wo2), woff_p(c->wo2), ((c->mymx21 >> 16) & 0xff), ((c->mymx21 >> 24) & 0xff), w2);
+                                c->h, st->wdenom, wweight(c->wo2), woff_p(s, c->wo2), ((c->mymx21 >> 16) & 0xff), ((c->mymx21 >> 24) & 0xff), w2);
                         }
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
@@ -309,7 +309,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         s->hevcdsp.put_hevc_qpel_bi_w[wtoidx(c->w)][(c->mymx21 & 0xff000000) != 0][(c->mymx21 & 0xff0000) != 0](
                             c->dst_addr, st->stride1, patch_y2 + 3 * (PATCH_STRIDE + PW), PATCH_STRIDE, patch_y3,
                             c->h, st->wdenom, wweight(c->wo1), wweight(c->wo2),
-                            0, woff_b(c->wo2), ((c->mymx21 >> 16) & 0xff), ((c->mymx21 >> 24) & 0xff), c->w);
+                            0, woff_b(s, c->wo2), ((c->mymx21 >> 16) & 0xff), ((c->mymx21 >> 24) & 0xff), c->w);
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -327,7 +327,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         // wo[offset] = offset*2+1
                         s->hevcdsp.put_hevc_qpel_uni_w[wtoidx(c->w)][0][0](
                             c->dst_addr, st->stride1, patch_y1, PATCH_STRIDE,
-                            c->h, st->wdenom, wweight(c->wo1), woff_p(c->wo1), 0, 0, c->w);
+                            c->h, st->wdenom, wweight(c->wo1), woff_p(s, c->wo1), 0, 0, c->w);
 
                         st->last_l0 = &c->next_src1;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -357,7 +357,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         s->hevcdsp.put_hevc_qpel_bi_w[wtoidx(c->w)][0][0](
                             c->dst_addr, st->stride1, patch_y2, PATCH_STRIDE, patch_y3,
                             c->h, st->wdenom, wweight(c->wo1), wweight(c->wo2),
-                            0, woff_b(c->wo2), 0, 0, c->w);
+                            0, woff_b(s, c->wo2), 0, 0, c->w);
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -376,10 +376,10 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
 
                         s->hevcdsp.put_hevc_epel_uni_w[wtoidx(c->w)][my != 0][mx != 0](
                             patch_u3, 8 * PW, patch_u1 + PATCH_STRIDE + PW, PATCH_STRIDE,
-                            c->h, st->wdenom, wweight(c->wo_u), woff_p(c->wo_u), mx, my, c->w);
+                            c->h, st->wdenom, wweight(c->wo_u), woff_p(s, c->wo_u), mx, my, c->w);
                         s->hevcdsp.put_hevc_epel_uni_w[wtoidx(c->w)][my != 0][mx != 0](
                             patch_v3, 8 * PW, patch_v1 + PATCH_STRIDE + PW, PATCH_STRIDE,
-                            c->h, st->wdenom, wweight(c->wo_v), woff_p(c->wo_v), mx, my, c->w);
+                            c->h, st->wdenom, wweight(c->wo_v), woff_p(s, c->wo_v), mx, my, c->w);
 
                         FUNC(rpi_planar_to_sand_c)(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 8 * PW, patch_v3, 8 * PW, 0, 0, c->w * PW, c->h);
 
@@ -415,11 +415,11 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         s->hevcdsp.put_hevc_epel_bi_w[wtoidx(c->w)][my2 != 0][mx2 != 0](
                             patch_u3, 8 * PW, patch_u2 + PATCH_STRIDE + PW, PATCH_STRIDE, patch_u4,
                             c->h, st->wdenom, c->weight_u1, wweight(c->wo_u2),
-                            0, woff_b(c->wo_u2), mx2, my2, c->w);
+                            0, woff_b(s, c->wo_u2), mx2, my2, c->w);
                         s->hevcdsp.put_hevc_epel_bi_w[wtoidx(c->w)][my2 != 0][mx2 != 0](
                             patch_v3, 8 * PW, patch_v2 + PATCH_STRIDE + PW, PATCH_STRIDE, patch_v4,
                             c->h, st->wdenom, c->weight_v1, wweight(c->wo_v2),
-                            0, woff_b(c->wo_v2), mx2, my2, c->w);
+                            0, woff_b(s, c->wo_v2), mx2, my2, c->w);
 
                         FUNC(rpi_planar_to_sand_c)(c->dst_addr_c, st->stride1, st->stride2, patch_u3, 8 * PW, patch_v3, 8 * PW, 0, 0, c->w * PW, c->h);
 

@@ -2393,6 +2393,12 @@ static void rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
 #define get_mc_address_u(f) get_vc_address_u(f)
 #endif
 
+static inline int offset_depth_adj(const HEVCContext *const s, const int wt)
+{
+    return s->ps.sps->high_precision_offsets_enabled_flag ? wt :
+           wt << (s->ps.sps->bit_depth - 8);
+}
+
 static void
 rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
            const int nPbW, const int nPbH,
@@ -2408,7 +2414,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
     const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
     const qpu_mc_src_addr_t src_vc_address_y = get_mc_address_y(src_frame);
     qpu_mc_dst_addr_t dst_addr = get_mc_address_y(s->frame) + y_off;
-    const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
+    const uint32_t wo = PACK2(offset_depth_adj(s, weight_offset) * 2 + 1, weight_mul);
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].luma_ip;
     const unsigned int xshl = rpi_sand_frame_xshl(s->frame);
 
@@ -2599,8 +2605,8 @@ rpi_pred_y_b(HEVCContext * const s,
     const uint32_t     my2_mx2_my_mx = (my2_mx2 << 16) | my_mx;
     const unsigned int ref_idx0 = mv_field->ref_idx[0];
     const unsigned int ref_idx1 = mv_field->ref_idx[1];
-    const uint32_t wt_offset = s->sh.luma_offset_l0[ref_idx0] +
-                 s->sh.luma_offset_l1[ref_idx1] + 1;
+    const uint32_t wt_offset =
+        offset_depth_adj(s, s->sh.luma_offset_l0[ref_idx0] + s->sh.luma_offset_l1[ref_idx1]) + 1;
     const uint32_t wo1 = PACK2(wt_offset, s->sh.luma_weight_l0[ref_idx0]);
     const uint32_t wo2 = PACK2(wt_offset, s->sh.luma_weight_l1[ref_idx1]);
 
@@ -2747,8 +2753,8 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
     const qpu_mc_src_addr_t src_base_u = get_mc_address_u(src_frame);
     const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->x, 2 + hshift) << (1 - hshift)];
     const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->y, 2 + vshift) << (1 - vshift)];
-    const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
-    const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
+    const uint32_t wo_u = PACK2(offset_depth_adj(s, c_offsets[0]) * 2 + 1, c_weights[0]);
+    const uint32_t wo_v = PACK2(offset_depth_adj(s, c_offsets[1]) * 2 + 1, c_weights[1]);
     qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
     const unsigned int xshl = rpi_sand_frame_xshl(s->frame) + 1;
@@ -2815,6 +2821,9 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
     const int x2_c = x0_c + (mv2->x >> (2 + hshift)) - 1;
     const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
 
+    const uint32_t wo_u2 = PACK2(offset_depth_adj(s, c_offsets[0] + c_offsets2[0]) + 1, c_weights2[0]);
+    const uint32_t wo_v2 = PACK2(offset_depth_adj(s, c_offsets[1] + c_offsets2[1]) + 1, c_weights2[1]);
+
     qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     const qpu_mc_src_addr_t src1_base = get_mc_address_u(src_frame);
     const qpu_mc_src_addr_t src2_base = get_mc_address_u(src_frame2);
@@ -2849,8 +2858,8 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
             u[0].weight_v1 = c_weights[1]; // Weight L0 V
             u[0].coeffs_x2 = coefs1_x;
             u[0].coeffs_y2 = coefs1_y;
-            u[0].wo_u2 = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
-            u[0].wo_v2 = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
+            u[0].wo_u2 = wo_u2;
+            u[0].wo_v2 = wo_v2;
             u[0].dst_addr_c = dst_base_u + (start_x << xshl);
 
             cp->last_l0 = &u[0].next_src1;
@@ -3682,7 +3691,7 @@ static void rpi_begin(HEVCContext *s)
         u->pic_ch = pic_height_c;
         u->stride2 = rpi_sand_frame_stride2(s->frame);
         u->stride1 = s->frame->linesize[1];
-        u->wdenom = s->sh.chroma_log2_weight_denom + 6;
+        u->wdenom = s->sh.chroma_log2_weight_denom;
         cp->last_l0 = &u->next_src1;
 
         u->next_fn = 0;
@@ -3709,7 +3718,7 @@ static void rpi_begin(HEVCContext *s)
         y->pic_w = pic_width_y;
         y->stride2 = rpi_sand_frame_stride2(s->frame);
         y->stride1 = s->frame->linesize[0];
-        y->wdenom = s->sh.luma_log2_weight_denom + 6;
+        y->wdenom = s->sh.luma_log2_weight_denom;
         y->next_fn = 0;
         yp->last_l0 = &y->next_src1;
         yp->last_l1 = &y->next_src2;
