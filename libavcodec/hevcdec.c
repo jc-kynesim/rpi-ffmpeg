@@ -139,6 +139,12 @@ static const int * const inter_pred_setup_y_qpu[12] = {
     mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn
 };
 
+static const int * const inter_pred_setup_y10_qpu[12] = {
+    mc_setup_y10_q0, mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn,
+    mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn,
+    mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn
+};
+
 static const int * const inter_pred_sync_qpu[12] = {
     mc_sync_q0, mc_sync_q1, mc_sync_q2, mc_sync_q3,
     mc_sync_q4, mc_sync_q5, mc_sync_q6, mc_sync_q7,
@@ -169,6 +175,12 @@ static const int * const inter_pred_exit_y_qpu[12] = {
     mc_exit,   mc_exit, mc_exit, mc_exit
 };
 
+static const int * const inter_pred_exit_y10_qpu[12] = {
+    mc_exit_y10_q0, mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn,
+    mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn,
+    mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn
+};
+
 typedef struct ipe_chan_info_s
 {
     const unsigned int n;
@@ -193,8 +205,7 @@ static const ipe_init_info_t ipe_init_infos[9] = {  // Alloc for bit depths of 8
       .chroma = {0}
    },
    {  // 10
-       // *********** Lies - but we need some values - shouldn't be called
-      .luma =   {QPU_MC_PRED_N_Y10, inter_pred_setup_y_qpu, inter_pred_sync_qpu, inter_pred_exit_y_qpu},
+      .luma =   {QPU_MC_PRED_N_Y10, inter_pred_setup_y10_qpu, inter_pred_sync10_qpu, inter_pred_exit_y10_qpu},
       .chroma = {QPU_MC_PRED_N_C10, inter_pred_setup_c10_qpu, inter_pred_sync10_qpu, inter_pred_exit_c10_qpu}
    }
 

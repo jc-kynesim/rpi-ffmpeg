@@ -917,6 +917,10 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
     case 10:
       qf->c_pxx = qpu_fn(mc_filter_c10_p);
       qf->c_bxx = qpu_fn(mc_filter_c10_b);
+      qf->y_pxx = qpu_fn(mc_filter_y10_pxx);
+      qf->y_bxx = qpu_fn(mc_filter_y10_bxx);
+      qf->y_p00 = qpu_fn(mc_filter_y10_p00);
+      qf->y_b00 = qpu_fn(mc_filter_y10_b00);
       break;
     default:
       return -1;
