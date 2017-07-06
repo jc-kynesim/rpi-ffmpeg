@@ -217,7 +217,7 @@ static void set_ipe_from_ici(HEVCRpiInterPredEnv * const ipe, const ipe_chan_inf
     const unsigned int q1_size = (ipe->gptr.numbytes / n) & ~3;  // Round down to word
 
     ipe->n = n;
-    ipe->q1_size = q1_size;
+    ipe->max_fill = q1_size - ipe->min_gap;
     for(unsigned int i = 0; i < n; i++) {
         HEVCRpiInterPredQ * const q = ipe->q + i;
         q->qpu_mc_curr = q->qpu_mc_base =

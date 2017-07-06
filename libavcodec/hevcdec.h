@@ -574,7 +574,6 @@ typedef struct HEVCRpiInterPredEnv
     unsigned int max_fill;
     unsigned int min_gap;
     GPU_MEM_PTR_T gptr;
-    unsigned int q1_size;  // size of 1 uniform Q
 } HEVCRpiInterPredEnv;
 
 typedef struct HEVCRpiJob {
