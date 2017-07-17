@@ -30,6 +30,9 @@ void ff_hevc_h_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta
 void ff_hevc_v_loop_filter_chroma_neon(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_h_loop_filter_chroma_neon(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 
+void ff_hevc_v_loop_filter_luma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
+void ff_hevc_h_loop_filter_luma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
+
 #ifdef RPI
 void ff_hevc_v_loop_filter_luma2_neon_8(uint8_t * _pix_r,
                              unsigned int _stride, unsigned int beta, const int32_t tc[2],
@@ -41,6 +44,10 @@ void ff_hevc_v_loop_filter_uv2_neon_8(uint8_t * src_r, unsigned int stride, uint
                              uint8_t * src_l,
                              unsigned int no_f);
 
+void ff_hevc_v_loop_filter_luma2_neon_10(uint8_t * _pix_r,
+                             unsigned int _stride, unsigned int beta, const int32_t tc[2],
+                             const uint8_t no_p[2], const uint8_t no_q[2],
+                             uint8_t * _pix_l);
 void ff_hevc_h_loop_filter_uv_neon_10(uint8_t * src, unsigned int stride, uint32_t tc4,
                              unsigned int no_f);
 void ff_hevc_v_loop_filter_uv2_neon_10(uint8_t * src_r, unsigned int stride, uint32_t tc4,
@@ -616,7 +623,12 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[1]           = ff_hevc_add_residual_8x8_c_neon_10;
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_10;
 #endif
+        c->hevc_v_loop_filter_luma     = ff_hevc_v_loop_filter_luma_neon_10;
+        c->hevc_v_loop_filter_luma_c   = ff_hevc_v_loop_filter_luma_neon_10;
+        c->hevc_h_loop_filter_luma     = ff_hevc_h_loop_filter_luma_neon_10;
+        c->hevc_h_loop_filter_luma_c   = ff_hevc_h_loop_filter_luma_neon_10;
 #ifdef RPI
+        c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_10;
         c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_10;
         c->hevc_v_loop_filter_uv2      = ff_hevc_v_loop_filter_uv2_neon_10;
 #endif

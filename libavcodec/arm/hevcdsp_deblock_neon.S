@@ -122,7 +122,19 @@
 
 @ Uses: r2, r3, r12
 @ Modifies: r5, r6, r7, r8, r9
-function hevc_loop_filter_luma_body
+
+@ Input:
+@  r2   beta    (needs shift for bitdepth > 8)
+@  r3   tc[0]   (needs shift for bitdepth > 8)
+@  r12  tc[1]   (needs shift for bitdepth > 8)
+@
+@ Input & output
+@  8-bit: d16-d23
+@ 16-bit:  q8-q15
+
+
+.macro m_filter_luma bit_depth
+.if \bit_depth == 8
         vmovl.u8  q15, d23
         vmovl.u8  q14, d22
         vmovl.u8  q13, d21
@@ -131,6 +143,11 @@ function hevc_loop_filter_luma_body
         vmovl.u8  q10, d18
         vmovl.u8  q9, d17
         vmovl.u8  q8, d16
+.else
+        lsl        r2, r2, #(\bit_depth - 8)
+        lsl        r3, r3, #(\bit_depth - 8)
+        lsl        r12, r12, #(\bit_depth - 8)
+.endif
 
         vadd.i16   q7, q9, q11
         vadd.i16   q6, q14, q12
@@ -213,7 +230,7 @@ function hevc_loop_filter_luma_body
 
         and        r9, r8, r7
         cmp        r9, #0
-        beq        weakfilter_
+        beq        1f
 
         vadd.i16  q2, q11, q12
         vadd.i16  q4, q9, q8
@@ -271,11 +288,11 @@ function hevc_loop_filter_luma_body
         vbit      q13, q3, q5
         vbit      q14, q2, q5
 
-weakfilter_:
+1:
         mvn       r8, r8
         and       r9, r8, r7
         cmp       r9, #0
-        beq       ready_
+        beq       2f
 
         vdup.16    q4, r2
 
@@ -336,7 +353,8 @@ weakfilter_:
         vbit      q11, q0, q5
         vbit      q12, q4, q5
 
-ready_:
+2:
+.if \bit_depth == 8
         vqmovun.s16 d16, q8
         vqmovun.s16 d17, q9
         vqmovun.s16 d18, q10
@@ -345,7 +363,29 @@ ready_:
         vqmovun.s16 d21, q13
         vqmovun.s16 d22, q14
         vqmovun.s16 d23, q15
+.else
+        movw      r12, #(1 << \bit_depth - 1)
+        vmov.i64  q0, #0
+        vdup.i16  q1, r12
+        @ q8 & q15 should be unaltered and so don't require clipping
+        vmax.s16  q9,  q0
+        vmax.s16  q10, q0
+        vmax.s16  q11, q0
+        vmax.s16  q12, q0
+        vmax.s16  q13, q0
+        vmax.s16  q14, q0
+        vmin.s16  q9,  q1
+        vmin.s16  q10, q1
+        vmin.s16  q11, q1
+        vmin.s16  q12, q1
+        vmin.s16  q13, q1
+        vmin.s16  q14, q1
+.endif
         mov       pc, lr
+.endm
+
+function hevc_loop_filter_luma_body
+        m_filter_luma 8
 endfunc
 
 @ ff_hevc_v_loop_filter_luma2_neon(src (r0), stride (r1), beta (r2), tc (r3), np_p (sp[0]), no_q (sp[4]), src2 (sp[8]))
@@ -356,6 +396,15 @@ function ff_hevc_v_loop_filter_luma2_neon_8, export=1
         ldr      r4, [sp, #40]
         b        v_loop_luma_common
 endfunc
+
+
+@ void ff_hevc_v_loop_filter_luma_neon(
+@   uint8_t *_pix,      [r0]
+@   ptrdiff_t _stride,  [r1]
+@   int _beta,          [r2]
+@   int *_tc,           [r3]
+@   uint8_t *_no_p,     [sp+0]
+@   uint8_t *_no_q)     [sp+4]
 
 
 function ff_hevc_v_loop_filter_luma_neon, export=1
@@ -450,6 +499,99 @@ bypasswrite:
         pop      {r4-r10,pc}
 endfunc
 
+.macro m_filter_v_luma_common_16 bit_depth
+        @ Why this isn't a bitmask to start with I have no idea...
+        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
+        ldr      r5, [sp, #32]
+        ldrh     r10, [r5]
+        ldr      r5, [sp, #36]
+        ldrh     r5, [r5]
+        orr      r10, r10, r5, lsl #16  @ So should have b0:no_p[0], b8:no_p[1], b16: no_q[0], b24:no_q[1]
+
+        vpush    {d8-d15}
+
+        @ Uses slightly fewer instructions to do laned loads than unlaned
+        @ and transpose.  This also means that we can use the same code for
+        @ both split & unsplit deblock
+        vld4.16  {d16[0], d18[0], d20[0], d22[0]}, [r4], r1
+        vld4.16  {d24[0], d26[0], d28[0], d30[0]}, [r0], r1
+
+        vld4.16  {d16[1], d18[1], d20[1], d22[1]}, [r4], r1
+        vld4.16  {d24[1], d26[1], d28[1], d30[1]}, [r0], r1
+
+        vld4.16  {d16[2], d18[2], d20[2], d22[2]}, [r4], r1
+        vld4.16  {d24[2], d26[2], d28[2], d30[2]}, [r0], r1
+
+        vld4.16  {d16[3], d18[3], d20[3], d22[3]}, [r4], r1
+        vld4.16  {d24[3], d26[3], d28[3], d30[3]}, [r0], r1
+
+        vld4.16  {d17[0], d19[0], d21[0], d23[0]}, [r4], r1
+        vld4.16  {d25[0], d27[0], d29[0], d31[0]}, [r0], r1
+
+        vld4.16  {d17[1], d19[1], d21[1], d23[1]}, [r4], r1
+        vld4.16  {d25[1], d27[1], d29[1], d31[1]}, [r0], r1
+
+        vld4.16  {d17[2], d19[2], d21[2], d23[2]}, [r4], r1
+        vld4.16  {d25[2], d27[2], d29[2], d31[2]}, [r0], r1
+
+        vld4.16  {d17[3], d19[3], d21[3], d23[3]}, [r4]
+        vld4.16  {d25[3], d27[3], d29[3], d31[3]}, [r0]
+
+        bl hevc_loop_filter_luma_body_\bit_depth
+
+        neg     r1, r1
+
+        @ p[1]
+        tst     r10, #0xff00
+        itt ne
+        addne    r4, r4, r1, lsl #2
+        bne      1f
+
+        vst4.16  {d17[3], d19[3], d21[3], d23[3]}, [r4], r1
+        vst4.16  {d17[2], d19[2], d21[2], d23[2]}, [r4], r1
+        vst4.16  {d17[1], d19[1], d21[1], d23[1]}, [r4], r1
+        vst4.16  {d17[0], d19[0], d21[0], d23[0]}, [r4], r1
+
+1:
+        @ q[1]
+        tst     r10, #0xff000000
+        itt ne
+        addne    r0, r0, r1, lsl #2
+        bne 2f
+
+        vst4.16  {d25[3], d27[3], d29[3], d31[3]}, [r0], r1
+        vst4.16  {d25[2], d27[2], d29[2], d31[2]}, [r0], r1
+        vst4.16  {d25[1], d27[1], d29[1], d31[1]}, [r0], r1
+        vst4.16  {d25[0], d27[0], d29[0], d31[0]}, [r0], r1
+
+2:
+        @ p[0]
+        tst     r10, #0xff
+        bne      3f
+
+        vst4.16  {d16[3], d18[3], d20[3], d22[3]}, [r4], r1
+        vst4.16  {d16[2], d18[2], d20[2], d22[2]}, [r4], r1
+        vst4.16  {d16[1], d18[1], d20[1], d22[1]}, [r4], r1
+        vst4.16  {d16[0], d18[0], d20[0], d22[0]}, [r4]
+
+3:
+        @ q[0]
+        tst     r10, #0xff0000
+        bne      4f
+
+        vst4.16  {d24[3], d26[3], d28[3], d30[3]}, [r0], r1
+        vst4.16  {d24[2], d26[2], d28[2], d30[2]}, [r0], r1
+        vst4.16  {d24[1], d26[1], d28[1], d30[1]}, [r0], r1
+        vst4.16  {d24[0], d26[0], d28[0], d30[0]}, [r0]
+
+4:
+        vpop     {d8-d15}
+        pop      {r4-r10,pc}
+.endm
+
+
+
+
 @ void (*hevc_h_loop_filter_luma)(uint8_t *pix,     [r0]
 @                                 ptrdiff_t stride, [r1]
 @                                 int beta,         [r2]
@@ -540,6 +682,94 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
         pop      {r4-r10,pc}
 
 endfunc
+
+
+.macro m_filter_h_luma_16 bit_depth
+        hevc_loop_filter_luma_start
+        push     {r4-r10,lr}
+
+        vpush    {d8-d15}
+        sub      r0, r0, r1, lsl #2
+
+        vld1.16 { q8}, [r0], r1
+        vld1.16 { q9}, [r0], r1
+        vld1.16 {q10}, [r0], r1
+        vld1.16 {q11}, [r0], r1
+        vld1.16 {q12}, [r0], r1
+        vld1.16 {q13}, [r0], r1
+        vld1.16 {q14}, [r0], r1
+        vld1.16 {q15}, [r0]
+
+        bl hevc_loop_filter_luma_body_\bit_depth
+
+        vpop     {d8-d15}
+
+        sub     r0, r1
+        neg     r1, r1
+
+        @ Why this isn't a bitmask to start with I have no idea...
+        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
+        ldr      r5, [sp, #32]
+        ldrh     r10, [r5]
+        ldr      r5, [sp, #36]
+        ldrh     r5, [r5]
+        orrs     r10, r10, r5, lsl #16  @ So should have b1:no_p[0], b9:no_p[1], b17: no_q[0], b25:no_q[1]
+        bne      1f
+
+        vst1.16  {q14}, [r0], r1
+        vst1.16  {q13}, [r0], r1
+        vst1.16  {q12}, [r0], r1
+        vst1.16  {q11}, [r0], r1
+        vst1.16  {q10}, [r0], r1
+        vst1.16  { q9}, [r0]
+
+        pop      {r4-r10,pc}
+
+@ Partial write
+1:
+        tst      r10, #0xff0000
+        bne      1f
+
+        vst1.16  {d28}, [r0], r1
+        vst1.16  {d26}, [r0], r1
+        vst1.16  {d24}, [r0]
+        sub      r0, r0, r1, lsl #1
+
+1:
+        tst      r10, #0xff000000
+        bne      1f
+
+        add      r2, r0, #8
+        vst1.16  {d29}, [r2], r1
+        vst1.16  {d27}, [r2], r1
+        vst1.16  {d25}, [r2]
+
+1:
+        @ r0 = r0 + r1 * 3
+        add      r0, r0, r1
+        add      r0, r0, r1, lsl # 1
+
+        tst      r10, #0xff
+        bne      1f
+
+        vst1.16  {d22}, [r0], r1
+        vst1.16  {d20}, [r0], r1
+        vst1.16  {d18}, [r0]
+        sub      r0, r0, r1, lsl #1
+
+1:
+        tst      r10, #0xff00
+        bne      1f
+
+        add      r2, r0, #8
+        vst1.16  {d23}, [r2], r1
+        vst1.16  {d21}, [r2], r1
+        vst1.16  {d19}, [r2]
+
+1:
+        pop      {r4-r10,pc}
+.endm
+
 
 @ void ff_hevc_h_loop_filter_uv_neon(uint8_t * src_r,        // r0
 @                                     unsigned int stride,   // r1
@@ -983,7 +1213,34 @@ T       addhs       v7, v7, a4
         b           11b
 endfunc
 
+@ =============================================================================
+@
+@ 10 bit
 
+function hevc_loop_filter_luma_body_10
+        m_filter_luma 10
+endfunc
+
+function ff_hevc_h_loop_filter_luma_neon_10, export=1
+        m_filter_h_luma_16 10
+endfunc
+
+function ff_hevc_v_loop_filter_luma2_neon_10, export=1
+        hevc_loop_filter_luma_start
+        push     {r4-r10,lr}       @ 8 regs = 32 bytes
+
+        ldr      r4, [sp, #40]
+        b        v_loop_luma_common_10
+endfunc
+
+function ff_hevc_v_loop_filter_luma_neon_10, export=1
+        hevc_loop_filter_luma_start
+        push     {r4-r10,lr}
+
+        sub      r4, r0, #4
+v_loop_luma_common_10:
+        m_filter_v_luma_common_16 10
+endfunc
 
 function ff_hevc_h_loop_filter_uv_neon_10, export=1
         m_filter_h_uv_16 10
