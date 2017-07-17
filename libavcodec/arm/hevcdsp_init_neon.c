@@ -40,6 +40,12 @@ void ff_hevc_h_loop_filter_uv_neon_8(uint8_t * src, unsigned int stride, uint32_
 void ff_hevc_v_loop_filter_uv2_neon_8(uint8_t * src_r, unsigned int stride, uint32_t tc4,
                              uint8_t * src_l,
                              unsigned int no_f);
+
+void ff_hevc_h_loop_filter_uv_neon_10(uint8_t * src, unsigned int stride, uint32_t tc4,
+                             unsigned int no_f);
+void ff_hevc_v_loop_filter_uv2_neon_10(uint8_t * src_r, unsigned int stride, uint32_t tc4,
+                             uint8_t * src_l,
+                             unsigned int no_f);
 #endif
 
 void ff_hevc_transform_4x4_neon_8(int16_t *coeffs, int col_limit);
@@ -609,6 +615,10 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[0]           = ff_hevc_add_residual_4x4_c_neon_10;
         c->add_residual_c[1]           = ff_hevc_add_residual_8x8_c_neon_10;
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_10;
+#endif
+#ifdef RPI
+        c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_10;
+        c->hevc_v_loop_filter_uv2      = ff_hevc_v_loop_filter_uv2_neon_10;
 #endif
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_10;
     }

@@ -78,6 +78,36 @@
 .endm
 
 
+@ Uses r2[0:7], r2[8:15]
+@ Modifies: q0-q3
+.macro hevc_loop_filter_uv_body16 P1, P0, Q0, Q1, bit_depth
+        vsub.i16  q0, \Q0, \P0
+        vsub.i16  q1, \P1, \Q1
+        vshl.i16  q0, #2
+        vadd.i16  q0, q1
+
+        @ r2[0:7] -> d0.16 (all), r2[8:15] -> d1.16(all)
+        vdup.16   d4, r2
+        vshll.u8  q2, d4, #\bit_depth - 8
+        vuzp.16   d4, d5
+
+        vrshr.s16 q0, q0, #3
+        vneg.s16  q3, q2
+        vmin.s16  q0, q0, q2
+        vmax.s16  q0, q0, q3
+        vadd.i16  \P0, q0, \P0
+        vsub.i16  \Q0, q0
+
+        movw      r12, #(1 << \bit_depth) - 1
+        vmov.i64  q2, #0
+        vdup.i16  q3, r12
+        vmax.s16  \P0, q2
+        vmax.s16  \Q0, q2
+        vmin.s16  \P0, q3
+        vmin.s16  \Q0, q3
+.endm
+
+
 
 .macro hevc_loop_filter_luma_start
         ldr     r12, [r3]
@@ -561,6 +591,60 @@ function ff_hevc_h_loop_filter_uv_neon_8, export=1
 endfunc
 
 
+@ void ff_hevc_h_loop_filter_uv_neon_10(uint8_t * src_r,     // r0
+@                                     unsigned int stride,   // r1
+@                                     uint32_t tc4,          // r2
+@                                     unsigned int no_f);    // r3
+@
+@ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
+@
+@ Macro here actual function near bottom
+
+.macro m_filter_h_uv_16 bit_depth
+        sub      r0, r0, r1, lsl #1
+        vld2.16  {q8,  q9 }, [r0], r1
+        vld2.16  {q10, q11}, [r0], r1
+        vld2.16  {q12, q13}, [r0], r1
+        vld2.16  {q14, q15}, [r0]
+        sub      r0, r0, r1, lsl #1
+
+        hevc_loop_filter_uv_body16 q8, q10, q12, q14, \bit_depth
+        lsr      r2, r2, #16
+        hevc_loop_filter_uv_body16 q9, q11, q13, q15, \bit_depth
+
+        cmp      r3, #0
+        bne      1f
+        vst2.16  {q10, q11}, [r0], r1
+        vst2.16  {q12, q13}, [r0]
+        bx       lr
+
+        @ At least one no_f bit is set
+        @ Which means we need to break this apart in an ugly fashion
+1:      vzip.16  q10, q11
+        vzip.16  q12, q13
+        sub      r1, r1, #16
+
+        tst      r3, #1
+        bne      1f
+        vst1.16  {q10}, [r0]
+1:      add      r0, r0, #16
+        tst      r3, #2
+        bne      2f
+        vst1.16  {q11}, [r0]
+2:      add      r0, r0, r1
+
+        tst      r3, #4
+        bne      1f
+        vst1.16  {q12}, [r0]
+1:      add      r0, r0, #16
+        tst      r3, #8
+        it ne
+        bxne     lr
+        vst1.16  {q13}, [r0]
+        bx       lr
+.endm
+
+
 @ void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r,       // r0
 @                                     unsigned int stride,   // r1
 @                                     uint32_t tc4,          // r2
@@ -645,6 +729,95 @@ function ff_hevc_v_loop_filter_uv2_neon_8, export=1
 endfunc
 
 
+@ void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r,       // r0
+@                                     unsigned int stride,   // r1
+@                                     uint32_t tc4,          // r2
+@                                     uint8_t * src_l,       // r3
+@                                     unsigned int no_f);   // sp[0]
+@
+@ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
+.macro m_filter_v_uv2_16 bit_depth
+        vld4.16  {d16[0], d18[0], d20[0], d22[0]}, [r3], r1
+        vld4.16  {d24[0], d26[0], d28[0], d30[0]}, [r0], r1
+
+        vld4.16  {d16[1], d18[1], d20[1], d22[1]}, [r3], r1
+        vld4.16  {d24[1], d26[1], d28[1], d30[1]}, [r0], r1
+
+        vld4.16  {d16[2], d18[2], d20[2], d22[2]}, [r3], r1
+        vld4.16  {d24[2], d26[2], d28[2], d30[2]}, [r0], r1
+
+        vld4.16  {d16[3], d18[3], d20[3], d22[3]}, [r3], r1
+        vld4.16  {d24[3], d26[3], d28[3], d30[3]}, [r0], r1
+
+        vld4.16  {d17[0], d19[0], d21[0], d23[0]}, [r3], r1
+        vld4.16  {d25[0], d27[0], d29[0], d31[0]}, [r0], r1
+
+        vld4.16  {d17[1], d19[1], d21[1], d23[1]}, [r3], r1
+        vld4.16  {d25[1], d27[1], d29[1], d31[1]}, [r0], r1
+
+        vld4.16  {d17[2], d19[2], d21[2], d23[2]}, [r3], r1
+        vld4.16  {d25[2], d27[2], d29[2], d31[2]}, [r0], r1
+
+        vld4.16  {d17[3], d19[3], d21[3], d23[3]}, [r3]
+        vld4.16  {d25[3], d27[3], d29[3], d31[3]}, [r0]
+
+
+        hevc_loop_filter_uv_body16  q8, q10, q12, q14, \bit_depth
+        lsr      r2, r2, #16
+        hevc_loop_filter_uv_body16  q9, q11, q13, q15, \bit_depth
+
+        ldr      r2, [sp, #0]
+        neg      r1, r1
+
+        @ p[1]
+        tst      r2, #2
+        itt ne
+        addne    r3, r3, r1, lsl #2
+        bne      1f
+
+        vst4.16  {d17[3], d19[3], d21[3], d23[3]}, [r3], r1
+        vst4.16  {d17[2], d19[2], d21[2], d23[2]}, [r3], r1
+        vst4.16  {d17[1], d19[1], d21[1], d23[1]}, [r3], r1
+        vst4.16  {d17[0], d19[0], d21[0], d23[0]}, [r3], r1
+
+1:
+        @ q[1]
+        tst      r2, #8
+        itt ne
+        addne    r0, r0, r1, lsl #2
+        bne 2f
+
+        vst4.16  {d25[3], d27[3], d29[3], d31[3]}, [r0], r1
+        vst4.16  {d25[2], d27[2], d29[2], d31[2]}, [r0], r1
+        vst4.16  {d25[1], d27[1], d29[1], d31[1]}, [r0], r1
+        vst4.16  {d25[0], d27[0], d29[0], d31[0]}, [r0], r1
+
+2:
+        @ p[0]
+        tst      r2, #1
+        bne      3f
+
+        vst4.16  {d16[3], d18[3], d20[3], d22[3]}, [r3], r1
+        vst4.16  {d16[2], d18[2], d20[2], d22[2]}, [r3], r1
+        vst4.16  {d16[1], d18[1], d20[1], d22[1]}, [r3], r1
+        vst4.16  {d16[0], d18[0], d20[0], d22[0]}, [r3]
+
+3:
+        @ q[0]
+        tst      r2, #4
+        it ne
+        bxne     lr
+
+        vst4.16  {d24[3], d26[3], d28[3], d30[3]}, [r0], r1
+        vst4.16  {d24[2], d26[2], d28[2], d30[2]}, [r0], r1
+        vst4.16  {d24[1], d26[1], d28[1], d30[1]}, [r0], r1
+        vst4.16  {d24[0], d26[0], d28[0], d30[0]}, [r0]
+
+        bx       lr
+.endm
+
+
+
 function ff_hevc_v_loop_filter_chroma_neon, export=1
         hevc_loop_filter_chroma_start
         sub      r0, #4
@@ -684,6 +857,7 @@ function ff_hevc_h_loop_filter_chroma_neon, export=1
         vst1.8   {d4}, [r0]
         bx       lr
 endfunc
+
 
 /* ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_i
  *                                            int *curr_rpl0, int *curr_
@@ -807,5 +981,15 @@ T       addhs       v7, v7, a4
 
 90:     mov         a3, #1
         b           11b
+endfunc
+
+
+
+function ff_hevc_h_loop_filter_uv_neon_10, export=1
+        m_filter_h_uv_16 10
+endfunc
+
+function ff_hevc_v_loop_filter_uv2_neon_10, export=1
+        m_filter_v_uv2_16 10
 endfunc
 
