@@ -1237,7 +1237,7 @@ function ff_hevc_v_loop_filter_luma_neon_10, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}
 
-        sub      r4, r0, #4
+        sub      r4, r0, #8
 v_loop_luma_common_10:
         m_filter_v_luma_common_16 10
 endfunc
