@@ -1102,6 +1102,7 @@ function ff_hevc_v_loop_filter_chroma_neon, export=1
         sub      r0, r0, r1, lsl #3
         add      r0, r0, #1
         hevc_loop_filter_chroma_body d16, d17, d18, d19
+        bne      1f
 
         vst2.8   {d17[0], d18[0]}, [r0], r1
         vst2.8   {d17[1], d18[1]}, [r0], r1
@@ -1114,8 +1115,121 @@ function ff_hevc_v_loop_filter_chroma_neon, export=1
         bx       lr
 
 1:
+        tst      r12, #0xff             @ P0a
+        bne      2f
+
+        vst1.8   {d17[0]}, [r0], r1
+        vst1.8   {d17[1]}, [r0], r1
+        vst1.8   {d17[2]}, [r0], r1
+        vst1.8   {d17[3]}, [r0], r1
+        sub      r0, r0, r1, lsl #2
+
+2:
+        tst      r12, #0xff0000         @ Q0a
+        add      r0, #1
+        bne      3f
+        vst1.8   {d18[0]}, [r0], r1
+        vst1.8   {d18[1]}, [r0], r1
+        vst1.8   {d18[2]}, [r0], r1
+        vst1.8   {d18[3]}, [r0], r1
+        sub      r0, r0, r1, lsl #2
+
+3:
+        tst      r12, #0xff000000       @ Q0b
+        add      r0, r0, r1, lsl #2
+        bne      4f
+        vst1.8   {d18[4]}, [r0], r1
+        vst1.8   {d18[5]}, [r0], r1
+        vst1.8   {d18[6]}, [r0], r1
+        vst1.8   {d18[7]}, [r0], r1
+        sub      r0, r0, r1, lsl #2
+
+4:
+        tst      r12, #0xff00           @ P0b
+        it ne
+        bxne     lr
+
+        sub      r0, #1
+        vst1.8   {d17[4]}, [r0], r1
+        vst1.8   {d17[5]}, [r0], r1
+        vst1.8   {d17[6]}, [r0], r1
+        vst1.8   {d17[7]}, [r0], r1
+        bx       lr
 
 endfunc
+
+
+.macro m_filter_v_chroma_16 bit_depth
+        hevc_loop_filter_chroma_start
+
+        sub      r0, #4
+        vld4.16  {d16[0], d18[0], d20[0], d22[0]}, [r0], r1
+        vld4.16  {d16[1], d18[1], d20[1], d22[1]}, [r0], r1
+        vld4.16  {d16[2], d18[2], d20[2], d22[2]}, [r0], r1
+        vld4.16  {d16[3], d18[3], d20[3], d22[3]}, [r0], r1
+        vld4.16  {d17[0], d19[0], d21[0], d23[0]}, [r0], r1
+        vld4.16  {d17[1], d19[1], d21[1], d23[1]}, [r0], r1
+        vld4.16  {d17[2], d19[2], d21[2], d23[2]}, [r0], r1
+        vld4.16  {d17[3], d19[3], d21[3], d23[3]}, [r0], r1
+
+        sub      r0, r0, r1, lsl #3
+        add      r0, r0, #2
+        hevc_loop_filter_chroma_body_16 q8, q9, q10, q11, \bit_depth
+        bne      1f
+
+        vst2.16  {d18[0], d20[0]}, [r0], r1
+        vst2.16  {d18[1], d20[1]}, [r0], r1
+        vst2.16  {d18[2], d20[2]}, [r0], r1
+        vst2.16  {d18[3], d20[3]}, [r0], r1
+        vst2.16  {d19[0], d21[0]}, [r0], r1
+        vst2.16  {d19[1], d21[1]}, [r0], r1
+        vst2.16  {d19[2], d21[2]}, [r0], r1
+        vst2.16  {d19[3], d21[3]}, [r0], r1
+        bx       lr
+
+1:
+        tst      r12, #0xff             @ P0a
+        bne      2f
+
+        vst1.16  {d18[0]}, [r0], r1
+        vst1.16  {d18[1]}, [r0], r1
+        vst1.16  {d18[2]}, [r0], r1
+        vst1.16  {d18[3]}, [r0], r1
+        sub      r0, r0, r1, lsl #2
+
+2:
+        tst      r12, #0xff0000         @ Q0a
+        add      r0, #1
+        bne      3f
+        vst1.16  {d20[0]}, [r0], r1
+        vst1.16  {d20[1]}, [r0], r1
+        vst1.16  {d20[2]}, [r0], r1
+        vst1.16  {d20[3]}, [r0], r1
+        sub      r0, r0, r1, lsl #2
+
+3:
+        tst      r12, #0xff000000       @ Q0b
+        add      r0, r0, r1, lsl #2
+        bne      4f
+        vst1.16  {d21[0]}, [r0], r1
+        vst1.16  {d21[1]}, [r0], r1
+        vst1.16  {d21[2]}, [r0], r1
+        vst1.16  {d21[3]}, [r0], r1
+        sub      r0, r0, r1, lsl #2
+
+4:
+        tst      r12, #0xff00           @ P0b
+        it ne
+        bxne     lr
+
+        sub      r0, #1
+        vst1.16  {d19[0]}, [r0], r1
+        vst1.16  {d19[1]}, [r0], r1
+        vst1.16  {d19[2]}, [r0], r1
+        vst1.16  {d19[3]}, [r0], r1
+        bx       lr
+.endm
+
 
 @ void ff_hevc_h_loop_filter_chroma_neon(
 @   uint8_t *_pix,     [r0]
@@ -1360,5 +1474,9 @@ endfunc
 
 function ff_hevc_h_loop_filter_chroma_neon_10, export=1
         m_filter_h_chroma_16 10
+endfunc
+
+function ff_hevc_v_loop_filter_chroma_neon_10, export=1
+        m_filter_v_chroma_16 10
 endfunc
 
