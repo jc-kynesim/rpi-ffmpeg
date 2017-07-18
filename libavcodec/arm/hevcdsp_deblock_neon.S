@@ -94,6 +94,8 @@
 .endm
 
 
+@ Preserves r12
+@ Clobbers r2
 .macro hevc_loop_filter_uv_body2 P1u, P1v, P0u, P0v, Q0u, Q0v, Q1u, Q1v
         vsubl.u8  q0, \Q0u, \P0u
         vsubl.u8  q1, \Q0v, \P0v
@@ -135,8 +137,8 @@
         vqmovun.s16 \Q0v, q3
 .endm
 
-
-
+@ Preserves r12
+@ Clobbers r2
 .macro hevc_loop_filter_uv_body2_16 P1u, P1v, P0u, P0v, Q0u, Q0v, Q1u, Q1v, bit_depth
         vsub.i16  q0, \Q0u, \P0u
         vsub.i16  q1, \Q0v, \P0v
