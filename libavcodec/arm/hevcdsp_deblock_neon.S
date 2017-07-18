@@ -94,58 +94,92 @@
 .endm
 
 
-@ Uses r2[0:7], r2[8:15] (tc U;V)
-@ Modifies: d0-d7, d22-d25
-.macro hevc_loop_filter_uv_body P1, P0, Q0, Q1
-        vsubl.u8  q3, \Q0, \P0
-        vsubl.u8  q11, \P1, \Q1
-        vshl.i16  q3, #2
-        vadd.i16  q11, q3
+.macro hevc_loop_filter_uv_body2 P1u, P1v, P0u, P0v, Q0u, Q0v, Q1u, Q1v
+        vsubl.u8  q0, \Q0u, \P0u
+        vsubl.u8  q1, \Q0v, \P0v
+        vsubl.u8  q2, \P1u, \Q1u
+        vsubl.u8  q3, \P1v, \Q1v
+        vshl.i16  q0, #2
+        vshl.i16  q1, #2
+        vadd.i16  q0, q2
+        vdup.16   d4, r2
+        lsr       r2, #16
+        vadd.i16  q1, q3
 
-        @ r2[0:7] -> d0.16 (all), r2[8:15] -> d1.16(all)
-        vdup.16   d0, r2
-        vmovl.u8  q0, d0
-        vuzp.16   d0, d1
+        @ r2[0:7] -> d4.16 (all), r2[8:15] -> d5.16(all)
+        vrshr.s16 q0, #3
+        vdup.16   d6, r2
+        vmovl.u8  q2, d4
+        vmovl.u8  q3, d6
+        vuzp.16   d4, d5
+        vrshr.s16 q1, #3
+        vuzp.16   d6, d7
 
-        vrshr.s16 q11, q11, #3
-        vneg.s16  q12, q0
-        vmovl.u8  q2, \Q0
-        vmin.s16  q11, q11, q0
-        vmax.s16  q11, q11, q12
-        vaddw.u8  q1, q11, \P0
-        vsub.i16  q2, q11
-        vqmovun.s16 \P0, q1
-        vqmovun.s16 \Q0, q2
+        vmin.s16  q0, q2
+        vneg.s16  q2, q2
+        vmin.s16  q1, q3
+        vneg.s16  q3, q3
+        vmax.s16  q0, q2
+        vaddw.u8  q2, q0, \P0u
+        vmax.s16  q1, q3
+        vaddw.u8  q3, q1, \P0v
+
+        vqmovun.s16 \P0u, q2
+        vmovl.u8  q2, \Q0u
+        vqmovun.s16 \P0v, q3
+        vmovl.u8  q3, \Q0v
+        vsub.i16  q2, q0
+        vsub.i16  q3, q1
+
+        vqmovun.s16 \Q0u, q2
+        vqmovun.s16 \Q0v, q3
 .endm
 
 
-@ Uses r2[0:7], r2[8:15] (tc U;V)
-@ Modifies: q0-q3
-.macro hevc_loop_filter_uv_body16 P1, P0, Q0, Q1, bit_depth
-        vsub.i16  q0, \Q0, \P0
-        vsub.i16  q1, \P1, \Q1
+
+.macro hevc_loop_filter_uv_body2_16 P1u, P1v, P0u, P0v, Q0u, Q0v, Q1u, Q1v, bit_depth
+        vsub.i16  q0, \Q0u, \P0u
+        vsub.i16  q1, \Q0v, \P0v
+        vsub.i16  q2, \P1u, \Q1u
+        vsub.i16  q3, \P1v, \Q1v
         vshl.i16  q0, #2
-        vadd.i16  q0, q1
-
-        @ r2[0:7] -> d0.16 (all), r2[8:15] -> d1.16(all)
+        vshl.i16  q1, #2
+        vadd.i16  q0, q2
         vdup.16   d4, r2
-        vshll.u8  q2, d4, #\bit_depth - 8
-        vuzp.16   d4, d5
+        lsr       r2, #16
+        vadd.i16  q1, q3
 
-        vrshr.s16 q0, q0, #3
-        vneg.s16  q3, q2
-        vmin.s16  q0, q0, q2
-        vmax.s16  q0, q0, q3
-        vadd.i16  \P0, q0, \P0
-        vsub.i16  \Q0, q0
+        @ r2[0:7] -> d4.16 (all), r2[8:15] -> d5.16(all)
+        vrshr.s16 q0, #3
+        vdup.16   d6, r2
+        vshll.u8  q2, d4, #\bit_depth - 8
+        vshll.u8  q3, d6, #\bit_depth - 8
+        vuzp.16   d4, d5
+        vrshr.s16 q1, #3
+        vuzp.16   d6, d7
 
         movw      r12, #(1 << \bit_depth) - 1
+        vmin.s16  q0, q2
+        vneg.s16  q2, q2
+        vmin.s16  q1, q3
+        vneg.s16  q3, q3
+        vmax.s16  q0, q2
         vmov.i64  q2, #0
+        vmax.s16  q1, q3
         vdup.i16  q3, r12
-        vmax.s16  \P0, q2
-        vmax.s16  \Q0, q2
-        vmin.s16  \P0, q3
-        vmin.s16  \Q0, q3
+        vadd.i16  \P0u, q0
+        vsub.i16  \Q0u, q0
+        vadd.i16  \P0v, q1
+        vsub.i16  \Q0v, q1
+
+        vmax.s16  \P0u, q2
+        vmax.s16  \Q0u, q2
+        vmax.s16  \P0v, q2
+        vmax.s16  \Q0v, q2
+        vmin.s16  \P0u, q3
+        vmin.s16  \Q0u, q3
+        vmin.s16  \P0v, q3
+        vmin.s16  \Q0v, q3
 .endm
 
 
@@ -822,9 +856,7 @@ function ff_hevc_h_loop_filter_uv_neon_8, export=1
         vld2.8   {d26,d27}, [r0], r1
         vld2.8   {d28,d29}, [r0]
         sub      r0, r0, r1, lsl #1
-        hevc_loop_filter_uv_body d16, d18, d26, d28
-        lsr      r2, r2, #16
-        hevc_loop_filter_uv_body d17, d19, d27, d29
+        hevc_loop_filter_uv_body2 d16, d17, d18, d19, d26, d27, d28, d29
         cmp      r3, #0
         bne      1f
         vst2.8   {d18,d19}, [r0], r1
@@ -876,9 +908,7 @@ endfunc
         vld2.16  {q14, q15}, [r0]
         sub      r0, r0, r1, lsl #1
 
-        hevc_loop_filter_uv_body16 q8, q10, q12, q14, \bit_depth
-        lsr      r2, r2, #16
-        hevc_loop_filter_uv_body16 q9, q11, q13, q15, \bit_depth
+        hevc_loop_filter_uv_body2_16 q8, q9, q10, q11, q12, q13, q14, q15, \bit_depth
 
         cmp      r3, #0
         bne      1f
@@ -945,23 +975,21 @@ function ff_hevc_v_loop_filter_uv2_neon_8, export=1
         vld4.8   {d16[7], d17[7], d18[7], d19[7]}, [r3]
         vld4.8   {d26[7], d27[7], d28[7], d29[7]}, [r0]
 
-        hevc_loop_filter_uv_body d16, d18, d26, d28
-        lsr      r2, r2, #16
-        hevc_loop_filter_uv_body d17, d19, d27, d29
-
-        neg      r1, r1
+        hevc_loop_filter_uv_body2 d16, d17, d18, d19, d26, d27, d28, d29
 
         ldr      r2, [sp, #0]
+        neg      r1, r1
 
         @ p[1]
         tst      r2, #2
+        add      r3, #2
         itt ne
         addne    r3, r3, r1, lsl #2
         bne      1f
-        vst4.8   {d16[7], d17[7], d18[7], d19[7]}, [r3], r1
-        vst4.8   {d16[6], d17[6], d18[6], d19[6]}, [r3], r1
-        vst4.8   {d16[5], d17[5], d18[5], d19[5]}, [r3], r1
-        vst4.8   {d16[4], d17[4], d18[4], d19[4]}, [r3], r1
+        vst2.8   {d18[7], d19[7]}, [r3], r1
+        vst2.8   {d18[6], d19[6]}, [r3], r1
+        vst2.8   {d18[5], d19[5]}, [r3], r1
+        vst2.8   {d18[4], d19[4]}, [r3], r1
 
 1:
         @ q[1]
@@ -969,29 +997,29 @@ function ff_hevc_v_loop_filter_uv2_neon_8, export=1
         itt ne
         addne    r0, r0, r1, lsl #2
         bne 2f
-        vst4.8   {d26[7], d27[7], d28[7], d29[7]}, [r0], r1
-        vst4.8   {d26[6], d27[6], d28[6], d29[6]}, [r0], r1
-        vst4.8   {d26[5], d27[5], d28[5], d29[5]}, [r0], r1
-        vst4.8   {d26[4], d27[4], d28[4], d29[4]}, [r0], r1
+        vst2.8   {d26[7], d27[7]}, [r0], r1
+        vst2.8   {d26[6], d27[6]}, [r0], r1
+        vst2.8   {d26[5], d27[5]}, [r0], r1
+        vst2.8   {d26[4], d27[4]}, [r0], r1
 
 2:
         @ p[0]
         tst      r2, #1
         bne      3f
-        vst4.8   {d16[3], d17[3], d18[3], d19[3]}, [r3], r1
-        vst4.8   {d16[2], d17[2], d18[2], d19[2]}, [r3], r1
-        vst4.8   {d16[1], d17[1], d18[1], d19[1]}, [r3], r1
-        vst4.8   {d16[0], d17[0], d18[0], d19[0]}, [r3]
+        vst2.8   {d18[3], d19[3]}, [r3], r1
+        vst2.8   {d18[2], d19[2]}, [r3], r1
+        vst2.8   {d18[1], d19[1]}, [r3], r1
+        vst2.8   {d18[0], d19[0]}, [r3]
 
 3:
         @ q[0]
         tst      r2, #4
         it ne
         bxne     lr
-        vst4.8   {d26[3], d27[3], d28[3], d29[3]}, [r0], r1
-        vst4.8   {d26[2], d27[2], d28[2], d29[2]}, [r0], r1
-        vst4.8   {d26[1], d27[1], d28[1], d29[1]}, [r0], r1
-        vst4.8   {d26[0], d27[0], d28[0], d29[0]}, [r0]
+        vst2.8   {d26[3], d27[3]}, [r0], r1
+        vst2.8   {d26[2], d27[2]}, [r0], r1
+        vst2.8   {d26[1], d27[1]}, [r0], r1
+        vst2.8   {d26[0], d27[0]}, [r0]
 
         bx       lr
 endfunc
@@ -1030,56 +1058,52 @@ endfunc
         vld4.16  {d25[3], d27[3], d29[3], d31[3]}, [r0]
 
 
-        hevc_loop_filter_uv_body16  q8, q10, q12, q14, \bit_depth
-        lsr      r2, r2, #16
-        hevc_loop_filter_uv_body16  q9, q11, q13, q15, \bit_depth
+        hevc_loop_filter_uv_body2_16  q8, q9, q10, q11, q12, q13, q14, q15, \bit_depth
 
-        ldr      r2, [sp, #0]
+        ldr      r2, [sp, #0]           @ P0a:P0b:Q0a:Q0b
         neg      r1, r1
 
-        @ p[1]
-        tst      r2, #2
+        tst      r2, #2                 @ P0b
+        add      r3, #4
         itt ne
         addne    r3, r3, r1, lsl #2
         bne      1f
 
-        vst4.16  {d17[3], d19[3], d21[3], d23[3]}, [r3], r1
-        vst4.16  {d17[2], d19[2], d21[2], d23[2]}, [r3], r1
-        vst4.16  {d17[1], d19[1], d21[1], d23[1]}, [r3], r1
-        vst4.16  {d17[0], d19[0], d21[0], d23[0]}, [r3], r1
+        vst2.16  {d21[3], d23[3]}, [r3], r1
+        vst2.16  {d21[2], d23[2]}, [r3], r1
+        vst2.16  {d21[1], d23[1]}, [r3], r1
+        vst2.16  {d21[0], d23[0]}, [r3], r1
 
 1:
-        @ q[1]
-        tst      r2, #8
+        tst      r2, #8                 @ Q0b
         itt ne
         addne    r0, r0, r1, lsl #2
         bne 2f
 
-        vst4.16  {d25[3], d27[3], d29[3], d31[3]}, [r0], r1
-        vst4.16  {d25[2], d27[2], d29[2], d31[2]}, [r0], r1
-        vst4.16  {d25[1], d27[1], d29[1], d31[1]}, [r0], r1
-        vst4.16  {d25[0], d27[0], d29[0], d31[0]}, [r0], r1
+        vst2.16  {d25[3], d27[3]}, [r0], r1
+        vst2.16  {d25[2], d27[2]}, [r0], r1
+        vst2.16  {d25[1], d27[1]}, [r0], r1
+        vst2.16  {d25[0], d27[0]}, [r0], r1
 
 2:
         @ p[0]
-        tst      r2, #1
+        tst      r2, #1                 @ P0a
         bne      3f
 
-        vst4.16  {d16[3], d18[3], d20[3], d22[3]}, [r3], r1
-        vst4.16  {d16[2], d18[2], d20[2], d22[2]}, [r3], r1
-        vst4.16  {d16[1], d18[1], d20[1], d22[1]}, [r3], r1
-        vst4.16  {d16[0], d18[0], d20[0], d22[0]}, [r3]
+        vst2.16  {d20[3], d22[3]}, [r3], r1
+        vst2.16  {d20[2], d22[2]}, [r3], r1
+        vst2.16  {d20[1], d22[1]}, [r3], r1
+        vst2.16  {d20[0], d22[0]}, [r3]
 
 3:
-        @ q[0]
-        tst      r2, #4
+        tst      r2, #4                 @ Q0a
         it ne
         bxne     lr
 
-        vst4.16  {d24[3], d26[3], d28[3], d30[3]}, [r0], r1
-        vst4.16  {d24[2], d26[2], d28[2], d30[2]}, [r0], r1
-        vst4.16  {d24[1], d26[1], d28[1], d30[1]}, [r0], r1
-        vst4.16  {d24[0], d26[0], d28[0], d30[0]}, [r0]
+        vst2.16  {d24[3], d26[3]}, [r0], r1
+        vst2.16  {d24[2], d26[2]}, [r0], r1
+        vst2.16  {d24[1], d26[1]}, [r0], r1
+        vst2.16  {d24[0], d26[0]}, [r0]
 
         bx       lr
 .endm
