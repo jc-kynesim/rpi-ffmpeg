@@ -158,7 +158,7 @@
         vrshr.s16 q1, #3
         vuzp.16   d6, d7
 
-        movw      r12, #(1 << \bit_depth) - 1
+        movw      r2, #(1 << \bit_depth) - 1
         vmin.s16  q0, q2
         vneg.s16  q2, q2
         vmin.s16  q1, q3
@@ -166,7 +166,7 @@
         vmax.s16  q0, q2
         vmov.i64  q2, #0
         vmax.s16  q1, q3
-        vdup.i16  q3, r12
+        vdup.i16  q3, r2
         vadd.i16  \P0u, q0
         vsub.i16  \Q0u, q0
         vadd.i16  \P0v, q1
