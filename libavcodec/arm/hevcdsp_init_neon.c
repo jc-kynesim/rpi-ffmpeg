@@ -32,6 +32,7 @@ void ff_hevc_h_loop_filter_chroma_neon(uint8_t *_pix, ptrdiff_t _stride, int *_t
 
 void ff_hevc_v_loop_filter_luma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_h_loop_filter_luma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
+void ff_hevc_h_loop_filter_chroma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 
 #ifdef RPI
 void ff_hevc_v_loop_filter_luma2_neon_8(uint8_t * _pix_r,
@@ -493,6 +494,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->hevc_h_loop_filter_luma_c   = ff_hevc_h_loop_filter_luma_neon;
         c->hevc_v_loop_filter_chroma   = ff_hevc_v_loop_filter_chroma_neon;
         c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon;
+        c->hevc_h_loop_filter_chroma_c = ff_hevc_h_loop_filter_chroma_neon;
 #ifdef RPI
         c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_8;
         c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_8;
@@ -627,6 +629,8 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->hevc_v_loop_filter_luma_c   = ff_hevc_v_loop_filter_luma_neon_10;
         c->hevc_h_loop_filter_luma     = ff_hevc_h_loop_filter_luma_neon_10;
         c->hevc_h_loop_filter_luma_c   = ff_hevc_h_loop_filter_luma_neon_10;
+        c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon_10;
+        c->hevc_h_loop_filter_chroma_c = ff_hevc_h_loop_filter_chroma_neon_10;
 #ifdef RPI
         c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_10;
         c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_10;

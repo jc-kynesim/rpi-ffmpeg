@@ -85,9 +85,11 @@ function JOIN(ff_hevc_add_residual_16x16_neon_, BIT_DEPTH), export=1
         mov         r12, #8
 1:
         vldm        r1!, {q10-q13}
-        vld1.16     {q0, q1}, [r0, :256], r2
+        @ For RPI Sand we could guarantee :256 but not for general
+        @ non-RPI allocation. :128 is as good as we can claim
+        vld1.16     {q0, q1}, [r0, :128], r2
         subs        r12, #1
-        vld1.16     {q2, q3}, [r0, :256]
+        vld1.16     {q2, q3}, [r0, :128]
         vqadd.s16   q0,  q10
         vqadd.s16   q1,  q11
         vqadd.s16   q2,  q12
@@ -101,8 +103,8 @@ function JOIN(ff_hevc_add_residual_16x16_neon_, BIT_DEPTH), export=1
         vmin.s16    q1,  q1,  q9
         vmin.s16    q2,  q2,  q9
         vmin.s16    q3,  q3,  q9
-        vst1.16     {q0, q1}, [r0, :256], r2
-        vst1.16     {q2, q3}, [r0, :256], r2
+        vst1.16     {q0, q1}, [r0, :128], r2
+        vst1.16     {q2, q3}, [r0, :128], r2
         bne         1b
         bx          lr
 
