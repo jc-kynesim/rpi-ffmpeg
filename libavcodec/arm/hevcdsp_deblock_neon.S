@@ -198,13 +198,21 @@
 @ Modifies: r5, r6, r7, r8, r9
 
 @ Input:
-@  r2          beta    (needs shift for bitdepth > 8)
-@  r3[ 0:15]   tc[0]   (needs shift for bitdepth > 8)
-@  r3[16:31]   tc[1]   (needs shift for bitdepth > 8)
+@  r2          beta    (raw: needs shift for bitdepth > 8)
+@  r3[ 0:15]   tc[0]   (raw: needs shift for bitdepth > 8)
+@  r3[16:31]   tc[1]   (raw: needs shift for bitdepth > 8)
+@  [sp,#96]    &no_p[0]
+@  [sp,#100]   &no_q[0]
 @
 @ Input & output
 @  8-bit: d16-d23
 @ 16-bit:  q8-q15
+@
+@ Output
+@  r10[ 0:7 ]  no_p[0]
+@  r10[ 8:15]  no_p[1]
+@  r10[16:23]  no_q[0]
+@  r10[24:31]  no_q[1]
 
 
 .macro m_filter_luma bit_depth
@@ -217,29 +225,36 @@
         vmovl.u8  q10, d18
         vmovl.u8  q9, d17
         vmovl.u8  q8, d16
-.else
+.endif
+        vadd.i16   q7, q9, q11
+.if \bit_depth > 8
         lsl        r2, r2, #(\bit_depth - 8)
+.endif
+        vadd.i16   q6, q14, q12
+.if \bit_depth > 8
         lsl        r3, r3, #(\bit_depth - 8)
 .endif
-
-        vadd.i16   q7, q9, q11
-        vadd.i16   q6, q14, q12
         vsub.i16   q7, q10
+        ldr        r5, [sp, #96]        @ Bolt no_x values together into r10
         vsub.i16   q6, q13
         vabd.s16   q7, q7, q10
         vabd.s16   q6, q6, q13
+        ldrh       r10, [r5]
 
         vdup.16    q0, r2
         vmov       q4, q7
         vmov       q5, q6
+        ldr        r5, [sp, #100]
         vdup.16    d4, r3
         lsr        r3, r3, #16
         vtrn.16    q7, q4
+        ldrh       r5, [r5]
         vtrn.16    q6, q5
 
         vshl.u64   q7, #32
         vshr.u64   q4, #32
         vshl.u64   q6, #32
+        orr        r10, r10, r5, lsl #16
         vshr.u64   q5, #32
         vshr.u64   q7, #32
         vshr.u64   q6, #32
@@ -430,6 +445,7 @@
 2:
 .if \bit_depth == 8
         vqmovun.s16 d16, q8
+        cmp       r10, #0
         vqmovun.s16 d17, q9
         vqmovun.s16 d18, q10
         vqmovun.s16 d19, q11
@@ -443,6 +459,7 @@
         vdup.i16  q1, r12
         @ q8 & q15 should be unaltered and so don't require clipping
         vmax.s16  q9,  q0
+        cmp       r10, #0
         vmax.s16  q10, q0
         vmax.s16  q11, q0
         vmax.s16  q12, q0
@@ -487,14 +504,6 @@ function ff_hevc_v_loop_filter_luma_neon, export=1
 
         sub      r4, r0, #4
 v_loop_luma_common:
-        @ Why this isn't a bitmask to start with I have no idea...
-        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
-        ldr      r5, [sp, #32]
-        ldrh     r10, [r5]
-        ldr      r5, [sp, #36]
-        ldrh     r5, [r5]
-        orr      r10, r10, r5, lsl #16  @ So should have b0:no_p[0], b8:no_p[1], b16: no_q[0], b24:no_q[1]
-
         vpush    {d8-d15}
 
         @ Uses slightly fewer instructions to do laned loads than unlaned
@@ -574,14 +583,6 @@ bypasswrite:
 endfunc
 
 .macro m_filter_v_luma_common_16 bit_depth
-        @ Why this isn't a bitmask to start with I have no idea...
-        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
-        ldr      r5, [sp, #32]
-        ldrh     r10, [r5]
-        ldr      r5, [sp, #36]
-        ldrh     r5, [r5]
-        orr      r10, r10, r5, lsl #16  @ So should have b0:no_p[0], b8:no_p[1], b16: no_q[0], b24:no_q[1]
-
         vpush    {d8-d15}
 
         @ Uses slightly fewer instructions to do laned loads than unlaned
@@ -698,13 +699,6 @@ function ff_hevc_h_loop_filter_luma_neon, export=1
         neg     r1, r1
         add     r0, r0, r1
 
-        @ Why this isn't a bitmask to start with I have no idea...
-        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
-        ldr      r5, [sp, #32]
-        ldrh     r10, [r5]
-        ldr      r5, [sp, #36]
-        ldrh     r5, [r5]
-        orrs     r10, r10, r5, lsl #16  @ So should have b1:no_p[0], b9:no_p[1], b17: no_q[0], b25:no_q[1]
         bne      1f
 
         vst1.8  {d22}, [r0], r1
@@ -781,13 +775,6 @@ endfunc
         sub     r0, r1
         neg     r1, r1
 
-        @ Why this isn't a bitmask to start with I have no idea...
-        @ Beware that no_x[] seems to be loaded with 2/0 rather than 1/0
-        ldr      r5, [sp, #32]
-        ldrh     r10, [r5]
-        ldr      r5, [sp, #36]
-        ldrh     r5, [r5]
-        orrs     r10, r10, r5, lsl #16  @ So should have b1:no_p[0], b9:no_p[1], b17: no_q[0], b25:no_q[1]
         bne      1f
 
         vst1.16  {q14}, [r0], r1
