@@ -242,9 +242,10 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         .dest_rect = {x, y, w, h}
     };
     const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
     rpi_display_env_t * de;
-    int isp_req = 0;
+    int isp_req = (fmt == AV_PIX_FMT_SAND64_10);
 
     bcm_host_init();  // Needs to be done by someone...
 
@@ -268,9 +269,12 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         MMAL_PORT_T * const port = de->port_in;
         MMAL_ES_FORMAT_T* const format = port->format;
         port->userdata = (struct MMAL_PORT_USERDATA_T *)de;
-        format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 : MMAL_ENCODING_I420;
+        format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 :
+            fmt == AV_PIX_FMT_SAND64_10 ? MMAL_ENCODING_YUVUV64_16 :
+                MMAL_ENCODING_I420;
         format->es->video.width = geo.stride_y;
-        format->es->video.height = fmt == AV_PIX_FMT_SAND128 ? (h + 15) & ~15 : geo.height_y;  // Magic
+        format->es->video.height = (fmt == AV_PIX_FMT_SAND128 || fmt == AV_PIX_FMT_SAND64_10) ?
+                                      (h + 15) & ~15 : geo.height_y;  // Magic
         format->es->video.crop.x = 0;
         format->es->video.crop.y = 0;
         format->es->video.crop.width = w;
