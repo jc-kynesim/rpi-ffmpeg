@@ -209,6 +209,7 @@
 @ 16-bit:  q8-q15
 @
 @ Output
+@  Z           r10==0
 @  r10[ 0:7 ]  no_p[0]
 @  r10[ 8:15]  no_p[1]
 @  r10[16:23]  no_q[0]
@@ -855,25 +856,23 @@ function ff_hevc_h_loop_filter_uv_neon_8, export=1
         @ At least one no_f bit is set
         @ Which means we need to break this apart in an ugly fashion
 1:      vzip.8   d18, d19
+        lsls     r2, r3, #31            @ b0 -> N, b1 -> C
         vzip.8   d26, d27
         sub      r1, r1, #8
 
-        tst      r3, #1
-        bne      1f
+        bmi      1f
         vst1.8   {d18}, [r0]
 1:      add      r0, r0, #8
-        tst      r3, #2
-        bne      2f
+        bcs      2f
         vst1.8   {d19}, [r0]
-2:      add      r0, r0, r1
+2:      lsls     r2, r3, #29            @ b2 -> N, b3 -> C
+        add      r0, r0, r1
 
-        tst      r3, #4
-        bne      1f
+        bmi      1f
         vst1.8   {d26}, [r0]
-1:      add      r0, r0, #8
-        tst      r3, #8
-        it ne
-        bxne     lr
+1:      it cs
+        bxcs     lr
+        add      r0, r0, #8
         vst1.8   {d27}, [r0]
         bx       lr
 
@@ -908,25 +907,23 @@ endfunc
         @ At least one no_f bit is set
         @ Which means we need to break this apart in an ugly fashion
 1:      vzip.16  q10, q11
+        lsls     r2, r3, #31            @ b0 -> N, b1 -> C
         vzip.16  q12, q13
         sub      r1, r1, #16
 
-        tst      r3, #1
-        bne      1f
+        bmi      1f
         vst1.16  {q10}, [r0]
 1:      add      r0, r0, #16
-        tst      r3, #2
-        bne      2f
+        bcs      2f
         vst1.16  {q11}, [r0]
-2:      add      r0, r0, r1
+2:      lsls     r2, r3, #29            @ b2 -> N, b3 -> C
+        add      r0, r0, r1
 
-        tst      r3, #4
-        bne      1f
+        bmi      1f
         vst1.16  {q12}, [r0]
-1:      add      r0, r0, #16
-        tst      r3, #8
-        it ne
-        bxne     lr
+1:      it cs
+        bxcs     lr
+        add      r0, r0, #16
         vst1.16  {q13}, [r0]
         bx       lr
 .endm
@@ -938,78 +935,87 @@ endfunc
 @                                     uint8_t * src_l,       // r3
 @                                     unsigned int no_f);   // sp[0]
 @
-@ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
+@ no_f = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
+
 function ff_hevc_v_loop_filter_uv2_neon_8, export=1
         vld4.8   {d16[0], d17[0], d18[0], d19[0]}, [r3], r1
-        vld4.8   {d26[0], d27[0], d28[0], d29[0]}, [r0], r1
+        vld4.8   {d20[0], d21[0], d22[0], d23[0]}, [r0], r1
+        sub      r12, r0, r3
 
         vld4.8   {d16[1], d17[1], d18[1], d19[1]}, [r3], r1
-        vld4.8   {d26[1], d27[1], d28[1], d29[1]}, [r0], r1
+        vld4.8   {d20[1], d21[1], d22[1], d23[1]}, [r0], r1
+        cmp      r12, #4
 
         vld4.8   {d16[2], d17[2], d18[2], d19[2]}, [r3], r1
-        vld4.8   {d26[2], d27[2], d28[2], d29[2]}, [r0], r1
+        vld4.8   {d20[2], d21[2], d22[2], d23[2]}, [r0], r1
 
         vld4.8   {d16[3], d17[3], d18[3], d19[3]}, [r3], r1
-        vld4.8   {d26[3], d27[3], d28[3], d29[3]}, [r0], r1
+        vld4.8   {d20[3], d21[3], d22[3], d23[3]}, [r0], r1
 
         vld4.8   {d16[4], d17[4], d18[4], d19[4]}, [r3], r1
-        vld4.8   {d26[4], d27[4], d28[4], d29[4]}, [r0], r1
+        vld4.8   {d20[4], d21[4], d22[4], d23[4]}, [r0], r1
 
         vld4.8   {d16[5], d17[5], d18[5], d19[5]}, [r3], r1
-        vld4.8   {d26[5], d27[5], d28[5], d29[5]}, [r0], r1
+        vld4.8   {d20[5], d21[5], d22[5], d23[5]}, [r0], r1
 
         vld4.8   {d16[6], d17[6], d18[6], d19[6]}, [r3], r1
-        vld4.8   {d26[6], d27[6], d28[6], d29[6]}, [r0], r1
+        vld4.8   {d20[6], d21[6], d22[6], d23[6]}, [r0], r1
 
         vld4.8   {d16[7], d17[7], d18[7], d19[7]}, [r3]
-        vld4.8   {d26[7], d27[7], d28[7], d29[7]}, [r0]
+        vld4.8   {d20[7], d21[7], d22[7], d23[7]}, [r0]
+        it eq
+        ldreq    r12, [sp, #0]
 
-        hevc_loop_filter_uv_body2 d16, d17, d18, d19, d26, d27, d28, d29
-
-        ldr      r2, [sp, #0]
-        neg      r1, r1
-
-        @ p[1]
-        tst      r2, #2
+        hevc_loop_filter_uv_body2 d16, d17, d18, d19, d20, d21, d22, d23
+        cmp      r12, #0
         add      r3, #2
-        itt ne
-        addne    r3, r3, r1, lsl #2
+        neg      r1, r1
         bne      1f
+
+@ Much/most of the time r0 == r3 + 4 and no_f == 0
+@ so it is worth having this special case
+        vst4.8   {d18[7], d19[7], d20[7], d21[7]}, [r3], r1
+        vst4.8   {d18[6], d19[6], d20[6], d21[6]}, [r3], r1
+        vst4.8   {d18[5], d19[5], d20[5], d21[5]}, [r3], r1
+        vst4.8   {d18[4], d19[4], d20[4], d21[4]}, [r3], r1
+        vst4.8   {d18[3], d19[3], d20[3], d21[3]}, [r3], r1
+        vst4.8   {d18[2], d19[2], d20[2], d21[2]}, [r3], r1
+        vst4.8   {d18[1], d19[1], d20[1], d21[1]}, [r3], r1
+        vst4.8   {d18[0], d19[0], d20[0], d21[0]}, [r3]
+        bx       lr
+
+@ Either split or partial
+1:
+        ldr      r12, [sp, #0]
+        lsls     r12, #29               @ b2 -> N, b3 -> C
+        add      r2, r0, r1, lsl #2
+        bcs      1f
+        vst2.8   {d20[7], d21[7]}, [r0], r1
+        vst2.8   {d20[6], d21[6]}, [r0], r1
+        vst2.8   {d20[5], d21[5]}, [r0], r1
+        vst2.8   {d20[4], d21[4]}, [r0]
+1:
+        bmi      2f
+        vst2.8   {d20[3], d21[3]}, [r2], r1
+        vst2.8   {d20[2], d21[2]}, [r2], r1
+        vst2.8   {d20[1], d21[1]}, [r2], r1
+        vst2.8   {d20[0], d21[0]}, [r2]
+
+2:
+        lsls     r12, #2
+        add      r2, r3, r1, lsl #2
+        bcs      3f
         vst2.8   {d18[7], d19[7]}, [r3], r1
         vst2.8   {d18[6], d19[6]}, [r3], r1
         vst2.8   {d18[5], d19[5]}, [r3], r1
-        vst2.8   {d18[4], d19[4]}, [r3], r1
-
-1:
-        @ q[1]
-        tst      r2, #8
-        itt ne
-        addne    r0, r0, r1, lsl #2
-        bne 2f
-        vst2.8   {d26[7], d27[7]}, [r0], r1
-        vst2.8   {d26[6], d27[6]}, [r0], r1
-        vst2.8   {d26[5], d27[5]}, [r0], r1
-        vst2.8   {d26[4], d27[4]}, [r0], r1
-
-2:
-        @ p[0]
-        tst      r2, #1
-        bne      3f
-        vst2.8   {d18[3], d19[3]}, [r3], r1
-        vst2.8   {d18[2], d19[2]}, [r3], r1
-        vst2.8   {d18[1], d19[1]}, [r3], r1
-        vst2.8   {d18[0], d19[0]}, [r3]
-
+        vst2.8   {d18[4], d19[4]}, [r3]
 3:
-        @ q[0]
-        tst      r2, #4
-        it ne
-        bxne     lr
-        vst2.8   {d26[3], d27[3]}, [r0], r1
-        vst2.8   {d26[2], d27[2]}, [r0], r1
-        vst2.8   {d26[1], d27[1]}, [r0], r1
-        vst2.8   {d26[0], d27[0]}, [r0]
-
+        it mi
+        bxmi     lr
+        vst2.8   {d18[3], d19[3]}, [r2], r1
+        vst2.8   {d18[2], d19[2]}, [r2], r1
+        vst2.8   {d18[1], d19[1]}, [r2], r1
+        vst2.8   {d18[0], d19[0]}, [r2]
         bx       lr
 endfunc
 
@@ -1024,9 +1030,11 @@ endfunc
 .macro m_filter_v_uv2_16 bit_depth
         vld4.16  {d16[0], d18[0], d20[0], d22[0]}, [r3], r1
         vld4.16  {d24[0], d26[0], d28[0], d30[0]}, [r0], r1
+        sub      r12, r0, r3
 
         vld4.16  {d16[1], d18[1], d20[1], d22[1]}, [r3], r1
         vld4.16  {d24[1], d26[1], d28[1], d30[1]}, [r0], r1
+        cmp      r12, #8
 
         vld4.16  {d16[2], d18[2], d20[2], d22[2]}, [r3], r1
         vld4.16  {d24[2], d26[2], d28[2], d30[2]}, [r0], r1
@@ -1045,55 +1053,59 @@ endfunc
 
         vld4.16  {d17[3], d19[3], d21[3], d23[3]}, [r3]
         vld4.16  {d25[3], d27[3], d29[3], d31[3]}, [r0]
-
+        it eq
+        ldreq    r12, [sp, #0]
 
         hevc_loop_filter_uv_body2_16  q8, q9, q10, q11, q12, q13, q14, q15, \bit_depth
-
-        ldr      r2, [sp, #0]           @ P0a:P0b:Q0a:Q0b
-        neg      r1, r1
-
-        tst      r2, #2                 @ P0b
+        cmp      r12, #0
         add      r3, #4
-        itt ne
-        addne    r3, r3, r1, lsl #2
+        neg      r1, r1
         bne      1f
 
-        vst2.16  {d21[3], d23[3]}, [r3], r1
-        vst2.16  {d21[2], d23[2]}, [r3], r1
-        vst2.16  {d21[1], d23[1]}, [r3], r1
-        vst2.16  {d21[0], d23[0]}, [r3], r1
+@ Much/most of the time r0 == r3 + 4 and no_f == 0
+@ so it is worth having this special case
+        vst4.16  {d21[3], d23[3],d25[3], d27[3]}, [r3], r1
+        vst4.16  {d21[2], d23[2],d25[2], d27[2]}, [r3], r1
+        vst4.16  {d21[1], d23[1],d25[1], d27[1]}, [r3], r1
+        vst4.16  {d21[0], d23[0],d25[0], d27[0]}, [r3], r1
+        vst4.16  {d20[3], d22[3],d24[3], d26[3]}, [r3], r1
+        vst4.16  {d20[2], d22[2],d24[2], d26[2]}, [r3], r1
+        vst4.16  {d20[1], d22[1],d24[1], d26[1]}, [r3], r1
+        vst4.16  {d20[0], d22[0],d24[0], d26[0]}, [r3], r1
+        bx       lr
 
+@ Either split or partial
 1:
-        tst      r2, #8                 @ Q0b
-        itt ne
-        addne    r0, r0, r1, lsl #2
-        bne 2f
-
+        ldr      r12, [sp, #0]
+        lsls     r12, #29               @ b2 -> N, b3 -> C
+        add      r2, r0, r1, lsl #2
+        bcs      1f
         vst2.16  {d25[3], d27[3]}, [r0], r1
         vst2.16  {d25[2], d27[2]}, [r0], r1
         vst2.16  {d25[1], d27[1]}, [r0], r1
-        vst2.16  {d25[0], d27[0]}, [r0], r1
+        vst2.16  {d25[0], d27[0]}, [r0]
+1:
+        bmi      2f
+        vst2.16  {d24[3], d26[3]}, [r2], r1
+        vst2.16  {d24[2], d26[2]}, [r2], r1
+        vst2.16  {d24[1], d26[1]}, [r2], r1
+        vst2.16  {d24[0], d26[0]}, [r2]
 
 2:
-        @ p[0]
-        tst      r2, #1                 @ P0a
-        bne      3f
-
-        vst2.16  {d20[3], d22[3]}, [r3], r1
-        vst2.16  {d20[2], d22[2]}, [r3], r1
-        vst2.16  {d20[1], d22[1]}, [r3], r1
-        vst2.16  {d20[0], d22[0]}, [r3]
-
+        lsls     r12, #2
+        add      r2, r3, r1, lsl #2
+        bcs      3f
+        vst2.16  {d21[3], d23[3]}, [r3], r1
+        vst2.16  {d21[2], d23[2]}, [r3], r1
+        vst2.16  {d21[1], d23[1]}, [r3], r1
+        vst2.16  {d21[0], d23[0]}, [r3]
 3:
-        tst      r2, #4                 @ Q0a
-        it ne
-        bxne     lr
-
-        vst2.16  {d24[3], d26[3]}, [r0], r1
-        vst2.16  {d24[2], d26[2]}, [r0], r1
-        vst2.16  {d24[1], d26[1]}, [r0], r1
-        vst2.16  {d24[0], d26[0]}, [r0]
-
+        it mi
+        bxmi     lr
+        vst2.16  {d20[3], d22[3]}, [r2], r1
+        vst2.16  {d20[2], d22[2]}, [r2], r1
+        vst2.16  {d20[1], d22[1]}, [r2], r1
+        vst2.16  {d20[0], d22[0]}, [r2]
         bx       lr
 .endm
 
