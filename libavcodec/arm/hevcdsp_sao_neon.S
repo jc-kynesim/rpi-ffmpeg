@@ -54,6 +54,39 @@
         vsub.s8  q11, q3
 .endm
 
+@ q0-q1  Offset table
+@ q2     0
+@ q3     (1 << bit_depth) - 1
+@ q4-q7  clobbered
+@ q8-q15 input/output
+.macro sao_band_64_16 bit_depth
+	vshrn.i16 d8,  q8,  #(bit_depth - 5)
+	vshrn.i16 d9,  q9,  #(bit_depth - 5)
+	vshrn.i16 d10, q10, #(bit_depth - 5)
+	vshrn.i16 d11, q11, #(bit_depth - 5)
+	vshrn.i16 d12, q12, #(bit_depth - 5)
+	vshrn.i16 d13, q13, #(bit_depth - 5)
+	vshrn.i16 d14, q14, #(bit_depth - 5)
+	vshrn.i16 d15, q15, #(bit_depth - 5)
+        vtbl.8    d8,  {d0, d1, d2, d3}, d8
+        vtbl.8    d9,  {d0, d1, d2, d3}, d9
+        vtbl.8    d10, {d0, d1, d2, d3}, d10
+        vtbl.8    d11, {d0, d1, d2, d3}, d11
+        vtbl.8    d12, {d0, d1, d2, d3}, d12
+        vtbl.8    d13, {d0, d1, d2, d3}, d13
+        vtbl.8    d14, {d0, d1, d2, d3}, d14
+        vtbl.8    d15, {d0, d1, d2, d3}, d15
+	vaddw.s8  q8,  d8
+	vaddw.s8  q9,  d9
+	vaddw.s8  q10, d10
+	vaddw.s8  q11, d11
+	vaddw.s8  q12, d12
+	vaddw.s8  q13, d13
+	vaddw.s8  q14, d14
+	vaddw.s8  q15, d15
+
+.endm
+
 function ff_hevc_sao_band_w8_neon_8, export=1
         init_sao_band
 1:      subs     r12, #8
@@ -149,7 +182,7 @@ function ff_hevc_sao_band_w64_neon_8, export=1
 endfunc
 
 
-@ ff_hevc_sao_band_c_w64_neon_8(
+@ ff_hevc_sao_band_c_neon_8(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -252,50 +285,33 @@ function ff_hevc_sao_band_c_neon_8, export=1
 
 @ -- width 16 (UV pairs) --
 16:
-        subs    r12, #2
+        subs    r12, #1
         it ne
         addne   r4, r4, r3, lsl #1
 
 1:
-        subs      r12, #2
+        subs      r12, #1
         vld2.8    {q8-q9}, [r1, :128], r3
         vsub.u8   q12, q8, q1
-        vld2.8    {q10-q11}, [r1, :128], r3
-        vsub.u8   q14, q10, q1
         vsub.u8   q13, q9, q2
         pld       [r4]
-        vsub.u8   q15, q11, q2
-        pld       [r4, r3]
         vshr.u8  q12, #3
         vadd.s8  q8, q3
         vshr.u8  q13, #3
         vadd.s8  q9, q3
 
         vtbl.8   d24, {d0}, d24
-        vshr.u8  q14, #3
         vtbl.8   d25, {d0}, d25
-        vshr.u8  q15, #3
         vtbl.8   d26, {d1}, d26
-        vadd.s8  q10, q3
         vtbl.8   d27, {d1}, d27
-        vadd.s8  q11, q3
-        vtbl.8   d28, {d0}, d28
         vqadd.s8 q8, q12
-        vtbl.8   d29, {d0}, d29
         vqadd.s8 q9, q13
-        vtbl.8   d30, {d1}, d30
-        vqadd.s8 q10, q14
-        vtbl.8   d31, {d1}, d31
         vsub.s8  q8, q3
-        vqadd.s8 q11, q15
         vsub.s8  q9, q3
-        vsub.s8  q10, q3
-        vsub.s8  q11, q3
 
         it ne
-        addne   r4, r4, r3, lsl #1
+        addne   r4, r3
         vst2.8    {q8-q9}, [r0, :128], r2
-        vst2.8    {q10-q11}, [r0, :128], r2
         bpl       1b
 
         pop    {r4-r8, pc}
