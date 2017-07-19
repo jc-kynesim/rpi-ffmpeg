@@ -285,37 +285,63 @@ function ff_hevc_sao_band_c_neon_8, export=1
 
 @ -- width 16 (UV pairs) --
 16:
+	cmp	r5, #8
+	beq     8
         subs    r12, #1
         it ne
         addne   r4, r4, r3, lsl #1
 
 1:
         subs      r12, #1
-        vld2.8    {q8-q9}, [r1, :128], r3
+        vld2.8    {q8, q9}, [r1, :128], r3
         vsub.u8   q12, q8, q1
         vsub.u8   q13, q9, q2
         pld       [r4]
-        vshr.u8  q12, #3
-        vadd.s8  q8, q3
-        vshr.u8  q13, #3
-        vadd.s8  q9, q3
+        vshr.u8   q12, #3
+        vadd.s8   q8, q3
+        vshr.u8   q13, #3
+        vadd.s8   q9, q3
 
-        vtbl.8   d24, {d0}, d24
-        vtbl.8   d25, {d0}, d25
-        vtbl.8   d26, {d1}, d26
-        vtbl.8   d27, {d1}, d27
-        vqadd.s8 q8, q12
-        vqadd.s8 q9, q13
-        vsub.s8  q8, q3
-        vsub.s8  q9, q3
+        vtbl.8    d24, {d0}, d24
+        vtbl.8    d25, {d0}, d25
+        vtbl.8    d26, {d1}, d26
+        vtbl.8    d27, {d1}, d27
+        vqadd.s8  q8, q12
+        vqadd.s8  q9, q13
+        vsub.s8   q8, q3
+        vsub.s8   q9, q3
 
         it ne
-        addne   r4, r3
-        vst2.8    {q8-q9}, [r0, :128], r2
+        addne     r4, r3
+        vst2.8    {q8, q9}, [r0, :128], r2
         bpl       1b
 
         pop    {r4-r8, pc}
 
+8:
+        subs    r12, #1
+        it ne
+        addne   r4, r4, r3, lsl #1
+
+1:
+        subs      r12, #1
+        vld2.8    {d16, d17}, [r1, :64], r3
+        vsub.u8   q12, q8, q1
+        pld       [r4]
+        vshr.u8   q12, #3
+        vadd.s8   q8, q3
+
+        vtbl.8    d24, {d0}, d24
+        vtbl.8    d26, {d1}, d26
+        vqadd.s8  q8, q12
+        vsub.s8   q8, q3
+
+        it ne
+        addne     r4, r3
+        vst2.8    {d16, d17}, [r0, :128], r2
+        bpl       1b
+
+        pop    {r4-r8, pc}
 endfunc
 
 

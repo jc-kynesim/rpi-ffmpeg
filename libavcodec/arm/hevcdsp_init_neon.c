@@ -484,10 +484,15 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         for (x = 0; x < sizeof c->sao_band_filter / sizeof *c->sao_band_filter; x++) {
           c->sao_band_filter[x]        = ff_hevc_sao_band_neon_wrapper;
           c->sao_edge_filter[x]        = ff_hevc_sao_edge_neon_wrapper;
+#if RPI_HEVC_SAND
           c->sao_edge_filter_c[x]      = ff_hevc_sao_edge_c_neon_wrapper;
+#endif
         }
-        c->sao_band_filter_c[1]        = ff_hevc_sao_band_c_neon_8;  // width=16
-        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_neon_8;  // width=32
+#if RPI_HEVC_SAND
+        c->sao_band_filter_c[0]        = ff_hevc_sao_band_c_neon_8;
+        c->sao_band_filter_c[1]        = ff_hevc_sao_band_c_neon_8;
+        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_neon_8;
+#endif
         put_hevc_qpel_neon[1][0]       = ff_hevc_put_qpel_v1_neon_8;
         put_hevc_qpel_neon[2][0]       = ff_hevc_put_qpel_v2_neon_8;
         put_hevc_qpel_neon[3][0]       = ff_hevc_put_qpel_v3_neon_8;

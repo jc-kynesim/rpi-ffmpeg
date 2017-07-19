@@ -43,6 +43,7 @@ static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height
     }
 }
 
+#if RPI_HEVC_SAND
 static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
 {
@@ -64,7 +65,7 @@ static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int heig
         dst += stride;
     }
 }
-
+#endif
 
 static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
                                                 ptrdiff_t stride, int size)
@@ -507,11 +508,13 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
 
 
 #if BIT_DEPTH == 10
+#if RPI_HEVC_SAND
 // We need a 32 bit variation for the _c restores so hijack bit depth 10
 #undef pixel
 #undef BIT_DEPTH
 #define pixel uint32_t
 #define BIT_DEPTH 32
+#endif
 // All 16 bit variations are the same
 #define sao_edge_restore_0_10 sao_edge_restore_0_9
 #define sao_edge_restore_1_10 sao_edge_restore_1_9
@@ -664,6 +667,7 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
 // --- Plaited chroma versions
 
+#if RPI_HEVC_SAND
 static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
@@ -763,6 +767,8 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
 #define sao_edge_restore_c_0_16 sao_edge_restore_0_32
 #define sao_edge_restore_c_1_16 sao_edge_restore_1_32
 #endif
+
+#endif  // RPI_HEVC_SAND
 
 
 #undef CMP
