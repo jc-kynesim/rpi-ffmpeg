@@ -11,7 +11,8 @@ HEADERS = avcodec.h                                                     \
           rpi_shader_template.h                                         \
           rpi_shader_template_fn.h                                      \
           rpi_mailbox.h                                                 \
-          rpi_hevc_transform.h                                          \
+          rpi_hevc_transform8.h                                         \
+          rpi_hevc_transform10.h                                        \
           rpi_zc.h                                                      \
           d3d11va.h                                                     \
           dirac.h                                                       \
