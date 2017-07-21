@@ -60,14 +60,14 @@
 @ q4-q7  clobbered
 @ q8-q15 input/output
 .macro sao_band_64_16 bit_depth
-        vshrn.i16 d8,  q8,  #(bit_depth - 5)
-        vshrn.i16 d9,  q9,  #(bit_depth - 5)
-        vshrn.i16 d10, q10, #(bit_depth - 5)
-        vshrn.i16 d11, q11, #(bit_depth - 5)
-        vshrn.i16 d12, q12, #(bit_depth - 5)
-        vshrn.i16 d13, q13, #(bit_depth - 5)
-        vshrn.i16 d14, q14, #(bit_depth - 5)
-        vshrn.i16 d15, q15, #(bit_depth - 5)
+        vshrn.i16 d8,  q8,  #(\bit_depth - 5)
+        vshrn.i16 d9,  q9,  #(\bit_depth - 5)
+        vshrn.i16 d10, q10, #(\bit_depth - 5)
+        vshrn.i16 d11, q11, #(\bit_depth - 5)
+        vshrn.i16 d12, q12, #(\bit_depth - 5)
+        vshrn.i16 d13, q13, #(\bit_depth - 5)
+        vshrn.i16 d14, q14, #(\bit_depth - 5)
+        vshrn.i16 d15, q15, #(\bit_depth - 5)
         vtbl.8    d8,  {d0, d1, d2, d3}, d8
         vtbl.8    d9,  {d0, d1, d2, d3}, d9
         vtbl.8    d10, {d0, d1, d2, d3}, d10
@@ -84,7 +84,22 @@
         vaddw.s8  q13, d13
         vaddw.s8  q14, d14
         vaddw.s8  q15, d15
-
+        vmax.s16  q8,  q2
+        vmax.s16  q9,  q2
+        vmax.s16  q10, q2
+        vmax.s16  q11, q2
+        vmax.s16  q12, q2
+        vmax.s16  q13, q2
+        vmax.s16  q14, q2
+        vmax.s16  q15, q2
+        vmin.s16  q8,  q3
+        vmin.s16  q9,  q3
+        vmin.s16  q10, q3
+        vmin.s16  q11, q3
+        vmin.s16  q12, q3
+        vmin.s16  q13, q3
+        vmin.s16  q14, q3
+        vmin.s16  q15, q3
 .endm
 
 function ff_hevc_sao_band_w8_neon_8, export=1
@@ -154,30 +169,24 @@ function ff_hevc_sao_band_w32_neon_8, export=1
         bx       lr
 endfunc
 
+
+
+
+
 @ Standard coding rules for sao_offset_abs limit it to 0-31 (Table 9-38)
 @ so we are quite safe stuffing it into a byte array
 @ There may be a subsequent shl by log2_sao_offset_scale_luma/chroma
 @ (7.4.3.3.2 && 7-70) but we should still be safe to at least 12 bits of
 @ precision
+
+@ This, somewhat nasty, bit of code builds the {d0-d3} translation
+@ array via the stack
+@ Given that sao_left_class > 28 can cause wrap we can't just poke
+@ all 4 bytes in at once
 @
-@ ff_hevc_sao_band_64_neon_8 (
-@   uint8_t *_dst,              [r0]
-@   uint8_t *_src,              [r1]
-@   ptrdiff_t stride_dst,       [r2]
-@   ptrdiff_t stride_src,       [r3]
-@   int16_t *sao_offset_val,    [sp, #0]
-@   int sao_left_class,         [sp, #4]
-@   int width,                  [sp, #8]
-@   int height)                 [sp, #12]
+@ It also loads other common regs
 
-function ff_hevc_sao_band_64_neon_8, export=1
-        @ This, somewhat nasty, bit of code builds the {d0-d3} translation
-        @ array via the stack
-        @ Given that sao_left_class > 28 can cause wrap we can't just poke
-        @ all 4 bytes in at once
-
-        push      {r4, lr}
-
+band_load_y:
         vmov.i64  q0, #0
         ldr       r12, [sp, #8]         @ &sao_offset_val[0]
         add       r12, #2               @ 1st interesting val is [1]
@@ -205,12 +214,29 @@ function ff_hevc_sao_band_64_neon_8, export=1
         vpop      {q0, q1}              @ Pop modified array
         ldr       r12, [sp, #20]        @ height
         pld       [r1]
-        vmov.u8  q3, #128
 
         subs      r12, #1
         mov       r4, r1
         it ne
         addne     r4, r3
+        bx        lr
+
+
+
+@ ff_hevc_sao_band_64_neon_8 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
+
+function ff_hevc_sao_band_64_neon_8, export=1
+        push      {r4, lr}
+        bl        band_load_y
+        vmov.u8   q3, #128
 
 1:      subs      r12, #1
         vldm      r1, {q8-q11}
@@ -230,8 +256,32 @@ function ff_hevc_sao_band_64_neon_8, export=1
         pop       {r4, pc}
 endfunc
 
+.macro band_64_16 bit_depth
+        push      {r4, lr}
+        movw      r4, #(1 << \bit_depth) - 1
+        vmov.i64  q2, #0
+        vdup.i16  q3, r4
+        bl        band_load_y
+        vpush     {q4-q7}
 
+1:      subs      r12, #1
+        vldm      r1, {q8-q15}
+        pld       [r4]
+        add       r1, r3
+        sao_band_64_16 \bit_depth
+        it ne
+        addne     r4, r3
+        vstm      r0, {q8-q15}
+        add       r0, r2
+        bpl       1b
 
+        vpop      {q4-q7}
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_64_neon_10, export=1
+        band_64_16 10
+endfunc
 
 function ff_hevc_sao_band_w64_neon_8, export=1
         init_sao_band

@@ -159,6 +159,8 @@ void ff_hevc_sao_band_c_neon_8(uint8_t *_dst, const uint8_t *_src,
 
 void ff_hevc_sao_band_64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                 int16_t *sao_offset_val, int sao_left_class, int width, int height);
+void ff_hevc_sao_band_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
 
 
 #define PUT_PIXELS(name) \
@@ -572,6 +574,19 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->put_hevc_qpel_uni[9][0][0]  = ff_hevc_put_qpel_uw_pixels_w64_neon_8;
     }
     else if (bit_depth == 10) {
+        c->hevc_v_loop_filter_luma     = ff_hevc_v_loop_filter_luma_neon_10;
+        c->hevc_v_loop_filter_luma_c   = ff_hevc_v_loop_filter_luma_neon_10;
+        c->hevc_h_loop_filter_luma     = ff_hevc_h_loop_filter_luma_neon_10;
+        c->hevc_h_loop_filter_luma_c   = ff_hevc_h_loop_filter_luma_neon_10;
+        c->hevc_v_loop_filter_chroma   = ff_hevc_v_loop_filter_chroma_neon_10;
+        c->hevc_v_loop_filter_chroma_c = ff_hevc_v_loop_filter_chroma_neon_10;
+        c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon_10;
+        c->hevc_h_loop_filter_chroma_c = ff_hevc_h_loop_filter_chroma_neon_10;
+#ifdef RPI
+        c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_10;
+        c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_10;
+        c->hevc_v_loop_filter_uv2      = ff_hevc_v_loop_filter_uv2_neon_10;
+#endif
         c->idct[0]                     = ff_hevc_transform_4x4_neon_10;
         c->idct[1]                     = ff_hevc_transform_8x8_neon_10;
         c->idct_dc[0]                  = ff_hevc_idct_4x4_dc_neon_10;
@@ -593,20 +608,8 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[1]           = ff_hevc_add_residual_8x8_c_neon_10;
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_10;
 #endif
-        c->hevc_v_loop_filter_luma     = ff_hevc_v_loop_filter_luma_neon_10;
-        c->hevc_v_loop_filter_luma_c   = ff_hevc_v_loop_filter_luma_neon_10;
-        c->hevc_h_loop_filter_luma     = ff_hevc_h_loop_filter_luma_neon_10;
-        c->hevc_h_loop_filter_luma_c   = ff_hevc_h_loop_filter_luma_neon_10;
-        c->hevc_v_loop_filter_chroma   = ff_hevc_v_loop_filter_chroma_neon_10;
-        c->hevc_v_loop_filter_chroma_c = ff_hevc_v_loop_filter_chroma_neon_10;
-        c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon_10;
-        c->hevc_h_loop_filter_chroma_c = ff_hevc_h_loop_filter_chroma_neon_10;
-#ifdef RPI
-        c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_10;
-        c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_10;
-        c->hevc_v_loop_filter_uv2      = ff_hevc_v_loop_filter_uv2_neon_10;
-#endif
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_10;
+        c->sao_band_filter[4]          = ff_hevc_sao_band_64_neon_10;
     }
 
     assert(offsetof(MvField, mv) == 0);
