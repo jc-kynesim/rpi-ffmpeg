@@ -241,8 +241,8 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
-    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
-//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
+//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
     rpi_display_env_t * de;
     int isp_req = (fmt == AV_PIX_FMT_SAND64_10);
@@ -289,6 +289,15 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         MMAL_PORT_T * const port_out = de->isp->output[0];
         mmal_log_dump_port(de->port_in);
         mmal_format_copy(port_out->format, de->port_in->format);
+        if (fmt == AV_PIX_FMT_SAND64_10) {
+            if ((err = mmal_port_parameter_set_int32(port_out, MMAL_PARAMETER_OUTPUT_SHIFT, 6)) != MMAL_SUCCESS)
+            {
+                av_log(NULL, AV_LOG_WARNING, "Failed to set ISP output port shift\n");
+            }
+            else
+                av_log(NULL, AV_LOG_WARNING, "Set ISP output port shift OK\n");
+
+        }
         port_out->format->encoding = MMAL_ENCODING_I420;
         mmal_log_dump_port(port_out);
         if ((err = mmal_port_format_commit(port_out)) != MMAL_SUCCESS)

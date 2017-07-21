@@ -579,7 +579,8 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
         return NULL;
     }
 
-    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10 || rpi_is_sand16_frame(frame))
+    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10)
+//    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10 || rpi_is_sand16_frame(frame))
     {
         if (maycopy)
         {

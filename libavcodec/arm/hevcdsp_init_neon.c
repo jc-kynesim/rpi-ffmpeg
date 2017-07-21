@@ -157,6 +157,9 @@ void ff_hevc_sao_band_c_neon_8(uint8_t *_dst, const uint8_t *_src,
                                   const int16_t *sao_offset_val_v, int sao_left_class_v,
                                   int width, int height);
 
+void ff_hevc_sao_band_64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
+
 
 #define PUT_PIXELS(name) \
     void name(int16_t *dst, uint8_t *src, \
@@ -488,6 +491,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
           c->sao_edge_filter_c[x]      = ff_hevc_sao_edge_c_neon_wrapper;
 #endif
         }
+        c->sao_band_filter[4]          = ff_hevc_sao_band_64_neon_8;
 #if RPI_HEVC_SAND
         c->sao_band_filter_c[0]        = ff_hevc_sao_band_c_neon_8;
         c->sao_band_filter_c[1]        = ff_hevc_sao_band_c_neon_8;
