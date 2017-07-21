@@ -1169,6 +1169,8 @@
 
   mov r1,0x01010000  # -ve
   ror r0, r1, ra8.8d
+  mov rb3, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+
   bra -, ra_link
   ror ra1.8d, r1, ra8.8c ; v8min rb7, r0, r3
 
@@ -1177,7 +1179,8 @@
   asr rb_wt_off, r0, 9  ; mov ra_link, unif    # ; link - load after we've used its previous val
 # >>> branch ra_link
 
-# r3 = 0
+# r5 = 0
+# rb3           = hi/lo el flag
 # ra_wt_mul_l1  = weight L1
 # ra5.16a       = weight L0/L1 depending on side (wanted for 2x mono-pred)
 # rb_wt_off     = (((is P) ? offset L0/L1 * 2 : offset L1 + offset L0) + 1) << (rb_wt_den_p15 - 1)
@@ -1220,17 +1223,14 @@
   add t0s, ra_base, r2          ; mov.ifz ra_base2, rb_base2_next
 
   max r2, ra_y2, 0
-  min r2, r2, rb_max_y
+  min r2, r2, rb_max_y          ; mov ra7, ra8
   add ra_y2, ra_y2, 1           ; mul24 r2, r2, r3
   add t1s, ra_base2, r2         ; v8min r0, r0, rb_pmask # v8subs masks out all but bottom byte
 
-# generate seven shifted versions
-# interleave with scroll of vertical context
-
-  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+  mov.setf -, rb3       ; mov ra8, ra9
 
 # apply horizontal filter
-  and r1, r1, rb_pmask   ; mul24      r3, ra0.8a,      r0
+  and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,      r0
   nop                   ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
   nop                   ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
@@ -1247,26 +1247,15 @@
   add r2, r2, r3        ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
 
-  sub.setf -, r5, 8     ; mov r1,   ra8
-  mov ra8,  ra9         ; mov rb8,  rb9
-.if v_bit_depth <= 8
+  sub.setf -, r5, 8     ; mov ra9,  ra10
+  sub r2, r2, r3        ; mul24 r0, rb9,  ra2.8a
   brr.anyn -, r:1b
-  mov ra9,  ra10        ; mov rb9,  rb10
+  mov rb9,  rb10        ; mul24 r1, rb10, ra2.8b
   mov ra10, ra11        ; mov rb10, rb11
-  sub ra11, r2, r3      ; mov rb11, r1
-.else
-  mov ra9,  ra10        ; mov rb9,  rb10
-  brr.anyn -, r:1b
-  mov ra10, ra11        ; mov rb10, rb11
-  sub r2, r2, r3        ; mov rb11, r1
-  asr ra11, r2, v_bit_depth - 8
-.endif
+  asr ra11, r2, v_bit_depth - 8 ; mov rb11, ra7
   # >>> .anyn 1b
 
   # apply vertical filter and write to VPM
-
-  nop                   ; mul24 r0, rb8,  ra2.8a
-  nop                   ; mul24 r1, rb9,  ra2.8b
   sub r1, r1, r0        ; mul24 r0, rb10, ra2.8c
   sub r1, r1, r0        ; mul24 r0, rb11, ra2.8d
   add r1, r1, r0        ; mul24 r0, ra8,  rb4
@@ -1356,14 +1345,11 @@
   add t0s, ra_base, r2          ; mov.ifz ra_base2, rb_base2_next
 
   max r2, ra_y2, 0
-  min r2, r2, rb_max_y
+  min r2, r2, rb_max_y          ; mov ra7, ra8
   add ra_y2, ra_y2, 1           ; mul24 r2, r2, r3
   add t1s, ra_base2, r2         ; v8min r0, r0, rb_pmask # v8subs masks out all but bottom byte
 
-# generate seven shifted versions
-# interleave with scroll of vertical context
-
-  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+  mov.setf -, rb3       ; mov ra8, ra9
 
 # apply horizontal filter
   and r1, r1, rb_pmask   ; mul24      r3, ra0.8a,      r0
@@ -1383,25 +1369,15 @@
   add r2, r2, r3        ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
 
-  sub.setf -, r5, 8     ; mov r1,   ra8
-  mov ra8,  ra9         ; mov rb8,  rb9
-.if v_bit_depth <= 8
+  sub.setf -, r5, 8     ; mov ra9,  ra10
+  sub r2, r2, r3        ; mul24 r0, rb9,  ra2.8a
   brr.anyn -, r:1b
-  mov ra9,  ra10        ; mov rb9,  rb10
+  mov rb9,  rb10        ; mul24 r1, rb10, ra2.8b
   mov ra10, ra11        ; mov rb10, rb11
-  sub ra11, r2, r3      ; mov rb11, r1
-.else
-  mov ra9,  ra10        ; mov rb9,  rb10
-  brr.anyn -, r:1b
-  mov ra10, ra11        ; mov rb10, rb11
-  sub r2, r2, r3        ; mov rb11, r1
-  asr ra11, r2, v_bit_depth - 8
-.endif
+  asr ra11, r2, v_bit_depth - 8 ; mov rb11, ra7
   # >>> .anyn 1b
 
   # apply vertical filter and write to VPM
-  nop                   ; mul24 r0, rb8,  ra2.8a
-  nop                   ; mul24 r1, rb9,  ra2.8b
   sub r1, r1, r0        ; mul24 r0, rb10, ra2.8c
   sub r1, r1, r0        ; mul24 r0, rb11, ra2.8d
   add r1, r1, r0        ; mul24 r0, ra8,  rb4
