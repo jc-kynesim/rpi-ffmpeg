@@ -301,7 +301,7 @@ function ff_hevc_sao_band_c_neon_8, export=1
         cmp     r5, #16         @ At some point we may want a table lookup
         vqmovn.s16 d1, q9
         vmov.i8 q3, #128
-        beq     16f
+        bls     16f
 
         @ d0 U lookup
         @ d1 V lookup
@@ -365,10 +365,10 @@ function ff_hevc_sao_band_c_neon_8, export=1
 @ -- width 16 (UV pairs) --
 16:
         cmp     r5, #8
-        beq     8
+        bls     8f
         subs    r12, #1
         it ne
-        addne   r4, r4, r3, lsl #1
+        addne   r4, r4, r3
 
 1:
         subs      r12, #1
@@ -400,18 +400,19 @@ function ff_hevc_sao_band_c_neon_8, export=1
 8:
         subs    r12, #1
         it ne
-        addne   r4, r4, r3, lsl #1
+        addne   r4, r4, r3
 
 1:
         subs      r12, #1
         vld2.8    {d16, d17}, [r1, :64], r3
-        vsub.u8   q12, q8, q1
+        vsub.u8   d24, d16, d2
+        vsub.u8   d25, d17, d4
         pld       [r4]
         vshr.u8   q12, #3
         vadd.s8   q8, q3
 
         vtbl.8    d24, {d0}, d24
-        vtbl.8    d26, {d1}, d26
+        vtbl.8    d25, {d1}, d25
         vqadd.s8  q8, q12
         vsub.s8   q8, q3
 
