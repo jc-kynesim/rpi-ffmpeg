@@ -28,34 +28,90 @@
 #include "hevcpred.h"
 
 #ifdef RPI
-#include "rpi_zc.h"
+#include "libavutil/rpi_sand_fns.h"
 #endif
 
 #define DUMP_PRED 0
 
 #define POS(x, y) src[(x) + stride * (y)]
 
-#if PRED_C
-
+// REPEAT_INCLUDE defined at EOF
+#if defined(RPI) && !defined(INCLUDED_ONCE)
 typedef uint8_t (* c8_dst_ptr_t)[2];
 typedef const uint8_t (* c8_src_ptr_t)[2];
+typedef uint16_t (* c16_dst_ptr_t)[2];
+typedef const uint16_t (* c16_src_ptr_t)[2];
+
+// *** On ARM make these NEON registers
+typedef struct pixel4_16 {
+    uint16_t x[4];
+} pixel4_16;
+typedef struct pixel4_32 {
+    uint32_t x[4];
+} pixel4_32;
+static inline pixel4_16 PIXEL_SPLAT_X4_16(const uint16_t x)
+{
+    pixel4_16 t = {{x, x, x, x}};
+    return t;
+}
+static inline pixel4_32 PIXEL_SPLAT_X4_32(const uint32_t x)
+{
+    pixel4_32 t = {{x, x, x, x}};
+    return t;
+}
+#endif
+
+#if PRED_C
+// For chroma we double pixel size so we copy pairs
+#undef pixel
+#undef pixel2
+#undef pixel4
+#undef dctcoef
+#undef INIT_CLIP
+#undef no_rnd_avg_pixel4
+#undef rnd_avg_pixel4
+#undef AV_RN2P
+#undef AV_RN4P
+#undef AV_RN4PA
+#undef AV_WN2P
+#undef AV_WN4P
+#undef AV_WN4PA
+#undef CLIP
+#undef FUNC
+#undef FUNCC
+#undef av_clip_pixel
+#undef PIXEL_SPLAT_X4
 
 #if BIT_DEPTH == 8
-#undef BIT_DEPTH
-#define BIT_DEPTH 16
-#include "bit_depth_template.c"
-#undef FUNC
-#define FUNC(a) FUNC3(a, 8, _c)
+#define pixel uint16_t
+#define pixel4 pixel4_16
+#define PIXEL_SPLAT_X4 PIXEL_SPLAT_X4_16
+#define cpel uint8_t
+#define c_src_ptr_t  c8_src_ptr_t
+#define c_dst_ptr_t  c8_dst_ptr_t
 #else
-#undef FUNC
-#define FUNC FUNCC
+#define pixel uint32_t
+#define pixel4 pixel4_32
+#define PIXEL_SPLAT_X4 PIXEL_SPLAT_X4_32
+#define cpel uint16_t
+#define c_src_ptr_t c16_dst_ptr_t
+#define c_dst_ptr_t c16_dst_ptr_t
+#endif
+#define AV_RN4P(p) (*(pixel4*)(p))
+#define AV_WN4P(p,x) (*(pixel4*)(p) = (x))
+#define FUNC(a) FUNC2(a, BIT_DEPTH, _c)
 #endif
 
+
+// Get PW prior to horrid PRED_C trickery
+#if BIT_DEPTH == 8
+#define PW 1
+#else
+#define PW 2
 #endif
 
-#if DUMP_PRED
-#ifndef DEBUG_ONCE
-#define DEBUG_ONCE
+
+#if DUMP_PRED && !defined(INCLUDE_ONCE)
 static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const unsigned int size)
 {
     for (unsigned int y = 0; y != size; y++, data += stride * 2) {
@@ -66,7 +122,6 @@ static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const 
     }
     printf("\n");
 }
-#endif
 #endif
 
 static av_always_inline void FUNC(intra_pred)(HEVCContext *s, int x0, int y0,
@@ -133,11 +188,11 @@ do {                                  \
 
     const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
 #if defined(RPI)
-    pixel *const src = s->frame->format != AV_PIX_FMT_SAND128 ?
+    pixel *const src = !rpi_is_sand_frame(s->frame) ?
             (pixel*)s->frame->data[c_idx] + x + y * stride :
         c_idx == 0 ?
-            (pixel *)rpi_sliced_frame_pos_y(s->frame, x, y) :
-            (pixel *)rpi_sliced_frame_pos_c(s->frame, x, y);
+            (pixel *)rpi_sand_frame_pos_y(s->frame, x, y) :
+            (pixel *)rpi_sand_frame_pos_c(s->frame, x, y);
 #else
     pixel *src = (pixel*)s->frame->data[c_idx] + x + y * stride;
 #endif
@@ -182,10 +237,11 @@ do {                                  \
 #endif
 
 #if defined(RPI)
-    if (s->frame->format == AV_PIX_FMT_SAND128) {
+    if (rpi_is_sand_frame(s->frame)) {
+        // N.B. stride is in pixels (not bytes) or in the case of chroma pixel-pairs
         const AVFrame * const frame = s->frame;
         const unsigned int mask = stride - 1; // For chroma pixel=uint16 so stride_c is stride_y / 2
-        const unsigned int stripe_adj = (frame->linesize[3] - 1) * stride;
+        const unsigned int stripe_adj = (rpi_sand_frame_stride2(frame) - 1) * stride;
         if ((x & mask) == 0)
             src_l -= stripe_adj;
         if (((x + size) & mask) == 0)
@@ -348,8 +404,8 @@ do {                                  \
             cand_up_left = 1;
             cand_left    = 1;
         } else { // No samples available
-#if PRED_C && BIT_DEPTH == 16
-            left[-1] = 0x8080;
+#if PRED_C
+            left[-1] = (1 << (BIT_DEPTH - 1)) | (1 << (BIT_DEPTH - 1 + PW * 8));
 #else
             left[-1] = (1 << (BIT_DEPTH - 1));
 #endif
@@ -371,7 +427,7 @@ do {                                  \
     top[-1] = left[-1];
 
     // Filtering process
-    // Sand128 can only apply to chroma_format_idc == 1 so we don't need to
+    // Sand can only apply to chroma_format_idc == 1 so we don't need to
     // worry about chroma smoothing for that case
 #if !PRED_C
     if (!s->ps.sps->intra_smoothing_disabled_flag && (c_idx == 0  || s->ps.sps->chroma_format_idc == 3)) {
@@ -455,20 +511,11 @@ do {                                  \
 #endif
 }
 
-#if !PRED_C || BIT_DEPTH == 16
 #define INTRA_PRED(size)                                                            \
 static void FUNC(intra_pred_ ## size)(HEVCContext *s, int x0, int y0, int c_idx)    \
 {                                                                                   \
     FUNC(intra_pred)(s, x0, y0, size, c_idx);                                       \
 }
-#else
-#define INTRA_PRED(size)                                                            \
-static void FUNC(intra_pred_ ## size)(HEVCContext *s, int x0, int y0, int c_idx)    \
-{                                                                                   \
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-#endif
 
 INTRA_PRED(2)
 INTRA_PRED(3)
@@ -499,9 +546,9 @@ static av_always_inline void FUNC(pred_planar)(uint8_t * _src, const uint8_t * _
 {
     int x, y;
     int size = 1 << trafo_size;
-    c8_dst_ptr_t src = (c8_dst_ptr_t)_src;
-    const c8_src_ptr_t top = (c8_src_ptr_t)_top;
-    const c8_src_ptr_t left = (c8_src_ptr_t)_left;
+    c_dst_ptr_t src = (c_dst_ptr_t)_src;
+    const c_src_ptr_t top = (c_src_ptr_t)_top;
+    const c_src_ptr_t left = (c_src_ptr_t)_left;
 
     for (y = 0; y < size; y++, src += stride)
     {
@@ -516,22 +563,12 @@ static av_always_inline void FUNC(pred_planar)(uint8_t * _src, const uint8_t * _
 }
 #endif
 
-#if !PRED_C || BIT_DEPTH == 16
 #define PRED_PLANAR(size)\
 static void FUNC(pred_planar_ ## size)(uint8_t *src, const uint8_t *top,        \
                                        const uint8_t *left, ptrdiff_t stride)   \
 {                                                                               \
     FUNC(pred_planar)(src, top, left, stride, size + 2);                        \
 }
-#else
-#define PRED_PLANAR(size)\
-static void FUNC(pred_planar_ ## size)(uint8_t *src, const uint8_t *top,        \
-                                       const uint8_t *left, ptrdiff_t stride)   \
-{                                                                               \
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF", __func__);                            \
-    abort();                                                                    \
-}
-#endif
 
 PRED_PLANAR(0)
 PRED_PLANAR(1)
@@ -578,9 +615,9 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
 {
     unsigned int i, j;
     const unsigned int size = (1 << log2_size);
-    c8_dst_ptr_t src = (c8_dst_ptr_t)_src;
-    const c8_src_ptr_t top = (c8_src_ptr_t)_top;
-    const c8_src_ptr_t left = (c8_src_ptr_t)_left;
+    c_dst_ptr_t src = (c_dst_ptr_t)_src;
+    const c_src_ptr_t top = (c_src_ptr_t)_top;
+    const c_src_ptr_t left = (c_src_ptr_t)_left;
     unsigned int dc0 = size;
     unsigned int dc1 = size;
 
@@ -709,26 +746,26 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
                                                 int mode, int size)
 {
     int x, y;
-    c8_dst_ptr_t src  = (c8_dst_ptr_t)_src;
-    c8_src_ptr_t top  = (c8_src_ptr_t)_top;
-    c8_src_ptr_t left = (c8_src_ptr_t)_left;
+    c_dst_ptr_t src  = (c_dst_ptr_t)_src;
+    c_src_ptr_t top  = (c_src_ptr_t)_top;
+    c_src_ptr_t left = (c_src_ptr_t)_left;
 
     const int angle = intra_pred_angle[mode - 2];
-    uint8_t ref_array[3 * MAX_TB_SIZE + 4][2];
-    c8_dst_ptr_t ref_tmp = ref_array + size;
-    c8_src_ptr_t ref;
+    cpel ref_array[3 * MAX_TB_SIZE + 4][2];
+    c_dst_ptr_t ref_tmp = ref_array + size;
+    c_src_ptr_t ref;
     const int last = (size * angle) >> 5;
 
     if (mode >= 18) {
         ref = top - 1;
         if (angle < 0 && last < -1) {
-            memcpy(ref_tmp, top - 1, (size + 1) * 2);
+            memcpy(ref_tmp, top - 1, (size + 1) * 2 * PW);
             for (x = last; x <= -1; x++)
             {
                 ref_tmp[x][0] = left[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][0];
                 ref_tmp[x][1] = left[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][1];
             }
-            ref = (c8_src_ptr_t)ref_tmp;
+            ref = (c_src_ptr_t)ref_tmp;
         }
 
         for (y = 0; y < size; y++, src += stride) {
@@ -742,19 +779,19 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
                                        fact  * ref[x + idx + 2][1] + 16) >> 5;
                 }
             } else {
-                memcpy(src, ref + idx + 1, size * 2);
+                memcpy(src, ref + idx + 1, size * 2 * PW);
             }
         }
     } else {
         ref = left - 1;
         if (angle < 0 && last < -1) {
-            memcpy(ref_tmp, left - 1, (size + 1) * 2);
+            memcpy(ref_tmp, left - 1, (size + 1) * 2 * PW);
             for (x = last; x <= -1; x++)
             {
                 ref_tmp[x][0] = top[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][0];
                 ref_tmp[x][1] = top[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][1];
             }
-            ref = (c8_src_ptr_t)ref_tmp;
+            ref = (c_src_ptr_t)ref_tmp;
         }
 
         for (x = 0; x < size; x++, src++) {
@@ -807,6 +844,10 @@ static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
     FUNC(pred_angular)(src, top, left, stride, c_idx, mode, 1 << 5);
 }
 
+#undef cpel
+#undef c_src_ptr_t
+#undef c_dst_ptr_t
+
 #undef EXTEND_LEFT_CIP
 #undef EXTEND_RIGHT_CIP
 #undef EXTEND_UP_CIP
@@ -818,3 +859,9 @@ static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
 #undef EXTEND
 #undef MIN_TB_ADDR_ZS
 #undef POS
+#undef PW
+
+#ifndef INCLUDED_ONCE
+#define INCLUDED_ONCE
+#endif
+

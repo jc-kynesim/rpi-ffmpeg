@@ -32,7 +32,7 @@
 #include "hevcdec.h"
 
 #ifdef RPI
-#include "rpi_zc.h"
+#include "libavutil/rpi_sand_fns.h"
 #endif
 
 // BY22 is probably faster than simple bypass if the processor has
@@ -1520,12 +1520,12 @@ static void rpi_add_residual(HEVCContext * const s,
     unsigned int stride = frame->linesize[c_idx];
     unsigned int x = x0 >> s->ps.sps->hshift[c_idx];
     unsigned int y = y0 >> s->ps.sps->vshift[c_idx];
-    const int is_sliced = rpi_sliced_frame(frame);
+    const int is_sliced = rpi_is_sand_frame(frame);
     uint8_t * dst = !is_sliced ?
             s->frame->data[c_idx] + y * stride + (x << s->ps.sps->pixel_shift) :
         c_idx == 0 ?
-            rpi_sliced_frame_pos_y(frame, x, y) :
-            rpi_sliced_frame_pos_c(frame, x, y);
+            rpi_sand_frame_pos_y(frame, x, y) :
+            rpi_sand_frame_pos_c(frame, x, y);
 
     if (s->enable_rpi) {
         const unsigned int i = s->num_pred_cmds[s->pass0_job];
@@ -1824,7 +1824,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #ifdef RPI
         use_vpu = 0;
         if (s->enable_rpi) {
-            use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size>=4;
+            use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size >= 4;
             coeffs = rpi_alloc_coeff_buf(s, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
 #if HAVE_NEON
             rpi_zap_coeff_vals_neon(coeffs, log2_trafo_size - 2);

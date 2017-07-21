@@ -32,6 +32,7 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/avassert.h"
+#include "libavutil/rpi_sand_fns.h"
 
 static av_cold int raw_encode_init(AVCodecContext *avctx)
 {
@@ -50,64 +51,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
-// x0 & width in luma units (so chroma * 2)
-// x0 odd for v
-static uint8_t * sand_copy_line_u(uint8_t * dst, const uint8_t * src,
-                           unsigned int x0, const unsigned int width,
-                           const unsigned int stride1, const unsigned int stride2)
-{
-    unsigned int xend;
-
-    // Skip any empty slices
-    src += (x0 & ~(stride1 - 1)) * stride2;
-    x0 &= (stride1 - 1);
-
-    xend = x0 + width;
-    for (unsigned int x = 0; x < xend; x += stride1)
-    {
-        const unsigned int w = FFMIN(stride1, xend - x) - x0;
-        for (unsigned int i = 0; i < w; i += 2)
-            *dst++ = src[x0 + i];
-        src += stride1 * stride2;
-        x0 &= 1;
-    }
-
-    return dst;
-}
-
-static uint8_t * cpy_sand_c(uint8_t * dst, const AVFrame * const frame,
-                            const unsigned int x0, const unsigned int y0,
-                            const unsigned int width, const unsigned int height)
-{
-    for (unsigned int y = y0; y < height + y0; ++y) {
-        dst = sand_copy_line_u(dst, frame->data[1] + y * frame->linesize[1], x0, width, frame->linesize[1], frame->linesize[3]);
-    }
-    return dst;
-}
-
-static uint8_t * sand_copy_line_y(uint8_t * dst, const uint8_t * src,
-                           unsigned int x0, const unsigned int width,
-                           const unsigned int stride1, const unsigned int stride2)
-{
-    unsigned int xend;
-
-    // Skip any empty slices
-    src += (x0 & ~(stride1 - 1)) * stride2;
-    x0 &= (stride1 - 1);
-
-    xend = x0 + width;
-    for (unsigned int x = 0; x < xend; x += stride1)
-    {
-        const unsigned int w = FFMIN(stride1, xend - x) - x0;
-        memcpy(dst, src + x0, w);
-        dst += w;
-        src += stride1 * stride2;
-        x0 = 0;
-    }
-    return dst;
-}
-
-static int raw_sand_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
+static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame)
 {
     const AVFrameSideData *const sd = av_frame_get_side_data(frame, AV_FRAME_DATA_SAND_INFO);
@@ -122,8 +66,6 @@ static int raw_sand_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
     if (sd != NULL) {
         const AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
 
-//        printf("PScan: h/w=%d/%d, off=%d,%d\n", pscan->height, pscan->width, pscan->position[0][0], pscan->position[0][0]);
-
         x0 = si->left_offset;
         y0 = si->top_offset;
     }
@@ -134,16 +76,45 @@ static int raw_sand_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 
     dst = pkt->data;
 
-    // Luma is "easy"
-    for (int y = y0; y < height + y0; ++y) {
-        dst = sand_copy_line_y(dst, frame->data[0] + y * frame->linesize[0], x0, width, frame->linesize[0], frame->linesize[3]);
-    }
-
-    // Chroma is dull
-    dst = cpy_sand_c(dst, frame, x0 & ~1, y0 / 2, width, height / 2);
-    dst = cpy_sand_c(dst, frame, x0 | 1,  y0 / 2, width, height / 2);
+    rpi_sand_to_planar_y8(dst, width, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
+    dst += width * height;
+    rpi_sand_to_planar_c8(dst, width / 2, dst + width * height / 4, width / 2,
+                          frame->data[1], frame->linesize[1], rpi_sand_frame_stride2(frame), x0 / 2, y0 / 2, width / 2, height / 2);
     return 0;
 }
+
+static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
+                      const AVFrame *frame)
+{
+    const AVFrameSideData *const sd = av_frame_get_side_data(frame, AV_FRAME_DATA_SAND_INFO);
+    int size;
+    int width = frame->width;
+    int height = frame->height;
+    int x0 = 0;
+    int y0 = 0;
+    uint8_t * dst;
+    int ret;
+
+    if (sd != NULL) {
+        const AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
+
+        x0 = si->left_offset;
+        y0 = si->top_offset;
+    }
+
+    size = width * height * 3;
+    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+        return ret;
+
+    dst = pkt->data;
+
+    rpi_sand_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0 * 2, y0, width * 2, height);
+    dst += width * height * 2;
+    rpi_sand_to_planar_c16(dst, width, dst + width * height / 2, width,
+                          frame->data[1], frame->linesize[1], rpi_sand_frame_stride2(frame), x0, y0 / 2, width, height / 2);
+    return 0;
+}
+
 
 static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame, int *got_packet)
@@ -154,8 +125,8 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
     if (ret < 0)
         return ret;
 
-    if (frame->format == AV_PIX_FMT_SAND128) {
-        ret = raw_sand_as_yuv420(avctx, pkt, frame);
+    if (rpi_is_sand_frame(frame)) {
+        ret = rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) : raw_sand16_as_yuv420(avctx, pkt, frame);
         *got_packet = (ret == 0);
         return ret;
     }

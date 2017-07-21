@@ -16,8 +16,9 @@
 #include "rpi_mailbox.h"
 #include "rpi_qpu.h"
 #include "rpi_shader.h"
-#include "rpi_hevc_transform.h"
-#include "rpi_zc.h"
+#include "rpi_hevc_transform8.h"
+#include "rpi_hevc_transform10.h"
+#include "libavutil/rpi_sand_fns.h"
 
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files
@@ -44,7 +45,7 @@
 #define vcos_verify_ge0(x) ((x)>=0)
 
 // Size in 32bit words
-#define QPU_CODE_SIZE 2048
+#define QPU_CODE_SIZE 4098
 #define VPU_CODE_SIZE 2048
 
 static const short rpi_transMatrix2even[32][16] = { // Even rows first
@@ -87,7 +88,8 @@ static const short rpi_transMatrix2even[32][16] = { // Even rows first
 struct GPU
 {
   unsigned int qpu_code[QPU_CODE_SIZE];
-  unsigned int vpu_code[VPU_CODE_SIZE];
+  unsigned int vpu_code8[VPU_CODE_SIZE];
+  unsigned int vpu_code10[VPU_CODE_SIZE];
   short transMatrix2even[16*16*2];
 };
 
@@ -303,9 +305,14 @@ static int gpu_init(gpu_env_t ** const gpu) {
   }
   // And the VPU code
   {
-    int num_bytes = sizeof(rpi_hevc_transform);
+    int num_bytes = sizeof(rpi_hevc_transform8);
     av_assert0(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
-    memcpy((void*)ptr->vpu_code, rpi_hevc_transform, num_bytes);
+    memcpy((void*)ptr->vpu_code8, rpi_hevc_transform8, num_bytes);
+  }
+  {
+    int num_bytes = sizeof(rpi_hevc_transform10);
+    av_assert0(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
+    memcpy((void*)ptr->vpu_code10, rpi_hevc_transform10, num_bytes);
   }
   // And the transform coefficients
   memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
@@ -396,10 +403,18 @@ void gpu_free(GPU_MEM_PTR_T * const p) {
   gpu_unlock_unref(ge);
 }
 
-unsigned int vpu_get_fn(void) {
+unsigned int vpu_get_fn(const unsigned int bit_depth) {
   // Make sure that the gpu is initialized
   av_assert0(gpu != NULL);
-  return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code);
+  switch (bit_depth){
+    case 8:
+      return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code8);
+    case 10:
+      return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code10);
+    default:
+      av_assert0(0);
+  }
+  return 0;
 }
 
 unsigned int vpu_get_constants(void) {
@@ -534,6 +549,8 @@ void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame 
   }
 }
 
+// Flush an area of a frame
+// Width, height, x0, y0 in luma pels
 void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
   const unsigned int x0, const unsigned int y0, const unsigned int width, const unsigned int height,
   const unsigned int uv_shift, const int do_luma, const int do_chroma)
@@ -564,7 +581,7 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
       rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
     }
   }
-  else if (!rpi_sliced_frame(frame))
+  else if (!rpi_is_sand_frame(frame))
   {
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
     if (do_luma) {
@@ -580,13 +597,15 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
 //    printf("%s: start_line=%d, lines=%d, %c%c\n", __func__, start_line, n, do_luma ? 'l' : ' ', do_chroma ? 'c' : ' ');
     // **** Use x0!
-    for (int x = 0; x < x0 + width; x += frame->linesize[0]) {
+    // We are working in pels here so halve linesize if 16-bit frame
+    const unsigned int slice_width = rpi_is_sand8_frame(frame) ? frame->linesize[0] : (frame->linesize[0] >> 1);
+    for (unsigned int x = 0; x < x0 + width; x += slice_width) {
       if (do_luma) {
-        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sliced_frame_off_y(frame, x, y0), y_size);
+        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sand_frame_off_y(frame, x, y0), y_size);
       }
       if (do_chroma) {
         rpi_cache_flush_add_gm_range(rfe, gm, mode,
-                                     (frame->data[1] - gm->arm) + rpi_sliced_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
+                                     (frame->data[1] - gm->arm) + rpi_sand_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
       }
     }
   }
@@ -873,6 +892,40 @@ void vpu_qpu_term()
 uint32_t qpu_fn(const int * const mc_fn)
 {
   return gpu->code_gm_ptr.vc + ((const char *)mc_fn - (const char *)rpi_shader) + offsetof(struct GPU, qpu_code);
+}
+
+
+int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
+{
+  // Dummy values we can catch with emulation
+  qf->y_pxx = ~1U;
+  qf->y_bxx = ~2U;
+  qf->y_p00 = ~3U;
+  qf->y_b00 = ~4U;
+  qf->c_pxx = ~5U;
+  qf->c_bxx = ~6U;
+
+  switch (bit_depth) {
+    case 8:
+      qf->y_pxx = qpu_fn(mc_filter_y_pxx);
+      qf->y_bxx = qpu_fn(mc_filter_y_bxx);
+      qf->y_p00 = qpu_fn(mc_filter_y_p00);
+      qf->y_b00 = qpu_fn(mc_filter_y_b00);
+      qf->c_pxx = qpu_fn(mc_filter_c_p);
+      qf->c_bxx = qpu_fn(mc_filter_c_b);
+      break;
+    case 10:
+      qf->c_pxx = qpu_fn(mc_filter_c10_p);
+      qf->c_bxx = qpu_fn(mc_filter_c10_b);
+      qf->y_pxx = qpu_fn(mc_filter_y10_pxx);
+      qf->y_bxx = qpu_fn(mc_filter_y10_bxx);
+      qf->y_p00 = qpu_fn(mc_filter_y10_p00);
+      qf->y_b00 = qpu_fn(mc_filter_y10_b00);
+      break;
+    default:
+      return -1;
+  }
+  return 0;
 }
 
 #endif // RPI

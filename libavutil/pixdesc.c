@@ -2169,7 +2169,19 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
             { 1, 2, 1, 0, 8, 1, 7, 2 },        /* V */
         },
         .flags = 0,
-    }
+    },
+    [AV_PIX_FMT_SAND64_10] = {
+        .name = "sand64_10",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 2, 0, 0, 10, 0, 9, 1 },        /* Y */
+            { 1, 4, 0, 0, 10, 1, 9, 1 },        /* U */
+            { 1, 4, 1, 0, 10, 1, 9, 2 },        /* V */
+        },
+        .flags = 0,
+    },
 };
 #if FF_API_PLUS1_MINUS1
 FF_ENABLE_DEPRECATION_WARNINGS

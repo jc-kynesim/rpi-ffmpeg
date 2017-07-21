@@ -25,7 +25,6 @@
 
 #ifdef RPI
 #define RPI_DISPLAY
-#define RPI_ZERO_COPY
 #endif
 
 #include "config.h"
@@ -48,6 +47,7 @@
 #include "libavformat/avformat.h"
 #include "libavdevice/avdevice.h"
 #include "libswresample/swresample.h"
+#include "libavutil/atomic.h"
 #include "libavutil/opt.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/parseutils.h"
@@ -82,14 +82,14 @@
 #include <interface/mmal/mmal.h>
 #include <interface/mmal/mmal_parameters_camera.h>
 #include <interface/mmal/mmal_buffer.h>
+#include <interface/mmal/mmal_port.h>
 #include <interface/mmal/util/mmal_util.h>
 #include <interface/mmal/util/mmal_default_components.h>
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_util_params.h>
 #pragma GCC diagnostic pop
-#ifdef RPI_ZERO_COPY
 #include "libavcodec/rpi_qpu.h"
-#endif
+#include "libavutil/rpi_sand_fns.h"
 #include "libavcodec/rpi_zc.h"
 #endif
 
@@ -193,39 +193,35 @@ static void free_input_threads(void);
 
 #define NUM_BUFFERS 4
 
-static MMAL_COMPONENT_T* rpi_display = NULL;
-static MMAL_POOL_T *rpi_pool = NULL;
-static volatile int rpi_display_count = 0;
 
-static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port, size_t w, size_t h)
+typedef struct rpi_display_env_s
+{
+    MMAL_COMPONENT_T* display;
+    MMAL_COMPONENT_T* isp;
+    MMAL_PORT_T * port_in;  // Input port of either isp or display depending on pipe setup
+    MMAL_CONNECTION_T * conn;
+
+    MMAL_POOL_T *rpi_pool;
+    volatile int rpi_display_count;
+} rpi_display_env_t;
+
+static rpi_display_env_t * rpi_display_env = NULL;
+
+
+static MMAL_POOL_T* display_alloc_pool(MMAL_PORT_T* port)
 {
     MMAL_POOL_T* pool;
-    size_t i;
-    size_t size = (w*h*3)/2;
-#ifdef RPI_ZERO_COPY
     mmal_port_parameter_set_boolean(port, MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE); // Does this mark that the buffer contains a vc_handle?  Would have expected a vc_image?
     pool = mmal_port_pool_create(port, NUM_BUFFERS, 0);
     assert(pool);
-#else
-    pool = mmal_port_pool_create(port, NUM_BUFFERS, size);
-
-    for (i = 0; i < NUM_BUFFERS; ++i)
-    {
-       MMAL_BUFFER_HEADER_T* buffer = pool->header[i];
-       char * bufPtr = buffer->data;
-       memset(bufPtr, i*30, w*h);
-       memset(bufPtr+w*h, 128, (w*h)/2);
-    }
-#endif
 
     return pool;
 }
 
 static void display_cb_input(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer) {
-#ifdef RPI_ZERO_COPY
+    rpi_display_env_t *const de = (rpi_display_env_t *)port->userdata;
     av_rpi_zc_unref(buffer->user_data);
-    --rpi_display_count;
-#endif
+    avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, -1);
     mmal_buffer_header_release(buffer);
 }
 
@@ -233,9 +229,10 @@ static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
   mmal_buffer_header_release(buffer);
 }
 
-static MMAL_COMPONENT_T* display_init(const enum AVPixelFormat fmt, size_t x, size_t y, size_t w, size_t h)
+static rpi_display_env_t *
+display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, size_t h)
 {
-    MMAL_COMPONENT_T* display;
+    MMAL_STATUS_T err;
     MMAL_DISPLAYREGION_T region =
     {
         .hdr = {MMAL_PARAMETER_DISPLAYREGION, sizeof(region)},
@@ -244,51 +241,107 @@ static MMAL_COMPONENT_T* display_init(const enum AVPixelFormat fmt, size_t x, si
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
+//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
+    rpi_display_env_t * de;
+    int isp_req = (fmt == AV_PIX_FMT_SAND64_10);
 
-    bcm_host_init();  // TODO is this needed?
-    mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &display);
-    assert(display);
+    bcm_host_init();  // Needs to be done by someone...
 
-    mmal_port_parameter_set(display->input[0], &region.hdr);
+    if ((de = av_mallocz(sizeof(*de))) == NULL) {
+        return NULL;
+    }
+
+    mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &de->display);
+    av_assert0(de->display);
+    de->port_in = de->display->input[0];
+
+    if (isp_req)
+    {
+        mmal_component_create("vc.ril.isp", &de->isp);
+        de->port_in = de->isp->input[0];
+    }
+
+    mmal_port_parameter_set(de->display->input[0], &region.hdr);
 
     {
-        MMAL_ES_FORMAT_T* format = display->input[0]->format;
-        format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 : MMAL_ENCODING_I420;
+        MMAL_PORT_T * const port = de->port_in;
+        MMAL_ES_FORMAT_T* const format = port->format;
+        port->userdata = (struct MMAL_PORT_USERDATA_T *)de;
+        format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 :
+            fmt == AV_PIX_FMT_SAND64_10 ? MMAL_ENCODING_YUVUV64_16 :
+                MMAL_ENCODING_I420;
         format->es->video.width = geo.stride_y;
-        format->es->video.height = geo.height_y;
+        format->es->video.height = (fmt == AV_PIX_FMT_SAND128 || fmt == AV_PIX_FMT_SAND64_10) ?
+                                      (h + 15) & ~15 : geo.height_y;  // Magic
         format->es->video.crop.x = 0;
         format->es->video.crop.y = 0;
         format->es->video.crop.width = w;
         format->es->video.crop.height = h;
-        mmal_port_format_commit(display->input[0]);
+        mmal_port_format_commit(port);
     }
 
-    mmal_component_enable(display);
+    de->rpi_pool = display_alloc_pool(de->port_in);
+    mmal_port_enable(de->port_in,display_cb_input);
 
-    rpi_pool = display_alloc_pool(display->input[0], geo.stride_y, geo.height_y);
+    if (isp_req) {
+        MMAL_PORT_T * const port_out = de->isp->output[0];
+        mmal_log_dump_port(de->port_in);
+        mmal_format_copy(port_out->format, de->port_in->format);
+        if (fmt == AV_PIX_FMT_SAND64_10) {
+            if ((err = mmal_port_parameter_set_int32(port_out, MMAL_PARAMETER_OUTPUT_SHIFT, 6)) != MMAL_SUCCESS)
+            {
+                av_log(NULL, AV_LOG_WARNING, "Failed to set ISP output port shift\n");
+            }
+            else
+                av_log(NULL, AV_LOG_WARNING, "Set ISP output port shift OK\n");
 
-    mmal_port_enable(display->input[0],display_cb_input);
-    mmal_port_enable(display->control,display_cb_control);
+        }
+        port_out->format->encoding = MMAL_ENCODING_I420;
+        mmal_log_dump_port(port_out);
+        if ((err = mmal_port_format_commit(port_out)) != MMAL_SUCCESS)
+        {
+            av_log(NULL, AV_LOG_ERROR, "Failed to set ISP output port format\n");
+            goto fail;
+        }
+        if ((err = mmal_connection_create(&de->conn, port_out, de->display->input[0], MMAL_CONNECTION_FLAG_TUNNELLING)) != MMAL_SUCCESS) {
+            av_log(NULL, AV_LOG_ERROR, "Failed to create connection\n");
+            goto fail;
+        }
+        if ((err = mmal_connection_enable(de->conn)) != MMAL_SUCCESS) {
+            av_log(NULL, AV_LOG_ERROR, "Failed to enable connection\n");
+            goto fail;
+        }
+        mmal_port_enable(de->isp->control,display_cb_control);
+        mmal_component_enable(de->isp);
+    }
+
+    mmal_component_enable(de->display);
+    mmal_port_enable(de->display->control,display_cb_control);
 
     printf("Allocated display %dx%d in %dx%d, fmt=%d\n", w, h, geo.stride_y, geo.height_y, fmt);
 
-    return display;
+    return de;
+
+fail:
+    // **** Free stuff
+    return NULL;
 }
 
-static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* const display, const AVFrame* const fr)
+static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * const de, const AVFrame* const fr)
 {
     MMAL_BUFFER_HEADER_T* buf;
 
-    if (!display || !rpi_pool)
+    if (de == NULL)
         return;
 
-    if (rpi_display_count >= 3) {
+    if (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
         av_log(s, AV_LOG_VERBOSE, "Frame dropped\n");
         return;
     }
 
-    buf = mmal_queue_get(rpi_pool->queue);
+    buf = mmal_queue_get(de->rpi_pool->queue);
     if (!buf) {
         // Running too fast so drop the frame
         printf("Q alloc failure\n");
@@ -298,67 +351,63 @@ static void display_frame(struct AVCodecContext * const s, MMAL_COMPONENT_T* con
     buf->cmd = 0;
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
-#ifdef RPI_ZERO_COPY
-{
-    const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
-    if (fr_buf == NULL) {
-        mmal_buffer_header_release(buf);
-        return;
-    }
-
-    buf->user_data = fr_buf;
-    buf->data = av_rpi_zc_vc_handle(fr_buf);
-    buf->offset = av_rpi_zc_offset(fr_buf);
-    buf->length = av_rpi_zc_length(fr_buf);
-    buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
-#if 0
     {
-        unsigned int n;
-        for (n = 0; n < fr->width; n += 128) {
-            memset(fr->data[1] + n * fr->linesize[3], 0x80, 128 * fr->height / 2);
+        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
+        if (fr_buf == NULL) {
+            mmal_buffer_header_release(buf);
+            return;
         }
+
+        buf->user_data = fr_buf;
+        buf->data = (uint8_t *)av_rpi_zc_vc_handle(fr_buf);  // Cast our handle to a pointer for mmal
+        buf->offset = av_rpi_zc_offset(fr_buf);
+        buf->length = av_rpi_zc_length(fr_buf);
+        buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
+        avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, 1);
     }
-#endif
-    ++rpi_display_count;
-}
-#else
-{
-#error YYY
-    int w = fr->width;
-    int h = fr->height;
-    int w2 = (w+31)&~31;
-    int h2 = (h+15)&~15;
 
-    buf->length = (w2 * h2 * 3)/2;
-    buf->user_data = NULL;
-
-    //mmal_buffer_header_mem_lock(buf);
-    memcpy(buf->data, fr->data[0], w2 * h);
-    memcpy(buf->data+w2*h2, fr->data[1], w2 * h / 4);
-    memcpy(buf->data+w2*h2*5/4, fr->data[2], w2 * h / 4);
-    //mmal_buffer_header_mem_unlock(buf);
-}
-#endif
-
-    while (rpi_display_count >= 3) {
+    while (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
         usleep(5000);
     }
 
-    if (mmal_port_send_buffer(display->input[0], buf) != MMAL_SUCCESS)
+    if (mmal_port_send_buffer(de->port_in, buf) != MMAL_SUCCESS)
     {
-        printf("** send failed: depth=%d\n", rpi_display_count);
-        display_cb_input(NULL, buf);
+        av_log(s, AV_LOG_ERROR, "mmal_port_send_buffer failed: depth=%d\n", de->rpi_display_count);
+        display_cb_input(de->port_in, buf);
     }
 }
 
-static void display_exit(MMAL_COMPONENT_T* display)
+static void display_exit(rpi_display_env_t ** const pde)
 {
+    rpi_display_env_t * const de = *pde;
+    *pde = NULL;
+
+    if (de != NULL) {
 //    sleep(120);
-    if (display) {
-        mmal_component_destroy(display);
-    }
-    if (rpi_pool) {
-        mmal_port_pool_destroy(display->input[0], rpi_pool);
+
+        if (de->port_in != NULL) {
+            mmal_port_disable(de->port_in);
+        }
+
+        // The above disable should kick out all buffers - check that
+        if (avpriv_atomic_int_get(&de->rpi_display_count) != 0) {
+            av_log(NULL, AV_LOG_WARNING, "Exiting with display count non-zero:%d\n", avpriv_atomic_int_get(&de->rpi_display_count));
+        }
+
+        if (de->conn != NULL) {
+            mmal_connection_destroy(de->conn);
+        }
+        if (de->isp != NULL) {
+            mmal_component_destroy(de->isp);
+        }
+        if (de->display != NULL) {
+            mmal_component_destroy(de->display);
+        }
+        if (de->rpi_pool != NULL) {
+            mmal_port_pool_destroy(de->display->input[0], de->rpi_pool);
+        }
+
+        av_free(de);
     }
 }
 
@@ -778,7 +827,7 @@ static void ffmpeg_cleanup(int ret)
     }
 
 #ifdef RPI_DISPLAY
-    display_exit(rpi_display);
+    display_exit(&rpi_display_env);
 #endif
 
     for (i = 0; i < nb_input_streams; i++) {
@@ -792,8 +841,7 @@ static void ffmpeg_cleanup(int ret)
         av_freep(&ist->filters);
         av_freep(&ist->hwaccel_device);
         av_freep(&ist->dts_buffer);
-
-#ifdef RPI_ZERO_COPY
+#ifdef RPI_DISPLAY
         av_rpi_zc_uninit(ist->dec_ctx);
 #endif
         avcodec_free_context(&ist->dec_ctx);
@@ -1265,9 +1313,9 @@ static void do_video_out(OutputFile *of,
 #ifdef RPI_DISPLAY
     if (next_picture && ist != NULL)
     {
-        if (!rpi_display)
-            rpi_display = display_init(next_picture->format, 0, 0, next_picture->width, next_picture->height);
-        display_frame(ist->dec_ctx, rpi_display, next_picture);
+        if (rpi_display_env == NULL)
+            rpi_display_env = display_init(next_picture->format, 0, 0, next_picture->width, next_picture->height);
+        display_frame(ist->dec_ctx, rpi_display_env, next_picture);
     }
 #endif
 
@@ -3103,7 +3151,7 @@ static int init_input_stream(int ist_index, char *error, int error_len)
         ist->dec_ctx->get_format            = get_format;
         ist->dec_ctx->get_buffer2           = get_buffer;
 
-#ifdef RPI_ZERO_COPY
+#ifdef RPI_DISPLAY
         // Overrides the above get_buffer2
         av_rpi_zc_init(ist->dec_ctx);
 #endif

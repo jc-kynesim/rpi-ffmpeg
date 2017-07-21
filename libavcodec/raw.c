@@ -276,6 +276,7 @@ const PixelFormatTag ff_raw_pix_fmt_tags[] = {
     /* RPI */
 #ifdef RPI
     { AV_PIX_FMT_SAND128,     MKTAG('S', 'A', 'N', 'D') },
+    { AV_PIX_FMT_SAND64_10,   MKTAG('S', 'N', 'D', 'A') },
 #endif
 
     /* special */

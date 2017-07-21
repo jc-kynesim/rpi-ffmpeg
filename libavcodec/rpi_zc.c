@@ -1,9 +1,11 @@
 #include "config.h"
 #ifdef RPI
+#include "libavcodec/avcodec.h"
 #include "rpi_qpu.h"
 #include "rpi_mailbox.h"
 #include "rpi_zc.h"
 #include "libavutil/avassert.h"
+#include "libavutil/rpi_sand_fns.h"
 #include <pthread.h>
 
 #include "libavutil/buffer_internal.h"
@@ -30,21 +32,11 @@ typedef struct ZcPoolEnt
     struct ZcPool * pool;
 } ZcPoolEnt;
 
-#if 1
-//#define ALLOC_PAD       0x1000
-#define ALLOC_PAD       0
-#define ALLOC_ROUND     0x1000
-//#define ALLOC_N_OFFSET  0x100
-#define ALLOC_N_OFFSET  0
-#define STRIDE_ROUND    0x80
-#define STRIDE_OR       0x80
-#else
 #define ALLOC_PAD       0
 #define ALLOC_ROUND     0x1000
 #define ALLOC_N_OFFSET  0
-#define STRIDE_ROUND    32
+#define STRIDE_ROUND    64
 #define STRIDE_OR       0
-#endif
 
 #define DEBUG_ZAP0_BUFFERS 0
 
@@ -221,13 +213,22 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
     {
         case AV_PIX_FMT_YUV420P:
             geo.stride_y = ((video_width + 32 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
-        //    geo.stride_y = ((video_width + 32 + 31) & ~31);
             geo.stride_c = geo.stride_y / 2;
-        //    geo.height_y = (video_height + 15) & ~15;
             geo.height_y = (video_height + 32 + 31) & ~31;
             geo.height_c = geo.height_y / 2;
             geo.planes_c = 2;
             geo.stripes = 1;
+            geo.bytes_per_pel = 1;
+            break;
+
+        case AV_PIX_FMT_YUV420P10:
+            geo.stride_y = ((video_width * 2 + 64 + STRIDE_ROUND - 1) & ~(STRIDE_ROUND - 1)) | STRIDE_OR;
+            geo.stride_c = geo.stride_y / 2;
+            geo.height_y = (video_height + 32 + 31) & ~31;
+            geo.height_c = geo.height_y / 2;
+            geo.planes_c = 2;
+            geo.stripes = 1;
+            geo.bytes_per_pel = 2;
             break;
 
         case AV_PIX_FMT_SAND128:
@@ -262,11 +263,51 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
             geo.height_c = img.pitch / stripe_w - geo.height_y;
             geo.planes_c = 1;
             geo.stripes = (video_width + stripe_w - 1) / stripe_w;
+            geo.bytes_per_pel = 1;
 
             pthread_mutex_unlock(&sand_lock);
 
             av_assert0((int)geo.height_y > 0 && (int)geo.height_c > 0);
             av_assert0(geo.height_y >= video_height && geo.height_c >= video_height / 2);
+            break;
+        }
+
+        case AV_PIX_FMT_SAND64_16:
+        case AV_PIX_FMT_SAND64_10:
+        {
+            const unsigned int stripe_w = 128;  // bytes
+
+            static pthread_mutex_t sand_lock = PTHREAD_MUTEX_INITIALIZER;
+            static VC_IMAGE_T img = {0};
+
+            // Given the overhead of calling the mailbox keep a stashed
+            // copy as we will almost certainly just want the same numbers again
+            // but that means we need a lock
+            pthread_mutex_lock(&sand_lock);
+
+            if (img.width != video_width || img.height != video_height)
+            {
+                VC_IMAGE_T new_img = {
+                    .type = VC_IMAGE_YUV_UV_16,
+                    .width = video_width,
+                    .height = video_height
+                };
+
+                gpu_ref();
+                mbox_get_image_params(gpu_get_mailbox(), &new_img);
+                gpu_unref();
+                img = new_img;
+            }
+
+            geo.stride_y = stripe_w;
+            geo.stride_c = stripe_w;
+            geo.height_y = ((intptr_t)img.extra.uv.u - (intptr_t)img.image_data) / stripe_w;
+            geo.height_c = img.pitch / stripe_w - geo.height_y;
+            geo.planes_c = 1;
+            geo.stripes = (video_width * 2 + stripe_w - 1) / stripe_w;
+            geo.bytes_per_pel = 2;
+
+            pthread_mutex_unlock(&sand_lock);
             break;
         }
 
@@ -342,8 +383,12 @@ static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
     frame->linesize[0] = geo.stride_y;
     frame->linesize[1] = geo.stride_c;
     frame->linesize[2] = geo.stride_c;
+    // abuse: linesize[3] = "stripe stride"
+    // stripe_stride is NOT the stride between slices it is (that / geo.stride_y).
+    // In a general case this makes the calculation an xor and multiply rather
+    // than a divide and multiply
     if (geo.stripes > 1)
-        frame->linesize[3] = geo.height_y + geo.height_c;      // abuse: linesize[3] = stripe stride
+        frame->linesize[3] = geo.height_y + geo.height_c;
 
     frame->data[0] = buf->data;
     frame->data[1] = frame->data[0] + size_y;
@@ -371,7 +416,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
         rv = avcodec_default_get_buffer2(s, frame, flags);
     }
     else if (frame->format == AV_PIX_FMT_YUV420P ||
-             frame->format == AV_PIX_FMT_SAND128)
+             rpi_is_sand_frame(frame))
     {
         rv = rpi_get_display_buffer(s->get_buffer_context, frame);
     }
@@ -401,6 +446,7 @@ static AVBufferRef * zc_copy(struct AVCodecContext * const s,
     unsigned int i;
     uint8_t * psrc, * pdest;
 
+    dest->format = src->format;
     dest->width = src->width;
     dest->height = src->height;
 
@@ -432,25 +478,124 @@ static AVBufferRef * zc_copy(struct AVCodecContext * const s,
 }
 
 
+static AVBufferRef * zc_420p10_to_sand128(struct AVCodecContext * const s,
+    const AVFrame * const src)
+{
+    AVFrame dest_frame;
+    AVFrame * const dest = &dest_frame;
+    unsigned int i;
+    uint8_t * psrc, * psrc2, * pdest;
+
+    memset(dest, 0, sizeof(*dest));
+    dest->format = AV_PIX_FMT_SAND128;
+    dest->width = src->width;
+    dest->height = src->height;
+
+    if (rpi_get_display_buffer(s->get_buffer_context, dest) != 0)
+    {
+        return NULL;
+    }
+
+    // Y
+    for (i = 0, psrc = src->data[0], pdest = dest->data[0];
+         i != dest->height;
+         ++i, psrc += src->linesize[0], pdest += dest->linesize[0])
+    {
+        uint16_t * s = (uint16_t*)psrc;
+        uint8_t * d = pdest;
+        for (unsigned int k = 0; k < dest->width; k += dest->linesize[0])
+        {
+            const unsigned int n = FFMIN(dest->linesize[0], dest->width - k);
+            for (unsigned int j = 0; j != n; ++j)
+                *d++ = (uint8_t)(*s++ >> 2);
+            d += (dest->linesize[3] - 1) * dest->linesize[0];
+        }
+    }
+
+    // C
+    for (i = 0, psrc = src->data[1], psrc2 = src->data[2], pdest = dest->data[1];
+         i != dest->height / 2;
+         ++i, psrc += src->linesize[1], psrc2 += src->linesize[2], pdest += dest->linesize[1])
+    {
+        const uint16_t * su = (uint16_t*)psrc;
+        const uint16_t * sv = (uint16_t*)psrc2;
+        uint8_t * d = pdest;
+        for (unsigned int k = 0; k < dest->width; k += dest->linesize[1])
+        {
+            const unsigned int n = FFMIN(dest->linesize[1], dest->width - k) / 2;
+            for (unsigned int j = 0; j != n; ++j)
+            {
+                *d++ = (uint8_t)(*su++ >> 2);
+                *d++ = (uint8_t)(*sv++ >> 2);
+            }
+            d += (dest->linesize[3] - 1) * dest->linesize[1];
+        }
+    }
+
+    return dest->buf[0];
+}
+
+
+static AVBufferRef * zc_sand64_16_to_sand128(struct AVCodecContext * const s,
+    const AVFrame * const src, const unsigned int src_bits)
+{
+    AVFrame dest_frame = {
+        .format = AV_PIX_FMT_SAND128,
+        .width = src->width,
+        .height = src->height
+    };
+    AVFrame * const dest = &dest_frame;
+    const unsigned int shr = src_bits - 8;
+
+    if (rpi_get_display_buffer(s->get_buffer_context, dest) != 0)
+    {
+        return NULL;
+    }
+
+    // Y
+    rpi_sand16_to_sand8(dest->data[0], dest->linesize[0], rpi_sand_frame_stride2(dest),
+                        src->data[0], src->linesize[0], rpi_sand_frame_stride2(dest),
+                        src->width, src->height, shr);
+    // C
+    rpi_sand16_to_sand8(dest->data[1], dest->linesize[1], rpi_sand_frame_stride2(dest),
+                        src->data[1], src->linesize[1], rpi_sand_frame_stride2(dest),
+                        src->width, src->height / 2, shr);
+
+    return dest->buf[0];
+}
+
+
+
 AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
     const AVFrame * const frame, const int maycopy)
 {
     assert(s != NULL);
 
     if (frame->format != AV_PIX_FMT_YUV420P &&
-        frame->format != AV_PIX_FMT_SAND128)
+        frame->format != AV_PIX_FMT_YUV420P10 &&
+        !rpi_is_sand_frame(frame))
     {
         av_log(s, AV_LOG_WARNING, "%s: *** Format not SAND/YUV420P: %d\n", __func__, frame->format);
         return NULL;
     }
 
-    if (frame->buf[1] != NULL)
+    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10)
+//    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10 || rpi_is_sand16_frame(frame))
     {
-        av_assert0(frame->format == AV_PIX_FMT_YUV420P);
         if (maycopy)
         {
             av_log(s, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);
-            return zc_copy(s, frame);
+            switch (frame->format)
+            {
+                case AV_PIX_FMT_YUV420P10:
+                    return zc_420p10_to_sand128(s, frame);
+
+                case AV_PIX_FMT_SAND64_10:
+                    return zc_sand64_16_to_sand128(s, frame, 10);
+
+                default:
+                    return zc_copy(s, frame);
+            }
         }
         else
         {
