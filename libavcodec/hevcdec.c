@@ -46,7 +46,9 @@
   #include "rpi_qpu.h"
   #include "rpi_shader.h"
   #include "rpi_shader_cmd.h"
+  #include "rpi_shader_template.h"
   #include "rpi_zc.h"
+  #include "libavutil/rpi_sand_fns.h"
 
   // Define RPI_CACHE_UNIF_MVS to write motion vector uniform stream to cached memory
   #define RPI_CACHE_UNIF_MVS  1
@@ -96,8 +98,8 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 #define QPU_Y_CMD_PER_CTU_MAX (8 * 8)
 #define QPU_C_CMD_PER_CTU_MAX (4 * 4)
 
-#define UV_COMMANDS_PER_QPU (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 / QPU_N_UV + 2)
-#define Y_COMMANDS_PER_QPU  (((RPI_MAX_WIDTH * 64) / (4 * 4))     / QPU_N_Y  + 2)
+#define QPU_C_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 + 2 * QPU_N_MAX)
+#define QPU_Y_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4))     + 2 * QPU_N_MAX)
 
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
@@ -125,10 +127,22 @@ static const int * const inter_pred_setup_c_qpu[12] = {
     mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn, mc_setup_c_qn
 };
 
+static const int * const inter_pred_setup_c10_qpu[12] = {
+    mc_setup_c10_q0, mc_setup_c10_qn, mc_setup_c10_qn, mc_setup_c10_qn,
+    mc_setup_c10_qn, mc_setup_c10_qn, mc_setup_c10_qn, mc_setup_c10_qn,
+    mc_setup_c10_qn, mc_setup_c10_qn, mc_setup_c10_qn, mc_setup_c10_qn
+};
+
 static const int * const inter_pred_setup_y_qpu[12] = {
     mc_setup_y_q0, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn,
     mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn,
     mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn, mc_setup_y_qn
+};
+
+static const int * const inter_pred_setup_y10_qpu[12] = {
+    mc_setup_y10_q0, mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn,
+    mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn,
+    mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn, mc_setup_y10_qn
 };
 
 static const int * const inter_pred_sync_qpu[12] = {
@@ -137,17 +151,97 @@ static const int * const inter_pred_sync_qpu[12] = {
     mc_sync_q8, mc_sync_q9, mc_sync_q10, mc_sync_q11
 };
 
+static const int * const inter_pred_sync10_qpu[12] = {
+    mc_sync10_q0, mc_sync10_q1, mc_sync10_q2, mc_sync10_q3,
+    mc_sync10_q4, mc_sync10_q5, mc_sync10_q6, mc_sync10_q7,
+    mc_sync10_q8, mc_sync10_q9, mc_sync10_q10, mc_sync10_q11
+};
+
 static const int * const inter_pred_exit_c_qpu[12] = {
-    mc_interrupt_exit12c, mc_exit_c, mc_exit_c, mc_exit_c,
-    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c,
-    mc_exit_c, mc_exit_c, mc_exit_c, mc_exit_c
+    mc_exit_c_q0, mc_exit_c_qn, mc_exit_c_qn, mc_exit_c_qn,
+    mc_exit_c_qn, mc_exit_c_qn, mc_exit_c_qn, mc_exit_c_qn,
+    mc_exit_c_qn, mc_exit_c_qn, mc_exit_c_qn, mc_exit_c_qn
+};
+
+static const int * const inter_pred_exit_c10_qpu[12] = {
+    mc_exit_c10_q0, mc_exit_c10_qn, mc_exit_c10_qn, mc_exit_c10_qn,
+    mc_exit_c10_qn, mc_exit_c10_qn, mc_exit_c10_qn, mc_exit_c10_qn,
+    mc_exit_c10_qn, mc_exit_c10_qn, mc_exit_c10_qn, mc_exit_c10_qn
 };
 
 static const int * const inter_pred_exit_y_qpu[12] = {
-    mc_interrupt_exit12, mc_exit, mc_exit, mc_exit,
-    mc_exit,   mc_exit, mc_exit, mc_exit,
-    mc_exit,   mc_exit, mc_exit, mc_exit
+    mc_exit_y_q0, mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn,
+    mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn,
+    mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn, mc_exit_y_qn
 };
+
+static const int * const inter_pred_exit_y10_qpu[12] = {
+    mc_exit_y10_q0, mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn,
+    mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn,
+    mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn, mc_exit_y10_qn
+};
+
+typedef struct ipe_chan_info_s
+{
+    const unsigned int n;
+    const int * const * setup_fns;
+    const int * const * sync_fns;
+    const int * const * exit_fns;
+} ipe_chan_info_t;
+
+typedef struct ipe_init_info_s
+{
+    ipe_chan_info_t luma;
+    ipe_chan_info_t chroma;
+} ipe_init_info_t;
+
+static const ipe_init_info_t ipe_init_infos[9] = {  // Alloc for bit depths of 8-16
+   {  // 8
+      .luma =   {QPU_MC_PRED_N_Y8, inter_pred_setup_y_qpu, inter_pred_sync_qpu, inter_pred_exit_y_qpu},
+      .chroma = {QPU_MC_PRED_N_C8, inter_pred_setup_c_qpu, inter_pred_sync_qpu, inter_pred_exit_c_qpu}
+   },
+   {  // 9
+      .luma =   {0},
+      .chroma = {0}
+   },
+   {  // 10
+      .luma =   {QPU_MC_PRED_N_Y10, inter_pred_setup_y10_qpu, inter_pred_sync10_qpu, inter_pred_exit_y10_qpu},
+      .chroma = {QPU_MC_PRED_N_C10, inter_pred_setup_c10_qpu, inter_pred_sync10_qpu, inter_pred_exit_c10_qpu}
+   }
+
+};
+
+static void set_ipe_from_ici(HEVCRpiInterPredEnv * const ipe, const ipe_chan_info_t * const ici)
+{
+    const unsigned int n = ici->n;
+    const unsigned int q1_size = (ipe->gptr.numbytes / n) & ~3;  // Round down to word
+
+    ipe->n = n;
+    ipe->max_fill = q1_size - ipe->min_gap;
+    for(unsigned int i = 0; i < n; i++) {
+        HEVCRpiInterPredQ * const q = ipe->q + i;
+        q->qpu_mc_curr = q->qpu_mc_base =
+            (qpu_mc_pred_cmd_t *)(ipe->gptr.arm + i * q1_size);
+        q->code_setup = qpu_fn(ici->setup_fns[i]);
+        q->code_sync = qpu_fn(ici->sync_fns[i]);
+        q->code_exit = qpu_fn(ici->exit_fns[i]);
+    }
+}
+
+static void rpi_hevc_qpu_set_fns(HEVCContext * const s, const unsigned int bit_depth)
+{
+    const ipe_init_info_t * const iii = ipe_init_infos + bit_depth - 8;
+
+    av_assert0(bit_depth >= 8 && bit_depth <= 16);
+
+    rpi_hevc_qpu_init_fn(&s->qpu, bit_depth);
+
+    for (unsigned int i = 0; i != RPI_MAX_JOBS; ++i) {
+        HEVCRpiJob *const jb = s->jobs + i;
+        set_ipe_from_ici(&jb->chroma_ip, &iii->chroma);
+        set_ipe_from_ici(&jb->luma_ip,   &iii->luma);
+    }
+}
 
 
 #endif
@@ -329,8 +423,8 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 //    printf("CTB with=%d\n", sps->ctb_width);
 //    s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
     s->max_ctu_count = FFMIN(coefs_per_luma / coefs_in_ctb, sps->ctb_width);
-    s->ctu_per_y_chan = s->max_ctu_count / QPU_N_Y;
-    s->ctu_per_uv_chan = s->max_ctu_count / QPU_N_UV;
+//    s->ctu_per_y_chan = s->max_ctu_count / QPU_N_Y;
+//    s->ctu_per_uv_chan = s->max_ctu_count / QPU_N_UV;
 
     for(job=0;job<RPI_MAX_JOBS;job++) {
         for(job=0;job<RPI_MAX_JOBS;job++) {
@@ -664,7 +758,7 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
 {
     #define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + CONFIG_HEVC_D3D11VA_HWACCEL + CONFIG_HEVC_VAAPI_HWACCEL + CONFIG_HEVC_VDPAU_HWACCEL)
     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 4], *fmt = pix_fmts;
-    int ret, i;
+    int ret;
 
     pic_arrays_free(s);
     s->ps.sps = NULL;
@@ -702,6 +796,12 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
 #endif
         break;
     case AV_PIX_FMT_YUV420P10:
+#if RPI_HEVC_SAND
+        // Currently geometry calc is stuffed for big sizes
+        if (sps->width < 2048 && sps->height <= 1088) {
+            *fmt++ = AV_PIX_FMT_SAND64_10;
+        }
+#endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
 #endif
@@ -731,27 +831,36 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps, enum AVPixelFormat pix_fm
     ff_hevc_pred_init(&s->hpc,     sps->bit_depth);
     ff_hevc_dsp_init (&s->hevcdsp, sps->bit_depth);
     ff_videodsp_init (&s->vdsp,    sps->bit_depth);
+#ifdef RPI
+    rpi_hevc_qpu_set_fns(s, sps->bit_depth);
+#endif
 
-    for (i = 0; i < 3; i++) {
-        av_freep(&s->sao_pixel_buffer_h[i]);
-        av_freep(&s->sao_pixel_buffer_v[i]);
-    }
+    av_freep(&s->sao_pixel_buffer_h[0]);
+    av_freep(&s->sao_pixel_buffer_v[0]);
 
     if (sps->sao_enabled && !s->avctx->hwaccel) {
-        int c_count = (sps->chroma_format_idc != 0) ? 3 : 1;
-        int c_idx;
+        const unsigned int c_count = (sps->chroma_format_idc != 0) ? 3 : 1;
+        unsigned int c_idx;
+        size_t vsize[3] = {0};
+        size_t hsize[3] = {0};
 
         for(c_idx = 0; c_idx < c_count; c_idx++) {
             int w = sps->width >> sps->hshift[c_idx];
             int h = sps->height >> sps->vshift[c_idx];
-            // ******** Very very nasty allocation kludge for plaited Chroma
-            s->sao_pixel_buffer_h[c_idx] =
-                av_malloc((w * 2 * sps->ctb_height * (1 + (c_idx == 1))) <<
-                          sps->pixel_shift);
-            s->sao_pixel_buffer_v[c_idx] =
-                av_malloc((h * 2 * sps->ctb_width  * (1 + (c_idx == 1))) <<
-                          sps->pixel_shift);
+            // ctb height & width are a min of 8 so this must a multiple of 16
+            // so no point rounding up!
+            hsize[c_idx] = (w * 2 * sps->ctb_height) << sps->pixel_shift;
+            vsize[c_idx] = (h * 2 * sps->ctb_width) << sps->pixel_shift;
         }
+
+        // Allocate as a single lump so we can extend h[1] & v[1] into h[2] & v[2]
+        // when we have plaited chroma
+        s->sao_pixel_buffer_h[0] = av_malloc(hsize[0] + hsize[1] + hsize[2]);
+        s->sao_pixel_buffer_v[0] = av_malloc(vsize[0] + vsize[1] + vsize[2]);
+        s->sao_pixel_buffer_h[1] = s->sao_pixel_buffer_h[0] + hsize[0];
+        s->sao_pixel_buffer_h[2] = s->sao_pixel_buffer_h[1] + hsize[1];
+        s->sao_pixel_buffer_v[1] = s->sao_pixel_buffer_v[0] + vsize[0];
+        s->sao_pixel_buffer_v[2] = s->sao_pixel_buffer_v[1] + vsize[1];
     }
 
     s->ps.sps = sps;
@@ -1281,7 +1390,7 @@ static int hls_cross_component_pred(HEVCContext *s, int idx) {
 static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, int c_idx)
 {
     // U & V done on U call in the case of sliced frames
-    if (rpi_sliced_frame(s->frame) && c_idx > 1)
+    if (av_rpi_is_sand_frame(s->frame) && c_idx > 1)
         return;
 
     if (s->enable_rpi) {
@@ -1295,7 +1404,7 @@ static void rpi_intra_pred(HEVCContext *s, int log2_trafo_size, int x0, int y0, 
         cmd->i_pred.y = y0;
         cmd->i_pred.mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
     }
-    else if (rpi_sliced_frame(s->frame) && c_idx != 0) {
+    else if (av_rpi_is_sand_frame(s->frame) && c_idx != 0) {
         s->hpc.intra_pred_c[log2_trafo_size - 2](s, x0, y0, c_idx);
     }
     else {
@@ -1699,12 +1808,12 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
         return ret;
 
 #if RPI_HEVC_SAND
-    if (rpi_sliced_frame(s->frame)) {
-        s->hevcdsp.put_pcm(rpi_sliced_frame_pos_y(s->frame, x0, y0),
+    if (av_rpi_is_sand_frame(s->frame)) {
+        s->hevcdsp.put_pcm(av_rpi_sand_frame_pos_y(s->frame, x0, y0),
                            s->frame->linesize[0],
                            cb_size, cb_size, &gb, s->ps.sps->pcm.bit_depth);
 
-        s->hevcdsp.put_pcm_c(rpi_sliced_frame_pos_c(s->frame, x0 >> s->ps.sps->hshift[1], y0 >> s->ps.sps->vshift[1]),
+        s->hevcdsp.put_pcm_c(av_rpi_sand_frame_pos_c(s->frame, x0 >> s->ps.sps->hshift[1], y0 >> s->ps.sps->vshift[1]),
                            s->frame->linesize[1],
                            cb_size >> s->ps.sps->hshift[1],
                            cb_size >> s->ps.sps->vshift[1],
@@ -2264,38 +2373,39 @@ static void rpi_inter_pred_reset(HEVCRpiInterPredEnv * const ipe)
     }
 }
 
-static void rpi_alloc_inter_pred(HEVCRpiInterPredEnv * const ipe,
-                                 const unsigned int n, const unsigned int n_grp,
-                                 const unsigned int q1_size, const unsigned int min_gap,
-                                 const int * const * const setup_fns,
-                                 const int * const * const sync_fns,
-                                 const int * const * const exit_fns)
+static void rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
+                                 const unsigned int n_max, const unsigned int n_grp,
+                                 const unsigned int total_size, const unsigned int min_gap)
 {
-    unsigned int i;
-
     memset(ipe, 0, sizeof(*ipe));
-    av_assert0((ipe->q = av_mallocz(n * sizeof(*ipe->q))) != NULL);
-    ipe->n = n;
+    av_assert0((ipe->q = av_mallocz(n_max * sizeof(*ipe->q))) != NULL);
     ipe->n_grp = n_grp;
-    ipe->q1_size = q1_size;
-    ipe->max_fill = ipe->q1_size - min_gap;
+    ipe->min_gap = min_gap;
 
 #if RPI_CACHE_UNIF_MVS
-    gpu_malloc_cached(n * q1_size, &ipe->gptr);
+    gpu_malloc_cached(total_size, &ipe->gptr);
 #else
-    gpu_malloc_uncached(n * q1_size, &ipe->gptr);
+    gpu_malloc_uncached(total_size, &ipe->gptr);
 #endif
-
-    for(i = 0; i < n; i++) {
-        HEVCRpiInterPredQ * const q = ipe->q + i;
-        q->qpu_mc_curr = q->qpu_mc_base =
-            (qpu_mc_pred_cmd_t *)(ipe->gptr.arm + i * q1_size);
-        q->code_setup = qpu_fn(setup_fns[i]);
-        q->code_sync = qpu_fn(sync_fns[i]);
-        q->code_exit = qpu_fn(exit_fns[i]);
-    }
 }
 
+
+#if RPI_QPU_EMU_Y
+#define get_mc_address_y(f) ((f)->data[0])
+#else
+#define get_mc_address_y(f) get_vc_address_y(f)
+#endif
+#if RPI_QPU_EMU_C
+#define get_mc_address_u(f) ((f)->data[1])
+#else
+#define get_mc_address_u(f) get_vc_address_u(f)
+#endif
+
+static inline int offset_depth_adj(const HEVCContext *const s, const int wt)
+{
+    return s->ps.sps->high_precision_offsets_enabled_flag ? wt :
+           wt << (s->ps.sps->bit_depth - 8);
+}
 
 static void
 rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
@@ -2305,15 +2415,16 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
            const int weight_offset,
            AVFrame *const src_frame)
 {
-    const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
+    const unsigned int y_off = av_rpi_sand_frame_off_y(s->frame, x0, y0);
     const unsigned int mx          = mv->x & 3;
     const unsigned int my          = mv->y & 3;
     const unsigned int my_mx       = (my << 8) | mx;
     const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
-    const uint32_t src_vc_address_y = get_vc_address_y(src_frame);
-    uint32_t dst_addr = get_vc_address_y(s->frame) + y_off;
-    const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
+    const qpu_mc_src_addr_t src_vc_address_y = get_mc_address_y(src_frame);
+    qpu_mc_dst_addr_t dst_addr = get_mc_address_y(s->frame) + y_off;
+    const uint32_t wo = PACK2(offset_depth_adj(s, weight_offset) * 2 + 1, weight_mul);
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].luma_ip;
+    const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame);
 
     if (my_mx == 0)
     {
@@ -2332,7 +2443,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             for (int start_x = 0; start_x < nPbW; start_x += 16)
             {
                 const int bw = FFMIN(nPbW - start_x, 16);
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh, s->qpu_filter_y_p00);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh, s->qpu.y_p00);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_pred_y_p00_t *const cmd_y = &yp->qpu_mc_curr->y.p00;
 
@@ -2359,7 +2470,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 cmd_y->w = bw;
                 cmd_y->h = bh;
                 cmd_y->wo1 = wo;
-                cmd_y->dst_addr =  dst_addr + start_x;
+                cmd_y->dst_addr =  dst_addr + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 *(qpu_mc_pred_y_p00_t **)&yp->qpu_mc_curr = cmd_y + 1;
             }
@@ -2414,7 +2525,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             for (; start_x < nPbW; start_x += 16)
             {
                 const int bw = FFMIN(nPbW - start_x, 16);
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh + 7, s->qpu_filter);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh + 7, s->qpu.y_pxx);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2448,7 +2559,11 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 {
                     src2->x = MC_DUMMY_X;
                     src2->y = MC_DUMMY_Y;
-                    src2->base = s->qpu_dummy_frame;
+#if RPI_QPU_EMU_Y
+                    src2->base = s->qpu_dummy_frame_emu;
+#else
+                    src2->base = s->qpu_dummy_frame_qpu;
+#endif
                 }
                 else
                 {
@@ -2461,7 +2576,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
                 cmd_y->mymx21 = my2_mx2_my_mx;
                 cmd_y->wo1 = wo;
                 cmd_y->wo2 = wo;
-                cmd_y->dst_addr =  dst_addr + start_x;
+                cmd_y->dst_addr =  dst_addr + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
@@ -2485,7 +2600,7 @@ rpi_pred_y_b(HEVCContext * const s,
            AVFrame *const src_frame,
            AVFrame *const src_frame2)
 {
-    const unsigned int y_off = rpi_sliced_frame_off_y(s->frame, x0, y0);
+    const unsigned int y_off = av_rpi_sand_frame_off_y(s->frame, x0, y0);
     const Mv * const mv  = mv_field->mv + 0;
     const Mv * const mv2 = mv_field->mv + 1;
 
@@ -2498,14 +2613,15 @@ rpi_pred_y_b(HEVCContext * const s,
     const uint32_t     my2_mx2_my_mx = (my2_mx2 << 16) | my_mx;
     const unsigned int ref_idx0 = mv_field->ref_idx[0];
     const unsigned int ref_idx1 = mv_field->ref_idx[1];
-    const uint32_t wt_offset = s->sh.luma_offset_l0[ref_idx0] +
-                 s->sh.luma_offset_l1[ref_idx1] + 1;
+    const uint32_t wt_offset =
+        offset_depth_adj(s, s->sh.luma_offset_l0[ref_idx0] + s->sh.luma_offset_l1[ref_idx1]) + 1;
     const uint32_t wo1 = PACK2(wt_offset, s->sh.luma_weight_l0[ref_idx0]);
     const uint32_t wo2 = PACK2(wt_offset, s->sh.luma_weight_l1[ref_idx1]);
 
-    uint32_t dst = get_vc_address_y(s->frame) + y_off;
-    const uint32_t src1_base = get_vc_address_y(src_frame);
-    const uint32_t src2_base = get_vc_address_y(src_frame2);
+    const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame);
+    qpu_mc_dst_addr_t dst = get_mc_address_y(s->frame) + y_off;
+    const qpu_mc_src_addr_t src1_base = get_mc_address_y(src_frame);
+    const qpu_mc_src_addr_t src2_base = get_mc_address_y(src_frame2);
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].luma_ip;
 
     if (my2_mx2_my_mx == 0)
@@ -2526,7 +2642,7 @@ rpi_pred_y_b(HEVCContext * const s,
             // Can do chunks a full 16 wide if we don't want the H filter
             for (int start_x=0; start_x < nPbW; start_x += 16)
             {
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh, s->qpu_filter_y_b00);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh, s->qpu.y_b00);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2552,7 +2668,7 @@ rpi_pred_y_b(HEVCContext * const s,
                 cmd_y->mymx21 = 0;
                 cmd_y->wo1 = wo1;
                 cmd_y->wo2 = wo2;
-                cmd_y->dst_addr =  dst + start_x;
+                cmd_y->dst_addr =  dst + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
@@ -2581,7 +2697,7 @@ rpi_pred_y_b(HEVCContext * const s,
             { // B blocks work 8 at a time
                 // B weights aren't doubled as the QPU code does the same
                 // amount of work as it does for P
-                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh + 7, s->qpu_filter_b);
+                HEVCRpiInterPredQ *const yp = rpi_nxt_pred(ipe, bh + 7, s->qpu.y_bxx);
                 qpu_mc_src_t *const src1 = yp->last_l0;
                 qpu_mc_src_t *const src2 = yp->last_l1;
                 qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
@@ -2616,7 +2732,7 @@ rpi_pred_y_b(HEVCContext * const s,
                 cmd_y->mymx21 = my2_mx2_my_mx;
                 cmd_y->wo1 = wo1;
                 cmd_y->wo2 = wo2;
-                cmd_y->dst_addr =  dst + start_x;
+                cmd_y->dst_addr =  dst + (start_x << xshl);
                 yp->last_l0 = &cmd_y->next_src1;
                 yp->last_l1 = &cmd_y->next_src2;
                 *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
@@ -2636,19 +2752,20 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
   const int16_t * const c_offsets,
   AVFrame * const src_frame)
 {
-    const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
+    const unsigned int c_off = av_rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
     const int hshift           = s->ps.sps->hshift[1];
     const int vshift           = s->ps.sps->vshift[1];
 
     const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
     const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
-    const uint32_t src_base_u = get_vc_address_u(src_frame);
+    const qpu_mc_src_addr_t src_base_u = get_mc_address_u(src_frame);
     const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->x, 2 + hshift) << (1 - hshift)];
     const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->y, 2 + vshift) << (1 - vshift)];
-    const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
-    const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
-    uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
+    const uint32_t wo_u = PACK2(offset_depth_adj(s, c_offsets[0]) * 2 + 1, c_weights[0]);
+    const uint32_t wo_v = PACK2(offset_depth_adj(s, c_offsets[1]) * 2 + 1, c_weights[1]);
+    qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
+    const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame) + 1;
 
     for(int start_y=0;start_y < nPbH_c;start_y+=16)
     {
@@ -2656,7 +2773,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
 
         for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH)
         {
-            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh + 3, s->qpu_filter_uv);
+            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh + 3, s->qpu.c_pxx);
             qpu_mc_pred_c_p_t * const u = &cp->qpu_mc_curr->c.p;
             qpu_mc_src_t * const last_l0 = cp->last_l0;
             const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
@@ -2670,7 +2787,7 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
             u[0].coeffs_y = y_coeffs;
             u[0].wo_u = wo_u;
             u[0].wo_v = wo_v;
-            u[0].dst_addr_c = dst_base_u + start_x * 2;
+            u[0].dst_addr_c = dst_base_u + (start_x << xshl);
             cp->last_l0 = &u->next_src;
             *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = u + 1;
         }
@@ -2691,7 +2808,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame,
   AVFrame * const src_frame2)
 {
-    const unsigned int c_off = rpi_sliced_frame_off_c(s->frame, x0_c, y0_c);
+    const unsigned int c_off = av_rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
     const int hshift = s->ps.sps->hshift[1];
     const int vshift = s->ps.sps->vshift[1];
     const Mv * const mv = mv_field->mv + 0;
@@ -2712,10 +2829,14 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
     const int x2_c = x0_c + (mv2->x >> (2 + hshift)) - 1;
     const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
 
-    uint32_t dst_base_u = get_vc_address_u(s->frame) + c_off;
-    const uint32_t src1_base = get_vc_address_u(src_frame);
-    const uint32_t src2_base = get_vc_address_u(src_frame2);
+    const uint32_t wo_u2 = PACK2(offset_depth_adj(s, c_offsets[0] + c_offsets2[0]) + 1, c_weights2[0]);
+    const uint32_t wo_v2 = PACK2(offset_depth_adj(s, c_offsets[1] + c_offsets2[1]) + 1, c_weights2[1]);
+
+    qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
+    const qpu_mc_src_addr_t src1_base = get_mc_address_u(src_frame);
+    const qpu_mc_src_addr_t src2_base = get_mc_address_u(src_frame2);
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
+    const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame) + 1;
 
     for (int start_y = 0; start_y < nPbH_c; start_y += 16)
     {
@@ -2725,7 +2846,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
         {
             const unsigned int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
 
-            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh * 2 + 3, s->qpu_filter_uv_b0);
+            HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh * 2 + 3, s->qpu.c_bxx);
             qpu_mc_pred_c_b_t * const u = &cp->qpu_mc_curr->c.b;
             qpu_mc_src_t * const src_l0 = cp->last_l0;
             qpu_mc_src_t * const src_l1 = cp->last_l1;
@@ -2745,9 +2866,9 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
             u[0].weight_v1 = c_weights[1]; // Weight L0 V
             u[0].coeffs_x2 = coefs1_x;
             u[0].coeffs_y2 = coefs1_y;
-            u[0].wo_u2 = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
-            u[0].wo_v2 = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
-            u[0].dst_addr_c = dst_base_u + start_x * 2;
+            u[0].wo_u2 = wo_u2;
+            u[0].wo_v2 = wo_v2;
+            u[0].dst_addr_c = dst_base_u + (start_x << xshl);
 
             cp->last_l0 = &u[0].next_src1;
             cp->last_l1 = &u[0].next_src2;
@@ -3508,7 +3629,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
               lc->na.cand_up_left      = (cmd->na >> 2) & 1;
               lc->na.cand_up           = (cmd->na >> 1) & 1;
               lc->na.cand_up_right     = (cmd->na >> 0) & 1;
-              if (!rpi_sliced_frame(s->frame) || cmd->c_idx == 0)
+              if (!av_rpi_is_sand_frame(s->frame) || cmd->c_idx == 0)
                   s->hpc.intra_pred[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
               else
                   s->hpc.intra_pred_c[cmd->size - 2](s, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
@@ -3567,7 +3688,7 @@ static void rpi_begin(HEVCContext *s)
     const uint16_t pic_height_c       = s->ps.sps->height >> s->ps.sps->vshift[1];
 
     rpi_inter_pred_reset(cipe);
-    for(i=0; i < QPU_N_UV;i++) {
+    for (i = 0; i < cipe->n; i++) {
         HEVCRpiInterPredQ * const cp = cipe->q + i;
         qpu_mc_pred_c_s_t * const u = &cp->qpu_mc_base->c.s;
 
@@ -3576,9 +3697,9 @@ static void rpi_begin(HEVCContext *s)
         u->next_src1.base = 0;
         u->pic_cw = pic_width_c;
         u->pic_ch = pic_height_c;
-        u->stride2 = rpi_sliced_frame_stride2(s->frame);
+        u->stride2 = av_rpi_sand_frame_stride2(s->frame);
         u->stride1 = s->frame->linesize[1];
-        u->wdenom = s->sh.chroma_log2_weight_denom + 6;
+        u->wdenom = s->sh.chroma_log2_weight_denom;
         cp->last_l0 = &u->next_src1;
 
         u->next_fn = 0;
@@ -3591,7 +3712,7 @@ static void rpi_begin(HEVCContext *s)
     }
 
     rpi_inter_pred_reset(yipe);
-    for(i=0;i < QPU_N_Y;i++) {
+    for (i = 0; i < yipe->n; i++) {
         HEVCRpiInterPredQ * const yp = s->jobs[job].luma_ip.q + i;
         qpu_mc_pred_y_s_t * const y = &yp->qpu_mc_base->y.s;
 
@@ -3603,9 +3724,9 @@ static void rpi_begin(HEVCContext *s)
         y->next_src2.base = 0;
         y->pic_h = pic_height_y;
         y->pic_w = pic_width_y;
-        y->stride2 = rpi_sliced_frame_stride2(s->frame);
+        y->stride2 = av_rpi_sand_frame_stride2(s->frame);
         y->stride1 = s->frame->linesize[0];
-        y->wdenom = s->sh.luma_log2_weight_denom + 6;
+        y->wdenom = s->sh.luma_log2_weight_denom;
         y->next_fn = 0;
         yp->last_l0 = &y->next_src1;
         yp->last_l1 = &y->next_src2;
@@ -3622,14 +3743,14 @@ static void rpi_begin(HEVCContext *s)
 
 
 #if RPI_INTER
-static unsigned int mc_terminate_add(HEVCContext * const s,
+#if !RPI_QPU_EMU_Y || !RPI_QPU_EMU_C
+static unsigned int mc_terminate_add_qpu(HEVCContext * const s,
                                      const vpu_qpu_job_h vqj,
                                      rpi_cache_flush_env_t * const rfe,
                                      HEVCRpiInterPredEnv * const ipe)
 {
     unsigned int i;
     uint32_t mail[QPU_N_MAX][QPU_MAIL_EL_VALS];
-
     if (!ipe->used) {
         return 0;
     }
@@ -3646,15 +3767,13 @@ static unsigned int mc_terminate_add(HEVCContext * const s,
 
         ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
 
-        av_assert0((char *)yp->qpu_mc_curr - (char *)yp->qpu_mc_base <= ipe->q1_size);
-
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->x = MC_DUMMY_X;
         p0->y = MC_DUMMY_Y;
-        p0->base = s->qpu_dummy_frame;
+        p0->base = s->qpu_dummy_frame_qpu;
         p1->x = MC_DUMMY_X;
         p1->y = MC_DUMMY_Y;
-        p1->base = s->qpu_dummy_frame;
+        p1->base = s->qpu_dummy_frame_qpu;
 
         yp->last_l0 = NULL;
         yp->last_l1 = NULL;
@@ -3667,11 +3786,62 @@ static unsigned int mc_terminate_add(HEVCContext * const s,
 #if RPI_CACHE_UNIF_MVS
     rpi_cache_flush_add_gm_ptr(rfe, &ipe->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
 #endif
-    vpu_qpu_job_add_qpu(vqj, QPU_N_UV, (uint32_t *)mail);
+    vpu_qpu_job_add_qpu(vqj, ipe->n, (uint32_t *)mail);
 
     return 1;
 }
+#endif
 
+#if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
+static unsigned int mc_terminate_add_emu(HEVCContext * const s,
+                                     const vpu_qpu_job_h vqj,
+                                     rpi_cache_flush_env_t * const rfe,
+                                     HEVCRpiInterPredEnv * const ipe)
+{
+    unsigned int i;
+    if (!ipe->used) {
+        return 0;
+    }
+
+    if (ipe->curr != 0) {
+        rpi_inter_pred_sync(ipe);
+    }
+
+    // Add final commands to Q
+    for(i = 0; i != ipe->n; ++i) {
+        HEVCRpiInterPredQ * const yp = ipe->q + i;
+        qpu_mc_src_t *const p0 = yp->last_l0;
+        qpu_mc_src_t *const p1 = yp->last_l1;
+
+        ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
+
+        // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
+        p0->x = MC_DUMMY_X;
+        p0->y = MC_DUMMY_Y;
+        p0->base = s->qpu_dummy_frame_emu;
+        p1->x = MC_DUMMY_X;
+        p1->y = MC_DUMMY_Y;
+        p1->base = s->qpu_dummy_frame_emu;
+
+        yp->last_l0 = NULL;
+        yp->last_l1 = NULL;
+    }
+
+    return 1;
+}
+#endif
+
+
+#if RPI_QPU_EMU_Y
+#define mc_terminate_add_y mc_terminate_add_emu
+#else
+#define mc_terminate_add_y mc_terminate_add_qpu
+#endif
+#if RPI_QPU_EMU_C
+#define mc_terminate_add_c mc_terminate_add_emu
+#else
+#define mc_terminate_add_c mc_terminate_add_qpu
+#endif
 #endif
 
 #ifdef RPI
@@ -3696,13 +3866,14 @@ static void worker_core(HEVCContext * const s)
     const int job = s->pass1_job;
     unsigned int flush_start = 0;
     unsigned int flush_count = 0;
+    HEVCRpiJob * const jb = s->jobs + job;
 
     const vpu_qpu_job_h vqj = vpu_qpu_job_new();
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
 
     if (s->num_coeffs[job][3] + s->num_coeffs[job][2] != 0) {
         vpu_qpu_job_add_vpu(vqj,
-            vpu_get_fn(),
+            vpu_get_fn(s->ps.sps->bit_depth),
             vpu_get_constants(),
             s->coeffs_buf_vc[job][2],
             s->num_coeffs[job][2] >> 8,
@@ -3729,7 +3900,7 @@ static void worker_core(HEVCContext * const s)
         flush_count = FFMIN(high + (1 << s->ps.sps->log2_ctb_size), s->ps.sps->height) - flush_start;
     }
 
-    if (mc_terminate_add(s, vqj, rfe, &s->jobs[job].chroma_ip) != 0)
+    if (mc_terminate_add_c(s, vqj, rfe, &jb->chroma_ip) != 0)
     {
         rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
           0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 0, 1);
@@ -3741,7 +3912,7 @@ static void worker_core(HEVCContext * const s)
     vpu_qpu_job_add_sync_this(vqj, &sync_c);
 #endif
 
-    if (mc_terminate_add(s, vqj, rfe, &s->jobs[job].luma_ip) != 0)
+    if (mc_terminate_add_y(s, vqj, rfe, &jb->luma_ip) != 0)
     {
         rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
           0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 1, 0);
@@ -3760,6 +3931,24 @@ static void worker_core(HEVCContext * const s)
     // Look back in git if you find you want it back - As we have
     // no arm/neon sand pred code there doesn't seem a lot of point
     // keeping it around
+#if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
+    if (av_rpi_is_sand8_frame(s->frame))
+#if RPI_QPU_EMU_Y && RPI_QPU_EMU_C
+        rpi_shader_c8(s, &jb->luma_ip, &jb->chroma_ip);
+#elif RPI_QPU_EMU_Y
+        rpi_shader_c8(s, &jb->luma_ip, NULL);
+#else
+        rpi_shader_c8(s, NULL, &jb->chroma_ip);
+#endif
+    else
+#if RPI_QPU_EMU_Y && RPI_QPU_EMU_C
+        rpi_shader_c16(s, &jb->luma_ip, &jb->chroma_ip);
+#elif RPI_QPU_EMU_Y
+        rpi_shader_c16(s, &jb->luma_ip, NULL);
+#else
+        rpi_shader_c16(s, NULL, &jb->chroma_ip);
+#endif
+#endif
 
 #if RPI_OPT_SEP_PRED
     // Wait for transform completion
@@ -3806,8 +3995,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
-    s->enable_rpi = s->ps.sps->bit_depth == 8 &&
-        s->frame->format == AV_PIX_FMT_SAND128 &&
+    s->enable_rpi =
+        ((s->ps.sps->bit_depth == 8 && s->frame->format == AV_PIX_FMT_SAND128) ||
+         (s->ps.sps->bit_depth == 10 && s->frame->format == AV_PIX_FMT_SAND64_10)) &&
         !s->ps.pps->cross_component_prediction_enabled_flag;
 
     if (!s->enable_rpi) {
@@ -4852,10 +5042,8 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     av_rpi_zc_uninit(avctx);
 #endif
 
-    for (i = 0; i < 3; i++) {
-        av_freep(&s->sao_pixel_buffer_h[i]);
-        av_freep(&s->sao_pixel_buffer_v[i]);
-    }
+    av_freep(&s->sao_pixel_buffer_h[0]);  // [1] & [2] allocated with [0]
+    av_freep(&s->sao_pixel_buffer_v[0]);
     av_frame_free(&s->output_frame);
 
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++) {
@@ -4930,28 +5118,29 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     for (job = 0; job < RPI_MAX_JOBS; job++) {
         HEVCRpiJob * const jb = s->jobs + job;
-        // ** Sizeof the union structure might be overkill but at the moment it
-        //    is correct (it certainly isn't going to be too samll)
 
-        rpi_alloc_inter_pred(&jb->chroma_ip,
-                             QPU_N_UV, QPU_N_GRP_UV,
-                             UV_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_c_t),
-                             QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t),
-                             inter_pred_setup_c_qpu, inter_pred_sync_qpu, inter_pred_exit_c_qpu);
-        rpi_alloc_inter_pred(&jb->luma_ip,
-                             QPU_N_Y,  QPU_N_GRP_Y,
-                             Y_COMMANDS_PER_QPU * sizeof(qpu_mc_pred_y_t),
-                             QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t),
-                             inter_pred_setup_y_qpu, inter_pred_sync_qpu, inter_pred_exit_y_qpu);
+        // ** Sizeof the union structure might be overkill but at the moment it
+        //    is correct (it certainly isn't going to be too small)
+
+        rpi_inter_pred_alloc(&jb->chroma_ip,
+                             QPU_N_MAX, QPU_N_GRP,
+                             QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t),
+                             QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t));
+        rpi_inter_pred_alloc(&jb->luma_ip,
+                             QPU_N_MAX,  QPU_N_GRP,
+                             QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
+                             QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
     }
 
-    s->qpu_filter_uv = qpu_fn(mc_filter_uv);
-    s->qpu_filter_uv_b0 = qpu_fn(mc_filter_uv_b0);
-    s->qpu_dummy_frame = qpu_fn(mc_start);  // Use our code as a dummy frame
-    s->qpu_filter = qpu_fn(mc_filter);
-    s->qpu_filter_y_p00 = qpu_fn(mc_filter_y_p00);
-    s->qpu_filter_y_b00 = qpu_fn(mc_filter_y_b00);
-    s->qpu_filter_b = qpu_fn(mc_filter_b);
+#if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
+    {
+        static const uint32_t dframe[1] = {0x80808080};
+        s->qpu_dummy_frame_emu = (const uint8_t *)dframe;
+    }
+#endif
+#if !RPI_QPU_EMU_Y || !RPI_QPU_EMU_C
+    s->qpu_dummy_frame_qpu = qpu_fn(mc_start);  // Use our code as a dummy frame
+#endif
 #endif
     //gpu_malloc_uncached(2048*64,&s->dummy);
 

@@ -1,6 +1,7 @@
 *.a
 *.o
 *.o.*
+*.bin
 *.d
 *.def
 *.dll

@@ -572,8 +572,8 @@ typedef struct HEVCRpiInterPredEnv
     int used;              // 0 if nothing in any Q, 1 otherwise
     int used_grp;          // 0 if nothing in any Q in the current group
     unsigned int max_fill;
+    unsigned int min_gap;
     GPU_MEM_PTR_T gptr;
-    unsigned int q1_size;  // size of 1 uniform Q
 } HEVCRpiInterPredEnv;
 
 typedef struct HEVCRpiJob {
@@ -641,8 +641,6 @@ typedef struct HEVCContext {
     int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
-    int ctu_per_y_chan; // Number of CTUs per luma QPU
-    int ctu_per_uv_chan; // Number of CTUs per chroma QPU
 
     HEVCRpiJob jobs[RPI_MAX_JOBS];
 #if RPI_TSTATS
@@ -653,13 +651,13 @@ typedef struct HEVCContext {
     struct qpu_mc_src_s * last_y8_l1;
 
     // Function pointers
-    uint32_t qpu_filter_uv;
-    uint32_t qpu_filter_uv_b0;
-    uint32_t qpu_dummy_frame;  // Not a frame - just a bit of memory
-    uint32_t qpu_filter;
-    uint32_t qpu_filter_b;
-    uint32_t qpu_filter_y_p00;
-    uint32_t qpu_filter_y_b00;
+#if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
+    const uint8_t * qpu_dummy_frame_emu;
+#endif
+#if !RPI_QPU_EMU_Y || !RPI_QPU_EMU_C
+    uint32_t qpu_dummy_frame_qpu;  // Not a frame - just a bit of memory
+#endif
+    HEVCRpiQpu qpu;
 #endif
 
 #ifdef RPI_WORKER
@@ -673,9 +671,8 @@ typedef struct HEVCContext {
     int kill_worker; // set to 1 to terminate the worker
 #endif
 
-#define RPI_DEBLOCK_VPU_Q_COUNT 2
-
 #ifdef RPI_DEBLOCK_VPU
+#define RPI_DEBLOCK_VPU_Q_COUNT 2
     int enable_rpi_deblock;
 
     int uv_setup_width;
