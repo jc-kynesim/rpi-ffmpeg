@@ -473,7 +473,8 @@
 # We fetch (after shift)
 #  C0  :  C3  :  C1  :  C4  :  C2  :  C5  : ...
 
-  mov rb3, [0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1]
+  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
+  shl rb3, r0, i_shift30
 
 # r5 = 0 (loop counter)
 :1
@@ -485,16 +486,12 @@
   shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y
   add r0, r3, 1         ; mov.ifz ra_base, ra_base_next
 
-  and.setf -, 1, elem_num ; mov ra_y, r0
+  add.setf -, rb3, rb3  ; mov ra_y, r0
   max r3, r3, ra_k0     ; mov      r0, r1 << 15
-  min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
+  min r3, r3, ra9       ; mov.ifnc r1, r2 << 1
 
-  mov.ifz r0, r2        ; mul24 r2, r3, rb_pitch
+  mov.ifnc r0, r2       ; mul24 r2, r3, rb_pitch
   add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
-
-# ra4 not really needed; this could be a mul24 rather than a mov but current
-# register usage means this wouldn't help
-  mov.setf -, rb3       ; mov ra4, ra5
 
 # apply horizontal filter
 # The filter coeffs for the two halves of this are the same (unlike in the
@@ -504,25 +501,20 @@
 
   and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,       r0
   nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
-  nop                   ; mul24.ifnz r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
+  nop                   ; mul24.ifn  r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 4,  r0 << 4  @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8c << 14, r1 << 14 @ "mul_used", 0
-  sub.setf -, r5, 4     ; mul24      r0, ra0.8d      , r1
+  nop                   ; mul24.ifn  r3, ra0.8c << 14, r1 << 14 @ "mul_used", 0
+  sub.setf -, r5, 4     ; mul24      r1, ra0.8d,       r1
+
 # V filter =- ra4 * rb8-+ ra5 * rb9 + ra6 * rb10 - ra7 * rb11 (post FIFO shift)
-# Have to dup block as we need to move the brr - code is more common than it
-# looks at first glance
-.if v_bit_depth <= 8
+# * If we had mixed ra/rb shift registers we could save an instruction here
+#   in the 8-bit case
+  add r2, r2, r3        ; mul24 r0, ra5, rb8
   brr.anyn -, r:1b
-  add r2, r2, r3        ; mov ra5, ra6
+  sub r2, r2, r1        ; mov ra5, ra6
   mov ra6, ra7          ; mul24 r1, ra7, rb10
-  sub ra7, r2, r0       ; mul24 r0, ra4, rb8
-.else
-  add r2, r2, r3        ; mov ra5, ra6
-  brr.anyn -, r:1b
-  mov ra6, ra7          ; mul24 r1, ra7, rb10
-  sub r2, r2, r0        ; mul24 r0, ra4, rb8
   asr ra7, r2, v_bit_depth - 8
-.endif
+
 # >>> .anyn 1b
 
   sub r1, r1, r0        ; mul24 r0, ra5, rb9    # [ra7 delay]
@@ -667,7 +659,9 @@
 # rb8-rb11  V coeffs L1
 # ra9       rb_max_y alias
 
-  mov rb3, [0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1]
+  # This allows us to have el even/odd on nn/n and lo/hi on nc/c after add to self
+  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
+  shl rb3, r0, i_shift30
 
 :1
 # retrieve texture results and pick out bytes
@@ -675,25 +669,24 @@
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0     # loop counter increment
   shr r2, r4, ra_xshift ; mov.ifz ra_base2, rb_base2_next
   shr r1, r2, v_v_shift ; mov.ifz ra_y_y2, ra_y_y2_next
-  mov rb4, rb5          ; mov.ifz ra_base, ra_base_next
+  add.setf -, rb3, rb3  ; mov.ifz ra_base, ra_base_next
   add ra_y, 1, ra_y     ; mov r3, ra_y
 
-  and.setf -, 1, elem_num
   max r3, r3, ra_k0     ; mov      r0, r1 << 15
-  min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
+  min r3, r3, ra9       ; mov.ifnc r1, r2 << 1
 
-  mov.ifz r0, r2        ; mul24 r3, r3, rb_pitch
+  mov.ifnc r0, r2       ; mul24 r3, r3, rb_pitch
   add t0s, ra_base, r3  ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
 
 # L0 H-filter
 # H FIFO scrolls are spread all over this loop
-  mov.setf -, rb3       ; mov ra4, ra5
+  mov rb4, rb5          ; mov ra4, ra5          # ? Just moves
 
   and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,       r0
   nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
-  nop                   ; mul24.ifnz r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
+  nop                   ; mul24.ifn  r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 4,  r0 << 4  @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8c << 14, r1 << 14 @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra0.8c << 14, r1 << 14 @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra0.8d,       r1
 .if v_bit_depth <= 8
   sub ra3, r2, r3       ; mov rb5, rb6          ; ldtmu1
@@ -706,38 +699,30 @@
   shr r1, r2, v_v_shift ; mov r3, ra_y2
   add ra_y2, r3, ra_k1  ; mov rb6, rb7
 
-  and.setf -, 1, elem_num
   max r3, r3, ra_k0     ; mov      r0, r1 << 15
-  min r3, r3, ra9       ; mov.ifz  r1, r2 << 1
+  min r3, r3, ra9       ; mov.ifnc r1, r2 << 1
 
-  mov.ifz r0, r2        ; mul24 r3, r3, rb_pitch
+  mov.ifnc r0, r2       ; mul24 r3, r3, rb_pitch
   add t1s, ra_base2, r3 ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
 
 # L1 H-filter
-  mov.setf -, rb3       ; mov rb7, ra3
 
   and r1, r1, rb_pmask  ; mul24      r3, ra1.8a,       r0
   nop                   ; mul24      r2, ra1.8b << 2,  r0 << 2  @ "mul_used", 0
-  nop                   ; mul24.ifnz r2, ra1.8b << 12, r1 << 12 @ "mul_used", 0
+  nop                   ; mul24.ifn  r2, ra1.8b << 12, r1 << 12 @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra1.8c << 4,  r0 << 4  @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8c << 14, r1 << 14 @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8c << 14, r1 << 14 @ "mul_used", 0
   sub.setf -, r5, 4     ; mul24      r0, ra1.8d,       r1
 # V filters - start in branch delay slots of H
-.if v_bit_depth <= 8
-  brr.anyn -, r:1b
-  add r2, r2, r3        ; mul24 r1, rb5, ra2.8b
-  mov ra6, ra7          ; mul24 r3, ra7, rb10
-  sub ra7, r2, r0       ; mul24 r0, rb4, ra2.8a
-.else
+# Final asr not needed for 8-bit but we can#t (currently) save a whole instruction
   add r2, r2, r3        ; mul24 r1, rb5, ra2.8b
   brr.anyn -, r:1b
   mov ra6, ra7          ; mul24 r3, ra7, rb10
   sub r2, r2, r0        ; mul24 r0, rb4, ra2.8a
-  asr ra7, r2, (v_bit_depth - 8)
-.endif
+  asr ra7, r2, (v_bit_depth - 8) ; mov rb7, ra3
 # >>> .anyn 1b
 
-  sub r1, r1, r0        ; mul24 r0, rb6, ra2.8c
+  sub r1, r1, r0        ; mul24 r0, rb6, ra2.8c # [rb7 delay]
   add r1, r1, r0        ; mul24 r0, rb7, ra2.8d
   sub r2, r1, r0        ; mul24 r0, ra4, rb8
   sub r1, r3, r0        ; mul24 r0, ra5, rb9
