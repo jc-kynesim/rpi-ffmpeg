@@ -152,7 +152,7 @@ static int get_qPy(HEVCContext *s, int xC, int yC)
 static inline unsigned int pixel_shift(const HEVCContext * const s, const unsigned int c_idx)
 {
 #ifdef RPI
-    return c_idx != 0 && rpi_is_sand_frame(s->frame) ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
+    return c_idx != 0 && av_rpi_is_sand_frame(s->frame) ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
 #else
     return s->ps.sps->pixel_shift;
 #endif
@@ -308,7 +308,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
     uint8_t up_tile_edge     = 0;
     uint8_t bottom_tile_edge = 0;
 #ifdef RPI
-    const int sliced = rpi_is_sand_frame(s->frame);
+    const int sliced = av_rpi_is_sand_frame(s->frame);
     const int plane_count = sliced ? 2 : (s->ps.sps->chroma_format_idc ? 3 : 1);
 #else
     const int plane_count = (s->ps.sps->chroma_format_idc ? 3 : 1);
@@ -372,18 +372,18 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         uint8_t * const src = !sliced ?
                 &s->frame->data[c_idx][y0 * stride_src + (x0 << sh)] :
             c_idx == 0 ?
-                rpi_sand_frame_pos_y(s->frame, x0, y0) :
-                rpi_sand_frame_pos_c(s->frame, x0, y0);
+                av_rpi_sand_frame_pos_y(s->frame, x0, y0) :
+                av_rpi_sand_frame_pos_c(s->frame, x0, y0);
         const uint8_t * const src_l = edges[0] || !wants_lr ? NULL :
             !sliced ? src - (1 << sh) :
             c_idx == 0 ?
-                rpi_sand_frame_pos_y(s->frame, x0 - 1, y0) :
-                rpi_sand_frame_pos_c(s->frame, x0 - 1, y0);
+                av_rpi_sand_frame_pos_y(s->frame, x0 - 1, y0) :
+                av_rpi_sand_frame_pos_c(s->frame, x0 - 1, y0);
         const uint8_t * const src_r = edges[2] || !wants_lr ? NULL :
             !sliced ? src + (width << sh) :
             c_idx == 0 ?
-                rpi_sand_frame_pos_y(s->frame, x0 + width, y0) :
-                rpi_sand_frame_pos_c(s->frame, x0 + width, y0);
+                av_rpi_sand_frame_pos_y(s->frame, x0 + width, y0) :
+                av_rpi_sand_frame_pos_c(s->frame, x0 + width, y0);
 
 
         if (sliced && c_idx > 1) {
@@ -664,13 +664,13 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     no_q[1] = get_pcm(s, x, y + 4);
                 }
 #ifdef RPI
-                if (rpi_is_sand_frame(s->frame)) {
+                if (av_rpi_is_sand_frame(s->frame)) {
 
                     // This copes properly with no_p/no_q
-                    s->hevcdsp.hevc_v_loop_filter_luma2(rpi_sand_frame_pos_y(s->frame, x, y),
+                    s->hevcdsp.hevc_v_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
                                                      s->frame->linesize[LUMA],
                                                      beta, tc, no_p, no_q,
-                                                     rpi_sand_frame_pos_y(s->frame, x - 4, y));
+                                                     av_rpi_sand_frame_pos_y(s->frame, x - 4, y));
                 }
                 else
 #endif
@@ -723,8 +723,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
                 src =
 #ifdef RPI
-                    rpi_is_sand_frame(s->frame) ?
-                        rpi_sand_frame_pos_y(s->frame, x, y) :
+                    av_rpi_is_sand_frame(s->frame) ?
+                        av_rpi_sand_frame_pos_y(s->frame, x, y) :
 #endif
                         &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
                 if (pcmf) {
@@ -758,7 +758,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
     if (s->ps.sps->chroma_format_idc) {
 #ifdef RPI
-        if (rpi_is_sand_frame(s->frame)) {
+        if (av_rpi_is_sand_frame(s->frame)) {
             const int v = 2;
             const int h = 2;
 
@@ -791,10 +791,10 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                 continue;
                         }
 
-                        s->hevcdsp.hevc_v_loop_filter_uv2(rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                        s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
                                                        s->frame->linesize[1],
                                                        tc4,
-                                                       rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
+                                                       av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
                                                        no_f);
                     }
                 }
@@ -833,7 +833,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                 continue;
                         }
 
-                        s->hevcdsp.hevc_h_loop_filter_uv(rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                        s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
                                                              s->frame->linesize[1],
                                                              tc4, no_f);
                     }
@@ -860,8 +860,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                         c_tc[1] = (bs1 == 2) ? chroma_tc(s, qp1, chroma, tc_offset) : 0;
                         src =
 #ifdef RPI
-                            rpi_is_sand_frame(s->frame) ?
-                                rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
+                            av_rpi_is_sand_frame(s->frame) ?
+                                av_rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
 #endif
                                 &s->frame->data[chroma][(y >> s->ps.sps->vshift[chroma]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[chroma]) << s->ps.sps->pixel_shift)];
                         if (pcmf) {
@@ -912,8 +912,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                         c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
                         src =
 #ifdef RPI
-                            rpi_is_sand_frame(s->frame) ?
-                                rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
+                            av_rpi_is_sand_frame(s->frame) ?
+                                av_rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
 #endif
                                 &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
                         if (pcmf) {

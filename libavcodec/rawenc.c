@@ -76,10 +76,10 @@ static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 
     dst = pkt->data;
 
-    rpi_sand_to_planar_y8(dst, width, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
+    av_rpi_sand_to_planar_y8(dst, width, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
     dst += width * height;
-    rpi_sand_to_planar_c8(dst, width / 2, dst + width * height / 4, width / 2,
-                          frame->data[1], frame->linesize[1], rpi_sand_frame_stride2(frame), x0 / 2, y0 / 2, width / 2, height / 2);
+    av_rpi_sand_to_planar_c8(dst, width / 2, dst + width * height / 4, width / 2,
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0 / 2, y0 / 2, width / 2, height / 2);
     return 0;
 }
 
@@ -108,10 +108,10 @@ static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 
     dst = pkt->data;
 
-    rpi_sand_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0 * 2, y0, width * 2, height);
+    av_rpi_sand_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0 * 2, y0, width * 2, height);
     dst += width * height * 2;
-    rpi_sand_to_planar_c16(dst, width, dst + width * height / 2, width,
-                          frame->data[1], frame->linesize[1], rpi_sand_frame_stride2(frame), x0, y0 / 2, width, height / 2);
+    av_rpi_sand_to_planar_c16(dst, width, dst + width * height / 2, width,
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0, y0 / 2, width, height / 2);
     return 0;
 }
 
@@ -125,8 +125,8 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
     if (ret < 0)
         return ret;
 
-    if (rpi_is_sand_frame(frame)) {
-        ret = rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) : raw_sand16_as_yuv420(avctx, pkt, frame);
+    if (av_rpi_is_sand_frame(frame)) {
+        ret = av_rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) : raw_sand16_as_yuv420(avctx, pkt, frame);
         *got_packet = (ret == 0);
         return ret;
     }

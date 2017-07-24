@@ -15,7 +15,7 @@
 // Fetches a single patch - offscreen fixup not done here
 // w <= stride1
 // unclipped
-void FUNC(rpi_sand_to_planar_y)(uint8_t * dst, const unsigned int dst_stride,
+void FUNC(av_rpi_sand_to_planar_y)(uint8_t * dst, const unsigned int dst_stride,
                              const uint8_t * src,
                              unsigned int stride1, unsigned int stride2,
                              unsigned int _x, unsigned int y,
@@ -58,7 +58,7 @@ void FUNC(rpi_sand_to_planar_y)(uint8_t * dst, const unsigned int dst_stride,
 
 // x & w in bytes but not of interleave (i.e. offset = x*2 for U&V)
 
-void FUNC(rpi_sand_to_planar_c)(uint8_t * dst_u, const unsigned int dst_stride_u,
+void FUNC(av_rpi_sand_to_planar_c)(uint8_t * dst_u, const unsigned int dst_stride_u,
                              uint8_t * dst_v, const unsigned int dst_stride_v,
                              const uint8_t * src,
                              unsigned int stride1, unsigned int stride2,
@@ -117,7 +117,7 @@ void FUNC(rpi_sand_to_planar_c)(uint8_t * dst_u, const unsigned int dst_stride_u
     }
 }
 
-void FUNC(rpi_planar_to_sand_c)(uint8_t * dst_c,
+void FUNC(av_rpi_planar_to_sand_c)(uint8_t * dst_c,
                              unsigned int stride1, unsigned int stride2,
                              const uint8_t * src_u, const unsigned int src_stride_u,
                              const uint8_t * src_v, const unsigned int src_stride_v,

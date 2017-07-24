@@ -24,7 +24,7 @@ static void cpy16_to_8(uint8_t * dst, const uint8_t * _src, unsigned int n, cons
 }
 
 // w/h in pixels
-void rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const unsigned int dst_stride2,
+void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const unsigned int dst_stride2,
                          const uint8_t * src, const unsigned int src_stride1, const unsigned int src_stride2,
                          unsigned int w, unsigned int h, const unsigned int shr)
 {

@@ -581,7 +581,7 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
       rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
     }
   }
-  else if (!rpi_is_sand_frame(frame))
+  else if (!av_rpi_is_sand_frame(frame))
   {
     const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
     if (do_luma) {
@@ -598,14 +598,14 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
 //    printf("%s: start_line=%d, lines=%d, %c%c\n", __func__, start_line, n, do_luma ? 'l' : ' ', do_chroma ? 'c' : ' ');
     // **** Use x0!
     // We are working in pels here so halve linesize if 16-bit frame
-    const unsigned int slice_width = rpi_is_sand8_frame(frame) ? frame->linesize[0] : (frame->linesize[0] >> 1);
+    const unsigned int slice_width = av_rpi_is_sand8_frame(frame) ? frame->linesize[0] : (frame->linesize[0] >> 1);
     for (unsigned int x = 0; x < x0 + width; x += slice_width) {
       if (do_luma) {
-        rpi_cache_flush_add_gm_range(rfe, gm, mode, rpi_sand_frame_off_y(frame, x, y0), y_size);
+        rpi_cache_flush_add_gm_range(rfe, gm, mode, av_rpi_sand_frame_off_y(frame, x, y0), y_size);
       }
       if (do_chroma) {
         rpi_cache_flush_add_gm_range(rfe, gm, mode,
-                                     (frame->data[1] - gm->arm) + rpi_sand_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
+                                     (frame->data[1] - gm->arm) + av_rpi_sand_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
       }
     }
   }

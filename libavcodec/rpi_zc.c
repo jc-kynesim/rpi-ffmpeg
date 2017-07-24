@@ -416,7 +416,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
         rv = avcodec_default_get_buffer2(s, frame, flags);
     }
     else if (frame->format == AV_PIX_FMT_YUV420P ||
-             rpi_is_sand_frame(frame))
+             av_rpi_is_sand_frame(frame))
     {
         rv = rpi_get_display_buffer(s->get_buffer_context, frame);
     }
@@ -553,12 +553,12 @@ static AVBufferRef * zc_sand64_16_to_sand128(struct AVCodecContext * const s,
     }
 
     // Y
-    rpi_sand16_to_sand8(dest->data[0], dest->linesize[0], rpi_sand_frame_stride2(dest),
-                        src->data[0], src->linesize[0], rpi_sand_frame_stride2(dest),
+    av_rpi_sand16_to_sand8(dest->data[0], dest->linesize[0], av_rpi_sand_frame_stride2(dest),
+                        src->data[0], src->linesize[0], av_rpi_sand_frame_stride2(dest),
                         src->width, src->height, shr);
     // C
-    rpi_sand16_to_sand8(dest->data[1], dest->linesize[1], rpi_sand_frame_stride2(dest),
-                        src->data[1], src->linesize[1], rpi_sand_frame_stride2(dest),
+    av_rpi_sand16_to_sand8(dest->data[1], dest->linesize[1], av_rpi_sand_frame_stride2(dest),
+                        src->data[1], src->linesize[1], av_rpi_sand_frame_stride2(dest),
                         src->width, src->height / 2, shr);
 
     return dest->buf[0];
@@ -573,7 +573,7 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
 
     if (frame->format != AV_PIX_FMT_YUV420P &&
         frame->format != AV_PIX_FMT_YUV420P10 &&
-        !rpi_is_sand_frame(frame))
+        !av_rpi_is_sand_frame(frame))
     {
         av_log(s, AV_LOG_WARNING, "%s: *** Format not SAND/YUV420P: %d\n", __func__, frame->format);
         return NULL;

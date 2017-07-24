@@ -188,11 +188,11 @@ do {                                  \
 
     const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
 #if defined(RPI)
-    pixel *const src = !rpi_is_sand_frame(s->frame) ?
+    pixel *const src = !av_rpi_is_sand_frame(s->frame) ?
             (pixel*)s->frame->data[c_idx] + x + y * stride :
         c_idx == 0 ?
-            (pixel *)rpi_sand_frame_pos_y(s->frame, x, y) :
-            (pixel *)rpi_sand_frame_pos_c(s->frame, x, y);
+            (pixel *)av_rpi_sand_frame_pos_y(s->frame, x, y) :
+            (pixel *)av_rpi_sand_frame_pos_c(s->frame, x, y);
 #else
     pixel *src = (pixel*)s->frame->data[c_idx] + x + y * stride;
 #endif
@@ -237,11 +237,11 @@ do {                                  \
 #endif
 
 #if defined(RPI)
-    if (rpi_is_sand_frame(s->frame)) {
+    if (av_rpi_is_sand_frame(s->frame)) {
         // N.B. stride is in pixels (not bytes) or in the case of chroma pixel-pairs
         const AVFrame * const frame = s->frame;
         const unsigned int mask = stride - 1; // For chroma pixel=uint16 so stride_c is stride_y / 2
-        const unsigned int stripe_adj = (rpi_sand_frame_stride2(frame) - 1) * stride;
+        const unsigned int stripe_adj = (av_rpi_sand_frame_stride2(frame) - 1) * stride;
         if ((x & mask) == 0)
             src_l -= stripe_adj;
         if (((x + size) & mask) == 0)

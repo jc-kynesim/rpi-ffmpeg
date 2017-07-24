@@ -218,7 +218,7 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
             if (ret < 0)
                 return ret;
 
-            if (rpi_is_sand_format(fmt))
+            if (av_rpi_is_sand_format(fmt))
             {
                 // Sand cannot be windowed by offset so add side data if we have an offset
                 const HEVCWindow * const window = &frame->window;

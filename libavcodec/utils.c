@@ -791,7 +791,7 @@ int avcodec_default_get_buffer2(AVCodecContext *avctx, AVFrame *frame, int flags
 
 #ifdef RPI
     // This is going to end badly if we let it continue
-    av_assert0(!rpi_is_sand_frame(frame));
+    av_assert0(!av_rpi_is_sand_frame(frame));
 #endif
 
     if (avctx->hw_frames_ctx)
