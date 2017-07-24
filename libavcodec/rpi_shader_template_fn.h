@@ -74,7 +74,7 @@ static void FUNC(get_patch_y)(const shader_track_t * const st,
     }
 
     dst += dl + dt * dst_stride;
-    FUNC(rpi_sand_to_planar_y)(dst, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
+    FUNC(av_rpi_sand_to_planar_y)(dst, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
 
     // Edge dup
     if (dl != 0)
@@ -139,7 +139,7 @@ static void FUNC(get_patch_c)(const shader_track_t * const st,
 
     dst_u += dl + dt * dst_stride;
     dst_v += dl + dt * dst_stride;
-    FUNC(rpi_sand_to_planar_c)(dst_u, dst_stride, dst_v, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
+    FUNC(av_rpi_sand_to_planar_c)(dst_u, dst_stride, dst_v, dst_stride, (const uint8_t *)src->base, st->stride1, st->stride2, x, y, w, h);
 
     // Edge dup
     if (dl != 0)
@@ -381,7 +381,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                             patch_v3, 8 * PW, patch_v1 + PATCH_STRIDE + PW, PATCH_STRIDE,
                             c->h, st->wdenom, wweight(c->wo_v), woff_p(s, c->wo_v), mx, my, c->w);
 
-                        FUNC(rpi_planar_to_sand_c)((uint8_t *)c->dst_addr_c, st->stride1, st->stride2, patch_u3, 8 * PW, patch_v3, 8 * PW, 0, 0, c->w * PW, c->h);
+                        FUNC(av_rpi_planar_to_sand_c)((uint8_t *)c->dst_addr_c, st->stride1, st->stride2, patch_u3, 8 * PW, patch_v3, 8 * PW, 0, 0, c->w * PW, c->h);
 
                         st->last_l0 = &c->next_src;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
@@ -421,7 +421,7 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                             c->h, st->wdenom, c->weight_v1, wweight(c->wo_v2),
                             0, woff_b(s, c->wo_v2), mx2, my2, c->w);
 
-                        FUNC(rpi_planar_to_sand_c)((uint8_t *)c->dst_addr_c, st->stride1, st->stride2, patch_u3, 8 * PW, patch_v3, 8 * PW, 0, 0, c->w * PW, c->h);
+                        FUNC(av_rpi_planar_to_sand_c)((uint8_t *)c->dst_addr_c, st->stride1, st->stride2, patch_u3, 8 * PW, patch_v3, 8 * PW, 0, 0, c->w * PW, c->h);
 
                         st->last_l0 = &c->next_src1;
                         st->last_l1 = &c->next_src2;
