@@ -455,28 +455,26 @@
   mov rb_dest, unif     ; mov ra9, rb_max_y     # dst_addr ; alias rb_max_y
 
   shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
-  mov r5quad, 0         ; mov rb11, ra3.8d      # Loop count (r5rep is B, r5quad is A)
+  mov r5quad, 0         ; mov rb11, ra3.8d
 
-  asr rb_wt_off, r1, 2  ; mov ra_link, unif     # Link
+  asr rb_wt_off, r1, 2
   sub ra3, rb_wt_den_p15, ra_k1
 
-# ra9 alias for rb_max_y
+  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
+  shl rb3, r0, i_shift30 ; mov ra_link, unif    # ; Link
+
+# r5           = 0 (loop counter)
+# rb3          = even/odd lo/hi el test value
+# ra9          = alias for rb_max_y
 # ra_wt_mul_l0 = weight L0
 # ra3          = weight denom + 22 - bit_depth [= rb_wt_den_p15 - 1, max 19]
 # rb_wt_off    = (offset * 2 + 1) << (ra3 - 1)
-
-# retrieve texture results and pick out bytes
-# then submit two more texture requests
 
 # We want (r0r1)
 # U0U3 : V0V3 : U1U4 : V1V4 : U2U5 : V2U5 : ...
 # We fetch (after shift)
 #  C0  :  C3  :  C1  :  C4  :  C2  :  C5  : ...
 
-  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
-  shl rb3, r0, i_shift30
-
-# r5 = 0 (loop counter)
 :1
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
@@ -484,13 +482,13 @@
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0     # loop counter increment
   shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
   shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y
-  add r0, r3, 1         ; mov.ifz ra_base, ra_base_next
+  add.setf -, rb3, rb3  ; mov.ifz ra_base, ra_base_next
 
-  add.setf -, rb3, rb3  ; mov ra_y, r0
-  max r3, r3, ra_k0     ; mov      r0, r1 << 15
-  min r3, r3, ra9       ; mov.ifnc r1, r2 << 1
+  add ra_y, r3, ra_k1   ; mov      r0, r1 << 15
+  max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
+  min r3, r3, ra9       ; mov.ifnc r0, r2
 
-  mov.ifnc r0, r2       ; mul24 r2, r3, rb_pitch
+  mov ra4, ra5          ; mul24 r2, r3, rb_pitch
   add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
 
 # apply horizontal filter
@@ -504,17 +502,23 @@
   nop                   ; mul24.ifn  r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 4,  r0 << 4  @ "mul_used", 0
   nop                   ; mul24.ifn  r3, ra0.8c << 14, r1 << 14 @ "mul_used", 0
-  sub.setf -, r5, 4     ; mul24      r1, ra0.8d,       r1
+  sub.setf -, r5, 4     ; mul24      r0, ra0.8d,       r1
 
 # V filter =- ra4 * rb8-+ ra5 * rb9 + ra6 * rb10 - ra7 * rb11 (post FIFO shift)
-# * If we had mixed ra/rb shift registers we could save an instruction here
-#   in the 8-bit case
-  add r2, r2, r3        ; mul24 r0, ra5, rb8
+# Have to dup block as we need to move the brr - code is more common than it
+# looks at first glance
+.if v_bit_depth <= 8
   brr.anyn -, r:1b
-  sub r2, r2, r1        ; mov ra5, ra6
+  add r2, r2, r3        ; mov ra5, ra6
   mov ra6, ra7          ; mul24 r1, ra7, rb10
+  sub ra7, r2, r0       ; mul24 r0, ra4, rb8
+.else
+  add r2, r2, r3        ; mov ra5, ra6
+  brr.anyn -, r:1b
+  mov ra6, ra7          ; mul24 r1, ra7, rb10
+  sub r2, r2, r0        ; mul24 r0, ra4, rb8
   asr ra7, r2, v_bit_depth - 8
-
+.endif
 # >>> .anyn 1b
 
   sub r1, r1, r0        ; mul24 r0, ra5, rb9    # [ra7 delay]
