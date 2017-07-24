@@ -54,11 +54,41 @@
         vsub.s8  q11, q3
 .endm
 
+
+.macro sao_band_32_16  Q0, Q1, Q2, Q3, XLAT, Q_MIN, Q_MAX, bit_depth
+        vshrn.i16 d12, \Q0, #(\bit_depth - 5)
+        vshrn.i16 d13, \Q1, #(\bit_depth - 5)
+        vshrn.i16 d14, \Q2, #(\bit_depth - 5)
+        vshrn.i16 d15, \Q3, #(\bit_depth - 5)
+        vtbl.8    d12, \XLAT, d12
+        vtbl.8    d13, \XLAT, d13
+        vtbl.8    d14, \XLAT, d14
+        vtbl.8    d15, \XLAT, d15
+        vaddw.s8  \Q0, d12
+        vaddw.s8  \Q1, d13
+        vaddw.s8  \Q2, d14
+        vaddw.s8  \Q3, d15
+        vmax.s16  \Q0, \Q_MIN
+        vmax.s16  \Q1, \Q_MIN
+        vmax.s16  \Q2, \Q_MIN
+        vmax.s16  \Q3, \Q_MIN
+        vmin.s16  \Q0, \Q_MAX
+        vmin.s16  \Q1, \Q_MAX
+        vmin.s16  \Q2, \Q_MAX
+        vmin.s16  \Q3, \Q_MAX
+.endm
+
 @ q0-q1  Offset table
 @ q2     0
 @ q3     (1 << bit_depth) - 1
 @ q4-q7  clobbered
 @ q8-q15 input/output
+.if 1
+.macro sao_band_64_16 bit_depth
+        sao_band_32_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", q2, q3, \bit_depth
+        sao_band_32_16 q12, q13, q14, q15, "{d0,d1,d2,d3}", q2, q3, \bit_depth
+.endm
+.else
 .macro sao_band_64_16 bit_depth
         vshrn.i16 d8,  q8,  #(\bit_depth - 5)
         vshrn.i16 d9,  q9,  #(\bit_depth - 5)
@@ -101,6 +131,9 @@
         vmin.s16  q14, q3
         vmin.s16  q15, q3
 .endm
+.endif
+
+
 
 function ff_hevc_sao_band_w8_neon_8, export=1
         init_sao_band
