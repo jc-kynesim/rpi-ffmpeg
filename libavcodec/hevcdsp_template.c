@@ -1974,7 +1974,7 @@ static void FUNC(hevc_v_loop_filter_luma)(uint8_t *pix, ptrdiff_t stride,
 #undef TQ2
 #undef TQ3
 
-#ifdef RPI
+#if RPI_HEVC_SAND
 
 // line zero
 #define P3 pix_l[0 * xstride]
