@@ -1265,11 +1265,12 @@
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
   min r1, r1, ra_pmax   ; mov -, vw_wait
-  max vpm, r1, 0
+  max vpm, r1, ra_k0    ; mul24 r2, r3, rb_pitch
 
 # >>> branch.anyn yloop
 
-# r0 = remaining height
+# r0 = remaining height (min 0)
+# r2 = r3 * rb_pitch
 # r3 = block_height (currently always 16)
 
 # If looping again then we consumed 16 height last loop
@@ -1277,19 +1278,18 @@
 # rb_i_tmu remains const (based on total height)
 # recalc rb_dma0, rb_lcount based on new segment height
 
-  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
+  mov.setf ra_height, r0 ; mov vw_setup, rb_dma0 # VDW setup 0
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
-  nop                   ; mov vw_addr, rb_dest  # start the VDW
+  min r0, r0, r3        ; mov vw_setup, rb_dma1 # Stride
+  sub r1, r0, r3        ; mov vw_addr, rb_dest  # start the VDW
+  shl r1, r1, i_shift23
 # >>> .anyz ra_link
 
 # Here r1 = cur_blk_height - 16 so it will be 0 or -ve
 # We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r1, r1, i_shift23
   brr -, r:1b
   add rb_dma0, rb_dma0, r1
   add rb_dest, rb_dest, r2
