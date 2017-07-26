@@ -54,7 +54,7 @@
         vsub.s8  q11, q3
 .endm
 
-
+@ Clobbers q6, q7
 .macro sao_band_32_16  Q0, Q1, Q2, Q3, XLAT, Q_MIN, Q_MAX, bit_depth
         vshrn.i16 d12, \Q0, #(\bit_depth - 5)
         vshrn.i16 d13, \Q1, #(\bit_depth - 5)
@@ -255,6 +255,66 @@ band_load_y:
         bx        lr
 
 
+band_load_c:
+        vmov.i64  q2, #0
+        ldr       r12, [sp, #8]         @ &sao_offset_val1[0]
+        add       r12, #2               @ 1st interesting val is [1]
+        vld1.16   {d16}, [r12]          @ Unaligned
+        vmov.i64  q3, #0
+        ldr       r12, [sp, #12]        @ sao_left_class
+        vpush     {q2, q3}              @ Put zero array on stack
+
+        @ stuff the offset vals into the array
+        add       r4, r12, sp
+        add       r12, #1
+        vst1.8    {d16[0]}, [r4]
+        and       r12, #31
+        add       r4, r12, sp
+        add       r12, #1
+        vst1.8    {d16[2]}, [r4]
+        and       r12, #31
+        add       r4, r12, sp
+        add       r12, #1
+        vst1.8    {d16[4]}, [r4]
+        and       r12, #31
+        add       r4, r12, sp
+        vst1.8    {d16[6]}, [r4]
+        vpop      {q0, q1}              @ Pop modified array
+
+        @ And again for the 2nd set
+        ldr       r12, [sp, #16]        @ &sao_offset_val2[0]
+        add       r12, #2               @ 1st interesting val is [1]
+        vld1.16   {d16}, [r12]          @ Unaligned
+        ldr       r12, [sp, #20]        @ sao_left_class2
+        vpush     {q2, q3}              @ Put zero array on stack (again)
+
+        @ stuff the offset vals into the array
+        add       r4, r12, sp
+        add       r12, #1
+        vst1.8    {d16[0]}, [r4]
+        and       r12, #31
+        add       r4, r12, sp
+        add       r12, #1
+        vst1.8    {d16[2]}, [r4]
+        and       r12, #31
+        add       r4, r12, sp
+        add       r12, #1
+        vst1.8    {d16[4]}, [r4]
+        and       r12, #31
+        add       r4, r12, sp
+        vst1.8    {d16[6]}, [r4]
+        vpop      {q2, q3}              @ Pop modified array
+
+        ldr       r12, [sp, #28]        @ height
+        pld       [r1]
+
+        subs      r12, #1
+        mov       r4, r1
+        it ne
+        addne     r4, r3
+        bx        lr
+
+
 
 @ ff_hevc_sao_band_64_neon_8 (
 @   uint8_t *_dst,              [r0]
@@ -315,6 +375,48 @@ endfunc
 function ff_hevc_sao_band_64_neon_10, export=1
         band_64_16 10
 endfunc
+
+
+.macro band_c_32_16 bit_depth
+        push      {r4, lr}
+        bl        band_load_c
+        vpush     {q4-q7}
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q4, #0
+        vdup.i16  q5, lr
+        sub       r2, #96
+
+1:      subs      r12, #1
+
+        vld2.16   { q8, q9 }, [r1, :128]!
+        vld2.16   {q10, q11}, [r1, :128]!
+        vld2.16   {q12, q13}, [r1, :128]!
+        vld2.16   {q14, q15}, [r1, :128], r3
+
+        pld       [r4]
+        sub       r1, #96
+
+        sao_band_32_16 q8,  q10, q12, q14, "{d0,d1,d2,d3}", q4, q5, \bit_depth
+        sao_band_32_16 q9,  q11, q13, q15, "{d4,d5,d6,d7}", q4, q5, \bit_depth
+
+        it ne
+        addne     r4, r3
+
+        vst2.16   { q8, q9 }, [r0, :128]!
+        vst2.16   {q10, q11}, [r0, :128]!
+        vst2.16   {q12, q13}, [r0, :128]!
+        vst2.16   {q14, q15}, [r0, :128], r2
+
+        bpl       1b
+
+        vpop      {q4-q7}
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_c_32_neon_10, export=1
+        band_c_32_16 10
+endfunc
+
 
 function ff_hevc_sao_band_w64_neon_8, export=1
         init_sao_band
