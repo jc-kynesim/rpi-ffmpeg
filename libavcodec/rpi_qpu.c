@@ -144,6 +144,7 @@ typedef struct gpu_env_s
   int open_count;
   int init_count;
   int mb;
+  int vpu_i_cache_flushed;
   GPU_MEM_PTR_T code_gm_ptr;
   vq_wait_pool_t wait_pool;
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
@@ -761,13 +762,17 @@ void vpu_qpu_job_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_code,
     vqj->mask |= VPU_QPU_MASK_VPU;
 
     j->command = EXECUTE_VPU;
-    j->u.v.q[0] = vpu_code;
+    // The bottom two bits of the execute address contain no-flush flags
+    // b0 will flush the VPU I-cache if unset so we nearly always want that set
+    // as we never reload code
+    j->u.v.q[0] = vpu_code | gpu->vpu_i_cache_flushed;
     j->u.v.q[1] = r0;
     j->u.v.q[2] = r1;
     j->u.v.q[3] = r2;
     j->u.v.q[4] = r3;
     j->u.v.q[5] = r4;
     j->u.v.q[6] = r5;
+    gpu->vpu_i_cache_flushed = 1;
   }
 }
 
