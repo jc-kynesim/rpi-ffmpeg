@@ -2767,9 +2767,11 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame) + 1;
 
-    for(int start_y=0;start_y < nPbH_c;start_y+=16)
-    {
-        const int bh = FFMIN(nPbH_c-start_y, 16);
+//    for(int start_y=0;start_y < nPbH_c;start_y+=16)
+//    {
+//        const int bh = FFMIN(nPbH_c-start_y, 16);
+        const int bh = nPbH_c;
+        const int start_y = 0;
 
         for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH)
         {
@@ -2791,9 +2793,9 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
             cp->last_l0 = &u->next_src;
             *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = u + 1;
         }
-
-        dst_base_u += s->frame->linesize[1] * 16;
-    }
+//
+//        dst_base_u += s->frame->linesize[1] * 16;
+//    }
     return;
 }
 
@@ -2838,9 +2840,11 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame) + 1;
 
-    for (int start_y = 0; start_y < nPbH_c; start_y += 16)
-    {
-        const unsigned int bh = FFMIN(nPbH_c-start_y, 16);
+//    for (int start_y = 0; start_y < nPbH_c; start_y += 16)
+//    {
+//        const unsigned int bh = FFMIN(nPbH_c-start_y, 16);
+        const unsigned int bh = nPbH_c;
+        const int start_y = 0;
 
         for (int start_x=0; start_x < nPbW_c; start_x += RPI_CHROMA_BLOCK_WIDTH)
         {
@@ -2875,8 +2879,8 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
             *(qpu_mc_pred_c_b_t **)&cp->qpu_mc_curr = u + 1;
         }
 
-        dst_base_u += s->frame->linesize[1] * 16;
-    }
+//        dst_base_u += s->frame->linesize[1] * 16;
+//    }
 }
 
 
