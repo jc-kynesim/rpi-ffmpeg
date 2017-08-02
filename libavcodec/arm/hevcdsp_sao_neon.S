@@ -54,6 +54,17 @@
         vsub.s8  q11, q3
 .endm
 
+.macro clip16_4 Q0, Q1, Q2, Q3, Q_MIN, Q_MAX
+        vmax.s16  \Q0, \Q_MIN
+        vmax.s16  \Q1, \Q_MIN
+        vmax.s16  \Q2, \Q_MIN
+        vmax.s16  \Q3, \Q_MIN
+        vmin.s16  \Q0, \Q_MAX
+        vmin.s16  \Q1, \Q_MAX
+        vmin.s16  \Q2, \Q_MAX
+        vmin.s16  \Q3, \Q_MAX
+.endm
+
 @ Clobbers q6, q7
 .macro sao_band_32_16  Q0, Q1, Q2, Q3, XLAT, Q_MIN, Q_MAX, bit_depth
         vshrn.i16 d12, \Q0, #(\bit_depth - 5)
@@ -68,70 +79,19 @@
         vaddw.s8  \Q1, d13
         vaddw.s8  \Q2, d14
         vaddw.s8  \Q3, d15
-        vmax.s16  \Q0, \Q_MIN
-        vmax.s16  \Q1, \Q_MIN
-        vmax.s16  \Q2, \Q_MIN
-        vmax.s16  \Q3, \Q_MIN
-        vmin.s16  \Q0, \Q_MAX
-        vmin.s16  \Q1, \Q_MAX
-        vmin.s16  \Q2, \Q_MAX
-        vmin.s16  \Q3, \Q_MAX
+        clip16_4   \Q0, \Q1, \Q2, \Q3, \Q_MIN, \Q_MAX
 .endm
 
 @ q0-q1  Offset table
 @ q2     0
 @ q3     (1 << bit_depth) - 1
-@ q4-q7  clobbered
+@ q6-q7  clobbered
 @ q8-q15 input/output
-.if 1
 .macro sao_band_64_16 bit_depth
+        @ 32 is wide enough for efficient code
         sao_band_32_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", q2, q3, \bit_depth
         sao_band_32_16 q12, q13, q14, q15, "{d0,d1,d2,d3}", q2, q3, \bit_depth
 .endm
-.else
-.macro sao_band_64_16 bit_depth
-        vshrn.i16 d8,  q8,  #(\bit_depth - 5)
-        vshrn.i16 d9,  q9,  #(\bit_depth - 5)
-        vshrn.i16 d10, q10, #(\bit_depth - 5)
-        vshrn.i16 d11, q11, #(\bit_depth - 5)
-        vshrn.i16 d12, q12, #(\bit_depth - 5)
-        vshrn.i16 d13, q13, #(\bit_depth - 5)
-        vshrn.i16 d14, q14, #(\bit_depth - 5)
-        vshrn.i16 d15, q15, #(\bit_depth - 5)
-        vtbl.8    d8,  {d0, d1, d2, d3}, d8
-        vtbl.8    d9,  {d0, d1, d2, d3}, d9
-        vtbl.8    d10, {d0, d1, d2, d3}, d10
-        vtbl.8    d11, {d0, d1, d2, d3}, d11
-        vtbl.8    d12, {d0, d1, d2, d3}, d12
-        vtbl.8    d13, {d0, d1, d2, d3}, d13
-        vtbl.8    d14, {d0, d1, d2, d3}, d14
-        vtbl.8    d15, {d0, d1, d2, d3}, d15
-        vaddw.s8  q8,  d8
-        vaddw.s8  q9,  d9
-        vaddw.s8  q10, d10
-        vaddw.s8  q11, d11
-        vaddw.s8  q12, d12
-        vaddw.s8  q13, d13
-        vaddw.s8  q14, d14
-        vaddw.s8  q15, d15
-        vmax.s16  q8,  q2
-        vmax.s16  q9,  q2
-        vmax.s16  q10, q2
-        vmax.s16  q11, q2
-        vmax.s16  q12, q2
-        vmax.s16  q13, q2
-        vmax.s16  q14, q2
-        vmax.s16  q15, q2
-        vmin.s16  q8,  q3
-        vmin.s16  q9,  q3
-        vmin.s16  q10, q3
-        vmin.s16  q11, q3
-        vmin.s16  q12, q3
-        vmin.s16  q13, q3
-        vmin.s16  q14, q3
-        vmin.s16  q15, q3
-.endm
-.endif
 
 
 
@@ -718,6 +678,81 @@ endfunc
         vsub.s8 q3, q3, q15
 
 .endm
+
+.macro edgeidx32_16
+
+        vcgt.u16 q12, q4, q0  // c > a -> -1 , otherwise 0
+        vcgt.u16 q13, q5, q1
+        vcgt.u16 q14, q6, q2
+        vcgt.u16 q15, q7, q3
+
+        vcgt.u16 q0, q0, q4  // a > c -> -1 , otherwise 0
+        vcgt.u16 q1, q1, q5
+        vcgt.u16 q2, q2, q6
+        vcgt.u16 q3, q3, q7
+
+        vsub.s16 q0, q0, q12 // a = sign(c-a)
+        vsub.s16 q1, q1, q13
+        vsub.s16 q2, q2, q14
+        vsub.s16 q3, q3, q15
+
+        vcgt.u16 q12, q4, q8  // c > b -> -1 , otherwise 0
+        vcgt.u16 q13, q5, q9
+        vcgt.u16 q14, q6, q10
+        vcgt.u16 q15, q7, q11
+
+        vsub.s16 q0, q0, q12
+        vsub.s16 q1, q1, q13
+        vsub.s16 q2, q2, q14
+        vsub.s16 q3, q3, q15
+
+        vcgt.u16 q12, q8, q4  // c < b -> -1 , otherwise 0
+        vcgt.u16 q13, q9, q5
+        vcgt.u16 q14, q10, q6
+        vcgt.u16 q15, q11, q7
+
+        vadd.s16 q0, q0, q12  // a = sign(c-a) + sign(c-b)
+        vadd.s16 q1, q1, q13
+        vmov.u8 q12, #2
+        vadd.s16 q2, q2, q14
+        vadd.s16 q3, q3, q15
+
+        vmovn.s16 d0, q0
+        vmovn.s16 d1, q1
+        vmovn.s16 d2, q2
+        vmovn.s16 d3, q3
+
+        vadd.s8 q0, q0, q12
+        vadd.s8 q1, q1, q12
+
+        @ whilst vmov dn, rm, rn exists it is a vfp instruction
+        @ and causes a stall till neon pipe empty - so don't do that!
+        @ ?? load from stack location might be better ??
+        vmov    d26[0], r4
+        vmov    d26[1], r5
+        vmov    d27[0], r6
+        vmov    d27[1], r7
+        vuzp.8    q0, q1
+
+        vtbl.8  d0, {d26}, d0
+        vtbl.8  d1, {d26}, d1
+        vtbl.8  d2, {d27}, d2
+        vtbl.8  d3, {d27}, d3
+
+        @ Avoid overwrite whilst widening
+        vaddw.s8 q2, q6, d2
+        vaddw.s8 q3, q7, d3
+        vaddw.s8 q0, q4, d0
+        vaddw.s8 q1, q5, d1
+
+        @ now clip
+        vmov.i64 q12, #0
+        vdup.i16 q13, r12                        @ r12 ???????????
+        clip16_4 q0, q1, q2, q3, q4, q12, q13
+.endm
+
+
+
 
 function edge_w64_body
         edgeidx64
