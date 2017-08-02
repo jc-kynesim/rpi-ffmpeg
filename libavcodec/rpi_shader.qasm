@@ -19,10 +19,20 @@
 
 .set PREREAD,                      2
 
+# Block heights - 8 & 16 are the only numbers we currently support
+
 .set C_BLK_HEIGHT_8,               16
-.set C_BLK_HEIGHT_16,              16
+.set C_BLK_HEIGHT_16,              8
 .set Y_BLK_HEIGHT_8,               16
-.set Y_BLK_HEIGHT_16,              16
+.set Y_BLK_HEIGHT_16,              8
+
+# QPU counts - depend on block size
+# If we have a 2-byte format & block_size > 8 then can only afford
+# 8 QPUs
+# These numbers must match the numbers in rpi_shader_cmd.h
+
+.set N_QPU_8,                      12
+.set N_QPU_16,                     12
 
 # register allocation
 #
@@ -197,8 +207,10 @@
 # Macros that express this - obviously these can't be overlapped
 # so are probably unsuitable for loop code
 
-.macro m_calc_dma_regs, r_vpm, r_dma
+.macro m_calc_dma_regs, v_bit_depth, v_blk_height, r_vpm, r_dma
   mov r2, qpu_num
+.if v_bit_depth <= 8
+  # 8 bit version
   asr r1, r2, 2
   shl r1, r1, 6
   and r0, r2, 3
@@ -209,25 +221,28 @@
 
   mov r1, vdw_setup_0(0, 0, dma_h8p(0,0,0)) # height,width added later
   shl r0, r0, 5
-  add r_dma, r0, r1  # DMA out
-.endm
 
-# 16 bits per pel, 16 line height, 8 QPU max
-.macro m_calc_dma_regs_16, r_vpm, r_dma
-  mov r2, qpu_num
+.else
+  # 16 bit version
+  # Limited to 8 QPUs if blk height > 8
   asr r1, r2, 1
+.if v_blk_height <= 8
+  shl r1, r1, 4
+.else
   shl r1, r1, 5
+.endif
   and r0, r2, 1
   or  r0, r0, r1
 
   mov r1, vpm_setup(0, 2, h16p(0, 0))   # 2 is stride - stride acts on ADDR
-  add r_vpm, r0, r1  # VPM 8bit storage
+  add r_vpm, r0, r1
 
   # X = H * 8 so the YH from VPMVCD_WR_SETUP[ADDR] drops into
   # XY VPMVCD_WR_SETUP[VPMBASE] if shifted left 3 (+ 3 for pos of field in reg)
   mov r1, vdw_setup_0(0, 0, dma_h16p(0,0,0))    # height,width added later
   shl r0, r0, 6
-  add r_dma, r0, r1                             # DMA out
+.endif
+  add r_dma, r0, r1  # DMA out
 .endm
 
 
@@ -320,11 +335,7 @@
 
 # Compute part of VPM to use for DMA output
 # * We only get 8 QPUs if 16 bit - maybe reduce height and auto-loop?
-.if v_bit_depth <= 8
-  m_calc_dma_regs rb_vpm_init, rb_dma0_base
-.else
-  m_calc_dma_regs_16 rb_vpm_init, rb_dma0_base
-.endif
+  m_calc_dma_regs v_bit_depth, v_blk_height, rb_vpm_init, rb_dma0_base
 
 # And again for L1, but only worrying about frame2 stuff
 
@@ -879,30 +890,32 @@
 .endif
 .endm
 
+.set v_quads8, N_QPU_8 / 4
+
 ::mc_sync_q0
-  m_sync_q 0, 3
+  m_sync_q 0, v_quads8
 ::mc_sync_q1
-  m_sync_q 1, 3
+  m_sync_q 1, v_quads8
 ::mc_sync_q2
-  m_sync_q 2, 3
+  m_sync_q 2, v_quads8
 ::mc_sync_q3
-  m_sync_q 3, 3
+  m_sync_q 3, v_quads8
 ::mc_sync_q4
-  m_sync_q 4, 3
+  m_sync_q 4, v_quads8
 ::mc_sync_q5
-  m_sync_q 5, 3
+  m_sync_q 5, v_quads8
 ::mc_sync_q6
-  m_sync_q 6, 3
+  m_sync_q 6, v_quads8
 ::mc_sync_q7
-  m_sync_q 7, 3
+  m_sync_q 7, v_quads8
 ::mc_sync_q8
-  m_sync_q 8, 3
+  m_sync_q 8, v_quads8
 ::mc_sync_q9
-  m_sync_q 9, 3
+  m_sync_q 9, v_quads8
 ::mc_sync_q10
-  m_sync_q 10, 3
+  m_sync_q 10, v_quads8
 ::mc_sync_q11
-  m_sync_q 11, 3
+  m_sync_q 11, v_quads8
 
 # mc_exit()
 # Chroma & Luma the same now
@@ -1055,11 +1068,7 @@
 
   add rb_wt_den_p15, unif, 23 - v_bit_depth     # weight denom
 
-.if v_bit_depth <= 8
-  m_calc_dma_regs rb_vpm_init, rb_dma0_base
-.else
-  m_calc_dma_regs_16 rb_vpm_init, rb_dma0_base
-.endif
+  m_calc_dma_regs v_bit_depth, v_blk_height, rb_vpm_init, rb_dma0_base
 
   mov ra_link, unif                             # Next fn
 
@@ -1661,7 +1670,7 @@
 # Even if these fns are the same as for other bit depths we want our own copy
 # to keep the code we are using in a single lump to avoid (direct map) cache
 # thrashing
-.set v_quads10, 2
+.set v_quads10, N_QPU_16 / 4
 
 ::mc_sync10_q0
   m_sync_q 0, v_quads10
