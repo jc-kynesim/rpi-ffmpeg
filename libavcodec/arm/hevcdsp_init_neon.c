@@ -155,6 +155,13 @@ void ff_hevc_sao_edge_eo3_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t str
 void ff_hevc_sao_edge_c_w64_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height,
                                    const int16_t *sao_offset_table_u, const int16_t *sao_offset_table_v, int eo);
 
+void ff_hevc_sao_edge_c_16_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height);
+void ff_hevc_sao_edge_c_32_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height);
+
 void ff_hevc_sao_band_c_neon_8(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
@@ -627,6 +634,8 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_32_neon_10;
         c->sao_edge_filter[2]          = ff_hevc_sao_edge_32_neon_10;
         c->sao_edge_filter[4]          = ff_hevc_sao_edge_64_neon_10;
+        c->sao_edge_filter_c[1]        = ff_hevc_sao_edge_c_16_neon_10;
+        c->sao_edge_filter_c[2]        = ff_hevc_sao_edge_c_32_neon_10;
     }
 
     assert(offsetof(MvField, mv) == 0);
