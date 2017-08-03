@@ -473,11 +473,6 @@ static void FUNC(sao_band_filter)(uint8_t *_dst, uint8_t *_src,
     }
 }
 
-#if BIT_DEPTH == 10
-void ff_hevc_sao_edge_32_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
-void ff_hevc_sao_edge_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
-#endif
-
 #define CMP(a, b) (((a) > (b)) - ((a) < (b)))
 
 static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *sao_offset_val,
@@ -495,23 +490,6 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
     int a_stride, b_stride;
     int x, y;
     ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
-
-#if BIT_DEPTH == 10
-    uint16_t tmp[64][64] = {{0}};
-    int a = 0;
-    static int n = 0;
-    if (width == 32) {
-        ff_hevc_sao_edge_32_neon_10((uint8_t*)tmp, _src, 128, sao_offset_val, eo, width, height);
-        a = 1;
-        ++n;
-    }
-    else if (width == 64) {
-        ff_hevc_sao_edge_64_neon_10((uint8_t*)tmp, _src, 128, sao_offset_val, eo, width, height);
-        a = 1;
-        ++n;
-    }
-#endif
-
     stride_dst /= sizeof(pixel);
 
     a_stride = pos[eo][0][0] + pos[eo][0][1] * stride_src;
@@ -521,20 +499,11 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
             int diff0 = CMP(src[x], src[x + a_stride]);
             int diff1 = CMP(src[x], src[x + b_stride]);
             int offset_val        = edge_idx[2 + diff0 + diff1];
-#if BIT_DEPTH == 10
-            int old = src[x];
-#endif
             dst[x] = av_clip_pixel(src[x] + sao_offset_val[offset_val]);
-#if BIT_DEPTH == 10
-            if (a && dst[x] != tmp[y][x]) {
-                printf("[%d] (%d,%d) %dx%d %d -> %d != %d, eo=%d, diff=%d/%d\n", n - 1, x, y, width, height, old, tmp[y][x], dst[x], eo, diff0, diff1);
-            }
-#endif
         }
         src += stride_src;
         dst += stride_dst;
     }
-
 }
 
 
@@ -752,30 +721,6 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
     int a_stride, b_stride;
     int x, y;
     ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
-#if BIT_DEPTH == 10
-    uint16_t tmp[64][64] = {{0}};
-    int a = 0;
-    static int n = 0;
-
-void ff_hevc_sao_edge_c_16_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
-                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
-                                  int eo, int width, int height);
-void ff_hevc_sao_edge_c_32_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
-                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
-                                  int eo, int width, int height);
-
-    if (width == 16) {
-        ff_hevc_sao_edge_c_16_neon_10((uint8_t*)tmp, _src, 128, sao_offset_val_u, sao_offset_val_v, eo, width, height);
-        a = 1;
-        ++n;
-    }
-    else if (width == 32) {
-        ff_hevc_sao_edge_c_32_neon_10((uint8_t*)tmp, _src, 128, sao_offset_val_u, sao_offset_val_v, eo, width, height);
-        a = 1;
-        ++n;
-    }
-#endif
-
     stride_dst /= sizeof(pixel);
     width *= 2;
 
@@ -791,28 +736,8 @@ void ff_hevc_sao_edge_c_32_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t
             int diff0v = CMP(src[x+1], src[x+1 + a_stride]);
             int diff1v = CMP(src[x+1], src[x+1 + b_stride]);
             int offset_valv        = edge_idx[2 + diff0v + diff1v];
-#if BIT_DEPTH == 10
-            int old_u = src[x];
-            int old_v = src[x + 1];
-#endif
-
             dst[x] = av_clip_pixel(src[x] + sao_offset_val_u[offset_valu]);
             dst[x+1] = av_clip_pixel(src[x+1] + sao_offset_val_v[offset_valv]);
-
-#if BIT_DEPTH == 10
-            if (a && dst[x] != tmp[y][x])
-                printf("[%d] U (%d,%d) %dx%d %d -> %d != %d, eo=%d, diff=%d/%d\n", n - 1, x, y, width, height, old_u, tmp[y][x], dst[x], eo, diff0u, diff1u);
-            if (a && dst[x+1] != tmp[y][x+1])
-                printf("[%d] V (%d,%d) %dx%d %d -> %d != %d, eo=%d, diff=%d/%d\n", n - 1, x, y, width, height, old_v, tmp[y][x+1], dst[x+1], eo, diff0v, diff1v);
-            if (a && (dst[x] != tmp[y][x] || dst[x+1] != tmp[y][x+1])) {
-                for (int i = 0; i != 5; ++i)
-                    printf(" %d", sao_offset_val_u[edge_idx[i]]);
-                printf(" --");
-                for (int i = 0; i != 5; ++i)
-                    printf(" %d", sao_offset_val_v[edge_idx[i]]);
-                printf("\n");
-            }
-#endif
         }
         src += stride_src;
         dst += stride_dst;
