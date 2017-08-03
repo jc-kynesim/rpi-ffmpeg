@@ -21,6 +21,8 @@
 #include "libavutil/arm/asm.S"
 #include "neon.S"
 
+.set EDGE_SRC_STRIDE, 160
+
 .macro init_sao_band
         pld      [r1]
         vld1.8   {q0, q1}, [r2]  // offset table
@@ -679,7 +681,14 @@ endfunc
 
 .endm
 
-.macro edgeidx32_16
+@ r0    destination address
+@ r2    stride to post-increment r0 with
+@ r4    upper clip value
+@ [r5]  translate values
+@
+@ q12-15 used as temp
+
+function edge_w32_body_16
 
         vcgt.u16 q12, q4, q0  // c > a -> -1 , otherwise 0
         vcgt.u16 q13, q5, q1
@@ -713,7 +722,7 @@ endfunc
 
         vadd.s16 q0, q0, q12  // a = sign(c-a) + sign(c-b)
         vadd.s16 q1, q1, q13
-        vmov.u8 q12, #2
+        vmov.u8  q12, #2
         vadd.s16 q2, q2, q14
         vadd.s16 q3, q3, q15
 
@@ -722,36 +731,222 @@ endfunc
         vmovn.s16 d2, q2
         vmovn.s16 d3, q3
 
-        vadd.s8 q0, q0, q12
-        vadd.s8 q1, q1, q12
+        vld1.8   {d26, d27}, [r5]
 
-        @ whilst vmov dn, rm, rn exists it is a vfp instruction
-        @ and causes a stall till neon pipe empty - so don't do that!
-        @ ?? load from stack location might be better ??
-        vmov    d26[0], r4
-        vmov    d26[1], r5
-        vmov    d27[0], r6
-        vmov    d27[1], r7
-        vuzp.8    q0, q1
+        vadd.s8  q0, q0, q12
+        vadd.s8  q1, q1, q12
 
-        vtbl.8  d0, {d26}, d0
-        vtbl.8  d1, {d26}, d1
-        vtbl.8  d2, {d27}, d2
-        vtbl.8  d3, {d27}, d3
+        vtbl.8   d0, {d26}, d0
+        vtbl.8   d1, {d26}, d1
+        vtbl.8   d2, {d27}, d2
+        vtbl.8   d3, {d27}, d3
 
         @ Avoid overwrite whilst widening
         vaddw.s8 q2, q6, d2
         vaddw.s8 q3, q7, d3
-        vaddw.s8 q0, q4, d0
         vaddw.s8 q1, q5, d1
+        vaddw.s8 q0, q4, d0
 
         @ now clip
         vmov.i64 q12, #0
-        vdup.i16 q13, r12                        @ r12 ???????????
-        clip16_4 q0, q1, q2, q3, q4, q12, q13
-.endm
+        vdup.i16 q13, r4
+        clip16_4 q0, q1, q2, q3, q12, q13
 
+        vstm     r0, {q0-q3}
+        add      r0, r0, r2
+        bx       lr
+endfunc
 
+@ void ff_hevc_sao_edge_w64_neon_10(
+@   uint8_t *_dst,            [r0]
+@   uint8_t *_src,            [r1]
+@   int  stride_dst,          [r2]
+@   int16_t *_sao_offset_val, [r3]
+@   int eo,                   [sp, #0]
+@   int width,                [sp, #4]
+@   int height)               [sp, #8]
+
+@ We simply split the 32 case into 2 vertical stripes
+@ and call the fns for w32
+@
+@ Calling code will always have src != dst so we don't have to worry
+@ about edge effects
+
+function ff_hevc_sao_edge_64_neon_10, export=1
+        push     {r4-r6, lr}    @ 16 bytes
+        vmov.i64 d6, #0
+        mov      r12, #2
+        vld1.8   {d6[2]}, [r3], r12
+        vld1.8   {d6[0]}, [r3], r12
+        vld1.8   {d6[1]}, [r3], r12
+        vld1.8   {d6[3]}, [r3], r12
+        vld1.8   {d6[4]}, [r3]
+        movw     r4, 0x3ff      @ ******* (1 << \bit_depth) - 1
+        vmov     d7, d6
+        movw     r3, EDGE_SRC_STRIDE
+        vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
+        mov      r5, sp
+
+        ldr      r12, [sp, #96]   @ e0
+        adr      r6, 99f
+        ldr      r6, [r6, r12, lsl #2]
+
+        ldr      r12, [sp, #104]  @ height
+
+        push     {r0, r1, r6, r12}
+        blx      r6
+        pop      {r0, r1, r6, r12}
+
+        add      r0, #64
+        add      r1, #64
+        blx      r6
+
+        vpop     {q3-q7}        @ spurious but harmless load of q3
+        pop      {r4-r6, pc}
+endfunc
+
+@ void ff_hevc_sao_edge_32_neon_10(
+@   uint8_t *_dst,            [r0]
+@   uint8_t *_src,            [r1]
+@   int  stride_dst,          [r2]
+@   int16_t *_sao_offset_val, [r3]
+@   int eo,                   [sp, #0]
+@   int width,                [sp, #4]
+@   int height)               [sp, #8]
+
+function ff_hevc_sao_edge_32_neon_10, export=1
+        push     {r4-r6, lr}    @ 16 bytes
+        vmov.i64 d6, #0
+        mov      r12, #2
+        vld1.8   {d6[2]}, [r3], r12
+        vld1.8   {d6[0]}, [r3], r12
+        vld1.8   {d6[1]}, [r3], r12
+        vld1.8   {d6[3]}, [r3], r12
+        vld1.8   {d6[4]}, [r3]
+        movw     r4, 0x3ff      @ ******* (1 << \bit_depth) - 1
+        vmov     d7, d6
+        movw     r3, EDGE_SRC_STRIDE
+        vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
+        mov      r5, sp
+
+        ldr      r12, [sp, #96]   @ e0
+        adr      r6, 99f
+        ldr      r6, [r6, r12, lsl #2]
+
+        ldr      r12, [sp, #104]  @ height
+        blx      r6
+
+        vpop     {q3-q7}        @ spurious but harmless load of q3
+        pop      {r4-r6, pc}
+
+99:
+        .word   0f
+        .word   10f
+        .word   20f
+        .word   30f
+
+@ eo 0
+0:
+        mov      r6, lr
+        sub      r1, #8
+1:      subs     r12, #1
+        vld1.64  {d7}, [r1, :64]!
+        vld1.64  {q4-q5}, [r1, :128]! // load c
+        vld1.64  {q6-q7}, [r1, :128]!
+        vld1.64  {d24}, [r1, :64], r3
+        sub      r1, #72
+        // load a
+        vext.16  q0,  q3,  q4, #7
+        vext.16  q1,  q4,  q5, #7
+        vext.16  q2,  q5,  q6, #7
+        vext.16  q3,  q6,  q7, #7
+        // load b
+        vext.16  q8,  q4,  q5, #1
+        vext.16  q9,  q5,  q6, #1
+        vext.16  q10, q6,  q7, #1
+        vext.16  q11, q7, q12, #1
+        bl       edge_w32_body_16
+        bne      1b
+        bx       r6
+
+@ eo 1
+10:
+        mov      r6, lr
+        sub      r1, r3
+        // load a
+        vld1.8   {q0-q1}, [r1, :128]!
+        vld1.8   {q2-q3}, [r1, :128], r3
+        sub      r1, #32
+        // load c
+        vld1.8   {q4-q5}, [r1, :128]!
+        vld1.8   {q6-q7}, [r1, :128], r3
+        sub      r1, #32
+1:      subs     r12, #1
+        // load b
+        vld1.8   {q8-q9}, [r1, :128]!
+        vld1.8   {q10-q11}, [r1, :128], r3
+        sub      r1, #32
+        bl       edge_w32_body_16
+        // copy c to a
+        vmov.64  q0, q4
+        vmov.64  q1, q5
+        vmov.64  q2, q6
+        vmov.64  q3, q7
+        // copy b to c
+        vmov.64  q4, q8
+        vmov.64  q5, q9
+        vmov.64  q6, q10
+        vmov.64  q7, q11
+        bne      1b
+        bx       r6
+
+20:
+        mov      r6, lr
+1:      sub      r1, r3
+        // load a
+        // TODO: fix unaligned load
+        //       don't reload a like in eo1
+        sub      r1, #2
+        vld1.16  {q0-q1}, [r1]!
+        vld1.16  {q2-q3}, [r1], r3
+        sub      r1, #30
+        subs     r12, #1
+        // load  c
+        vld1.16  {q4-q5}, [r1, :128]!
+        vld1.16  {q6-q7}, [r1, :128], r3
+        sub      r1, #30
+        // load  b
+        vld1.16  {q8-q9}, [r1]!
+        vld1.16  {q10-q11}, [r1]
+        sub      r1, #34
+        bl       edge_w32_body_16
+        bne      1b
+        bx       r6
+
+30:
+        mov      r6, lr
+1:      sub      r1, r3
+        // load a
+        // TODO: fix unaligned load
+        //       don't reload a like in eo1
+        add      r1, #2
+        vld1.16  {q0-q1}, [r1]!
+        vld1.16  {q2-q3}, [r1], r3
+        sub      r1, #34
+        subs     r12, #1
+        // load  c
+        vld1.16  {q4-q5}, [r1, :128]!
+        vld1.16  {q6-q7}, [r1, :128], r3
+        sub      r1, #34
+        // load  b
+        vld1.16  {q8-q9}, [r1]!
+        vld1.16  {q10-q11}, [r1]
+        sub      r1, #30
+        bl       edge_w32_body_16
+        bne      1b
+        bx       r6
+
+endfunc
 
 
 function edge_w64_body

@@ -143,6 +143,10 @@ void ff_hevc_sao_edge_eo1_w32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t str
 void ff_hevc_sao_edge_eo2_w32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 void ff_hevc_sao_edge_eo3_w32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 
+void ff_hevc_sao_edge_32_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
+void ff_hevc_sao_edge_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
+
+
 void ff_hevc_sao_edge_eo0_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 void ff_hevc_sao_edge_eo1_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 void ff_hevc_sao_edge_eo2_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
@@ -453,6 +457,10 @@ void ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, in
                                                 int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
                                                 MvField *curr, MvField *neigh, uint8_t *bs);
 
+#if (2*MAX_PB_SIZE + FF_INPUT_BUFFER_PADDING_SIZE) != 160
+#error SAO edge src stride not 160
+#endif
+
 av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
 {
     if (bit_depth == 8) {
@@ -617,6 +625,8 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_10;
         c->sao_band_filter[4]          = ff_hevc_sao_band_64_neon_10;
         c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_32_neon_10;
+        c->sao_edge_filter[2]          = ff_hevc_sao_edge_32_neon_10;
+        c->sao_edge_filter[4]          = ff_hevc_sao_edge_64_neon_10;
     }
 
     assert(offsetof(MvField, mv) == 0);

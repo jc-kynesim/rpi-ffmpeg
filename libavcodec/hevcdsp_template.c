@@ -473,6 +473,11 @@ static void FUNC(sao_band_filter)(uint8_t *_dst, uint8_t *_src,
     }
 }
 
+#if BIT_DEPTH == 10
+void ff_hevc_sao_edge_32_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
+void ff_hevc_sao_edge_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
+#endif
+
 #define CMP(a, b) (((a) > (b)) - ((a) < (b)))
 
 static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *sao_offset_val,
@@ -490,6 +495,23 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
     int a_stride, b_stride;
     int x, y;
     ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
+
+#if BIT_DEPTH == 10
+    uint16_t tmp[64][64] = {{0}};
+    int a = 0;
+    static int n = 0;
+    if (width == 32) {
+        ff_hevc_sao_edge_32_neon_10((uint8_t*)tmp, _src, 128, sao_offset_val, eo, width, height);
+        a = 1;
+        ++n;
+    }
+    else if (width == 64) {
+        ff_hevc_sao_edge_64_neon_10((uint8_t*)tmp, _src, 128, sao_offset_val, eo, width, height);
+        a = 1;
+        ++n;
+    }
+#endif
+
     stride_dst /= sizeof(pixel);
 
     a_stride = pos[eo][0][0] + pos[eo][0][1] * stride_src;
@@ -499,11 +521,20 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
             int diff0 = CMP(src[x], src[x + a_stride]);
             int diff1 = CMP(src[x], src[x + b_stride]);
             int offset_val        = edge_idx[2 + diff0 + diff1];
+#if BIT_DEPTH == 10
+            int old = src[x];
+#endif
             dst[x] = av_clip_pixel(src[x] + sao_offset_val[offset_val]);
+#if BIT_DEPTH == 10
+            if (a && dst[x] != tmp[y][x]) {
+                printf("[%d] (%d,%d) %dx%d %d -> %d != %d, eo=%d, diff=%d/%d\n", n - 1, x, y, width, height, old, tmp[y][x], dst[x], eo, diff0, diff1);
+            }
+#endif
         }
         src += stride_src;
         dst += stride_dst;
     }
+
 }
 
 
