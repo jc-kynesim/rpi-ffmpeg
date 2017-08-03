@@ -4645,7 +4645,7 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
 fail:  // Also success path
     if (s->ref && s->threads_type == FF_THREAD_FRAME) {
 #if RPI_INTER
-//        rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
+        rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
     }
