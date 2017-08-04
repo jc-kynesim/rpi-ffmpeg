@@ -229,6 +229,7 @@ static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_
   av_assert0(p->arm);
   p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
+//  printf("***** %s, %d\n", __func__, numbytes);
   return 0;
 }
 
@@ -242,6 +243,7 @@ static int gpu_malloc_uncached_internal(const int mb, const int numbytes, GPU_ME
   av_assert0(p->arm);
   p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
+//  printf("***** %s, %d\n", __func__, numbytes);
   return 0;
 }
 
@@ -250,6 +252,7 @@ static void gpu_free_internal(const int mb, GPU_MEM_PTR_T * const p) {
   vcsm_unlock_ptr(p->arm);
   vcsm_free(p->vcsm_handle);
   memset(p, 0, sizeof(*p));  // Ensure we crash hard if we try and use this again
+//  printf("***** %s\n", __func__);
 }
 
 

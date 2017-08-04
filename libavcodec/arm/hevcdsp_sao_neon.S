@@ -338,6 +338,32 @@ function ff_hevc_sao_band_64_neon_10, export=1
         band_64_16 10
 endfunc
 
+.macro band_32_16 bit_depth
+        push      {r4, lr}
+        movw      r4, #(1 << \bit_depth) - 1
+        vmov.i64  q2, #0
+        vdup.i16  q3, r4
+        bl        band_load_y
+        vpush     {q4-q7}
+
+1:      subs      r12, #1
+        vldm      r1, {q8-q11}
+        pld       [r4]
+        add       r1, r3
+        sao_band_32_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", q2, q3, \bit_depth
+        it ne
+        addne     r4, r3
+        vstm      r0, {q8-q11}
+        add       r0, r2
+        bpl       1b
+
+        vpop      {q4-q7}
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_32_neon_10, export=1
+        band_32_16 10
+endfunc
 
 .macro band_c_32_16 bit_depth
         push      {r4, lr}
@@ -377,34 +403,6 @@ endfunc
 
 function ff_hevc_sao_band_c_32_neon_10, export=1
         band_c_32_16 10
-endfunc
-
-
-function ff_hevc_sao_band_w64_neon_8, export=1
-        init_sao_band
-
-        push      {r4, lr}
-        subs      r12, #1
-        mov       r4, r1
-        it ne
-        addne     r4, r3
-
-1:      subs      r12, #1
-        vldm      r1, {q8-q11}
-        pld       [r4]
-        vshr.u8   q12, q8, #3
-        vshr.u8   q13, q9, #3
-        add       r1, r3
-        vshr.u8   q14, q10, #3
-        vshr.u8   q15, q11, #3
-        sao_band_64
-        it ne
-        addne     r4, r3
-        vstm      r0, {q8-q11}
-        add       r0, r2
-        bpl       1b
-
-        pop       {r4, pc}
 endfunc
 
 
@@ -570,16 +568,6 @@ function ff_hevc_sao_band_c_neon_8, export=1
 
         pop    {r4-r8, pc}
 endfunc
-
-
-.macro diff32 out0, out1, tmp0, tmp1, in0, in1, in2, in3
-        vcgt.u8 \out0, \in2, \in0  // c > a -> -1 , otherwise 0
-        vcgt.u8 \tmp0,  \in0, \in2  // a > c -> -1 , otherwise 0
-        vcgt.u8 \out1, \in3, \in1  // c > a -> -1 , otherwise 0 part 2
-        vcgt.u8 \tmp1,  \in1, \in3  // a > c -> -1 , otherwise 0 part 2
-        vsub.s8 \out0, \tmp0, \out0 // diff0
-        vsub.s8 \out1, \tmp1, \out1 // diff0 part 2
-.endm
 
 
 @ r0    destination address
@@ -849,7 +837,34 @@ endfunc
         bl       \body_fn
         vstm     r0, {q0-q3}
         add      r0, r0, r2
-        bne      1b
+        bgt      1b
+        bx       r6
+.endm
+
+.macro  edge_32bx2_e0, body_fn, pb
+        mov      r6, lr
+
+1:      subs     r12, #2
+
+        vld1.8   {q4-q5}, [r1]
+        sub      r1, #\pb
+        vld1.8   {q0-q1}, [r1]
+        add      r1, #(\pb * 2)
+        vld1.8   {q8-q9}, [r1], r3
+        sub      r1, #\pb
+        vld1.8   {q6-q7}, [r1]
+        sub      r1, #\pb
+        vld1.8   {q2-q3}, [r1]
+        add      r1, #(\pb * 2)
+        vld1.8   {q10-q11}, [r1], r3
+        sub      r1, #\pb
+
+        bl       \body_fn
+
+        vst1.8   {q0,q1}, [r0], r2
+        vst1.8   {q2,q3}, [r0], r2
+
+        bgt      1b
         bx       r6
 .endm
 
@@ -882,7 +897,40 @@ endfunc
         vmov.64  q5, q9
         vmov.64  q6, q10
         vmov.64  q7, q11
-        bne      1b
+        bgt      1b
+        bx       r6
+.endm
+
+.macro  edge_32bx2_e1, body_fn
+        mov      r6, lr
+        sub      r1, r3
+        // load a
+        vld1.8   {q0-q1}, [r1, :128], r3
+        vld1.8   {q4-q5}, [r1, :128], r3
+
+1:      subs     r12, #2
+        @ Given the data duplication here we could obviously do better than
+        @ using the generic body_fn but it almost certainly isn't worth it
+        vmov     q2, q4
+        vmov     q3, q5
+        vld1.8   {q8-q9}, [r1, :128], r3
+        vld1.8   {q10-q11}, [r1, :128], r3
+        vmov     q6, q8
+        vmov     q7, q9
+
+        bl       \body_fn
+
+        vst1.8   {q0,q1}, [r0], r2
+        vst1.8   {q2,q3}, [r0], r2
+
+        // copy c to a
+        vmov.64  q0, q8
+        vmov.64  q1, q9
+
+        // copy b to c
+        vmov.64  q4, q10
+        vmov.64  q5, q11
+        bgt      1b
         bx       r6
 .endm
 
@@ -908,38 +956,47 @@ endfunc
         bl       \body_fn
         vstm     r0, {q0-q3}
         add      r0, r0, r2
-        bne      1b
+        bgt      1b
 
         add      r3, #(32 - \pb)
         bx       r6
 .endm
 
-.macro  edge_64b_e3, body_fn, pb
+.macro  edge_32bx2_e2, body_fn, pb
         mov      r6, lr
-        sub      r1, #32
-        sub      r3, #(32 + \pb)
+        sub      r1, #\pb
 
 1:      sub      r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        vld1.8   {q0-q1}, [r1]!
-        vld1.8   {q2-q3}, [r1], r3
-        subs     r12, #1
+        vld1.8   {q0-q1}, [r1], r3
+        vld1.8   {q2-q3}, [r1]
+        subs     r12, #2
         // load  c
-        vld1.8   {q4-q5}, [r1, :128]!
-        vld1.8   {q6-q7}, [r1, :128], r3
+        add      r1, #\pb
+        vld1.8   {q4-q5}, [r1, :128], r3
+        vld1.8   {q6-q7}, [r1, :128]
         // load  b
-        vld1.8   {q8-q9}, [r1]!
+        add      r1, #\pb
+        vld1.8   {q8-q9}, [r1], r3
         vld1.8   {q10-q11}, [r1]
-        sub      r1, #(64 - \pb)
-        bl       \body_fn
-        vstm     r0, {q0-q3}
-        add      r0, r0, r2
-        bne      1b
+        sub      r1, #(\pb * 2)
 
-        add      r3, #(32 + \pb)
+        bl       \body_fn
+
+        vst1.8   {q0-q1}, [r0], r2
+        vst1.8   {q2-q3}, [r0], r2
+        bgt      1b
+
         bx       r6
+.endm
+
+.macro  edge_64b_e3, body_fn, pb
+        @ e3 is the same as e2 but with the X offset reversed
+        edge_64b_e2 \body_fn, (-\pb)
+.endm
+
+.macro  edge_32bx2_e3, body_fn, pb
+        @ e3 is the same as e2 but with the X offset reversed
+        edge_32bx2_e2 \body_fn, (-\pb)
 .endm
 
 .macro edge_64b_bodies, body_fn, pb
@@ -961,6 +1018,40 @@ endfunc
         edge_64b_e3     \body_fn, \pb
 .endm
 
+.macro edge_32bx2_bodies, body_fn, pb
+        .word   0f
+        .word   10f
+        .word   20f
+        .word   30f
+
+0:
+        edge_32bx2_e0   \body_fn, \pb
+
+10:
+        edge_32bx2_e1   \body_fn
+
+20:
+        edge_32bx2_e2   \body_fn, \pb
+
+30:
+        edge_32bx2_e3   \body_fn, \pb
+.endm
+
+@ void ff_hevc_sao_edge_32_neon_8(
+@   uint8_t *_dst,            [r0]
+@   uint8_t *_src,            [r1]
+@   int  stride_dst,          [r2]
+@   int16_t *_sao_offset_val, [r3]
+@   int eo,                   [sp, #0]
+@   int width,                [sp, #4]
+@   int height)               [sp, #8]
+
+function ff_hevc_sao_edge_32_neon_8, export=1
+        edge_64b_init   8, 0, 0, 99f
+99:
+        edge_32bx2_bodies edge_w64_body_8, 1
+endfunc
+
 @ void ff_hevc_sao_edge_64_neon_8(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
@@ -974,6 +1065,22 @@ function ff_hevc_sao_edge_64_neon_8, export=1
         edge_64b_init   8, 0, 0, 99f
 99:
         edge_64b_bodies edge_w64_body_8, 1
+endfunc
+
+@ ff_hevc_sao_edge_c_16_neon_8(
+@   uint8_t *_dst,                    [r0]
+@   const uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,             [r2]
+@   const int16_t *_sao_offset_val_u, [r3]
+@   const int16_t *_sao_offset_val_v, [sp, #0]
+@   int eo,                           [sp, #4]
+@   int width,                        [sp, #8]
+@   int height)                       [sp, #12]
+
+function ff_hevc_sao_edge_c_16_neon_8, export=1
+        edge_64b_init   8, 1, 0, 99f
+99:
+        edge_32bx2_bodies edge_w64_body_8, 2
 endfunc
 
 @ ff_hevc_sao_edge_c_32_neon_8(
@@ -1026,6 +1133,21 @@ function ff_hevc_sao_edge_32_neon_10, export=1
         edge_64b_bodies edge_w32_body_16, 2
 endfunc
 
+@ void ff_hevc_sao_edge_16_neon_10(
+@   uint8_t *_dst,            [r0]
+@   uint8_t *_src,            [r1]
+@   int  stride_dst,          [r2]
+@   int16_t *_sao_offset_val, [r3]
+@   int eo,                   [sp, #0]
+@   int width,                [sp, #4]
+@   int height)               [sp, #8]
+
+function ff_hevc_sao_edge_16_neon_10, export=1
+        edge_64b_init   10, 0, 0, 99f
+99:
+        edge_32bx2_bodies edge_w32_body_16, 2
+endfunc
+
 @ ff_hevc_sao_edge_c_32_neon_10(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
@@ -1055,181 +1177,5 @@ function ff_hevc_sao_edge_c_16_neon_10, export=1
         edge_64b_init   10, 1, 0, 99f
 99:
         edge_64b_bodies edge_w32_body_16, 4
-endfunc
-
-
-
-.macro init_edge_32
-        ldr     r12, [sp, #4] // sao_offset_val_table
-        vld1.32 {d31}, [r12]
-        ldr     r12, [sp] // height
-.endm
-
-.macro diff out0, tmp0, in0, in1
-        vcgt.u8 \out0, \in1, \in0  // c > a -> -1 , otherwise 0
-        vcgt.u8 \tmp0,  \in0, \in1  // a > c -> -1 , otherwise 0
-        vsub.s8 \out0, \tmp0, \out0 // diff0
-.endm
-
-.macro table32
-        vmov.s8  q10, #2
-        vadd.s8  q0, q10
-        vadd.s8  q1, q10
-        vmov.s8  q10, #128
-        vtbl.8   d0, {d31}, d0
-        vadd.s8  q11, q2, q10
-        vtbl.8   d1, {d31}, d1
-        vadd.s8  q12, q3, q10
-        vtbl.8   d2, {d31}, d2
-        vqadd.s8 q11, q0
-        vtbl.8   d3, {d31}, d3
-        vqadd.s8 q12, q1
-        vsub.s8  q0, q11, q10
-        vsub.s8  q1, q12, q10
-        vst1.8   {q0-q1}, [r0, :128], r2
-.endm
-
-function ff_hevc_sao_edge_eo0_w32_neon_8, export=1
-        init_edge_32
-        vpush {q4-q7}
-        sub     r1, #4
-1:      subs    r12, #1
-        vld1.8  {q13-q14}, [r1]!
-        vld1.32 d30, [r1], r3
-        sub     r1, #32
-        // a
-        vext.8   q0, q13, q14, #3
-        vext.8   q1, q14, q15, #3
-        vshr.u64 d24, d30, #24
-        // c
-        vext.8   q2, q13, q14, #4
-        vext.8   q3, q14, q15, #4
-        vshr.u64 d16, d30, #32
-        // diff0
-        diff32 q13, q14, q4, q5, q0, q1, q2, q3
-        diff   d18, d25, d24, d16
-        // -diff1
-        vext.s8 q0, q13, q14, #1
-        vext.s8 q1, q14, q9, #1
-
-        vsub.s8 q0, q13, q0 //diff0 + diff1
-        vsub.s8 q1, q14, q1
-        table32
-        bne     1b
-        vpop {q4-q7}
-
-        bx      lr
-endfunc
-
-function ff_hevc_sao_edge_eo1_w32_neon_8, export=1
-        init_edge_32
-        vpush {q4-q7}
-        // load a
-        sub     r1, r3
-        vld1.8  {q0-q1}, [r1, :128], r3
-        // load c
-        vld1.8  {q2-q3}, [r1, :128], r3
-        diff32 q12, q13, q0, q1, q0, q1, q2, q3 // CMP ( c, a )
-1:      subs    r12, #1
-        // load b
-        vld1.8  {q8-q9}, [r1, :128], r3
-        diff32 q4, q5, q10, q11, q8, q9, q2, q3 // CMP ( c, b )
-        vadd.s8 q0, q4, q12 //diff0 + diff1
-        vadd.s8 q1, q5, q13
-        table32
-        // CMP ( c, a )
-        vneg.s8 q12, q4
-        vneg.s8 q13, q5
-        // c
-        vmov.64 q2, q8
-        vmov.64 q3, q9
-        bne     1b
-        vpop {q4-q7}
-        bx      lr
-endfunc
-
-function ff_hevc_sao_edge_eo2_w32_neon_8, export=1
-        init_edge_32
-        vpush   {d8-d15}
-        // load a
-        sub     r1, r3
-        sub     r1, #8
-        vld1.8  {q10-q11}, [r1, :64]!
-        vld1.8  {d24}, [r1, :64], r3
-        sub     r1, #32
-        vext.8  q0, q10, q11, #7
-        vext.8  q1, q11, q12, #7
-        // load c
-        vld1.8  {d9}, [r1, :64]!
-        vld1.8  {q2-q3}, [r1, :64], r3
-        sub     r1, #8
-        vext.8  q4, q4, q2, #15
-1:      subs    r12, #1
-        // load b
-        vld1.8  {q10-q11}, [r1, :64]!
-        vld1.8  {q12}, [r1, :64], r3
-        sub     r1, #32
-        vext.8  q8, q10, q11, #9
-        vext.8  q9, q11, q12, #9
-        vext.8  q6, q10, q11, #8
-        vext.8  q7, q11, q12, #8
-        vext.8  q5, q10, q11, #7
-        diff32 q12, q13, q0, q1, q0, q1, q2, q3
-        diff32 q0, q1, q10, q11,  q8, q9, q2, q3
-        vadd.s8 q0, q12 //diff0 + diff1
-        vadd.s8 q1, q13
-        table32
-        // inputs for next loop iteration
-        // a
-        vmov.8  q0, q4
-        vext.8  q1, q2, q3, #15
-        // c
-        vmov.8  q2, q6
-        vmov.8  q3, q7
-        vmov.8  q4, q5
-        bne     1b
-        vpop    {d8-d15}
-        bx      lr
-endfunc
-
-function ff_hevc_sao_edge_eo3_w32_neon_8, export=1
-        init_edge_32
-        sub     r1, r3
-        // load a
-        vld1.8  {q10-q11}, [r1, :64]!
-        vld1.8  {d24}, [r1, :64], r3
-        sub     r1, #32
-        vext.8  q0, q10, q11, #1
-        vext.8  q1, q11, q12, #1
-        // load c
-        vld1.8  {q2-q3}, [r1, :64]!
-        vld1.8  {d30}, [r1, :64], r3
-        sub     r1, #40
-1:      subs    r12, #1
-        // load b
-        vld1.8  {q10-q11}, [r1, :64]!
-        vld1.8  {q12}, [r1, :64], r3
-        sub     r1, #32
-        vext.8  q8, q10, q11, #7
-        vext.8  q9, q11, q12, #7
-        vext.8  q14, q12, q10, #7
-
-        diff32 q12, q13, q0, q1, q0, q1, q2, q3
-        diff32 q0, q1, q10, q11,  q8, q9, q2, q3
-
-        vadd.s8 q0, q12 //diff0 + diff1
-        vadd.s8 q1, q13
-        table32
-
-        // inputs for next loop iteration
-        // a
-        vext.8  q0, q2, q3, #1
-        vext.8  q1, q3, q15, #1
-        // c
-        vext.8  q2, q8, q9, #1
-        vext.8  q3, q9, q14, #1
-        vext.8  d30, d28, d2, #1
-        bne     1b
-        bx      lr
 endfunc
 
