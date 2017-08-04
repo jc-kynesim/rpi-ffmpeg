@@ -118,8 +118,8 @@ typedef union qpu_mc_pred_cmd_u {
 #define QPU_MC_PRED_N_Y8        12
 #define QPU_MC_PRED_N_C8        12
 
-#define QPU_MC_PRED_N_Y10       8
-#define QPU_MC_PRED_N_C10       8
+#define QPU_MC_PRED_N_Y10       12
+#define QPU_MC_PRED_N_C10       12
 
 #pragma pack(pop)
 

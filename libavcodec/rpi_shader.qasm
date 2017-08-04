@@ -17,8 +17,22 @@
 # However in the current world there seems to be no benefit (and a small
 # overhead) in setting this bigger than 2.
 
-.set PREREAD, 2
+.set PREREAD,                      2
 
+# Block heights - 8 & 16 are the only numbers we currently support
+
+.set C_BLK_HEIGHT_8,               16
+.set C_BLK_HEIGHT_16,              8
+.set Y_BLK_HEIGHT_8,               16
+.set Y_BLK_HEIGHT_16,              8
+
+# QPU counts - depend on block size
+# If we have a 2-byte format & block_size > 8 then can only afford
+# 8 QPUs
+# These numbers must match the numbers in rpi_shader_cmd.h
+
+.set N_QPU_8,                      12
+.set N_QPU_16,                     12
 
 # register allocation
 #
@@ -77,11 +91,13 @@
 .set ra_wt_mul_l0,                 ra22.16a
 .set ra_wt_off_l0,                 ra22.16b
 
-# Max pel value (for 8 bit we can get awaay with sat ops but not 9+)
+# Max pel value (for 8 bit we can get away with sat ops but not 9+)
 # * Could merge with rb_pmask. For 10 bit Logically pmask needs 0xff in the
 #   2nd byte   but as the source should never be > 3 there 0x3ff should do
+.set ra_blk_height_pmax,           ra23
 .set ra_pmax,                      ra23.16a
-# -- free --                       ra23.16b
+.set ra_blk_height,                ra23.8c
+# -- free --                       ra23.8d
 
 # Loop:  src frame base (L0)
 .set ra_base,                      ra24
@@ -191,8 +207,10 @@
 # Macros that express this - obviously these can't be overlapped
 # so are probably unsuitable for loop code
 
-.macro m_calc_dma_regs, r_vpm, r_dma
+.macro m_calc_dma_regs, v_bit_depth, v_blk_height, r_vpm, r_dma
   mov r2, qpu_num
+.if v_bit_depth <= 8
+  # 8 bit version
   asr r1, r2, 2
   shl r1, r1, 6
   and r0, r2, 3
@@ -203,25 +221,28 @@
 
   mov r1, vdw_setup_0(0, 0, dma_h8p(0,0,0)) # height,width added later
   shl r0, r0, 5
-  add r_dma, r0, r1  # DMA out
-.endm
 
-# 16 bits per pel, 16 line height, 8 QPU max
-.macro m_calc_dma_regs_16, r_vpm, r_dma
-  mov r2, qpu_num
+.else
+  # 16 bit version
+  # Limited to 8 QPUs if blk height > 8
   asr r1, r2, 1
+.if v_blk_height <= 8
+  shl r1, r1, 4
+.else
   shl r1, r1, 5
+.endif
   and r0, r2, 1
   or  r0, r0, r1
 
   mov r1, vpm_setup(0, 2, h16p(0, 0))   # 2 is stride - stride acts on ADDR
-  add r_vpm, r0, r1  # VPM 8bit storage
+  add r_vpm, r0, r1
 
   # X = H * 8 so the YH from VPMVCD_WR_SETUP[ADDR] drops into
   # XY VPMVCD_WR_SETUP[VPMBASE] if shifted left 3 (+ 3 for pos of field in reg)
   mov r1, vdw_setup_0(0, 0, dma_h16p(0,0,0))    # height,width added later
   shl r0, r0, 6
-  add r_dma, r0, r1                             # DMA out
+.endif
+  add r_dma, r0, r1  # DMA out
 .endm
 
 
@@ -241,9 +262,11 @@
 .if v_bit_depth <= 8
 .set v_x_shift,         1
 .set v_pmask,           0xff
+.set v_blk_height,      C_BLK_HEIGHT_8
 .else
 .set v_x_shift,         2
 .set v_pmask,           0xffff
+.set v_blk_height,      C_BLK_HEIGHT_16
 .endif
 
   mov tmurs, 1                                  # No swap TMUs
@@ -261,7 +284,7 @@
 # load constants
   mov ra_kff100100, 0xff100100
   mov rb_pmask, v_pmask
-  mov ra_pmax, (1 << v_bit_depth) - 1
+  mov ra_blk_height_pmax, ((1 << v_bit_depth) - 1) | (v_blk_height << 16)
 
 # get source pitch
   mov rb_xpitch, unif                           # stride2
@@ -312,11 +335,7 @@
 
 # Compute part of VPM to use for DMA output
 # * We only get 8 QPUs if 16 bit - maybe reduce height and auto-loop?
-.if v_bit_depth <= 8
-  m_calc_dma_regs rb_vpm_init, rb_dma0_base
-.else
-  m_calc_dma_regs_16 rb_vpm_init, rb_dma0_base
-.endif
+  m_calc_dma_regs v_bit_depth, v_blk_height, rb_vpm_init, rb_dma0_base
 
 # And again for L1, but only worrying about frame2 stuff
 
@@ -422,7 +441,7 @@
   add r0, r0, rb_elem_x ; v8subs r1, r1, r1     # ; r1=0
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next
-  min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
+  min r0, r0, rb_max_x  ; mov ra_width_height, unif # ; width_height
 
 .if v_bit_depth <= 8
   shl ra_xshift_next, r0, 3
@@ -434,20 +453,20 @@
   nop                   ; mov ra0, unif         # H filter coeffs
 .endif
   nop                   ; mov ra_y_next, ra2.16a # [ra0 delay]
-  and r1, r0, r1        ; mul24 r2, ra1.16b, v_x_mul  # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
+  and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul  # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        ; mov r1, ra1.16a       # Add stripe offsets ; r1=height
-  add ra_base_next, r3, r0
-  shl r0, r1, v_dma_h_shift
+  add r0, r0, r1        ; mov ra3, unif         # ; V filter coeffs
+  add ra_base_next, r3, r0  ; mov r1, ra_height
 
 # set up VPM write
 
-  sub rb_dma1, rb_dma1_base, r2 ; mov ra3, unif # Compute vdw_setup1(dst_pitch-width) ; V filter coeffs
-  add rb_i_tmu, r1, 3 - PREREAD ; mov ra_wt_off_mul_l0, unif # ; U offset/weight
+  sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif # Compute vdw_setup1(dst_pitch-width) ; U offset/weight
+  add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
   add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
 
 # ; unpack filter coefficients
 
+  shl r0, r1, v_dma_h_shift
   add r0, r0, r2        ; mov rb8, ra3.8a       # Combine width and height of destination area (r0=h<<8, r2=w*2)
   shl r0, r0, v_dma_wh_shift ; mov rb9, ra3.8b  # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base ; mov r1, ra_wt_off_l0       # ; r1=weight
@@ -527,20 +546,40 @@
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256
   asr r1, r1, 14
   nop                   ; mul24 r1, r1, ra_wt_mul_l0
-  shl r1, r1, 8
-  add r1, r1, rb_wt_off
+  shl r1, r1, 8         ; mov r3, ra_blk_height
+  add r1, r1, rb_wt_off ; v8subs r0, ra_height, r3
   brr.anyn -, r:1b
   asr r1, r1, ra3
   min r1, r1, ra_pmax   ; mov -, vw_wait
-  max vpm, r1, 0
+  max vpm, r1, ra_k0    ; mul24 r2, r3, rb_pitch
 # >>> .anyn 1b
 
-# DMA out for U & stash for V
-  bra -, ra_link
-  mov vw_setup, rb_dma0
-  mov vw_setup, rb_dma1
-  mov vw_addr, rb_dest
-# >>> ra_link
+# r0 = remaining height (min 0)
+# r2 = r3 * rb_pitch
+# r3 = block_height (currently always 16)
+
+# If looping again then we consumed 16 height last loop
+# rb_dma1 (stride) remains constant
+# rb_i_tmu remains const (based on total height)
+# recalc rb_dma0, rb_lcount based on new segment height
+
+  mov.setf ra_height, r0 ; mov vw_setup, rb_dma0 # VDW setup 0
+
+# DMA out
+  bra.anyz -, ra_link
+  min r0, r0, r3        ; mov vw_setup, rb_dma1 # Stride
+  sub r1, r0, r3        ; mov vw_addr, rb_dest  # start the VDW
+  shl r1, r1, i_shift23
+# >>> .anyz ra_link
+
+# Here r1 = cur_blk_height - 16 so it will be 0 or -ve
+# We add to dma0 to reduce the number of output lines in the final block
+  add rb_lcount, rb_lcount, r0
+  brr -, r:1b
+  add rb_dma0, rb_dma0, r1
+  add rb_dest, rb_dest, r2
+  mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
+# >>> 1b
 .endm
 
 # At 10 bits
@@ -602,25 +641,25 @@
   add r0, r0, rb_elem_x ; mov ra_y_next, ra2.16a
   sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
   max r0, r0, 0         ; mov ra_xshift, ra_xshift_next
-  min r0, r0, rb_max_x  ; mov ra1, unif         # ; width_height
+  min r0, r0, rb_max_x  ; mov ra_width_height, unif         # ; width_height
 
 .if v_bit_depth <= 8
   shl ra_xshift_next, r0, 3
 .endif
 
   and r0, r0, -4        ; mov ra0, unif         # L0 H filter coeffs
-  and r1, r0, r1        ; mul24 r2, ra1.16b, v_x_mul  # r2=x*2 (we are working in pel pairs)
+  and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul  # r2=x*2 (we are working in pel pairs)
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        ; mov r1, ra1.16a       # Add stripe offsets ; r1=height
+  add r0, r0, r1        ; mov r1, ra_height     # Add stripe offsets ; r1=height
   add ra_base_next, r3, r0
-  shl r0, r1, v_dma_h_shift ; mov ra2, unif     # ; L0 V filter coeffs
 
 # set up VPM write
 
-  sub rb_dma1, rb_dma1_base, r2                 # Compute vdw_setup1(dst_pitch-width)
-  add rb_i_tmu, r1, 3 - PREREAD
+  sub rb_dma1, rb_dma1_base, r2 ; mov ra2, unif  # Compute vdw_setup1(dst_pitch-width) ; L0 V filter coeffs
+  add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
   add rb_lcount, r1, 3
 
+  shl r0, r1, v_dma_h_shift
   add r0, r0, r2        ; mov ra_wt_mul_l0, unif # ; U weight
   shl r0, r0, v_dma_wh_shift ; mov.ifnz ra_wt_mul_l0, unif  # Shift into bits 16 upwards of the vdw_setup0 register ; V weight
   add rb_dma0, r0, rb_dma0_base ; mov ra3, unif  # ; x2_y2
@@ -737,22 +776,42 @@
   asr r1, r1, 14        ; mul24 r2, r2, ra_wt_mul_l0
 
   add r2, r2, rb_wt_off ; mul24 r1, r1, ra_wt_mul_l1    # rb_wt_off = (offsetL0 + offsetL1 + 1) << (rb_wt_den_p15 - 9)
-  add r1, r1, r2
+  add r1, r1, r2        ; mov r3, ra_blk_height
 
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256     # Lose bad top 8 bits & sign extend
 
   brr.anyn -, r:1b
-  asr r1, r1, rb_wt_den_p15
+  asr r1, r1, rb_wt_den_p15 ; v8subs r0, ra_height, r3
   min r1, r1, ra_pmax   ; mov -, vw_wait
-  max vpm, r1, 0
+  max vpm, r1, ra_k0    ; mul24 r2, r3, rb_pitch
 # >>> .anyn 1b
 
+# r0 = remaining height (min 0)
+# r2 = r3 * rb_pitch
+# r3 = block_height (currently always 16)
+
+# If looping again then we consumed 16 height last loop
+# rb_dma1 (stride) remains constant
+# rb_i_tmu remains const (based on total height)
+# recalc rb_dma0, rb_lcount based on new segment height
+
+  mov.setf ra_height, r0 ; mov vw_setup, rb_dma0 # VDW setup 0
+
 # DMA out
-  bra -, ra_link
-  mov vw_setup, rb_dma0
-  mov vw_setup, rb_dma1
-  mov vw_addr, rb_dest
-# >>> ra_link
+  bra.anyz -, ra_link
+  min r0, r0, r3        ; mov vw_setup, rb_dma1 # Stride
+  sub r1, r0, r3        ; mov vw_addr, rb_dest  # start the VDW
+  shl r1, r1, i_shift23
+# >>> .anyz ra_link
+
+# Here r1 = cur_blk_height - 16 so it will be 0 or -ve
+# We add to dma0 to reduce the number of output lines in the final block
+  add rb_lcount, rb_lcount, r0
+  brr -, r:1b
+  add rb_dma0, rb_dma0, r1
+  add rb_dest, rb_dest, r2
+  mov vw_setup, rb_vpm_init                     # Reset our VDM write pointer
+# >>> 1b
 .endm
 
 ::mc_filter_c_b
@@ -831,30 +890,32 @@
 .endif
 .endm
 
+.set v_quads8, N_QPU_8 / 4
+
 ::mc_sync_q0
-  m_sync_q 0, 3
+  m_sync_q 0, v_quads8
 ::mc_sync_q1
-  m_sync_q 1, 3
+  m_sync_q 1, v_quads8
 ::mc_sync_q2
-  m_sync_q 2, 3
+  m_sync_q 2, v_quads8
 ::mc_sync_q3
-  m_sync_q 3, 3
+  m_sync_q 3, v_quads8
 ::mc_sync_q4
-  m_sync_q 4, 3
+  m_sync_q 4, v_quads8
 ::mc_sync_q5
-  m_sync_q 5, 3
+  m_sync_q 5, v_quads8
 ::mc_sync_q6
-  m_sync_q 6, 3
+  m_sync_q 6, v_quads8
 ::mc_sync_q7
-  m_sync_q 7, 3
+  m_sync_q 7, v_quads8
 ::mc_sync_q8
-  m_sync_q 8, 3
+  m_sync_q 8, v_quads8
 ::mc_sync_q9
-  m_sync_q 9, 3
+  m_sync_q 9, v_quads8
 ::mc_sync_q10
-  m_sync_q 10, 3
+  m_sync_q 10, v_quads8
 ::mc_sync_q11
-  m_sync_q 11, 3
+  m_sync_q 11, v_quads8
 
 # mc_exit()
 # Chroma & Luma the same now
@@ -914,9 +975,11 @@
 .if v_bit_depth <= 8
 .set v_x_shift,         0
 .set v_pmask,           0xff
+.set v_blk_height,      Y_BLK_HEIGHT_8
 .else
 .set v_x_shift,         1
 .set v_pmask,           0xffff
+.set v_blk_height,      Y_BLK_HEIGHT_16
 .endif
 
 
@@ -930,7 +993,7 @@
 
   mov ra_kff100100, 0xff100100
   mov rb_pmask, v_pmask
-  mov ra_pmax, (1 << v_bit_depth) - 1
+  mov ra_blk_height_pmax, ((1 << v_bit_depth) - 1) | (v_blk_height << 16)
 
 # Compute part of VPM to use
 
@@ -1005,11 +1068,7 @@
 
   add rb_wt_den_p15, unif, 23 - v_bit_depth     # weight denom
 
-.if v_bit_depth <= 8
-  m_calc_dma_regs rb_vpm_init, rb_dma0_base
-.else
-  m_calc_dma_regs_16 rb_vpm_init, rb_dma0_base
-.endif
+  m_calc_dma_regs v_bit_depth, v_blk_height, rb_vpm_init, rb_dma0_base
 
   mov ra_link, unif                             # Next fn
 
@@ -1108,9 +1167,8 @@
   add rb_base2_next, rb_base2_next, r0
 
 # get width,height of block (unif load above), r1 = width * pel_size
-  sub rb_dma1, rb_dma1_base, r1                 # Compute vdw_setup1(dst_pitch-width)
-  add rb_i_tmu, ra_height, 7 - PREREAD ; mov r0, ra_height
-  min r0, r0, ra_k16
+  sub rb_dma1, rb_dma1_base, r1 ; mov r0, ra_height # Compute vdw_setup1(dst_pitch-width)
+  add rb_i_tmu, r0, 7 - PREREAD ; v8min r0, r0, ra_blk_height
   add rb_lcount, r0, 7
   shl r0,   r0, v_dma_h_shift
   add r0,   r0, r1                              # Combine width and height of destination area
@@ -1259,17 +1317,18 @@
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_k256  # x256 - sign extend & discard rubbish
   asr r1, r1, 14
   nop                   ; mul24 r1, r1, ra_wt_mul_l0
-  add r1, r1, rb_wt_off ; mov r3, ra_k16        # ; r3 = block height for outside loop
+  add r1, r1, rb_wt_off ; mov r3, ra_blk_height      # ; r3 = block height for outside loop
 
   shl r1, r1, 8         ; v8subs r0, ra_height, r3
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
   min r1, r1, ra_pmax   ; mov -, vw_wait
-  max vpm, r1, 0
+  max vpm, r1, ra_k0    ; mul24 r2, r3, rb_pitch
 
 # >>> branch.anyn yloop
 
-# r0 = remaining height
+# r0 = remaining height (min 0)
+# r2 = r3 * rb_pitch
 # r3 = block_height (currently always 16)
 
 # If looping again then we consumed 16 height last loop
@@ -1277,19 +1336,18 @@
 # rb_i_tmu remains const (based on total height)
 # recalc rb_dma0, rb_lcount based on new segment height
 
-  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
+  mov.setf ra_height, r0 ; mov vw_setup, rb_dma0 # VDW setup 0
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
-  nop                   ; mov vw_addr, rb_dest  # start the VDW
+  min r0, r0, r3        ; mov vw_setup, rb_dma1 # Stride
+  sub r1, r0, r3        ; mov vw_addr, rb_dest  # start the VDW
+  shl r1, r1, i_shift23
 # >>> .anyz ra_link
 
 # Here r1 = cur_blk_height - 16 so it will be 0 or -ve
 # We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r1, r1, i_shift23
   brr -, r:1b
   add rb_dma0, rb_dma0, r1
   add rb_dest, rb_dest, r2
@@ -1306,26 +1364,15 @@
 # mc_filter_b(y_x, base, y2_x2, base2, width_height, my2_mx2_my_mx, offsetweight0, this_dst, next_kernel)
 # In a P block, only the first half of coefficients contain used information.
 # At this point we have already issued two pairs of texture requests for the current block
-# May be better to just send 16.16 motion vector and figure out the coefficients inside this block (only 4 cases so can compute hcoeffs in around 24 cycles?)
-# Can fill in the coefficients so only
-# Can also assume default weighted prediction for B frames.
 # Perhaps can unpack coefficients in a more efficient manner by doing H/V for a and b at the same time?
 # Or possibly by taking advantage of symmetry?
-# From 19->7 32bits per command.
-
 
 .macro m_filter_y_bxx, v_bit_depth
   m_luma_setup v_bit_depth
 
 :1
-# retrieve texture results and pick out bytes
-# then submit two more texture requests
-
-# If we knew there was no clipping then this code would get simpler.
-# Perhaps we could add on the pitch and clip using larger values?
-
-  sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1             ; ldtmu1
-  shr r1, r4, rb_xshift2        ; mov.ifz ra_y_y2, ra_y_y2_next      ; ldtmu0
+  sub.setf -, r5, rb_i_tmu      ; v8adds r5rep, r5, ra_k1        ; ldtmu1
+  shr r1, r4, rb_xshift2        ; mov.ifz ra_y_y2, ra_y_y2_next  ; ldtmu0
   shr r0, r4, ra_xshift         ; mov r3, rb_pitch
 
   max r2, ra_y, 0  # y
@@ -1341,7 +1388,7 @@
   mov.setf -, rb3       ; mov ra8, ra9
 
 # apply horizontal filter
-  and r1, r1, rb_pmask   ; mul24      r3, ra0.8a,      r0
+  and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,      r0
   nop                   ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
   nop                   ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
   nop                   ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
@@ -1382,15 +1429,16 @@
   nop                   ; mul24 r0, r1, ra_wt_mul_l0
   add r0, r0, r2        ; mul24 r1, r1 << 8, ra_wt_mul_l1 << 8    @ "mul_used", 0
 
-  add r1, r1, r0        ; mov r3, ra_k16
+  add r1, r1, r0        ; mov r3, ra_blk_height
   shl r1, r1, 8         ; v8subs r0, ra_height, r3
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
   min r1, r1, ra_pmax   ; mov -, vw_wait
-  max vpm, r1, 0
+  max vpm, r1, ra_k0    ; mul24 r2, r3, rb_pitch
 # >>> branch.anyn 1b
 
-# r0 = remaining height
+# r0 = remaining height (min 0)
+# r2 = r3 * rb_pitch
 # r3 = block_height (currently always 16)
 
 # If looping again then we consumed 16 height last loop
@@ -1398,19 +1446,18 @@
 # rb_i_tmu remains const (based on total height)
 # recalc rb_dma0, rb_lcount based on new segment height
 
-  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
+  mov.setf ra_height, r0 ; mov vw_setup, rb_dma0 # VDW setup 0
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
-  nop                   ; mov vw_addr, rb_dest  # start the VDW
+  min r0, r0, r3        ; mov vw_setup, rb_dma1 # Stride
+  sub r1, r0, r3        ; mov vw_addr, rb_dest  # start the VDW
+  shl r1, r1, i_shift23
 # >>> .anyz ra_link
 
 # Here r1 = cur_blk_height - 16 so it will be 0 or -ve
 # We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r1, r1, i_shift23
   brr -, r:1b
   add rb_dma0, rb_dma0, r1
   add rb_dest, rb_dest, r2
@@ -1469,9 +1516,8 @@
 # get width,height of block (unif load above)
 # Compute vdw_setup1(dst_pitch-width)
   shl r1, ra_width, v_x_shift
-  sub rb_dma1, rb_dma1_base, r1
-  sub rb_i_tmu, ra_height, PREREAD ; mov r0, ra_height
-  min r0, r0, ra_k16
+  sub rb_dma1, rb_dma1_base, r1 ; mov r0, ra_height
+  sub rb_i_tmu, r0, PREREAD ; v8min r0, r0, ra_blk_height
   add rb_lcount, r0, 0  ; mov ra_wt_off_mul_l0, unif
   shl r0, r0, v_dma_h_shift ; mov rb_dest, unif # Destination address
   add r0, r0, r1                                # Combine width and height of destination area
@@ -1493,16 +1539,17 @@
   add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask
 
   sub.setf -, r5, rb_lcount ; mul24 r1, r0, ra_wt_mul_l0
-  shl r1, r1, 23 - v_bit_depth ; mov r3, ra_k16
+  shl r1, r1, 23 - v_bit_depth ; mov r3, ra_blk_height
   add r1, r1, rb_wt_off ; v8subs r0, ra_height, r3
 
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
   min r1, r1, ra_pmax   ; mov -, vw_wait
-  max vpm, r1, 0
+  max vpm, r1, ra_k0    ; mul24 r2, r3, rb_pitch
 # >>> branch.anyn 1b
 
-# r0 = remaining height
+# r0 = remaining height (min 0)
+# r2 = r3 * rb_pitch
 # r3 = block_height (currently always 16)
 
 # If looping again then we consumed 16 height last loop
@@ -1510,19 +1557,18 @@
 # rb_i_tmu remains const (based on total height)
 # recalc rb_dma0, rb_lcount based on new segment height
 
-  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
+  mov.setf ra_height, r0 ; mov vw_setup, rb_dma0 # VDW setup 0
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
-  nop                   ; mov vw_addr, rb_dest  # start the VDW
+  min r0, r0, r3        ; mov vw_setup, rb_dma1 # Stride
+  sub r1, r0, r3        ; mov vw_addr, rb_dest  # start the VDW
+  shl r1, r1, i_shift23
 # >>> .anyz ra_link
 
 # Here r1 = cur_blk_height - 16 so it will be 0 or -ve
 # We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r1, r1, i_shift23
   brr -, r:1b
   add rb_dma0, rb_dma0, r1
   add rb_dest, rb_dest, r2
@@ -1566,16 +1612,17 @@
 
   sub.setf -, r5, rb_lcount ; mul24 r1, r1, ra_wt_mul_l1
   add r1, r0, r1
-  shl r1, r1, 22 - v_bit_depth ; mov r3, ra_k16
+  shl r1, r1, 22 - v_bit_depth ; mov r3, ra_blk_height
   add r1, r1, rb_wt_off ; v8subs r0, ra_height, r3
 
   brr.anyn -, r:1b
   asr r1, r1, rb_wt_den_p15
   min r1, r1, ra_pmax   ; mov -, vw_wait
-  max vpm, r1, 0
+  max vpm, r1, ra_k0    ; mul24 r2, r3, rb_pitch
 # >>> branch.anyn 1b
 
-# r0 = remaining height
+# r0 = remaining height (min 0)
+# r2 = r3 * rb_pitch
 # r3 = block_height (currently always 16)
 
 # If looping again then we consumed 16 height last loop
@@ -1583,19 +1630,18 @@
 # rb_i_tmu remains const (based on total height)
 # recalc rb_dma0, rb_lcount based on new segment height
 
-  mov.setf ra_height, r0 ; mul24 r2, r3, rb_pitch # Done if Z now
+  mov.setf ra_height, r0 ; mov vw_setup, rb_dma0 # VDW setup 0
 
 # DMA out
   bra.anyz -, ra_link
-  min r0, r0, r3        ; mov vw_setup, rb_dma0 # VDW setup 0
-  sub r1, r0, r3        ; mov vw_setup, rb_dma1 # Stride
-  nop                   ; mov vw_addr, rb_dest  # start the VDW
+  min r0, r0, r3        ; mov vw_setup, rb_dma1 # Stride
+  sub r1, r0, r3        ; mov vw_addr, rb_dest  # start the VDW
+  shl r1, r1, i_shift23
 # >>> .anyz ra_link
 
 # Here r1 = cur_blk_height - 16 so it will be 0 or -ve
 # We add to dma0 to reduce the number of output lines in the final block
   add rb_lcount, rb_lcount, r0
-  shl r1, r1, i_shift23
   brr -, r:1b
   add rb_dma0, rb_dma0, r1
   add rb_dest, rb_dest, r2
@@ -1624,7 +1670,7 @@
 # Even if these fns are the same as for other bit depths we want our own copy
 # to keep the code we are using in a single lump to avoid (direct map) cache
 # thrashing
-.set v_quads10, 2
+.set v_quads10, N_QPU_16 / 4
 
 ::mc_sync10_q0
   m_sync_q 0, v_quads10
