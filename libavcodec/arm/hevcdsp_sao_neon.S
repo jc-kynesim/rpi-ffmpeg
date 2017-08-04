@@ -582,19 +582,19 @@ endfunc
 .endm
 
 
-// input
-// a in q0 - q3
-// c in q4 - q7
-// b in q8 - q11
-// offset table r4,r5 and r6,r7
-//   r4,r5 applied to even samples; r6 r7 applied to odd - allows filtering of C
-// output in q0 - q3
-// clobbers q12 - q15
-
-@ a <- c <- b
+@ r0    destination address
+@ r2    stride to post-increment r0 with
+@ [r5]  translate values
 @
-@ It appears that Neon can stall if you try and use results too soon so we try to
-@ spread our instruction out
+@ a <- c <- b
+@ a in q0 - q3
+@ c in q4 - q7
+@ b in q8 - q11
+@
+@ q12-15 used as temp
+@
+@ Can be used for both Y & C as we unzip/zip the deltas and
+@ transform "u/v" separately via d26/d27.  For Y d26=d27
 
 function edge_w64_body_8
 
@@ -636,12 +636,9 @@ function edge_w64_body_8
 
         vadd.s8 q0, q0, q12
         vadd.s8 q1, q1, q12
-        @ whilst vmov dn, rm, rn exists it is a vfp instruction
-        @ and causes a stall till neon pipe empty - so don't do that!
-        vmov    d26[0], r4
-        vmov    d26[1], r5
-        vmov    d27[0], r6
-        vmov    d27[1], r7
+
+        vld1.8   {d26, d27}, [r5]
+
         vadd.s8 q2, q2, q12
         vuzp.8    q0, q1
         vmov.u8 q15, #128
@@ -688,6 +685,11 @@ endfunc
 @ r2    stride to post-increment r0 with
 @ r4    upper clip value
 @ [r5]  translate values
+@
+@ a <- c <- b
+@ a in q0 - q3
+@ c in q4 - q7
+@ b in q8 - q11
 @
 @ q12-15 used as temp
 @
@@ -769,7 +771,67 @@ function edge_w32_body_16
         bx       lr
 endfunc
 
-.macro	edge_64b_e0, body_fn, pb
+@ ff_hevc_sao_edge_c_16_neon(
+@   uint8_t *_dst,                    [r0]
+@   const uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,             [r2]
+@   const int16_t *_sao_offset_val_u, [r3]
+@   const int16_t *_sao_offset_val_v, [sp, #0]   // Chroma only
+@   int eo,                           [sp, #sp_base + 0]
+@   int width,                        [sp, #sp_base + 4]
+@   int height)                       [sp, #sp_base + 8]
+
+.macro  edge_64b_init, bit_depth, is_chroma, do2, jump_tab
+        push     {r4-r6, lr}    @ 16 bytes
+.set sp_base, 16
+        vmov.i64 d6, #0
+        mov      r12, #2
+.if \is_chroma
+        ldr      r4, [sp, #16]
+.set sp_base, sp_base + 4
+.endif
+        vld1.8   {d6[2]}, [r3], r12
+        vld1.8   {d6[0]}, [r3], r12
+        vld1.8   {d6[1]}, [r3], r12
+        vld1.8   {d6[3]}, [r3], r12
+        vld1.8   {d6[4]}, [r3]
+.if \is_chroma
+        vld1.8   {d7[2]}, [r4], r12
+        vld1.8   {d7[0]}, [r4], r12
+        vld1.8   {d7[1]}, [r4], r12
+        vld1.8   {d7[3]}, [r4], r12
+        vld1.8   {d7[4]}, [r4]
+.else
+        vmov     d7, d6
+.endif
+.if \bit_depth > 8
+        movw     r4, (1 << \bit_depth) - 1
+.endif
+        movw     r3, EDGE_SRC_STRIDE
+        vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
+.set sp_base, sp_base + 80
+        mov      r5, sp
+
+        ldr      r12, [sp, #sp_base + 0]   @ e0
+        adr      r6, \jump_tab
+        ldr      r6, [r6, r12, lsl #2]
+        ldr      r12, [sp, #sp_base + 8]  @ height
+.if \do2
+        push     {r0, r1, r6, r12}
+        blx      r6
+        pop      {r0, r1, r6, r12}
+
+        add      r0, #64
+        add      r1, #64
+.endif
+        blx      r6
+
+        vpop     {q3-q7}        @ spurious but harmless load of q3
+        pop      {r4-r6, pc}
+.endm
+
+
+.macro  edge_64b_e0, body_fn, pb
         mov      r6, lr
         sub      r1, #8
 1:      subs     r12, #1
@@ -793,7 +855,7 @@ endfunc
         bx       r6
 .endm
 
-.macro	edge_64b_e1, body_fn
+.macro  edge_64b_e1, body_fn
         mov      r6, lr
         sub      r1, r3
         // load a
@@ -809,7 +871,7 @@ endfunc
         vld1.8   {q8-q9}, [r1, :128]!
         vld1.8   {q10-q11}, [r1, :128], r3
         sub      r1, #32
-        bl       edge_w32_body_16
+        bl       \body_fn
         // copy c to a
         vmov.64  q0, q4
         vmov.64  q1, q5
@@ -824,55 +886,109 @@ endfunc
         bx       r6
 .endm
 
-.macro	edge_64b_e2, body_fn, pb
+.macro  edge_64b_e2, body_fn, pb
         mov      r6, lr
+        sub      r1, #32
+        sub      r3, #(32 - \pb)
+
 1:      sub      r1, r3
         // load a
         // TODO: fix unaligned load
         //       don't reload a like in eo1
-        sub      r1, #\pb
-        vld1.16  {q0-q1}, [r1]!
-        vld1.16  {q2-q3}, [r1], r3
-        sub      r1, #(32 - \pb)
+        vld1.8   {q0-q1}, [r1]!
+        vld1.8   {q2-q3}, [r1], r3
         subs     r12, #1
         // load  c
-        vld1.16  {q4-q5}, [r1, :128]!
-        vld1.16  {q6-q7}, [r1, :128], r3
-        sub      r1, #(32 - \pb)
+        vld1.8   {q4-q5}, [r1, :128]!
+        vld1.8   {q6-q7}, [r1, :128], r3
         // load  b
-        vld1.16  {q8-q9}, [r1]!
-        vld1.16  {q10-q11}, [r1]
-        sub      r1, #(32 + \pb)
+        vld1.8   {q8-q9}, [r1]!
+        vld1.8   {q10-q11}, [r1]
+        sub      r1, #(64 + \pb)
         bl       \body_fn
         bne      1b
+
+        add      r3, #(32 - \pb)
         bx       r6
 .endm
 
-.macro	edge_64b_e3, body_fn, pb
+.macro  edge_64b_e3, body_fn, pb
         mov      r6, lr
+        sub      r1, #32
+        sub      r3, #(32 + \pb)
+
 1:      sub      r1, r3
         // load a
         // TODO: fix unaligned load
         //       don't reload a like in eo1
-        add      r1, #\pb
-        vld1.16  {q0-q1}, [r1]!
-        vld1.16  {q2-q3}, [r1], r3
-        sub      r1, #(32 + \pb)
+        vld1.8   {q0-q1}, [r1]!
+        vld1.8   {q2-q3}, [r1], r3
         subs     r12, #1
         // load  c
-        vld1.16  {q4-q5}, [r1, :128]!
-        vld1.16  {q6-q7}, [r1, :128], r3
-        sub      r1, #(32 + \pb)
+        vld1.8   {q4-q5}, [r1, :128]!
+        vld1.8   {q6-q7}, [r1, :128], r3
         // load  b
-        vld1.16  {q8-q9}, [r1]!
-        vld1.16  {q10-q11}, [r1]
-        sub      r1, #(32 - \pb)
+        vld1.8   {q8-q9}, [r1]!
+        vld1.8   {q10-q11}, [r1]
+        sub      r1, #(64 - \pb)
         bl       \body_fn
         bne      1b
+
+        add      r3, #(32 + \pb)
         bx       r6
 .endm
 
-@ void ff_hevc_sao_edge_w64_neon_10(
+.macro edge_64b_bodies, body_fn, pb
+        .word   0f
+        .word   10f
+        .word   20f
+        .word   30f
+
+0:
+        edge_64b_e0     \body_fn, \pb
+
+10:
+        edge_64b_e1     \body_fn
+
+20:
+        edge_64b_e2     \body_fn, \pb
+
+30:
+        edge_64b_e3     \body_fn, \pb
+.endm
+
+@ void ff_hevc_sao_edge_64_neon_8(
+@   uint8_t *_dst,            [r0]
+@   uint8_t *_src,            [r1]
+@   int  stride_dst,          [r2]
+@   int16_t *_sao_offset_val, [r3]
+@   int eo,                   [sp, #0]
+@   int width,                [sp, #4]
+@   int height)               [sp, #8]
+
+function ff_hevc_sao_edge_64_neon_8, export=1
+        edge_64b_init   8, 0, 0, 99f
+99:
+        edge_64b_bodies edge_w64_body_8, 1
+endfunc
+
+@ ff_hevc_sao_edge_c_32_neon_8(
+@   uint8_t *_dst,                    [r0]
+@   const uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,             [r2]
+@   const int16_t *_sao_offset_val_u, [r3]
+@   const int16_t *_sao_offset_val_v, [sp, #0]
+@   int eo,                           [sp, #4]
+@   int width,                        [sp, #8]
+@   int height)                       [sp, #12]
+
+function ff_hevc_sao_edge_c_32_neon_8, export=1
+        edge_64b_init   8, 1, 0, 99f
+99:
+        edge_64b_bodies edge_w64_body_8, 2
+endfunc
+
+@ void ff_hevc_sao_edge_64_neon_10(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -888,36 +1004,7 @@ endfunc
 @ about edge effects
 
 function ff_hevc_sao_edge_64_neon_10, export=1
-        push     {r4-r6, lr}    @ 16 bytes
-        vmov.i64 d6, #0
-        mov      r12, #2
-        vld1.8   {d6[2]}, [r3], r12
-        vld1.8   {d6[0]}, [r3], r12
-        vld1.8   {d6[1]}, [r3], r12
-        vld1.8   {d6[3]}, [r3], r12
-        vld1.8   {d6[4]}, [r3]
-        movw     r4, 0x3ff      @ ******* (1 << \bit_depth) - 1
-        vmov     d7, d6
-        movw     r3, EDGE_SRC_STRIDE
-        vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
-        mov      r5, sp
-
-        ldr      r12, [sp, #96]   @ e0
-        adr      r6, 99f
-        ldr      r6, [r6, r12, lsl #2]
-
-        ldr      r12, [sp, #104]  @ height
-
-        push     {r0, r1, r6, r12}
-        blx      r6
-        pop      {r0, r1, r6, r12}
-
-        add      r0, #64
-        add      r1, #64
-        blx      r6
-
-        vpop     {q3-q7}        @ spurious but harmless load of q3
-        pop      {r4-r6, pc}
+        edge_64b_init   10, 0, 1, 99f
 endfunc
 
 @ void ff_hevc_sao_edge_32_neon_10(
@@ -930,51 +1017,12 @@ endfunc
 @   int height)               [sp, #8]
 
 function ff_hevc_sao_edge_32_neon_10, export=1
-        push     {r4-r6, lr}    @ 16 bytes
-        vmov.i64 d6, #0
-        mov      r12, #2
-        vld1.8   {d6[2]}, [r3], r12
-        vld1.8   {d6[0]}, [r3], r12
-        vld1.8   {d6[1]}, [r3], r12
-        vld1.8   {d6[3]}, [r3], r12
-        vld1.8   {d6[4]}, [r3]
-        movw     r4, 0x3ff      @ ******* (1 << \bit_depth) - 1
-        vmov     d7, d6
-        movw     r3, EDGE_SRC_STRIDE
-        vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
-        mov      r5, sp
-
-        ldr      r12, [sp, #96]   @ eo
-        adr      r6, 99f
-        ldr      r6, [r6, r12, lsl #2]
-
-        ldr      r12, [sp, #104]  @ height
-        blx      r6
-
-        vpop     {q3-q7}        @ spurious but harmless load of q3
-        pop      {r4-r6, pc}
-
+        edge_64b_init   10, 0, 0, 99f
 99:
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
-
-0:
-	edge_64b_e0	edge_w32_body_16, 2
-
-10:
-	edge_64b_e1	edge_w32_body_16
-
-20:
-	edge_64b_e2	edge_w32_body_16, 2
-
-30:
-	edge_64b_e3	edge_w32_body_16, 2
-
+        edge_64b_bodies edge_w32_body_16, 2
 endfunc
 
-@ ff_hevc_sao_edge_c_32_neon(
+@ ff_hevc_sao_edge_c_32_neon_10(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -985,45 +1033,11 @@ endfunc
 @   int height)                       [sp, #12]
 
 function ff_hevc_sao_edge_c_32_neon_10, export=1
-        push     {r4-r6, lr}    @ 16 bytes
-        vmov.i64 d6, #0
-        mov      r12, #2
-        ldr      r4, [sp, #16]
-        vld1.8   {d6[2]}, [r3], r12
-        vld1.8   {d6[0]}, [r3], r12
-        vld1.8   {d6[1]}, [r3], r12
-        vld1.8   {d6[3]}, [r3], r12
-        vld1.8   {d6[4]}, [r3]
-        vld1.8   {d7[2]}, [r4], r12
-        vld1.8   {d7[0]}, [r4], r12
-        vld1.8   {d7[1]}, [r4], r12
-        vld1.8   {d7[3]}, [r4], r12
-        vld1.8   {d7[4]}, [r4]
-        movw     r4, 0x3ff      @ ******* (1 << \bit_depth) - 1
-        movw     r3, EDGE_SRC_STRIDE
-        vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
-        mov      r5, sp
-
-        ldr      r12, [sp, #100]   @ e0
-        adr      r6, 99f
-        ldr      r6, [r6, r12, lsl #2]
-
-        ldr      r12, [sp, #108]  @ height
-
-        push     {r0, r1, r6, r12}
-        blx      r6
-        pop      {r0, r1, r6, r12}
-
-        add      r0, #64
-        add      r1, #64
-        blx      r6
-
-        vpop     {q3-q7}        @ spurious but harmless load of q3
-        pop      {r4-r6, pc}
+        edge_64b_init   10, 1, 1, 99f
 endfunc
 
 
-@ ff_hevc_sao_edge_c_16_neon(
+@ ff_hevc_sao_edge_c_16_neon_10(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1034,329 +1048,11 @@ endfunc
 @   int height)                       [sp, #12]
 
 function ff_hevc_sao_edge_c_16_neon_10, export=1
-        push     {r4-r6, lr}    @ 16 bytes
-        vmov.i64 d6, #0
-        mov      r12, #2
-        ldr      r4, [sp, #16]
-        vld1.8   {d6[2]}, [r3], r12
-        vld1.8   {d6[0]}, [r3], r12
-        vld1.8   {d6[1]}, [r3], r12
-        vld1.8   {d6[3]}, [r3], r12
-        vld1.8   {d6[4]}, [r3]
-        vld1.8   {d7[2]}, [r4], r12
-        vld1.8   {d7[0]}, [r4], r12
-        vld1.8   {d7[1]}, [r4], r12
-        vld1.8   {d7[3]}, [r4], r12
-        vld1.8   {d7[4]}, [r4]
-        movw     r4, 0x3ff      @ ******* (1 << \bit_depth) - 1
-        movw     r3, EDGE_SRC_STRIDE
-        vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
-        mov      r5, sp
-
-        ldr      r12, [sp, #100]   @ e0
-        adr      r6, 99f
-        ldr      r6, [r6, r12, lsl #2]
-
-        ldr      r12, [sp, #108]  @ height
-        blx      r6
-
-        vpop     {q3-q7}        @ spurious but harmless load of q3
-        pop      {r4-r6, pc}
-
+        edge_64b_init   10, 1, 0, 99f
 99:
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
-
-0:
-	edge_64b_e0	edge_w32_body_16, 4
-
-10:
-	edge_64b_e1	edge_w32_body_16
-
-20:
-	edge_64b_e2	edge_w32_body_16, 4
-
-30:
-	edge_64b_e3	edge_w32_body_16, 4
-
-
+        edge_64b_bodies edge_w32_body_16, 4
 endfunc
 
-
-
-
-
-
-
-
-
-.macro init_edge_64
-        push   {r4-r8,lr}
-        ldr    r12, [sp, #24] // height
-        ldr    r5,  [sp, #28] // sao_offset_val_table
-        ldrd   r4, r5, [r5]
-        mov    r6, r4
-        mov    r7, r5
-.endm
-
-function ff_hevc_sao_edge_eo0_w64_neon_8, export=1
-        init_edge_64
-        vpush {d8-d15}
-        sub    r1, #8
-1:      subs    r12, #1
-        vld1.64  {d7}, [r1, :64]!
-        vld1.64  {q4-q5}, [r1, :128]! // load c
-        vld1.64  {q6-q7}, [r1, :128]!
-        vld1.64  {d24}, [r1, :64], r3
-        sub      r1, #72
-        // load a
-        vext.8 q0, q3, q4, #15
-        vext.8 q1, q4, q5, #15
-        vext.8 q2, q5, q6, #15
-        vext.8 q3, q6, q7, #15
-        // load b
-        vext.8 q8, q4, q5, #1
-        vext.8 q9, q5, q6, #1
-        vext.8 q10, q6, q7, #1
-        vext.8 q11, q7, q12, #1
-        bl    edge_w64_body_8
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-endfunc
-
-function ff_hevc_sao_edge_eo1_w64_neon_8, export=1
-        init_edge_64
-        vpush {d8-d15}
-        sub     r1, r3
-        // load a
-        vld1.8  {q0-q1}, [r1, :128]!
-        vld1.8  {q2-q3}, [r1, :128], r3
-        sub     r1, #32
-        // load c
-        vld1.8  {q4-q5}, [r1, :128]!
-        vld1.8  {q6-q7}, [r1, :128], r3
-        sub     r1, #32
-1:      subs    r12, #1
-        // load b
-        vld1.8  {q8-q9}, [r1, :128]!
-        vld1.8  {q10-q11}, [r1, :128], r3
-        sub     r1, #32
-        bl      edge_w64_body_8
-        // copy c to a
-        vmov.64 q0, q4
-        vmov.64 q1, q5
-        vmov.64 q2, q6
-        vmov.64 q3, q7
-        // copy b to c
-        vmov.64 q4, q8
-        vmov.64 q5, q9
-        vmov.64 q6, q10
-        vmov.64 q7, q11
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-endfunc
-
-function ff_hevc_sao_edge_eo2_w64_neon_8, export=1
-        init_edge_64
-        vpush {d8-d15}
-1:      sub     r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        sub     r1, #1
-        vld1.8  {q0-q1}, [r1]!
-        vld1.8  {q2-q3}, [r1], r3
-        sub     r1, #31
-        subs    r12, #1
-        // load c
-        vld1.8  {q4-q5}, [r1, :128]!
-        vld1.8  {q6-q7}, [r1, :128], r3
-        sub     r1, #32
-        // load b
-        add     r1, #1
-        vld1.8  {q8-q9}, [r1]!
-        vld1.8  {q10-q11}, [r1]
-        sub     r1, #33
-        bl      edge_w64_body_8
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-endfunc
-
-function ff_hevc_sao_edge_eo3_w64_neon_8, export=1
-        init_edge_64
-        vpush {d8-d15}
-1:      sub     r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        add     r1, #1
-        vld1.8  {q0-q1}, [r1]!
-        vld1.8  {q2-q3}, [r1], r3
-        sub     r1, #33
-        subs    r12, #1
-        // load c
-        vld1.8  {q4-q5}, [r1, :128]!
-        vld1.8  {q6-q7}, [r1, :128], r3
-        sub     r1, #32
-        // load b
-        sub     r1, #1
-        vld1.8  {q8-q9}, [r1]!
-        vld1.8  {q10-q11}, [r1]
-        sub     r1, #31
-        bl      edge_w64_body_8
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-endfunc
-
-
-@ void ff_hevc_sao_edge_c_eo1_w64_neon_8(
-@   uint8_t *_dst,               r0
-@   uint8_t *_src,               r1
-@   ptrdiff_t stride_dst,        r2
-@   ptrdiff_t stride_src,        r3
-@   int height,                  sp[0]
-@   int16_t *sao_offset_table_u,  sp[4]
-@   int16_t *sao_offset_table_v); sp[8]
-@   int eo                        sp[12]
-
-function ff_hevc_sao_edge_c_w64_neon_8, export=1
-        push   {r4-r8,lr}     // 6 reg = 24
-        ldr    r5,  [sp, #28] // sao_offset_val_table_u
-        ldr    r7,  [sp, #32] // sao_offset_val_table_v
-
-        @ Load and rearrange offsets
-        @ Also "convert" from 16bit to 8bit
-        ldrb    r4, [r5, #2]
-        ldrb    r8, [r5, #4]
-        ldrb    r6, [r7, #2]
-        ldrb    r12, [r7, #4]
-        orr     r4, r4, r8, lsl #8
-        orr     r6, r6, r12, lsl #8
-        ldrb    r8, [r5, #6]
-        ldrb    r12, [r7, #6]
-        orr     r4, r4, r8, lsl #24
-        orr     r6, r6, r12, lsl #24
-        ldrb    r5, [r5, #8]
-        ldrb    r7, [r7, #8]
-
-        ldr     r12, [sp, #36] // e0
-        adr     r8, edge_c_tbl_w64
-        ldr     r8, [r8, r12, lsl #2]
-
-        ldr     r12, [sp, #24] // height
-        vpush   {d8-d15}
-        mov     pc, r8
-
-edge_c_tbl_w64:
-        .word   ff_hevc_sao_edge_c_eo0_w64_neon_8
-        .word   ff_hevc_sao_edge_c_eo1_w64_neon_8
-        .word   ff_hevc_sao_edge_c_eo2_w64_neon_8
-        .word   ff_hevc_sao_edge_c_eo3_w64_neon_8
-
-ff_hevc_sao_edge_c_eo0_w64_neon_8:
-        sub    r1, #8
-1:      subs    r12, #1
-        vld1.64  {d7}, [r1, :64]!
-        vld1.64  {q4-q5}, [r1, :128]! // load c
-        vld1.64  {q6-q7}, [r1, :128]!
-        vld1.64  {d24}, [r1, :64], r3
-        sub      r1, #72
-        // load a
-        vext.8 q0, q3, q4, #14
-        vext.8 q1, q4, q5, #14
-        vext.8 q2, q5, q6, #14
-        vext.8 q3, q6, q7, #14
-        // load b
-        vext.8 q8, q4, q5, #2
-        vext.8 q9, q5, q6, #2
-        vext.8 q10, q6, q7, #2
-        vext.8 q11, q7, q12, #2
-        bl    edge_w64_body_8
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-
-ff_hevc_sao_edge_c_eo1_w64_neon_8:
-        sub     r1, r3
-        // load a
-        vldm    r1, {q0-q3}
-        add     r1, r3
-        // load c
-        vldm    r1, {q4-q7}
-        add     r1, r3
-1:      subs    r12, #1
-        // load b
-        vldm    r1, {q8-q11}
-        add     r1, r3
-        bl      edge_w64_body_8
-        // copy c to a
-        vmov.64 q0, q4
-        vmov.64 q1, q5
-        vmov.64 q2, q6
-        vmov.64 q3, q7
-        // copy b to c
-        vmov.64 q4, q8
-        vmov.64 q5, q9
-        vmov.64 q6, q10
-        vmov.64 q7, q11
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-
-ff_hevc_sao_edge_c_eo2_w64_neon_8:
-1:      sub     r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        sub     r1, #2
-        vld1.8  {q0-q1}, [r1]!
-        vld1.8  {q2-q3}, [r1], r3
-        sub     r1, #30
-        subs    r12, #1
-        // load c
-        vld1.8  {q4-q5}, [r1, :128]!
-        vld1.8  {q6-q7}, [r1, :128], r3
-        sub     r1, #32
-        // load b
-        add     r1, #2
-        vld1.8  {q8-q9}, [r1]!
-        vld1.8  {q10-q11}, [r1]
-        sub     r1, #34
-        bl      edge_w64_body_8
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-
-ff_hevc_sao_edge_c_eo3_w64_neon_8:
-1:      sub     r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        add     r1, #2
-        vld1.8  {q0-q1}, [r1]!
-        vld1.8  {q2-q3}, [r1], r3
-        sub     r1, #34
-        subs    r12, #1
-        // load c
-        vld1.8  {q4-q5}, [r1, :128]!
-        vld1.8  {q6-q7}, [r1, :128], r3
-        sub     r1, #32
-        // load b
-        sub     r1, #2
-        vld1.8  {q8-q9}, [r1]!
-        vld1.8  {q10-q11}, [r1]
-        sub     r1, #30
-        bl      edge_w64_body_8
-        bne   1b
-        vpop  {d8-d15}
-        pop   {r4-r8,pc}
-endfunc
 
 
 .macro init_edge_32

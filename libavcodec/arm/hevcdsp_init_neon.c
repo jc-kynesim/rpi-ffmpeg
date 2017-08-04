@@ -143,17 +143,14 @@ void ff_hevc_sao_edge_eo1_w32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t str
 void ff_hevc_sao_edge_eo2_w32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 void ff_hevc_sao_edge_eo3_w32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
 
+void ff_hevc_sao_edge_64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
+
 void ff_hevc_sao_edge_32_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 void ff_hevc_sao_edge_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 
-
-void ff_hevc_sao_edge_eo0_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
-void ff_hevc_sao_edge_eo1_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
-void ff_hevc_sao_edge_eo2_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
-void ff_hevc_sao_edge_eo3_w64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height, int8_t *sao_offset_table);
-
-void ff_hevc_sao_edge_c_w64_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src, int height,
-                                   const int16_t *sao_offset_table_u, const int16_t *sao_offset_table_v, int eo);
+void ff_hevc_sao_edge_c_32_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height);
 
 void ff_hevc_sao_edge_c_16_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
                                   const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
@@ -377,22 +374,6 @@ static void ff_hevc_sao_edge_neon_wrapper(uint8_t *_dst /* align 16 */, uint8_t 
             break;
         }
         break;
-    case 64:
-        switch(eo) {
-        case 0:
-            ff_hevc_sao_edge_eo0_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 1:
-            ff_hevc_sao_edge_eo1_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 2:
-            ff_hevc_sao_edge_eo2_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        case 3:
-            ff_hevc_sao_edge_eo3_w64_neon_8(dst, src, stride_dst, stride_src, height, sao_offset_val);
-            break;
-        }
-        break;
     default:
         a_stride = pos[eo][0][0] + pos[eo][0][1] * stride_src;
         b_stride = pos[eo][1][0] + pos[eo][1][1] * stride_src;
@@ -410,55 +391,6 @@ static void ff_hevc_sao_edge_neon_wrapper(uint8_t *_dst /* align 16 */, uint8_t 
     }
 }
 
-
-static void ff_hevc_sao_edge_c_neon_wrapper(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
-                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
-                                  int eo, int width, int height)
-{
-    const ptrdiff_t stride_src = (2*MAX_PB_SIZE + FF_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
-
-    if (width == 32 && (height & 7) == 0) {
-        ff_hevc_sao_edge_c_w64_neon_8(_dst, _src, stride_dst, stride_src, height, _sao_offset_val_u, _sao_offset_val_v, eo);
-    }
-    else
-    {
-        static const uint8_t edge_idx[] = { 1, 2, 0, 3, 4 };
-        static const int8_t pos[4][2][2] = {
-            { { -1,  0 }, {  1, 0 } }, // horizontal
-            { {  0, -1 }, {  0, 1 } }, // vertical
-            { { -1, -1 }, {  1, 1 } }, // 45 degree
-            { {  1, -1 }, { -1, 1 } }, // 135 degree
-        };
-        int8_t sao_offset_val_u[8];  // padding of 3 for vld
-        int8_t sao_offset_val_v[8];  // padding of 3 for vld
-        pixel *dst = (pixel *)_dst;
-        pixel *src = (pixel *)_src;
-        int a_stride, b_stride;
-        int x, y;
-
-        stride_dst /= sizeof(pixel);
-        for (x = 0; x < 5; x++) {
-            sao_offset_val_u[x] = _sao_offset_val_u[edge_idx[x]];
-            sao_offset_val_v[x] = _sao_offset_val_v[edge_idx[x]];
-        }
-
-        a_stride = pos[eo][0][0] * 2 + pos[eo][0][1] * stride_src;
-        b_stride = pos[eo][1][0] * 2 + pos[eo][1][1] * stride_src;
-        for (y = 0; y < height; y++) {
-            for (x = 0; x < width * 2; x += 2) {
-                int diff0u = CMP(src[x], src[x + a_stride]);
-                int diff1u = CMP(src[x], src[x + b_stride]);
-                int diff0v = CMP(src[x+1], src[x+1 + a_stride]);
-                int diff1v = CMP(src[x+1], src[x+1 + b_stride]);
-                dst[x] = av_clip_pixel(src[x] + sao_offset_val_u[2 + diff0u + diff1u]);
-                dst[x+1] = av_clip_pixel(src[x+1] + sao_offset_val_v[2 + diff0v + diff1v]);
-            }
-            src += stride_src;
-            dst += stride_dst;
-        }
-    }
-}
-#undef CMP
 
 void ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,
                                                 int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
@@ -510,15 +442,15 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         for (x = 0; x < sizeof c->sao_band_filter / sizeof *c->sao_band_filter; x++) {
           c->sao_band_filter[x]        = ff_hevc_sao_band_neon_wrapper;
           c->sao_edge_filter[x]        = ff_hevc_sao_edge_neon_wrapper;
-#if RPI_HEVC_SAND
-          c->sao_edge_filter_c[x]      = ff_hevc_sao_edge_c_neon_wrapper;
-#endif
         }
         c->sao_band_filter[4]          = ff_hevc_sao_band_64_neon_8;
+        c->sao_edge_filter[4]          = ff_hevc_sao_edge_64_neon_8;
 #if RPI_HEVC_SAND
         c->sao_band_filter_c[0]        = ff_hevc_sao_band_c_neon_8;
         c->sao_band_filter_c[1]        = ff_hevc_sao_band_c_neon_8;
         c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_neon_8;
+
+        c->sao_edge_filter_c[2]        = ff_hevc_sao_edge_c_32_neon_8;
 #endif
         put_hevc_qpel_neon[1][0]       = ff_hevc_put_qpel_v1_neon_8;
         put_hevc_qpel_neon[2][0]       = ff_hevc_put_qpel_v2_neon_8;
