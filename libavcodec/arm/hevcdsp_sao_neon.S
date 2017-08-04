@@ -596,7 +596,7 @@ endfunc
 @ It appears that Neon can stall if you try and use results too soon so we try to
 @ spread our instruction out
 
-.macro edgeidx64
+function edge_w64_body_8
 
         vcgt.u8 q12, q4, q0  // c > a -> -1 , otherwise 0
         vcgt.u8 q13, q5, q1
@@ -679,7 +679,10 @@ endfunc
         vsub.s8 q2, q2, q15
         vsub.s8 q3, q3, q15
 
-.endm
+        vstm    r0, {q0-q3}
+        add     r0, r0, r2
+        bx       lr
+endfunc
 
 @ r0    destination address
 @ r2    stride to post-increment r0 with
@@ -766,6 +769,109 @@ function edge_w32_body_16
         bx       lr
 endfunc
 
+.macro	edge_64b_e0, body_fn, pb
+        mov      r6, lr
+        sub      r1, #8
+1:      subs     r12, #1
+        vld1.64  {d7}, [r1, :64]!
+        vld1.64  {q4-q5}, [r1, :128]! // load c
+        vld1.64  {q6-q7}, [r1, :128]!
+        vld1.64  {d24}, [r1, :64], r3
+        sub      r1, #72
+        // load a
+        vext.8   q0,  q3,  q4, #(16 - \pb)
+        vext.8   q1,  q4,  q5, #(16 - \pb)
+        vext.8   q2,  q5,  q6, #(16 - \pb)
+        vext.8   q3,  q6,  q7, #(16 - \pb)
+        // load b
+        vext.8   q8,  q4,  q5, #\pb
+        vext.8   q9,  q5,  q6, #\pb
+        vext.8   q10, q6,  q7, #\pb
+        vext.8   q11, q7, q12, #\pb
+        bl       \body_fn
+        bne      1b
+        bx       r6
+.endm
+
+.macro	edge_64b_e1, body_fn
+        mov      r6, lr
+        sub      r1, r3
+        // load a
+        vld1.8   {q0-q1}, [r1, :128]!
+        vld1.8   {q2-q3}, [r1, :128], r3
+        sub      r1, #32
+        // load c
+        vld1.8   {q4-q5}, [r1, :128]!
+        vld1.8   {q6-q7}, [r1, :128], r3
+        sub      r1, #32
+1:      subs     r12, #1
+        // load b
+        vld1.8   {q8-q9}, [r1, :128]!
+        vld1.8   {q10-q11}, [r1, :128], r3
+        sub      r1, #32
+        bl       edge_w32_body_16
+        // copy c to a
+        vmov.64  q0, q4
+        vmov.64  q1, q5
+        vmov.64  q2, q6
+        vmov.64  q3, q7
+        // copy b to c
+        vmov.64  q4, q8
+        vmov.64  q5, q9
+        vmov.64  q6, q10
+        vmov.64  q7, q11
+        bne      1b
+        bx       r6
+.endm
+
+.macro	edge_64b_e2, body_fn, pb
+        mov      r6, lr
+1:      sub      r1, r3
+        // load a
+        // TODO: fix unaligned load
+        //       don't reload a like in eo1
+        sub      r1, #\pb
+        vld1.16  {q0-q1}, [r1]!
+        vld1.16  {q2-q3}, [r1], r3
+        sub      r1, #(32 - \pb)
+        subs     r12, #1
+        // load  c
+        vld1.16  {q4-q5}, [r1, :128]!
+        vld1.16  {q6-q7}, [r1, :128], r3
+        sub      r1, #(32 - \pb)
+        // load  b
+        vld1.16  {q8-q9}, [r1]!
+        vld1.16  {q10-q11}, [r1]
+        sub      r1, #(32 + \pb)
+        bl       \body_fn
+        bne      1b
+        bx       r6
+.endm
+
+.macro	edge_64b_e3, body_fn, pb
+        mov      r6, lr
+1:      sub      r1, r3
+        // load a
+        // TODO: fix unaligned load
+        //       don't reload a like in eo1
+        add      r1, #\pb
+        vld1.16  {q0-q1}, [r1]!
+        vld1.16  {q2-q3}, [r1], r3
+        sub      r1, #(32 + \pb)
+        subs     r12, #1
+        // load  c
+        vld1.16  {q4-q5}, [r1, :128]!
+        vld1.16  {q6-q7}, [r1, :128], r3
+        sub      r1, #(32 + \pb)
+        // load  b
+        vld1.16  {q8-q9}, [r1]!
+        vld1.16  {q10-q11}, [r1]
+        sub      r1, #(32 - \pb)
+        bl       \body_fn
+        bne      1b
+        bx       r6
+.endm
+
 @ void ff_hevc_sao_edge_w64_neon_10(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
@@ -838,7 +944,7 @@ function ff_hevc_sao_edge_32_neon_10, export=1
         vpush    {q3-q7}        @ 80 bytes, q3 pushed last so will be at [sp,#0]
         mov      r5, sp
 
-        ldr      r12, [sp, #96]   @ e0
+        ldr      r12, [sp, #96]   @ eo
         adr      r6, 99f
         ldr      r6, [r6, r12, lsl #2]
 
@@ -854,106 +960,17 @@ function ff_hevc_sao_edge_32_neon_10, export=1
         .word   20f
         .word   30f
 
-@ eo 0
 0:
-        mov      r6, lr
-        sub      r1, #8
-1:      subs     r12, #1
-        vld1.64  {d7}, [r1, :64]!
-        vld1.64  {q4-q5}, [r1, :128]! // load c
-        vld1.64  {q6-q7}, [r1, :128]!
-        vld1.64  {d24}, [r1, :64], r3
-        sub      r1, #72
-        // load a
-        vext.16  q0,  q3,  q4, #7
-        vext.16  q1,  q4,  q5, #7
-        vext.16  q2,  q5,  q6, #7
-        vext.16  q3,  q6,  q7, #7
-        // load b
-        vext.16  q8,  q4,  q5, #1
-        vext.16  q9,  q5,  q6, #1
-        vext.16  q10, q6,  q7, #1
-        vext.16  q11, q7, q12, #1
-        bl       edge_w32_body_16
-        bne      1b
-        bx       r6
+	edge_64b_e0	edge_w32_body_16, 2
 
-@ eo 1
 10:
-        mov      r6, lr
-        sub      r1, r3
-        // load a
-        vld1.8   {q0-q1}, [r1, :128]!
-        vld1.8   {q2-q3}, [r1, :128], r3
-        sub      r1, #32
-        // load c
-        vld1.8   {q4-q5}, [r1, :128]!
-        vld1.8   {q6-q7}, [r1, :128], r3
-        sub      r1, #32
-1:      subs     r12, #1
-        // load b
-        vld1.8   {q8-q9}, [r1, :128]!
-        vld1.8   {q10-q11}, [r1, :128], r3
-        sub      r1, #32
-        bl       edge_w32_body_16
-        // copy c to a
-        vmov.64  q0, q4
-        vmov.64  q1, q5
-        vmov.64  q2, q6
-        vmov.64  q3, q7
-        // copy b to c
-        vmov.64  q4, q8
-        vmov.64  q5, q9
-        vmov.64  q6, q10
-        vmov.64  q7, q11
-        bne      1b
-        bx       r6
+	edge_64b_e1	edge_w32_body_16
 
 20:
-        mov      r6, lr
-1:      sub      r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        sub      r1, #2
-        vld1.16  {q0-q1}, [r1]!
-        vld1.16  {q2-q3}, [r1], r3
-        sub      r1, #30
-        subs     r12, #1
-        // load  c
-        vld1.16  {q4-q5}, [r1, :128]!
-        vld1.16  {q6-q7}, [r1, :128], r3
-        sub      r1, #30
-        // load  b
-        vld1.16  {q8-q9}, [r1]!
-        vld1.16  {q10-q11}, [r1]
-        sub      r1, #34
-        bl       edge_w32_body_16
-        bne      1b
-        bx       r6
+	edge_64b_e2	edge_w32_body_16, 2
 
 30:
-        mov      r6, lr
-1:      sub      r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        add      r1, #2
-        vld1.16  {q0-q1}, [r1]!
-        vld1.16  {q2-q3}, [r1], r3
-        sub      r1, #34
-        subs     r12, #1
-        // load  c
-        vld1.16  {q4-q5}, [r1, :128]!
-        vld1.16  {q6-q7}, [r1, :128], r3
-        sub      r1, #34
-        // load  b
-        vld1.16  {q8-q9}, [r1]!
-        vld1.16  {q10-q11}, [r1]
-        sub      r1, #30
-        bl       edge_w32_body_16
-        bne      1b
-        bx       r6
+	edge_64b_e3	edge_w32_body_16, 2
 
 endfunc
 
@@ -1052,106 +1069,18 @@ function ff_hevc_sao_edge_c_16_neon_10, export=1
         .word   20f
         .word   30f
 
-@ eo 0
 0:
-        mov      r6, lr
-        sub      r1, #8
-1:      subs     r12, #1
-        vld1.64  {d7}, [r1, :64]!
-        vld1.64  {q4-q5}, [r1, :128]! // load c
-        vld1.64  {q6-q7}, [r1, :128]!
-        vld1.64  {d24}, [r1, :64], r3
-        sub      r1, #72
-        // load a
-        vext.16  q0,  q3,  q4, #6
-        vext.16  q1,  q4,  q5, #6
-        vext.16  q2,  q5,  q6, #6
-        vext.16  q3,  q6,  q7, #6
-        // load b
-        vext.16  q8,  q4,  q5, #2
-        vext.16  q9,  q5,  q6, #2
-        vext.16  q10, q6,  q7, #2
-        vext.16  q11, q7, q12, #2
-        bl       edge_w32_body_16
-        bne      1b
-        bx       r6
+	edge_64b_e0	edge_w32_body_16, 4
 
-@ eo 1
 10:
-        mov      r6, lr
-        sub      r1, r3
-        // load a
-        vld1.8   {q0-q1}, [r1, :128]!
-        vld1.8   {q2-q3}, [r1, :128], r3
-        sub      r1, #32
-        // load c
-        vld1.8   {q4-q5}, [r1, :128]!
-        vld1.8   {q6-q7}, [r1, :128], r3
-        sub      r1, #32
-1:      subs     r12, #1
-        // load b
-        vld1.8   {q8-q9}, [r1, :128]!
-        vld1.8   {q10-q11}, [r1, :128], r3
-        sub      r1, #32
-        bl       edge_w32_body_16
-        // copy c to a
-        vmov.64  q0, q4
-        vmov.64  q1, q5
-        vmov.64  q2, q6
-        vmov.64  q3, q7
-        // copy b to c
-        vmov.64  q4, q8
-        vmov.64  q5, q9
-        vmov.64  q6, q10
-        vmov.64  q7, q11
-        bne      1b
-        bx       r6
+	edge_64b_e1	edge_w32_body_16
 
 20:
-        mov      r6, lr
-1:      sub      r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        sub      r1, #4
-        vld1.16  {q0-q1}, [r1]!
-        vld1.16  {q2-q3}, [r1], r3
-        sub      r1, #28
-        subs     r12, #1
-        // load  c
-        vld1.16  {q4-q5}, [r1, :128]!
-        vld1.16  {q6-q7}, [r1, :128], r3
-        sub      r1, #28
-        // load  b
-        vld1.16  {q8-q9}, [r1]!
-        vld1.16  {q10-q11}, [r1]
-        sub      r1, #36
-        bl       edge_w32_body_16
-        bne      1b
-        bx       r6
+	edge_64b_e2	edge_w32_body_16, 4
 
 30:
-        mov      r6, lr
-1:      sub      r1, r3
-        // load a
-        // TODO: fix unaligned load
-        //       don't reload a like in eo1
-        add      r1, #4
-        vld1.16  {q0-q1}, [r1]!
-        vld1.16  {q2-q3}, [r1], r3
-        sub      r1, #36
-        subs     r12, #1
-        // load  c
-        vld1.16  {q4-q5}, [r1, :128]!
-        vld1.16  {q6-q7}, [r1, :128], r3
-        sub      r1, #36
-        // load  b
-        vld1.16  {q8-q9}, [r1]!
-        vld1.16  {q10-q11}, [r1]
-        sub      r1, #28
-        bl       edge_w32_body_16
-        bne      1b
-        bx       r6
+	edge_64b_e3	edge_w32_body_16, 4
+
 
 endfunc
 
@@ -1162,12 +1091,6 @@ endfunc
 
 
 
-function edge_w64_body
-        edgeidx64
-        vstm    r0, {q0-q3}
-        add     r0, r0, r2
-        bx       lr
-endfunc
 
 .macro init_edge_64
         push   {r4-r8,lr}
@@ -1198,7 +1121,7 @@ function ff_hevc_sao_edge_eo0_w64_neon_8, export=1
         vext.8 q9, q5, q6, #1
         vext.8 q10, q6, q7, #1
         vext.8 q11, q7, q12, #1
-        bl    edge_w64_body
+        bl    edge_w64_body_8
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
@@ -1221,7 +1144,7 @@ function ff_hevc_sao_edge_eo1_w64_neon_8, export=1
         vld1.8  {q8-q9}, [r1, :128]!
         vld1.8  {q10-q11}, [r1, :128], r3
         sub     r1, #32
-        bl      edge_w64_body
+        bl      edge_w64_body_8
         // copy c to a
         vmov.64 q0, q4
         vmov.64 q1, q5
@@ -1258,7 +1181,7 @@ function ff_hevc_sao_edge_eo2_w64_neon_8, export=1
         vld1.8  {q8-q9}, [r1]!
         vld1.8  {q10-q11}, [r1]
         sub     r1, #33
-        bl      edge_w64_body
+        bl      edge_w64_body_8
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
@@ -1285,7 +1208,7 @@ function ff_hevc_sao_edge_eo3_w64_neon_8, export=1
         vld1.8  {q8-q9}, [r1]!
         vld1.8  {q10-q11}, [r1]
         sub     r1, #31
-        bl      edge_w64_body
+        bl      edge_w64_body_8
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
@@ -1354,7 +1277,7 @@ ff_hevc_sao_edge_c_eo0_w64_neon_8:
         vext.8 q9, q5, q6, #2
         vext.8 q10, q6, q7, #2
         vext.8 q11, q7, q12, #2
-        bl    edge_w64_body
+        bl    edge_w64_body_8
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
@@ -1371,7 +1294,7 @@ ff_hevc_sao_edge_c_eo1_w64_neon_8:
         // load b
         vldm    r1, {q8-q11}
         add     r1, r3
-        bl      edge_w64_body
+        bl      edge_w64_body_8
         // copy c to a
         vmov.64 q0, q4
         vmov.64 q1, q5
@@ -1405,7 +1328,7 @@ ff_hevc_sao_edge_c_eo2_w64_neon_8:
         vld1.8  {q8-q9}, [r1]!
         vld1.8  {q10-q11}, [r1]
         sub     r1, #34
-        bl      edge_w64_body
+        bl      edge_w64_body_8
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
@@ -1429,7 +1352,7 @@ ff_hevc_sao_edge_c_eo3_w64_neon_8:
         vld1.8  {q8-q9}, [r1]!
         vld1.8  {q10-q11}, [r1]
         sub     r1, #30
-        bl      edge_w64_body
+        bl      edge_w64_body_8
         bne   1b
         vpop  {d8-d15}
         pop   {r4-r8,pc}
