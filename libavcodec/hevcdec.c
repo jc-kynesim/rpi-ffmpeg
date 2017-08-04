@@ -3841,7 +3841,7 @@ static void worker_core(HEVCContext * const s)
 
     if (mc_terminate_add_c(s, vqj, rfe, &jb->chroma_ip) != 0)
     {
-        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
           0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 0, 1);
     }
 
@@ -3853,7 +3853,7 @@ static void worker_core(HEVCContext * const s)
 
     if (mc_terminate_add_y(s, vqj, rfe, &jb->luma_ip) != 0)
     {
-        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
           0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 1, 0);
     }
 #endif

@@ -598,87 +598,85 @@ endfunc
 
 function edge_w64_body_8
 
-        vcgt.u8 q12, q4, q0  // c > a -> -1 , otherwise 0
-        vcgt.u8 q13, q5, q1
-        vcgt.u8 q14, q6, q2
-        vcgt.u8 q15, q7, q3
+        vcgt.u8 q12,  q4,  q0   @ c > a -> -1 , otherwise 0
+        vcgt.u8 q13,  q5,  q1
+        vcgt.u8 q14,  q6,  q2
+        vcgt.u8 q15,  q7,  q3
 
-        vcgt.u8 q0, q0, q4  // a > c -> -1 , otherwise 0
-        vcgt.u8 q1, q1, q5
-        vcgt.u8 q2, q2, q6
-        vcgt.u8 q3, q3, q7
+        vcgt.u8  q0,  q4        @ a > c -> -1 , otherwise 0
+        vcgt.u8  q1,  q5
+        vcgt.u8  q2,  q6
+        vcgt.u8  q3,  q7
 
-        vsub.s8 q0, q0, q12 // a = sign(c-a)
-        vsub.s8 q1, q1, q13
-        vsub.s8 q2, q2, q14
-        vsub.s8 q3, q3, q15
+        vsub.s8  q0,  q12       @ a = sign(c-a)
+        vsub.s8  q1,  q13
+        vsub.s8  q2,  q14
+        vsub.s8  q3,  q15
 
-        vcgt.u8 q12, q4, q8  // c > b -> -1 , otherwise 0
-        vcgt.u8 q13, q5, q9
-        vcgt.u8 q14, q6, q10
-        vcgt.u8 q15, q7, q11
+        vcgt.u8  q12, q4,  q8   @ c > b -> -1 , otherwise 0
+        vcgt.u8  q13, q5,  q9
+        vcgt.u8  q14, q6,  q10
+        vcgt.u8  q15, q7,  q11
 
-        vsub.s8 q0, q0, q12
-        vsub.s8 q1, q1, q13
-        vsub.s8 q2, q2, q14
-        vsub.s8 q3, q3, q15
+        vsub.s8  q0,  q12
+        vsub.s8  q1,  q13
+        vsub.s8  q2,  q14
+        vsub.s8  q3,  q15
 
-        vcgt.u8 q12, q8, q4  // c < b -> -1 , otherwise 0
-        vcgt.u8 q13, q9, q5
-        vcgt.u8 q14, q10, q6
-        vcgt.u8 q15, q11, q7
+        vcgt.u8  q12, q8,  q4   @ c < b -> -1 , otherwise 0
+        vcgt.u8  q13, q9,  q5
+        vcgt.u8  q14, q10, q6
+        vcgt.u8  q15, q11, q7
 
-        vadd.s8 q0, q0, q12  // a = sign(c-a) + sign(c-b)
-        vadd.s8 q1, q1, q13
-        vmov.u8 q12, #2
-        vadd.s8 q2, q2, q14
-        vadd.s8 q3, q3, q15
+        vadd.s8  q0,  q12       @ a = sign(c-a) + sign(c-b)
+        vadd.s8  q1,  q13
+        vmov.u8  q12, #2
+        vadd.s8  q2,  q14
+        vadd.s8  q3,  q15
 
-        vadd.s8 q0, q0, q12
-        vadd.s8 q1, q1, q12
+        vadd.s8  q0,  q12
+        vadd.s8  q1,  q12
 
         vld1.8   {d26, d27}, [r5]
 
-        vadd.s8 q2, q2, q12
-        vuzp.8    q0, q1
-        vmov.u8 q15, #128
-        vadd.s8 q3, q3, q12 // a = 2 + sign(c-a) + sign(c-b)
+        vadd.s8  q2,  q12
+        vuzp.8   q0,  q1
+        vmov.u8  q15, #128
+        vadd.s8  q3,  q12       @ a = 2 + sign(c-a) + sign(c-b)
 
-        vtbl.8  d0, {d26}, d0
-        vadd.s8 q12, q4, q15  // Add -128 so we can use saturating signed add
+        vtbl.8   d0,  {d26}, d0
+        vadd.s8  q12, q4, q15   @ Add -128 so we can use saturating signed add
 
-        vtbl.8  d1, {d26}, d1
-        vadd.s8 q14, q5, q15
+        vtbl.8   d1,  {d26}, d1
+        vadd.s8  q14, q5, q15
 
-        vtbl.8  d2, {d27}, d2
-        vuzp.8    q2, q3
+        vtbl.8   d2,  {d27}, d2
+        vuzp.8   q2,  q3
 
-        vtbl.8  d3, {d27}, d3
+        vtbl.8   d3,  {d27}, d3
 
-        vtbl.8  d4, {d26}, d4
-        vzip.8    q0, q1
+        vtbl.8   d4,  {d26}, d4
+        vzip.8   q0,  q1
 
-        vtbl.8  d5, {d26}, d5
-        vqadd.s8 q0, q0, q12
-        vqadd.s8 q1, q1, q14
-        vadd.s8 q12, q6, q15  // Add -128 so we can use saturating signed add
+        vtbl.8   d5,  {d26}, d5
+        vqadd.s8 q0,  q12
+        vqadd.s8 q1,  q14
+        vadd.s8  q12, q6, q15   @ Add -128 so we can use saturating signed add
 
-        vtbl.8  d6, {d27}, d6
-        vadd.s8 q14, q7, q15  // Add -128 so we can use saturating signed add
+        vtbl.8   d6,  {d27}, d6
+        vadd.s8  q14, q7, q15   @ Add -128 so we can use saturating signed add
 
-        vtbl.8  d7, {d27}, d7
-        vzip.8   q2, q3
+        vtbl.8   d7,  {d27}, d7
+        vzip.8   q2,  q3
 
-        vsub.s8 q0, q0, q15
-        vqadd.s8 q2, q2, q12
-        vqadd.s8 q3, q3, q14
-        vsub.s8 q1, q1, q15
-        vsub.s8 q2, q2, q15
-        vsub.s8 q3, q3, q15
+        vsub.s8  q0,  q15
+        vqadd.s8 q2,  q12
+        vqadd.s8 q3,  q14
+        vsub.s8  q1,  q15
+        vsub.s8  q2,  q15
+        vsub.s8  q3,  q15
 
-        vstm    r0, {q0-q3}
-        add     r0, r0, r2
-        bx       lr
+        bx      lr
 endfunc
 
 @ r0    destination address
@@ -766,8 +764,6 @@ function edge_w32_body_16
         @ now clip
         clip16_4 q2, q3, q1, q0, q12, q13
 
-        vstm     r0, {q0-q3}
-        add      r0, r0, r2
         bx       lr
 endfunc
 
@@ -851,6 +847,8 @@ endfunc
         vext.8   q10, q6,  q7, #\pb
         vext.8   q11, q7, q12, #\pb
         bl       \body_fn
+        vstm     r0, {q0-q3}
+        add      r0, r0, r2
         bne      1b
         bx       r6
 .endm
@@ -872,6 +870,8 @@ endfunc
         vld1.8   {q10-q11}, [r1, :128], r3
         sub      r1, #32
         bl       \body_fn
+        vstm     r0, {q0-q3}
+        add      r0, r0, r2
         // copy c to a
         vmov.64  q0, q4
         vmov.64  q1, q5
@@ -906,6 +906,8 @@ endfunc
         vld1.8   {q10-q11}, [r1]
         sub      r1, #(64 + \pb)
         bl       \body_fn
+        vstm     r0, {q0-q3}
+        add      r0, r0, r2
         bne      1b
 
         add      r3, #(32 - \pb)
@@ -932,6 +934,8 @@ endfunc
         vld1.8   {q10-q11}, [r1]
         sub      r1, #(64 - \pb)
         bl       \body_fn
+        vstm     r0, {q0-q3}
+        add      r0, r0, r2
         bne      1b
 
         add      r3, #(32 + \pb)
