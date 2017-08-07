@@ -1143,4 +1143,4 @@ $(SUBDIR)rpi_hevc_transform10.h: $(SUBDIR)rpi_hevc_transform10.bin
 endif
 
 $(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_hevc_transform8.h $(SUBDIR)rpi_hevc_transform10.h
-$(SUBDIR)hevcdec.o $(SUBDIR)rpi_shader_template.o $(SUBDIR)rpi_qpu.o $(SUBDIR)hevc.o: $(SUBDIR)rpi_shader.h
+$(SUBDIR)hevcdec.o $(SUBDIR)rpi_shader_template.o $(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_shader.h
