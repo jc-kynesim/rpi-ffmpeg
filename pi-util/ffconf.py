@@ -14,7 +14,7 @@ ffmpeg_exec = "./ffmpeg"
 def testone(fileroot, srcname, es_file, md5_file):
     tmp_root = "/tmp"
 
-    names = string.split(srcname, '/')
+    names = srcname.split('/')
     while len(names) > 1:
         tmp_root = os.path.join(tmp_root, names[0])
         del names[0]
@@ -93,7 +93,7 @@ def runtest(name, tests):
     if not tests:
         return True
     for t in tests:
-        if name[0:len(t)] == t:
+        if name[0:len(t)] == t or name.find("/" + t) != -1:
             return True
         return False
 
