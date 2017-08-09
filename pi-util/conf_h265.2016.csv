@@ -188,3 +188,6 @@
 0,RExt/TSCTX_8bit_I_RExt_SHARP_1,TSCTX_8bit_I_RExt_SHARP_1.bin,TSCTX_8bit_I_RExt_SHARP_1.md5
 0,RExt/TSCTX_8bit_RExt_SHARP_1,TSCTX_8bit_RExt_SHARP_1.bin,TSCTX_8bit_RExt_SHARP_1.md5
 0,RExt/WAVETILES_RExt_Sony_2,WAVETILES_RExt_Sony_2.bit,WAVETILES_RExt_Sony_2.md5
+1,local/sao_cu16_mobile_344x280,sao_cu16_mobile_344x280.265,sao_cu16_mobile_344x280.md5
+1,local/dblk_cu16_mobile_344x280,dblk_cu16_mobile_344x280.265,dblk_cu16_mobile_344x280.md5
+2,local/dblksao_cu16_mobile_344x280,dblksao_cu16_mobile_344x280.265,dblksao_cu16_mobile_344x280.md5

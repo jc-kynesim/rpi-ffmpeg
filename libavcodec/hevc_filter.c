@@ -448,7 +448,6 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
             break;
         case SAO_EDGE:
         {
-#if 1
             int w = s->ps.sps->width >> s->ps.sps->hshift[c_idx];
             int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
             int top_edge = edges[1];
@@ -567,7 +566,6 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                                x, y, width, height, c_idx);
             sao->type_idx[c_idx] = SAO_APPLIED;
             break;
-#endif
         }
         }
     }
@@ -766,6 +764,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 
             // vertical filtering chroma
             for (y = y0; y < y_end; y += 8 * v) {
+//                const int demi_y = y + 4 * v >= s->ps.sps->height;
+                const int demi_y = 0;
                 for (x = x0 ? x0 : 8 * h; x < x_end; x += 8 * h) {
                     const int bs0 = s->vertical_bs[(x +  y          * s->bs_width) >> 2];
                     const int bs1 = s->vertical_bs[(x + (y + 4 * v) * s->bs_width) >> 2];
@@ -773,7 +773,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     if ((bs0 == 2) || (bs1 == 2)) {
                         const int qp0 = (get_qPy(s, x - 1, y)         + get_qPy(s, x, y)         + 1) >> 1;
                         const int qp1 = (get_qPy(s, x - 1, y + 4 * v) + get_qPy(s, x, y + 4 * v) + 1) >> 1;
-                        unsigned int no_f = 0;
+                        unsigned int no_f = !demi_y ? 0 : 2 | 8;
 
                         // tc_offset here should be set to cur_tc_offset I think
                         const uint32_t tc4 =
@@ -811,6 +811,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     x_end2 = x_end - 8 * h;
 
                 for (x = x0 ? x0 - 8 * h: 0; x < x_end2; x += 8 * h) {
+//                    const int demi_x = x + 4 * v >= s->ps.sps->width;
+                    const int demi_x = 0;
+
                     const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
                     const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
                     if ((bs0 == 2) || (bs1 == 2)) {
@@ -819,7 +822,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                         const uint32_t tc4 =
                             ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, tc_offset) | (chroma_tc(s, qp0, 2, tc_offset) << 16)) |
                             ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
-                        unsigned int no_f = 0;
+                        unsigned int no_f = !demi_x ? 0 : 2 | 8;
 
                         if (tc4 == 0)
                             continue;
