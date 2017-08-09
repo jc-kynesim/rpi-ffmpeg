@@ -222,7 +222,7 @@ endfunc
 @
 @ It also loads other common regs
 
-band_load_y:
+function band_load_y
         vmov.i64  q0, #0
         ldr       r12, [sp, #8]         @ &sao_offset_val[0]
         add       r12, #2               @ 1st interesting val is [1]
@@ -256,9 +256,10 @@ band_load_y:
         it ne
         addne     r4, r3
         bx        lr
+endfunc
 
 
-band_load_c:
+function band_load_c
         vmov.i64  q2, #0
         ldr       r12, [sp, #8]         @ &sao_offset_val1[0]
         add       r12, #2               @ 1st interesting val is [1]
@@ -316,7 +317,7 @@ band_load_c:
         it ne
         addne     r4, r3
         bx        lr
-
+endfunc
 
 
 @ ff_hevc_sao_band_64_neon_8 (
@@ -332,17 +333,15 @@ band_load_c:
 function ff_hevc_sao_band_64_neon_8, export=1
         push      {r4, lr}
         bl        band_load_y
-        vmov.u8   q3, #128
+        vmov.u8   q15, #128
 
 1:      subs      r12, #1
         vldm      r1, {q8-q11}
         pld       [r4]
-        vshr.u8   q12, q8, #3
-        vshr.u8   q13, q9, #3
         add       r1, r3
-        vshr.u8   q14, q10, #3
-        vshr.u8   q15, q11, #3
-        sao_band_64
+
+        sao_band_64_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
+
         it ne
         addne     r4, r3
         vstm      r0, {q8-q11}
@@ -462,8 +461,7 @@ function ff_hevc_sao_band_c_32_neon_8, export=1
         push    {r4, lr}
         bl      band_load_c
 
-        mov       lr, #128
-        vdup.i8   q15, lr
+        vmov.i8   q15, #128
         sub       r3, #32
         sub       r2, #32
 
@@ -863,7 +861,7 @@ function edge_16b_body_16
         vadd.s16 q0, q3         @ a = sign(c-a) + sign(c-b)
 
         vmovn.s16 d0, q0
-        @ d1 will have randon contents that we transform but
+        @ d1 will have random contents that we transform but
         @ that doesn't matter as we then discard them
         vuzp.8   d0, d1
 
@@ -883,7 +881,7 @@ function edge_16b_body_16
 endfunc
 
 
-@ ff_hevc_sao_edge_c_xx_neon(
+@ ff_hevc_sao_edge_[c_]xx_neon(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
