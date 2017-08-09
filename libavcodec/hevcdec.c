@@ -3934,15 +3934,13 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
 #ifdef RPI
+    // * We don't support cross_component_prediction_enabled_flag but as that
+    //   must be 0 unless we have 4:4:4 there is no point testing for it as we
+    //   only deal with sand which is never 4:4:4
+    //   [support wouldn't be hard]
     s->enable_rpi =
         ((s->ps.sps->bit_depth == 8 && s->frame->format == AV_PIX_FMT_SAND128) ||
-         (s->ps.sps->bit_depth == 10 && s->frame->format == AV_PIX_FMT_SAND64_10)) &&
-        !s->ps.pps->cross_component_prediction_enabled_flag;
-
-    if (!s->enable_rpi) {
-      if (s->ps.pps->cross_component_prediction_enabled_flag)
-        printf("Cross component\n");
-    }
+         (s->ps.sps->bit_depth == 10 && s->frame->format == AV_PIX_FMT_SAND64_10));
 #endif
     //printf("L0=%d L1=%d\n",s->sh.nb_refs[L1],s->sh.nb_refs[L1]);
 

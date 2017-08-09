@@ -23,40 +23,7 @@
 
 .set EDGE_SRC_STRIDE, 160
 
-.macro init_sao_band
-        pld      [r1]
-        vld1.8   {q0, q1}, [r2]  // offset table
-        ldr       r2, [sp, #0]   // stride_dst
-        ldr      r12, [sp, #4]   // height
-        vmov.u8  q3, #128
-.endm
-
-// 128 in q3
-// input q8 - q11
-.macro sao_band_64
-        vtbl.8   d24, {d0, d1, d2, d3}, d24
-        vadd.s8  q8, q3
-        vtbl.8   d25, {d0, d1, d2, d3}, d25
-        vadd.s8  q9, q3
-        vtbl.8   d26, {d0, d1, d2, d3}, d26
-        vadd.s8  q10, q3
-        vtbl.8   d27, {d0, d1, d2, d3}, d27
-        vadd.s8  q11, q3
-        vtbl.8   d28, {d0, d1, d2, d3}, d28
-        vqadd.s8 q8, q12
-        vtbl.8   d29, {d0, d1, d2, d3}, d29
-        vqadd.s8 q9, q13
-        vtbl.8   d30, {d0, d1, d2, d3}, d30
-        vqadd.s8 q10, q14
-        vtbl.8   d31, {d0, d1, d2, d3}, d31
-        vsub.s8  q8, q3
-        vqadd.s8 q11, q15
-        vsub.s8  q9, q3
-        vsub.s8  q10, q3
-        vsub.s8  q11, q3
-.endm
-
-.macro sao_band_64_8 XLAT0, XLAT1, Q_K128
+.macro sao_band_64b_8 XLAT0, XLAT1, Q_K128
         vshr.u8 q12, q8, #3
         vadd.s8  q8, \Q_K128
         vshr.u8 q13, q9, #3
@@ -86,6 +53,18 @@
         vsub.s8  q11, \Q_K128
 .endm
 
+.macro sao_band_16b_8 XLAT0, XLAT1, Q_K128
+        vshr.u8 q12, q8, #3
+        vadd.s8  q8, \Q_K128
+
+        vtbl.8   d24, \XLAT0, d24
+        vtbl.8   d25, \XLAT1, d25
+
+        vqadd.s8 q8, q12
+        vsub.s8  q8, \Q_K128
+.endm
+
+
 .macro clip16_4 Q0, Q1, Q2, Q3, Q_MIN, Q_MAX
         vmax.s16  \Q0, \Q_MIN
         vmax.s16  \Q1, \Q_MIN
@@ -97,116 +76,36 @@
         vmin.s16  \Q3, \Q_MAX
 .endm
 
-@ Clobbers q6, q7
-.macro sao_band_32_16  Q0, Q1, Q2, Q3, XLAT, Q_MIN, Q_MAX, bit_depth
-        vshrn.i16 d12, \Q0, #(\bit_depth - 5)
-        vshrn.i16 d13, \Q1, #(\bit_depth - 5)
-        vshrn.i16 d14, \Q2, #(\bit_depth - 5)
-        vshrn.i16 d15, \Q3, #(\bit_depth - 5)
-        vtbl.8    d12, \XLAT, d12
-        vtbl.8    d13, \XLAT, d13
-        vtbl.8    d14, \XLAT, d14
-        vtbl.8    d15, \XLAT, d15
-        vaddw.s8  \Q0, d12
-        vaddw.s8  \Q1, d13
-        vaddw.s8  \Q2, d14
-        vaddw.s8  \Q3, d15
+@ Clobbers q12, q13
+.macro sao_band_64b_16  Q0, Q1, Q2, Q3, XLAT0, XLAT1, Q_MIN, Q_MAX, bit_depth
+        vshrn.i16 d24, \Q0, #(\bit_depth - 5)
+        vshrn.i16 d25, \Q1, #(\bit_depth - 5)
+        vshrn.i16 d26, \Q2, #(\bit_depth - 5)
+        vshrn.i16 d27, \Q3, #(\bit_depth - 5)
+        vtbl.8    d24, \XLAT0, d24
+        vtbl.8    d25, \XLAT1, d25
+        vtbl.8    d26, \XLAT0, d26
+        vtbl.8    d27, \XLAT1, d27
+        vaddw.s8  \Q0, d24
+        vaddw.s8  \Q1, d25
+        vaddw.s8  \Q2, d26
+        vaddw.s8  \Q3, d27
         clip16_4   \Q0, \Q1, \Q2, \Q3, \Q_MIN, \Q_MAX
 .endm
 
-@ q0-q1  Offset table
-@ q2     0
-@ q3     (1 << bit_depth) - 1
-@ q6-q7  clobbered
-@ q8-q15 input/output
-.macro sao_band_64_16 bit_depth
-        @ 32 is wide enough for efficient code
-        sao_band_32_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", q2, q3, \bit_depth
-        sao_band_32_16 q12, q13, q14, q15, "{d0,d1,d2,d3}", q2, q3, \bit_depth
+@ Clobbers q12
+.macro sao_band_32b_16  Q0, Q1, XLAT0, XLAT1, Q_MIN, Q_MAX, bit_depth
+        vshrn.i16 d24, \Q0, #(\bit_depth - 5)
+        vshrn.i16 d25, \Q1, #(\bit_depth - 5)
+        vtbl.8    d24, \XLAT0, d24
+        vtbl.8    d25, \XLAT1, d25
+        vaddw.s8  \Q0, d24
+        vaddw.s8  \Q1, d25
+        vmax.s16  \Q0, \Q_MIN
+        vmax.s16  \Q1, \Q_MIN
+        vmin.s16  \Q0, \Q_MAX
+        vmin.s16  \Q1, \Q_MAX
 .endm
-
-
-
-function ff_hevc_sao_band_w8_neon_8, export=1
-        init_sao_band
-1:      subs     r12, #8
-        vld1.8   {d16}, [r1, :64], r3
-        vld1.8   {d17}, [r1, :64], r3
-        vshr.u8  q12, q8, #3
-        vld1.8   {d18}, [r1, :64], r3
-        vld1.8   {d19}, [r1, :64], r3
-        vshr.u8  q13, q9, #3
-        vld1.8   {d20}, [r1, :64], r3
-        vld1.8   {d21}, [r1, :64], r3
-        vshr.u8  q14, q10, #3
-        vld1.8   {d22}, [r1, :64], r3
-        vld1.8   {d23}, [r1, :64], r3
-        vshr.u8  q15, q11, #3
-        sao_band_64
-        vst1.8  {d16}, [r0, :64], r2
-        vst1.8  {d17}, [r0, :64], r2
-        vst1.8  {d18}, [r0, :64], r2
-        vst1.8  {d19}, [r0, :64], r2
-        vst1.8  {d20}, [r0, :64], r2
-        vst1.8  {d21}, [r0, :64], r2
-        vst1.8  {d22}, [r0, :64], r2
-        vst1.8  {d23}, [r0, :64], r2
-        bne    1b
-
-        bx lr
-endfunc
-
-function ff_hevc_sao_band_w16_neon_8, export=1
-        init_sao_band
-1:      subs     r12, #4
-        vld1.8  {q8}, [r1, :128], r3
-        vshr.u8  q12, q8, #3
-        vld1.8  {q9}, [r1, :128], r3
-        vshr.u8  q13, q9, #3
-        vld1.8  {q10}, [r1, :128], r3
-        vshr.u8  q14, q10, #3
-        vld1.8  {q11}, [r1, :128], r3
-        vshr.u8  q15, q11, #3
-        sao_band_64
-        vst1.8   {q8}, [r0, :128], r2
-        vst1.8   {q9}, [r0, :128], r2
-        vst1.8   {q10}, [r0, :128], r2
-        vst1.8   {q11}, [r0, :128], r2
-        bne    1b
-
-        bx lr
-endfunc
-
-function ff_hevc_sao_band_w32_neon_8, export=1
-        init_sao_band
-.if 0
-1:      subs     r12, #2
-        vld1.8   {q8-q9}, [r1, :128], r3
-        vshr.u8  q12, q8, #3
-        vshr.u8  q13, q9, #3
-        vld1.8   {q10-q11}, [r1, :128], r3
-        vshr.u8  q14, q10, #3
-        vshr.u8  q15, q11, #3
-        sao_band_64
-        vst1.8   {q8-q9}, [r0, :128], r2
-        vst1.8   {q10-q11}, [r0, :128], r2
-        bne      1b
-.else
-1:
-        vld1.8   {q8-q9}, [r1, :128], r3
-        vld1.8   {q10-q11}, [r1, :128], r3
-        subs     r12, #2
-        sao_band_64_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q3
-        vst1.8   {q8-q9}, [r0, :128], r2
-        vst1.8   {q10-q11}, [r0, :128], r2
-        bne      1b
-.endif
-
-        bx       lr
-endfunc
-
-
-
 
 
 @ Standard coding rules for sao_offset_abs limit it to 0-31 (Table 9-38)
@@ -340,7 +239,7 @@ function ff_hevc_sao_band_64_neon_8, export=1
         pld       [r4]
         add       r1, r3
 
-        sao_band_64_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
+        sao_band_64b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
 
         it ne
         addne     r4, r3
@@ -351,98 +250,110 @@ function ff_hevc_sao_band_64_neon_8, export=1
         pop       {r4, pc}
 endfunc
 
-.macro band_64_16 bit_depth
-        push      {r4, lr}
-        movw      r4, #(1 << \bit_depth) - 1
-        vmov.i64  q2, #0
-        vdup.i16  q3, r4
-        bl        band_load_y
-        vpush     {q4-q7}
+@ ff_hevc_sao_band_32_neon_8 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
 
-1:      subs      r12, #1
-        vldm      r1, {q8-q15}
-        pld       [r4]
-        add       r1, r3
-        sao_band_64_16 \bit_depth
-        it ne
-        addne     r4, r3
-        vstm      r0, {q8-q15}
-        add       r0, r2
+function ff_hevc_sao_band_32_neon_8, export=1
+        push      {r4, lr}
+        bl        band_load_y
+        vmov.u8   q15, #128
+
+1:      subs      r12, #2
+        vld1.8    { q8, q9 }, [r1, :128], r3
+        vld1.8    {q10, q11}, [r1, :128], r3
+
+        sao_band_64b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
+
+        vst1.8    { q8, q9 }, [r0, :128], r2
+        vst1.8    {q10, q11}, [r0, :128], r2
         bpl       1b
 
-        vpop      {q4-q7}
         pop       {r4, pc}
-.endm
-
-function ff_hevc_sao_band_64_neon_10, export=1
-        band_64_16 10
 endfunc
 
-.macro band_32_16 bit_depth
-        push      {r4, lr}
-        movw      r4, #(1 << \bit_depth) - 1
-        vmov.i64  q2, #0
-        vdup.i16  q3, r4
-        bl        band_load_y
-        vpush     {q4-q7}
+@ ff_hevc_sao_band_16_neon_8 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
 
-1:      subs      r12, #1
-        vldm      r1, {q8-q11}
-        pld       [r4]
-        add       r1, r3
-        sao_band_32_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", q2, q3, \bit_depth
-        it ne
-        addne     r4, r3
-        vstm      r0, {q8-q11}
-        add       r0, r2
+function ff_hevc_sao_band_16_neon_8, export=1
+        push      {r4, lr}
+        bl        band_load_y
+        vmov.u8   q15, #128
+
+1:      subs      r12, #4
+        vld1.8    { q8}, [r1, :128], r3
+        vld1.8    { q9}, [r1, :128], r3
+        vld1.8    {q10}, [r1, :128], r3
+        vld1.8    {q11}, [r1, :128], r3
+
+        sao_band_64b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
+
+        vst1.8    { q8}, [r0, :128], r2
+        vst1.8    { q9}, [r0, :128], r2
+        vst1.8    {q10}, [r0, :128], r2
+        vst1.8    {q11}, [r0, :128], r2
         bpl       1b
 
-        vpop      {q4-q7}
         pop       {r4, pc}
-.endm
-
-function ff_hevc_sao_band_32_neon_10, export=1
-        band_32_16 10
 endfunc
 
-.macro band_c_32_16 bit_depth
+@ ff_hevc_sao_band_8_neon_8 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
+
+function ff_hevc_sao_band_8_neon_8, export=1
         push      {r4, lr}
-        bl        band_load_c
-        vpush     {q4-q7}
-        movw      lr, #(1 << \bit_depth) - 1
-        vmov.i64  q4, #0
-        vdup.i16  q5, lr
-        sub       r2, #96
+        bl        band_load_y
+        ldr       lr, [sp, #16]         @ width
+        vmov.u8   q15, #128
+        cmp       lr, #8
+        blt       4f
 
-1:      subs      r12, #1
+1:      subs      r12, #2
+        vld1.8    {d16}, [r1, :64], r3
+        vld1.8    {d17}, [r1, :64], r3
 
-        vld2.16   { q8, q9 }, [r1, :128]!
-        vld2.16   {q10, q11}, [r1, :128]!
-        vld2.16   {q12, q13}, [r1, :128]!
-        vld2.16   {q14, q15}, [r1, :128], r3
+        sao_band_16b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
 
-        pld       [r4]
-        sub       r1, #96
-
-        sao_band_32_16 q8,  q10, q12, q14, "{d0,d1,d2,d3}", q4, q5, \bit_depth
-        sao_band_32_16 q9,  q11, q13, q15, "{d4,d5,d6,d7}", q4, q5, \bit_depth
-
-        it ne
-        addne     r4, r3
-
-        vst2.16   { q8, q9 }, [r0, :128]!
-        vst2.16   {q10, q11}, [r0, :128]!
-        vst2.16   {q12, q13}, [r0, :128]!
-        vst2.16   {q14, q15}, [r0, :128], r2
-
+        vst1.8    {d16}, [r0, :64], r2
+        vst1.8    {d17}, [r0, :64], r2
         bpl       1b
-
-        vpop      {q4-q7}
         pop       {r4, pc}
-.endm
 
-function ff_hevc_sao_band_c_32_neon_10, export=1
-        band_c_32_16 10
+4:
+1:      subs      r12, #4
+        vld1.32   {d16[0]}, [r1, :32], r3
+        vld1.32   {d16[1]}, [r1, :32], r3
+        vld1.32   {d17[0]}, [r1, :32], r3
+        vld1.32   {d17[1]}, [r1, :32], r3
+
+        sao_band_16b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
+
+        vst1.32   {d16[0]}, [r0, :32], r2
+        vst1.32   {d16[1]}, [r0, :32], r2
+        vst1.32   {d17[0]}, [r0, :32], r2
+        vst1.32   {d17[1]}, [r0, :32], r2
+        bpl       1b
+        pop       {r4, pc}
 endfunc
 
 @ ff_hevc_sao_band_c_32_neon_8(
@@ -471,7 +382,7 @@ function ff_hevc_sao_band_c_32_neon_8, export=1
 
         pld       [r4]
 
-        sao_band_64_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
+        sao_band_64b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
 
         vst2.8    { q8, q9 }, [r0, :128]!
         vst2.8    {q10, q11}, [r0, :128], r2
@@ -485,8 +396,7 @@ function ff_hevc_sao_band_c_32_neon_8, export=1
         pop     {r4, pc}
 endfunc
 
-
-@ ff_hevc_sao_band_c_neon_8(
+@ ff_hevc_sao_band_c_16_neon_8(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -497,124 +407,359 @@ endfunc
 @   uint32_t offset2       sp[12]
 @   int width              sp[16]
 @   int height             sp[20]
-@
-@ Widths 16-4 (less common than 32)
 
-@ As this is often done in-place on the frame buffer it is worth preloading
-@ the pixel values but we want to beware of loading ouside our buffer to avoid
-@ loading stuff into the cache that should still be invalid (in use by QPU, VPU)
+function ff_hevc_sao_band_c_16_neon_8, export=1
+        push    {r4, lr}
+        bl      band_load_c
+        vmov.i8   q15, #128
 
+1:      subs      r12, #2
+        vld2.8    { q8, q9 }, [r1, :128], r3
+        vld2.8    {q10, q11}, [r1, :128], r3
 
-function ff_hevc_sao_band_c_neon_8, export=1
-        mov     r12, sp
-        push   {r4-r8, lr}  // 24 bytes
+        sao_band_64b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
 
-        ldm     r12, {r4-r7}
+        vst2.8    { q8, q9 }, [r0, :128], r2
+        vst2.8    {q10, q11}, [r0, :128], r2
 
-        add     r4, #2
-        add     r6, #2
-        vld1.16 {d16}, [r4]    @ Unaligned
-        lsl     r5, r5, #3
-        vld1.16 {d18}, [r6]
-        pld     [r1]
-        vmov.i8  d17, #0
-        mov     r4, r1
-        vmov.i8  d19, #0
-        lsl     r7, r7, #3
-        vdup.8  q1, r5
-        ldr     r5, [r12, #16]  @ width
-        vdup.8  q2, r7
-        ldr     r12, [r12, #20]
-        vqmovn.s16 d0, q8
-        cmp     r5, #8         @ At some point we may want a table lookup
-        vqmovn.s16 d1, q9
-        vmov.i8 q3, #128
-        add     r4, r3
-        sub     r12, #1
-        bls     8f
-
-        @ d0 U lookup
-        @ d1 V lookup
-        @ q1 U raw offset
-        @ q2 V raw offset
-        @ q3 #128
-
-        @ r4 = r1 = src - Inteded for preload pointer
-        @ r12 = height
-
-1:
-        subs      r12, #1
-        vld2.8    {q8, q9}, [r1, :128], r3
-        vsub.u8   q12, q8, q1
-        vsub.u8   q13, q9, q2
-        pld       [r4]
-        vshr.u8   q12, #3
-        vadd.s8   q8, q3
-        vshr.u8   q13, #3
-        vadd.s8   q9, q3
-
-        vtbl.8    d24, {d0}, d24
-        vtbl.8    d25, {d0}, d25
-        vtbl.8    d26, {d1}, d26
-        vtbl.8    d27, {d1}, d27
-        vqadd.s8  q8, q12
-        vqadd.s8  q9, q13
-        vsub.s8   q8, q3
-        vsub.s8   q9, q3
-
-        it ne
-        addne     r4, r3
-        vst2.8    {q8, q9}, [r0, :128], r2
         bpl       1b
+        pop     {r4, pc}
+endfunc
 
-        pop    {r4-r8, pc}
+@ ff_hevc_sao_band_c_8_neon_8(
+@   uint8_t * dst          [r0]
+@   uint8_t * src          [r1]
+@   uint32_t dst_stride    [r2]
+@   uint32_t src_stride    [r3]
+@   const int16_t * table1 sp[0]
+@   uint32_t offset1       sp[4]
+@   const int16_t * table2 sp[8]
+@   uint32_t offset2       sp[12]
+@   int width              sp[16]
+@   int height             sp[20]
 
-8:
+function ff_hevc_sao_band_c_8_neon_8, export=1
+        push    {r4, lr}
+        bl      band_load_c
+        ldr       lr, [sp, #16]         @ width
+        vmov.u8   q15, #128
+        cmp       lr, #8
         blt       4f
-1:
-        subs      r12, #1
+
+1:      subs      r12, #1
         vld2.8    {d16, d17}, [r1, :128], r3
-        vsub.u8   d24, d16, d2
-        vsub.u8   d25, d17, d4
-        pld       [r4]
-        vshr.u8   q12, #3
-        vadd.s8   q8, q3
 
-        vtbl.8    d24, {d0}, d24
-        vtbl.8    d25, {d1}, d25
-        vqadd.s8  q8, q12
-        vsub.s8   q8, q3
+        sao_band_16b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
 
-        it ne
-        addne     r4, r3
         vst2.8    {d16, d17}, [r0, :128], r2
         bpl       1b
+        pop     {r4, pc}
 
-        pop    {r4-r8, pc}
-
-@ Unusual but possible width 4
 4:
-        subs      r12, #2
+1:      subs      r12, #1
         vld1.8    {d16}, [r1, :64], r3
         vld1.8    {d17}, [r1, :64], r3
         vuzp.8    d16, d17
 
-        vsub.u8   d24, d16, d2
-        vsub.u8   d25, d17, d4
-        vshr.u8   q12, #3
-        vadd.s8   q8, q3
-
-        vtbl.8    d24, {d0}, d24
-        vtbl.8    d25, {d1}, d25
-        vqadd.s8  q8, q12
-        vsub.s8   q8, q3
+        sao_band_16b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
 
         vzip.8    d16, d17
         vst1.8    {d16}, [r0, :64], r2
         vst1.8    {d17}, [r0, :64], r2
         bpl       1b
+        pop     {r4, pc}
+endfunc
 
-        pop    {r4-r8, pc}
+
+@ ff_hevc_sao_band_64_neon_10 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
+
+.macro band_64_16 bit_depth
+        push      {r4, lr}
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q2, #0
+        vdup.i16  q3, lr
+        bl        band_load_y
+        vpush     {q4-q7}
+
+1:      subs      r12, #1
+        vldm      r1, {q4-q11}
+        add       r1, r3
+        sao_band_64b_16 q4,  q5,  q6,  q7, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q2, q3, \bit_depth
+        sao_band_64b_16 q8,  q9, q10, q11, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q2, q3, \bit_depth
+        vstm      r0, {q4-q11}
+        add       r0, r2
+        bpl       1b
+
+        vpop      {q4-q7}
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_64_neon_10, export=1
+        band_64_16 10
+endfunc
+
+@ ff_hevc_sao_band_32_neon_10 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
+
+.macro band_32_16 bit_depth
+        push      {r4, lr}
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q2, #0
+        vdup.i16  q3, lr
+        bl        band_load_y
+
+1:      subs      r12, #1
+        vldm      r1, {q8-q11}
+        add       r1, r3
+        sao_band_64b_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q2, q3, \bit_depth
+        vstm      r0, {q8-q11}
+        add       r0, r2
+        bpl       1b
+
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_32_neon_10, export=1
+        band_32_16 10
+endfunc
+
+@ ff_hevc_sao_band_16_neon_10 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
+
+.macro band_16_16 bit_depth
+        push      {r4, lr}
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q14, #0
+        vdup.i16  q15, lr
+        bl        band_load_y
+
+1:      subs      r12, #2
+        vld1.16   { q8, q9 }, [r1, :128], r3
+        vld1.16   {q10, q11}, [r1, :128], r3
+        sao_band_64b_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q14, q15, \bit_depth
+        vst1.16   { q8, q9 }, [r0, :128], r2
+        vst1.16   {q10, q11}, [r0, :128], r2
+        bpl       1b
+
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_16_neon_10, export=1
+        band_16_16 10
+endfunc
+
+@ ff_hevc_sao_band_8_neon_10 (
+@   uint8_t *_dst,              [r0]
+@   uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,       [r2]
+@   ptrdiff_t stride_src,       [r3]
+@   int16_t *sao_offset_val,    [sp, #0]
+@   int sao_left_class,         [sp, #4]
+@   int width,                  [sp, #8]
+@   int height)                 [sp, #12]
+
+.macro band_8_16 bit_depth
+        push      {r4, lr}
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q14, #0
+        vdup.i16  q15, lr
+        bl        band_load_y
+        ldr       lr, [sp, #16]
+        cmp       lr, #8
+        blt       4f
+
+1:      subs      r12, #2
+        vld1.16   { q8}, [r1, :128], r3
+        vld1.16   { q9}, [r1, :128], r3
+        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q14, q15, \bit_depth
+        vst1.16   { q8}, [r0, :128], r2
+        vst1.16   { q9}, [r0, :128], r2
+        bpl       1b
+        pop       {r4, pc}
+
+4:
+1:      subs      r12, #4
+        vld1.16   {d16}, [r1, :64], r3
+        vld1.16   {d17}, [r1, :64], r3
+        vld1.16   {d18}, [r1, :64], r3
+        vld1.16   {d19}, [r1, :64], r3
+        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q14, q15, \bit_depth
+        vst1.16   {d16}, [r0, :64], r2
+        vst1.16   {d17}, [r0, :64], r2
+        vst1.16   {d18}, [r0, :64], r2
+        vst1.16   {d19}, [r0, :64], r2
+        bpl       1b
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_8_neon_10, export=1
+        band_8_16 10
+endfunc
+
+
+@ ff_hevc_sao_band_c_32_neon_10(
+@   uint8_t * dst          [r0]
+@   uint8_t * src          [r1]
+@   uint32_t dst_stride    [r2]
+@   uint32_t src_stride    [r3]
+@   const int16_t * table1 sp[0]
+@   uint32_t offset1       sp[4]
+@   const int16_t * table2 sp[8]
+@   uint32_t offset2       sp[12]
+@   int width              sp[16]
+@   int height             sp[20]
+
+.macro band_c_32_16 bit_depth
+        push      {r4, lr}
+        bl        band_load_c
+        vpush     {q4-q7}
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q14, #0
+        vdup.i16  q15, lr
+        sub       r2, #96
+
+1:      subs      r12, #1
+
+        vld2.16   { q4, q5 }, [r1, :128]!
+        vld2.16   { q6, q7 }, [r1, :128]!
+        vld2.16   { q8, q9 }, [r1, :128]!
+        vld2.16   {q10, q11}, [r1, :128], r3
+
+        pld       [r4]
+        sub       r1, #96
+
+        sao_band_64b_16 q4,  q5,  q6,  q7, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
+        sao_band_64b_16 q8,  q9, q10, q11, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
+
+        it ne
+        addne     r4, r3
+
+        vst2.16   { q4, q5 }, [r0, :128]!
+        vst2.16   { q6, q7 }, [r0, :128]!
+        vst2.16   { q8, q9 }, [r0, :128]!
+        vst2.16   {q10, q11}, [r0, :128], r2
+
+        bpl       1b
+
+        vpop      {q4-q7}
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_c_32_neon_10, export=1
+        band_c_32_16 10
+endfunc
+
+
+@ ff_hevc_sao_band_c_16_neon_10(
+@   uint8_t * dst          [r0]
+@   uint8_t * src          [r1]
+@   uint32_t dst_stride    [r2]
+@   uint32_t src_stride    [r3]
+@   const int16_t * table1 sp[0]
+@   uint32_t offset1       sp[4]
+@   const int16_t * table2 sp[8]
+@   uint32_t offset2       sp[12]
+@   int width              sp[16]
+@   int height             sp[20]
+
+.macro band_c_16_16 bit_depth
+        push      {r4, lr}
+        bl        band_load_c
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q14, #0
+        vdup.i16  q15, lr
+        sub       r2, #32
+        sub       r3, #32
+
+1:      subs      r12, #1
+
+        vld2.16   { q8, q9 }, [r1, :128]!
+        vld2.16   {q10, q11}, [r1, :128], r3
+
+        sao_band_64b_16 q8,  q9, q10, q11, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
+
+        vst2.16   { q8, q9 }, [r0, :128]!
+        vst2.16   {q10, q11}, [r0, :128], r2
+
+        bpl       1b
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_c_16_neon_10, export=1
+        band_c_16_16 10
+endfunc
+
+
+@ ff_hevc_sao_band_c_8_neon_10(
+@   uint8_t * dst          [r0]
+@   uint8_t * src          [r1]
+@   uint32_t dst_stride    [r2]
+@   uint32_t src_stride    [r3]
+@   const int16_t * table1 sp[0]
+@   uint32_t offset1       sp[4]
+@   const int16_t * table2 sp[8]
+@   uint32_t offset2       sp[12]
+@   int width              sp[16]
+@   int height             sp[20]
+
+.macro band_c_8_16 bit_depth
+        push      {r4, lr}
+        bl        band_load_c
+        movw      lr, #(1 << \bit_depth) - 1
+        vmov.i64  q14, #0
+        vdup.i16  q15, lr
+        ldr       lr, [sp, #24]         @ width
+        cmp       lr, #8
+        blt       4f
+
+1:      subs      r12, #1
+        vld2.16   { q8, q9 }, [r1, :128], r3
+
+        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
+
+        vst2.16   { q8, q9 }, [r0, :128], r2
+
+        bpl       1b
+        pop       {r4, pc}
+
+4:
+1:      subs      r12, #2
+        vld2.16   {d16, d17}, [r1, :128], r3
+        vld2.16   {d18, d19}, [r1, :128], r3
+
+        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
+
+        vst2.16   {d16, d17}, [r0, :128], r2
+        vst2.16   {d18, d19}, [r0, :128], r2
+
+        bpl       1b
+        pop       {r4, pc}
+.endm
+
+function ff_hevc_sao_band_c_8_neon_10, export=1
+        band_c_8_16 10
 endfunc
 
 
