@@ -620,6 +620,9 @@ function ff_hevc_sao_band_c_neon_8, export=1
 endfunc
 
 
+@ =============================================================================
+@ SAO EDGE
+
 @ r0    destination address
 @ r2    stride to post-increment r0 with
 @ [r5]  translate values
@@ -634,7 +637,7 @@ endfunc
 @ Can be used for both Y & C as we unzip/zip the deltas and
 @ transform "u/v" separately via d26/d27.  For Y d26=d27
 
-function edge_w64_body_8
+function edge_64b_body_8
 
         vcgt.u8 q12,  q4,  q0   @ c > a -> -1 , otherwise 0
         vcgt.u8 q13,  q5,  q1
@@ -732,7 +735,7 @@ endfunc
 @ Can be used for both Y & C as we unzip/zip the deltas and
 @ transform "u/v" separately via d26/d27.  For Y d26=d27
 
-function edge_w32_body_16
+function edge_64b_body_16
 
         vcgt.u16 q12, q4, q0  // c > a -> -1 , otherwise 0
         vcgt.u16 q13, q5, q1
@@ -810,26 +813,27 @@ endfunc
 @ a in q0
 @ c in q1
 @ b in q2
-@ Temp q3
+@ Temp q3, q9, q10
 @
 @ d16, d17 (q8) xlat U, V
 @ q14.u8 #2
 @ q15.u8 #128
 
 function edge_16b_body_8
-
         vcgt.u8  q3,  q1,  q0   @ c > a -> -1 , otherwise 0
         vcgt.u8  q0,  q1        @ a > c -> -1 , otherwise 0
-        vsub.s8  q0,  q3        @ a = sign(c-a)
-        vcgt.u8  q3,  q1,  q2   @ c > b -> -1 , otherwise 0
+        vcgt.u8  q9,  q1,  q2   @ c > b -> -1 , otherwise 0
+        vcgt.u8  q10, q2,  q1   @ c < b -> -1 , otherwise 0
+
         vsub.s8  q0,  q3
-        vcgt.u8  q3,  q2,  q1   @ c < b -> -1 , otherwise 0
-        vadd.s8  q0,  q3        @ a = sign(c-a) + sign(c-b)
+        vsub.s8  q10, q9
+        vadd.s8  q0,  q10       @ a = sign(c-a)
+
         vadd.s8  q0,  q14
         vuzp.8   d0,  d1
+        vadd.s8  q3,  q1, q15   @ Add -128 so we can use saturating signed add
 
         vtbl.8   d0,  {d16}, d0
-        vadd.s8  q3,  q1, q15   @ Add -128 so we can use saturating signed add
         vtbl.8   d1,  {d17}, d1
 
         vzip.8   d0,  d1
@@ -846,23 +850,21 @@ endfunc
 @ Temp q3
 @
 @ q12, #0
-@ d26, d27 xlat U, V
+@ d16, d17 xlat U, V
 @ q14.u8 #2
 @ q15.u16 max
 function edge_16b_body_16
         vcgt.u16 q3, q1, q0     @ c > a -> -1 , otherwise 0
-        vcgt.u16 q0, q0, q1     @ a > c -> -1 , otherwise 0
-        vsub.s16 q0, q0, q3     @ a = sign(c-a)
+        vcgt.u16 q0, q1         @ a > c -> -1 , otherwise 0
+        vsub.s16 q0, q3         @ a = sign(c-a)
         vcgt.u16 q3, q1, q2     @ c > b -> -1 , otherwise 0
-        vsub.s16 q0, q0, q3
+        vsub.s16 q0, q3
         vcgt.u16 q3, q2, q1     @ c < b -> -1 , otherwise 0
-        vadd.s16 q0, q0, q3     @ a = sign(c-a) + sign(c-b)
-
-        vmov.u8  q12, #2
+        vadd.s16 q0, q3         @ a = sign(c-a) + sign(c-b)
 
         vmovn.s16 d0, q0
-        vmov.u8   d1, d0        @ *** Unneeded
-
+        @ d1 will have randon contents that we transform but
+        @ that doesn't matter as we then discard them
         vuzp.8   d0, d1
 
         vadd.s8  q0, q0, q14
@@ -1241,6 +1243,33 @@ endfunc
 .endm
 
 .macro  edge_4bx4_e1, body_fn
+        mov      r6, lr
+        sub      r1, r3
+        // load a
+        vld1.32  {d0[0]}, [r1], r3
+        vld1.32  {d0[1]}, [r1], r3
+
+1:      subs     r12, #4
+        @ Given the data duplication here we could probably do better than
+        @ using the generic body_fn but it almost certainly isn't worth it
+        vld1.32  {d4[0]}, [r1], r3
+        vld1.32  {d4[1]}, [r1], r3
+        vld1.32  {d5[0]}, [r1], r3
+        vld1.32  {d5[1]}, [r1], r3
+
+        vmov.32  d1, d4
+        vext.32  q1, q0, q4, #1
+
+        bl       \body_fn
+
+        vst1.32  {d0[0]}, [r0], r2
+        vst1.32  {d0[1]}, [r0], r2
+        vst1.32  {d1[0]}, [r0], r2
+        vst1.32  {d1[1]}, [r0], r2
+
+        vmov.32  d0, d5
+        bgt      1b
+        bx       r6
 .endm
 
 .macro  edge_64b_e2, body_fn, pb
@@ -1345,6 +1374,46 @@ endfunc
 .endm
 
 .macro  edge_4bx4_e2, body_fn, pb
+        mov      r6, lr
+        sub      r1, #\pb
+
+1:      sub      r1, r3
+        @ line 0 {d0[0], -, -}          r1 lo
+        vld1.32  {d0[0]}, [r1], r3
+        subs     r12, #4
+        @ Line 1 {d0[1], d2[0], -}      r1 lo
+        vld1.32  {d0[1]}, [r1]
+        add      r1, #\pb
+        vld1.32  {d2[0]}, [r1], r3
+        @ Line 2 {d1[0], d2[1], d4[0]}  r1 mid
+        vld1.32  {d2[1]}, [r1]
+        sub      r1, #\pb
+        vld1.32  {d1[0]}, [r1]
+        add      r1, #\pb * 2
+        vld1.32  {d4[0]}, [r1], r3
+        @ Line 2 {d1[1], d3[0], d4[1]}  r1 hi
+        vld1.32  {d4[1]}, [r1]
+        sub      r1, #\pb * 2
+        vld1.32  {d1[1]}, [r1], r3
+        add      r1, #\pb
+        vld1.32  {d3[0]}, [r1]
+        @ Line 3 {-, d3[1], d5[0]}      r1 mid
+        vld1.32  {d3[1]}, [r1]
+        add      r1, #\pb
+        vld1.32  {d5[0]}, [r1], r3
+        @ Line 4 {-, -, d5[1]}          r1 hi
+        vld1.32  {d5[1]}, [r1]
+        sub      r1, #(\pb * 2)
+
+        bl       \body_fn
+
+        vst1.32  {d0[0]}, [r0], r2
+        vst1.32  {d0[1]}, [r0], r2
+        vst1.32  {d1[0]}, [r0], r2
+        vst1.32  {d1[1]}, [r0], r2
+        bgt      1b
+
+        bx       r6
 .endm
 
 .macro  edge_64b_e3, body_fn, pb
@@ -1510,7 +1579,7 @@ endfunc
 function ff_hevc_sao_edge_32_neon_8, export=1
         edge_64b_init   8, 0, 0, 99f
 99:
-        edge_32bx2_bodies edge_w64_body_8, 1
+        edge_32bx2_bodies edge_64b_body_8, 1
 endfunc
 
 @ void ff_hevc_sao_edge_64_neon_8(
@@ -1525,7 +1594,7 @@ endfunc
 function ff_hevc_sao_edge_64_neon_8, export=1
         edge_64b_init   8, 0, 0, 99f
 99:
-        edge_64b_bodies edge_w64_body_8, 1
+        edge_64b_bodies edge_64b_body_8, 1
 endfunc
 
 @ ff_hevc_sao_edge_c_8_neon_8(
@@ -1557,7 +1626,7 @@ endfunc
 function ff_hevc_sao_edge_c_16_neon_8, export=1
         edge_64b_init   8, 1, 0, 99f
 99:
-        edge_32bx2_bodies edge_w64_body_8, 2
+        edge_32bx2_bodies edge_64b_body_8, 2
 endfunc
 
 @ ff_hevc_sao_edge_c_32_neon_8(
@@ -1573,7 +1642,7 @@ endfunc
 function ff_hevc_sao_edge_c_32_neon_8, export=1
         edge_64b_init   8, 1, 0, 99f
 99:
-        edge_64b_bodies edge_w64_body_8, 2
+        edge_64b_bodies edge_64b_body_8, 2
 endfunc
 
 @ void ff_hevc_sao_edge_8_neon_10(
@@ -1603,7 +1672,7 @@ endfunc
 function ff_hevc_sao_edge_16_neon_10, export=1
         edge_64b_init   10, 0, 0, 99f
 99:
-        edge_32bx2_bodies edge_w32_body_16, 2
+        edge_32bx2_bodies edge_64b_body_16, 2
 endfunc
 
 @ void ff_hevc_sao_edge_64_neon_10(
@@ -1637,7 +1706,7 @@ endfunc
 function ff_hevc_sao_edge_32_neon_10, export=1
         edge_64b_init   10, 0, 0, 99f
 99:
-        edge_64b_bodies edge_w32_body_16, 2
+        edge_64b_bodies edge_64b_body_16, 2
 endfunc
 
 @ ff_hevc_sao_edge_c_8_neon_10(
@@ -1653,7 +1722,7 @@ endfunc
 function ff_hevc_sao_edge_c_8_neon_10, export=1
         edge_xxb_init   10, 1, 99f, check_w4=1, setup_16b=1, setup_64b=1
 99:
-        edge_32bx2_16b_bodies edge_w32_body_16, edge_16b_body_16, 4
+        edge_32bx2_16b_bodies edge_64b_body_16, edge_16b_body_16, 4
 endfunc
 
 @ ff_hevc_sao_edge_c_32_neon_10(
@@ -1684,6 +1753,6 @@ endfunc
 function ff_hevc_sao_edge_c_16_neon_10, export=1
         edge_64b_init   10, 1, 0, 99f
 99:
-        edge_64b_bodies edge_w32_body_16, 4
+        edge_64b_bodies edge_64b_body_16, 4
 endfunc
 

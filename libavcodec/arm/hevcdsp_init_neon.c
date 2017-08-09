@@ -528,7 +528,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->sao_edge_filter[2]          = ff_hevc_sao_edge_32_neon_10;
         c->sao_edge_filter[4]          = ff_hevc_sao_edge_64_neon_10;
 #if RPI_HEVC_SAND
-        c->sao_edge_filter_c[1]        = ff_hevc_sao_edge_c_8_neon_10;
+        c->sao_edge_filter_c[0]        = ff_hevc_sao_edge_c_8_neon_10;
         c->sao_edge_filter_c[1]        = ff_hevc_sao_edge_c_16_neon_10;
         c->sao_edge_filter_c[2]        = ff_hevc_sao_edge_c_32_neon_10;
 #endif
