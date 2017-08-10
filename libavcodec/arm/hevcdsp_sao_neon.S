@@ -1119,22 +1119,19 @@ endfunc
 .macro  edge_64b_e0, body_fn, pb
         mov      r6, lr
         sub      r1, #8
-1:      subs     r12, #1
-        vld1.64  {d7}, [r1, :64]!
-        vld1.64  {q4-q5}, [r1, :128]! // load c
-        vld1.64  {q6-q7}, [r1, :128]!
-        vld1.64  {d24}, [r1, :64], r3
-        sub      r1, #72
+1:      vldm     r1, {d7-d16}
+        subs     r12, #1
+        add      r1, r3
         // load a
         vext.8   q0,  q3,  q4, #(16 - \pb)
         vext.8   q1,  q4,  q5, #(16 - \pb)
         vext.8   q2,  q5,  q6, #(16 - \pb)
         vext.8   q3,  q6,  q7, #(16 - \pb)
         // load b
+        vext.8   q11, q7,  q8, #\pb     @ Avoid overwrite
         vext.8   q8,  q4,  q5, #\pb
         vext.8   q9,  q5,  q6, #\pb
         vext.8   q10, q6,  q7, #\pb
-        vext.8   q11, q7, q12, #\pb
         bl       \body_fn
         vstm     r0, {q0-q3}
         add      r0, r0, r2
@@ -1171,16 +1168,17 @@ endfunc
 
 .macro  edge_16b_e0, body_fn, pb
         mov      r6, lr
-        sub      r1, #8
+        sub      r1, #\pb
+        sub      r3, #\pb * 2
+
 1:      subs     r12, #1
-        vld1.64  {d7}, [r1, :64]!
-        vld1.64  {q1}, [r1, :128]! // load c
-        vld1.64  {d24}, [r1, :64], r3
-        sub      r1, #24
-        // load a
-        vext.8   q0,  q3,  q1, #(16 - \pb)
-        // load b
-        vext.8   q2,  q1,  q12, #\pb
+
+        vld1.64  {q0}, [r1]             @ load a
+        add      r1, #\pb
+        vld1.64  {q1}, [r1, :128]       @ load c
+        add      r1, #\pb
+        vld1.64  {q2}, [r1], r3         @ load b
+
         bl       \body_fn
         vst1.8   {q0}, [r0], r2
         bgt      1b
@@ -1223,26 +1221,22 @@ endfunc
         sub      r1, #\pb
         vld1.32  {d0[0]}, [r1]
         add      r1, #(\pb * 2)
-        vld1.32  {d4[0]}, [r1], r3
+        vld1.32  {d4[0]}, [r1], r3      @ R
+        vld1.32  {d4[1]}, [r1]
         sub      r1, #\pb
         vld1.32  {d2[1]}, [r1]
         sub      r1, #\pb
-        vld1.32  {d0[1]}, [r1]
-        add      r1, #(\pb * 2)
-        vld1.32  {d4[1]}, [r1], r3
-        sub      r1, #\pb
-        vld1.32  {d3[0]}, [r1]
-        sub      r1, #\pb
+        vld1.32  {d0[1]}, [r1], r3      @ L
         vld1.32  {d1[0]}, [r1]
-        add      r1, #(\pb * 2)
-        vld1.32  {d5[0]}, [r1], r3
-        sub      r1, #\pb
-        vld1.32  {d3[1]}, [r1]
-        sub      r1, #\pb
+        add      r1, #\pb
+        vld1.32  {d3[0]}, [r1]
+        add      r1, #\pb
+        vld1.32  {d5[0]}, [r1], r3      @ R
+        vld1.32  {d5[1]}, [r1]
+        sub      r1, #(\pb * 2)
         vld1.32  {d1[1]}, [r1]
-        add      r1, #(\pb * 2)
-        vld1.32  {d5[1]}, [r1], r3
-        sub      r1, #\pb
+        add      r1, #\pb
+        vld1.32  {d3[1]}, [r1], r3      @ M
 
         bl       \body_fn
 
@@ -1372,6 +1366,7 @@ endfunc
 
 .macro  edge_4bx4_e1, body_fn
         mov      r6, lr
+debug_me:
         sub      r1, r3
         // load a
         vld1.32  {d0[0]}, [r1], r3
@@ -1386,7 +1381,8 @@ endfunc
         vld1.32  {d5[1]}, [r1], r3
 
         vmov.32  d1, d4
-        vext.32  q1, q0, q4, #1
+        vext.32  d2, d0, d4, #1
+        vext.32  d3, d4, d5, #1
 
         bl       \body_fn
 
@@ -1506,10 +1502,10 @@ endfunc
         sub      r1, #\pb
 
 1:      sub      r1, r3
-        @ line 0 {d0[0], -, -}          r1 lo
+        @ line 0 {d0[0], -,     -    }  r1 lo
         vld1.32  {d0[0]}, [r1], r3
         subs     r12, #4
-        @ Line 1 {d0[1], d2[0], -}      r1 lo
+        @ Line 1 {d0[1], d2[0], -    }  r1 lo
         vld1.32  {d0[1]}, [r1]
         add      r1, #\pb
         vld1.32  {d2[0]}, [r1], r3
@@ -1522,14 +1518,14 @@ endfunc
         @ Line 2 {d1[1], d3[0], d4[1]}  r1 hi
         vld1.32  {d4[1]}, [r1]
         sub      r1, #\pb * 2
-        vld1.32  {d1[1]}, [r1], r3
+        vld1.32  {d1[1]}, [r1]
         add      r1, #\pb
-        vld1.32  {d3[0]}, [r1]
-        @ Line 3 {-, d3[1], d5[0]}      r1 mid
+        vld1.32  {d3[0]}, [r1], r3
+        @ Line 3 {-,     d3[1], d5[0]}  r1 mid
         vld1.32  {d3[1]}, [r1]
         add      r1, #\pb
         vld1.32  {d5[0]}, [r1], r3
-        @ Line 4 {-, -, d5[1]}          r1 hi
+        @ Line 4 {-,      -,    d5[1]}  r1 hi
         vld1.32  {d5[1]}, [r1]
         sub      r1, #(\pb * 2)
 
