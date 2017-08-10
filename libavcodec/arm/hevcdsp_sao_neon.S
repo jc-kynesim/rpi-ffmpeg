@@ -128,32 +128,27 @@ function band_load_y
         vld1.16   {d16}, [r12]          @ Unaligned
         vmov.i64  q1, #0
         ldr       r12, [sp, #12]        @ sao_left_class
-        vpush     {q0, q1}              @ Put zero array on stack
 
-        @ stuff the offset vals into the array
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[0]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[2]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[4]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        vst1.8    {d16[6]}, [r4]
+        mov       r4, sp
+        sub       sp, #32
+        and       sp, #~63              @ Align stack so we can wrap with a simple AND
+        vst1.8    {q0, q1}, [sp, :256]  @ Put zero array on stack
+        add       r12, sp
+        vst1.8    {d16[0]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[2]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[4]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[6]}, [r12]
+        vld1.8    {q0, q1}, [sp, :256]  @ Pop modified array
+        mov       sp, r4
 
-        vpop      {q0, q1}              @ Pop modified array
         ldr       r12, [sp, #20]        @ height
         pld       [r1]
 
-        subs      r12, #1
-        mov       r4, r1
-        it ne
-        addne     r4, r3
+        sub       r12, #1
+        add       r4, r1, r3
         bx        lr
 endfunc
 
@@ -165,56 +160,46 @@ function band_load_c
         vld1.16   {d16}, [r12]          @ Unaligned
         vmov.i64  q3, #0
         ldr       r12, [sp, #12]        @ sao_left_class
-        vpush     {q2, q3}              @ Put zero array on stack
 
-        @ stuff the offset vals into the array
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[0]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[2]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[4]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        vst1.8    {d16[6]}, [r4]
-        vpop      {q0, q1}              @ Pop modified array
+        mov       r4, sp                @ Remember SP
+        sub       sp, #32
+        and       sp, #~63              @ Align stack so we can wrap with a simple AND
+
+        vst1.8    {q2, q3}, [sp, :256]  @ Put zero array on stack
+        add       r12, sp
+        vst1.8    {d16[0]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[2]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[4]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[6]}, [r12]
+        vld1.8    {q0, q1}, [sp, :256]  @ Pop modified array
 
         @ And again for the 2nd set
-        ldr       r12, [sp, #16]        @ &sao_offset_val2[0]
+        ldr       r12, [r4, #16]        @ &sao_offset_val2[0]
         add       r12, #2               @ 1st interesting val is [1]
         vld1.16   {d16}, [r12]          @ Unaligned
-        ldr       r12, [sp, #20]        @ sao_left_class2
-        vpush     {q2, q3}              @ Put zero array on stack (again)
+        ldr       r12, [r4, #20]        @ sao_left_class2
 
-        @ stuff the offset vals into the array
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[0]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[2]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        add       r12, #1
-        vst1.8    {d16[4]}, [r4]
-        and       r12, #31
-        add       r4, r12, sp
-        vst1.8    {d16[6]}, [r4]
-        vpop      {q2, q3}              @ Pop modified array
+        vst1.8    {q2, q3}, [sp, :256]  @ Put zero array on stack (again)
+        add       r12, sp
+        vst1.8    {d16[0]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[2]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[4]}, [r12]!
+        and       r12, #~32
+        vst1.8    {d16[6]}, [r12]
+        vld1.8    {q2, q3}, [sp, :256]  @ Pop modified array
+
+        mov       sp, r4
 
         ldr       r12, [sp, #28]        @ height
         pld       [r1]
 
         subs      r12, #1
-        mov       r4, r1
-        it ne
-        addne     r4, r3
+        add       r4, r1, r3
         bx        lr
 endfunc
 
