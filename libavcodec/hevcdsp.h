@@ -54,6 +54,13 @@ typedef struct MvField {
     int8_t pred_flag;
 } MvField;
 
+#ifdef RPI
+#define SAO_FILTER_N 6
+#else
+#define SAO_FILTER_N 5
+#endif
+
+
 typedef struct HEVCDSPContext {
     void (*put_pcm)(uint8_t *_dst, ptrdiff_t _stride, int width, int height,
                     struct GetBitContext *gb, int pcm_bit_depth);
@@ -78,20 +85,20 @@ typedef struct HEVCDSPContext {
 
     void (*idct_dc[4])(int16_t *coeffs);
 
-    void (*sao_band_filter[5])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
+    void (*sao_band_filter[SAO_FILTER_N])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
 #if RPI_HEVC_SAND
-    void (*sao_band_filter_c[5])(uint8_t *_dst, const uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
+    void (*sao_band_filter_c[SAO_FILTER_N])(uint8_t *_dst, const uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                const int16_t *sao_offset_val_u, int sao_left_class_u,
                                const int16_t *sao_offset_val_v, int sao_left_class_v,
                                int width, int height);
 #endif
 
     /* implicit stride_src parameter has value of 2 * MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE */
-    void (*sao_edge_filter[5])(uint8_t *_dst /* align 16 */, uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
+    void (*sao_edge_filter[SAO_FILTER_N])(uint8_t *_dst /* align 16 */, uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
                                int16_t *sao_offset_val, int sao_eo_class, int width, int height);
 #if RPI_HEVC_SAND
-    void (*sao_edge_filter_c[5])(uint8_t *_dst /* align 16 */, const uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
+    void (*sao_edge_filter_c[SAO_FILTER_N])(uint8_t *_dst /* align 16 */, const uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
                                const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v, int sao_eo_class, int width, int height);
 #endif
 

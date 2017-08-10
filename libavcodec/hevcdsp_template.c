@@ -668,9 +668,6 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 // --- Plaited chroma versions
 
 #if RPI_HEVC_SAND
-#if BIT_DEPTH == 8
-static unsigned int fused = 0;
-#endif
 
 static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
@@ -684,20 +681,6 @@ static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
     int offset_table_v[32] = { 0 };
     int k, y, x;
     int shift  = BIT_DEPTH - 5;
-
-    if (width < 8 && (fused & 0x300) != 0x300){
-        int i;
-        for (i = 0; i != 5; ++i){
-            if (sao_offset_val_u[i] != 0 && (fused & 0x100) != 0x100){
-                fused |= 0x100;
-                printf("*** Used=%x\n", fused);
-            }
-            if (sao_offset_val_v[i] != 0 && (fused & 0x200) != 0x200){
-                fused |= 0x200;
-                printf("*** Used=%x\n", fused);
-            }
-        }
-    }
 
     stride_dst /= sizeof(pixel);
     stride_src /= sizeof(pixel);
@@ -739,22 +722,6 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
     int a_stride, b_stride;
     int x, y;
     ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
-
-    if (width < 8){
-        unsigned int mu = 1 << (eo * 2);
-        unsigned int mv = 2 << (eo * 2);
-        int i;
-        for (i = 0; i != 5; ++i){
-            if (sao_offset_val_u[i] != 0 && (fused & mu) == 0) {
-                fused |= mu;
-                printf("*** Used=%x\n", fused);
-            }
-            if (sao_offset_val_v[i] != 0 && (fused & mv) == 0) {
-                fused |= mv;
-                printf("*** Used=%x\n", fused);
-            }
-        }
-    }
 
     stride_dst /= sizeof(pixel);
     width *= 2;
