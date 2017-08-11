@@ -2247,10 +2247,21 @@ static void chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVF
 static void hevc_await_progress(HEVCContext *s, HEVCFrame *ref,
                                 const Mv *mv, int y0, int height)
 {
-    int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
+    if (s->threads_type == FF_THREAD_FRAME) {
+        const int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
 
-    if (s->threads_type == FF_THREAD_FRAME )
+//#ifdef RPI
+#if 1
+        if (s->enable_rpi) {
+            int * const pr = s->jobs[s->pass0_job].progress + ref->dpb_no;
+            if (*pr < y) {
+                *pr = y;
+            }
+        }
+        else
+#endif
         ff_thread_await_progress(&ref->tf, y, 0);
+    }
 }
 
 static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
@@ -3675,6 +3686,11 @@ static void rpi_begin(HEVCContext *s)
 
     s->last_y8_p = NULL;
     s->last_y8_l1 = NULL;
+
+    for (i = 0; i != FF_ARRAY_ELEMS(jb->progress); ++i) {
+        jb->progress[i] = -1;
+    }
+
 #endif
     s->ctu_count = 0;
 }
@@ -3862,6 +3878,17 @@ static void worker_core(HEVCContext * const s)
 
     // Having accumulated some commands - do them
     rpi_cache_flush_finish(rfe);
+
+    // Await progress as required
+    {
+        unsigned int i;
+        for (i = 0; i != FF_ARRAY_ELEMS(jb->progress); ++i) {
+            if (jb->progress[i] >= 0) {
+                ff_thread_await_progress(&s->DPB[i].tf, jb->progress[i], 0);
+            }
+        }
+    }
+
     vpu_qpu_job_finish(vqj);
 
     memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));
@@ -5107,6 +5134,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         if (!s->DPB[i].frame)
             goto fail;
         s->DPB[i].tf.f = s->DPB[i].frame;
+        s->DPB[i].dpb_no = i;
     }
 
     s->max_ra = INT_MAX;

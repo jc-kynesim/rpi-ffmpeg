@@ -408,6 +408,10 @@ typedef struct HEVCFrame {
      * A combination of HEVC_FRAME_FLAG_*
      */
     uint8_t flags;
+
+    // Entry no in DPB - can be used as a small unique
+    // frame identifier (within the current thread)
+    uint8_t dpb_no;
 } HEVCFrame;
 
 #ifdef RPI_WORKER
@@ -579,6 +583,7 @@ typedef struct HEVCRpiInterPredEnv
 typedef struct HEVCRpiJob {
     HEVCRpiInterPredEnv chroma_ip;
     HEVCRpiInterPredEnv luma_ip;
+    int progress[32];  // index by dpb_no
 } HEVCRpiJob;
 
 #if RPI_TSTATS
