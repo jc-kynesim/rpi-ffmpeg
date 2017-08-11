@@ -3983,6 +3983,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
+        if (s->ref && s->threads_type == FF_THREAD_FRAME && y_ctb > ctb_size) {
+            ff_thread_report_progress(&s->ref->tf, y_ctb - ctb_size, 1);
+        }
+
 #ifdef RPI
         if (s->enable_rpi) {
             int q_full = (s->ctu_count >= s->max_ctu_count);
@@ -4646,6 +4650,7 @@ fail:  // Also success path
         rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
+        ff_thread_report_progress(&s->ref->tf, INT_MAX, 1);
     }
 #if RPI_INTER
     else if (s->ref && s->enable_rpi) {
