@@ -230,6 +230,8 @@ static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
   mmal_buffer_header_release(buffer);
 }
 
+#define DISPLAY_PORT_DEPTH 4
+
 static rpi_display_env_t *
 display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, size_t h)
 {
@@ -270,6 +272,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         MMAL_PORT_T * const port = de->port_in;
         MMAL_ES_FORMAT_T* const format = port->format;
         port->userdata = (struct MMAL_PORT_USERDATA_T *)de;
+        port->buffer_num = DISPLAY_PORT_DEPTH;
         format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 :
             fmt == AV_PIX_FMT_SAND64_10 ? MMAL_ENCODING_YUVUV64_16 :
                 MMAL_ENCODING_I420;
@@ -333,12 +336,13 @@ fail:
 
 static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * const de, const AVFrame* const fr)
 {
+    static fno = 0;
     MMAL_BUFFER_HEADER_T* buf;
 
     if (de == NULL)
         return;
 
-    if (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
+    if (avpriv_atomic_int_get(&de->rpi_display_count) >= DISPLAY_PORT_DEPTH - 1) {
         av_log(s, AV_LOG_VERBOSE, "Frame dropped\n");
         return;
     }
@@ -368,7 +372,7 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
         avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, 1);
     }
 
-    while (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
+    while (avpriv_atomic_int_get(&de->rpi_display_count) >= DISPLAY_PORT_DEPTH - 1) {
         usleep(5000);
     }
 
