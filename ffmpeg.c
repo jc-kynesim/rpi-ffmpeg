@@ -297,7 +297,8 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         mmal_log_dump_port(de->port_in);
         mmal_format_copy(port_out->format, de->port_in->format);
         if (fmt == AV_PIX_FMT_SAND64_10) {
-            if ((err = mmal_port_parameter_set_int32(port_out, MMAL_PARAMETER_OUTPUT_SHIFT, 6)) != MMAL_SUCCESS)
+            if ((err = mmal_port_parameter_set_int32(de->port_in, MMAL_PARAMETER_CCM_SHIFT, 5)) != MMAL_SUCCESS ||
+                (err = mmal_port_parameter_set_int32(port_out, MMAL_PARAMETER_OUTPUT_SHIFT, 1)) != MMAL_SUCCESS)
             {
                 av_log(NULL, AV_LOG_WARNING, "Failed to set ISP output port shift\n");
             }
