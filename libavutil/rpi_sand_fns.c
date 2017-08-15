@@ -16,6 +16,8 @@
 void rpi_sand128b_stripe_to_8_10(uint8_t * dest, const uint8_t * src1, const uint8_t * src2, unsigned int lines);
 #endif
 
+#if 1
+// Simple round
 static void cpy16_to_8(uint8_t * dst, const uint8_t * _src, unsigned int n, const unsigned int shr)
 {
     const unsigned int rnd = (1 << shr) >> 1;
@@ -25,6 +27,20 @@ static void cpy16_to_8(uint8_t * dst, const uint8_t * _src, unsigned int n, cons
         *dst++ = (*src++ + rnd) >> shr;
     }
 }
+#else
+// Dithered variation
+static void cpy16_to_8(uint8_t * dst, const uint8_t * _src, unsigned int n, const unsigned int shr)
+{
+    unsigned int rnd = (1 << shr) >> 1;
+    const unsigned int mask = ((1 << shr) - 1);
+    const uint16_t * src = (const uint16_t *)_src;
+
+    for (; n != 0; --n) {
+        rnd = *src++ + (rnd & mask);
+        *dst++ = rnd >> shr;
+    }
+}
+#endif
 
 // w/h in pixels
 void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const unsigned int dst_stride2,
