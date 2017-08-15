@@ -398,7 +398,10 @@ static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
     frame->extended_data = frame->data;
     // Leave extended buf alone
 
-//    frame->buf[4] = rpi_buf_pool_alloc(&zc->pool, size_pic);  // *** 2 * wanted size - kludge
+#if RPI_ZC_SAND_8_IN_10_BUF != 0
+    // *** If we intend to use this for real we will want a 2nd buffer pool
+    frame->buf[RPI_ZC_SAND_8_IN_10_BUF] = rpi_buf_pool_alloc(&zc->pool, size_pic);  // *** 2 * wanted size - kludge
+#endif
 
     return 0;
 }
@@ -583,11 +586,13 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
 
     if (frame->buf[1] != NULL || frame->format != expected_format)
     {
-        if (frame->format == AV_PIX_FMT_SAND64_10 && expected_format == AV_PIX_FMT_SAND128 && frame->buf[4] != NULL)
+#if RPI_ZC_SAND_8_IN_10_BUF
+        if (frame->format == AV_PIX_FMT_SAND64_10 && expected_format == AV_PIX_FMT_SAND128 && frame->buf[RPI_ZC_SAND_8_IN_10_BUF] != NULL)
         {
-            av_log(s, AV_LOG_INFO, "%s: --- found buf[4]\n", __func__);
-            return av_buffer_ref(frame->buf[4]);
+//            av_log(s, AV_LOG_INFO, "%s: --- found buf[4]\n", __func__);
+            return av_buffer_ref(frame->buf[RPI_ZC_SAND_8_IN_10_BUF]);
         }
+#endif
 
         if (maycopy)
         {

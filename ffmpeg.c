@@ -244,8 +244,11 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
-//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || av_rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+#if RPI_ZC_SAND_8_IN_10_BUF
+    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || av_rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+#else
     const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
+#endif
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
     rpi_display_env_t * de;
     int isp_req = (fmt == AV_PIX_FMT_SAND64_10);
@@ -336,7 +339,6 @@ fail:
 
 static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * const de, const AVFrame* const fr)
 {
-    static fno = 0;
     MMAL_BUFFER_HEADER_T* buf;
 
     if (de == NULL)

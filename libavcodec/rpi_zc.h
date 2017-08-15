@@ -8,6 +8,13 @@
 // bit of memory for the frame when can then be reference counted until
 // display has finished with it.
 
+// Frame buffer number in which to stuff an 8-bit copy of a 16-bit frame
+// 0 disables
+// *** This option still in development
+//     Only works if SAO active
+//     Allocates buffers that are twice the required size
+#define RPI_ZC_SAND_8_IN_10_BUF  0
+
 struct AVBufferRef;
 struct AVFrame;
 struct AVCodecContext;

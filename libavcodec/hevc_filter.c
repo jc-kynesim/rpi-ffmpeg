@@ -40,7 +40,10 @@
 #include "rpi_qpu.h"
 #endif
 #if RPI_HEVC_SAND
+#include "rpi_zc.h"
 #include "libavutil/rpi_sand_fns.h"
+#else
+#define RPI_ZC_SAND_8_IN_10_BUF 0
 #endif
 
 #define LUMA 0
@@ -576,7 +579,8 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         }
     }
 
-    if (s->frame->format == AV_PIX_FMT_SAND64_10 && s->frame->buf[4] != NULL &&
+#if RPI_ZC_SAND_8_IN_10_BUF
+    if (s->frame->format == AV_PIX_FMT_SAND64_10 && s->frame->buf[RPI_ZC_SAND_8_IN_10_BUF] != NULL &&
         (((x + (1 << (s->ps.sps->log2_ctb_size))) & 255) == 0 || edges[2]))
     {
         const unsigned int stride1 = s->frame->linesize[0];
@@ -594,6 +598,7 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
         av_rpi_sand16_to_sand8(dy, stride1, stride2, sy, stride1, stride2, wy, hy, 3);
         av_rpi_sand16_to_sand8(dc, stride1, stride2, sc, stride1, stride2, wy, hy >> 1, 3);
     }
+#endif
 }
 
 // Returns 2 or 0.
