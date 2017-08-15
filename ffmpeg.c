@@ -203,6 +203,7 @@ typedef struct rpi_display_env_s
 
     MMAL_POOL_T *rpi_pool;
     volatile int rpi_display_count;
+    enum AVPixelFormat avfmt;
 } rpi_display_env_t;
 
 static rpi_display_env_t * rpi_display_env = NULL;
@@ -241,7 +242,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
-//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || av_rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
     const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
     rpi_display_env_t * de;
@@ -319,6 +320,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
 
     mmal_component_enable(de->display);
     mmal_port_enable(de->display->control,display_cb_control);
+    de->avfmt = fmt;
 
     printf("Allocated display %dx%d in %dx%d, fmt=%d\n", w, h, geo.stride_y, geo.height_y, fmt);
 
@@ -352,7 +354,7 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
     {
-        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
+        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, de->avfmt, 1);
         if (fr_buf == NULL) {
             mmal_buffer_header_release(buf);
             return;

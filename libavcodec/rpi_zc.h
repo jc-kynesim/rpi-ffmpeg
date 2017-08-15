@@ -11,6 +11,7 @@
 struct AVBufferRef;
 struct AVFrame;
 struct AVCodecContext;
+enum AVPixelFormat;
 
 // "Opaque" pointer to whatever we are using as a buffer reference
 typedef struct AVBufferRef * AVRpiZcRefPtr;
@@ -52,7 +53,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 //     the data, then allocate a new buffer and copy the data into it
 //   Otherwise return NULL
 AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
-    const struct AVFrame * const frame, const int maycopy);
+    const struct AVFrame * const frame, const enum AVPixelFormat expected_format, const int maycopy);
 
 // Get the vc_handle from the frame ref
 // Returns -1 if ref doesn't look valid
