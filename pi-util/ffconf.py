@@ -95,7 +95,7 @@ def runtest(name, tests):
     for t in tests:
         if name[0:len(t)] == t or name.find("/" + t) != -1:
             return True
-        return False
+    return False
 
 def doconf(csva, tests, test_root):
     unx_failures = []
