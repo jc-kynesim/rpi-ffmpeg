@@ -375,9 +375,9 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
         avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, 1);
     }
 
-    while (avpriv_atomic_int_get(&de->rpi_display_count) >= DISPLAY_PORT_DEPTH - 1) {
-        usleep(5000);
-    }
+//    while (avpriv_atomic_int_get(&de->rpi_display_count) >= DISPLAY_PORT_DEPTH - 1) {
+//        usleep(5000);
+//    }
 
     if (mmal_port_send_buffer(de->port_in, buf) != MMAL_SUCCESS)
     {
