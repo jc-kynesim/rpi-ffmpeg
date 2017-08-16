@@ -2696,13 +2696,15 @@ rpi_pred_y_b(HEVCContext * const s,
 
 
 static void
-rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
+rpi_pred_c(HEVCContext * const s, const unsigned int _lx, const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
   const Mv * const mv,
   const int16_t * const c_weights,
   const int16_t * const c_offsets,
   AVFrame * const src_frame)
 {
+//    const unsigned int lx = 0;
+    const unsigned int lx = _lx;
     const unsigned int c_off = av_rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
     const int hshift           = s->ps.sps->hshift[1];
     const int vshift           = s->ps.sps->vshift[1];
@@ -2721,14 +2723,14 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
 
     for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH)
     {
-        HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh + 3, s->qpu.c_pxx);
+        HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh + 3, lx == 0 ? s->qpu.c_pxx : s->qpu.c_pxx_l1);
         qpu_mc_pred_c_p_t * const u = &cp->qpu_mc_curr->c.p;
-        qpu_mc_src_t * const last_l0 = cp->last_l0;
+        qpu_mc_src_t * const last_lx = (lx == 0) ? cp->last_l0 : cp->last_l1;
         const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
 
-        last_l0->x = x1_c + start_x;
-        last_l0->y = y1_c;
-        last_l0->base = src_base_u;
+        last_lx->x = x1_c + start_x;
+        last_lx->y = y1_c;
+        last_lx->base = src_base_u;
         u[0].h = bh;
         u[0].w = bw;
         u[0].coeffs_x = x_coeffs;
@@ -2736,7 +2738,10 @@ rpi_pred_c(HEVCContext * const s, const int x0_c, const int y0_c,
         u[0].wo_u = wo_u;
         u[0].wo_v = wo_v;
         u[0].dst_addr_c = dst_base_u + (start_x << xshl);
-        cp->last_l0 = &u->next_src;
+        if (lx == 0)
+            cp->last_l0 = &u->next_src;
+        else
+            cp->last_l1 = &u->next_src;
         *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = u + 1;
     }
     return;
@@ -2909,7 +2914,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         if (s->ps.sps->chroma_format_idc) {
 #if RPI_INTER
             if (s->enable_rpi) {
-                rpi_pred_c(s, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 0,
+                rpi_pred_c(s, 0, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 0,
                   s->sh.chroma_weight_l0[current_mv.ref_idx[0]], s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
                   ref0->frame);
                 return;
@@ -2945,7 +2950,7 @@ static void hls_prediction_unit(HEVCContext * const s, const int x0, const int y
         if (s->ps.sps->chroma_format_idc) {
 #if RPI_INTER
             if (s->enable_rpi) {
-                rpi_pred_c(s, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 1,
+                rpi_pred_c(s, 1, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 1,
                   s->sh.chroma_weight_l1[current_mv.ref_idx[1]], s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
                   ref1->frame);
                 return;

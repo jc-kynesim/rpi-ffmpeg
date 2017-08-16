@@ -916,14 +916,17 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
   switch (bit_depth) {
     case 8:
       qf->y_pxx = qpu_fn(mc_filter_y_pxx);
+      qf->y_pxx = qpu_fn(mc_filter_y_pxx);
       qf->y_bxx = qpu_fn(mc_filter_y_bxx);
       qf->y_p00 = qpu_fn(mc_filter_y_p00);
       qf->y_b00 = qpu_fn(mc_filter_y_b00);
       qf->c_pxx = qpu_fn(mc_filter_c_p);
+      qf->c_pxx_l1 = qpu_fn(mc_filter_c_p_l1);
       qf->c_bxx = qpu_fn(mc_filter_c_b);
       break;
     case 10:
       qf->c_pxx = qpu_fn(mc_filter_c10_p);
+      qf->c_pxx_l1 = qpu_fn(mc_filter_c10_p_l1);
       qf->c_bxx = qpu_fn(mc_filter_c10_b);
       qf->y_pxx = qpu_fn(mc_filter_y10_pxx);
       qf->y_bxx = qpu_fn(mc_filter_y10_bxx);
