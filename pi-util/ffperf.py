@@ -88,8 +88,7 @@ def main():
         prefix = args.prefix
     else:
         prefix = streams[0]
-        for f in streams:
-            print(prefix, "---", f)
+        for f in streams[1:]:
             prefix = common_prefix(prefix, f)
         pp = prefix.rpartition(os.sep)
         prefix = pp[0] + pp[1]
