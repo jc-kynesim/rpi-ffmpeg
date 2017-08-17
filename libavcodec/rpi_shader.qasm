@@ -461,9 +461,6 @@
 
 .if v_bit_depth <= 8
   shl vrx_xshift_next, r0, 3
-.endif
-
-.if v_bit_depth <= 8
   and r0, r0, -4        ; mov ra0, unif         # H filter coeffs
 .else
   nop                   ; mov ra0, unif         # H filter coeffs
