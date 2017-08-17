@@ -450,44 +450,41 @@
 # get base addresses and per-channel shifts for *next* invocation
   mov vw_setup, rb_vpm_init ; mov ra2, unif     # ; x_y
 
-  and.setf -, elem_num, 1                       # [ra2 delay]
+  and.setf -, elem_num, 1 ; v8subs r5rep, r0, r0 # [ra2 delay] ; r5 = 0
 
   shl r0, ra2.16b, v_x_shift
-  add r0, r0, rb_elem_x ; v8subs r2, r2, r2     # ; r2=0
-  sub r1, r2, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
-# As it happens register layout is easier with xshift/xshift2 swapped
-  max r0, r0, r2        ; mov vrx_xshift, vrx_xshift_next
-  min r0, r0, rb_max_x  ; mov ra_width_height, unif # ; width_height
+  add r0, r0, rb_elem_x ; mov r3, unif          # ; base
+  sub r1, r5, rb_pitch  ; mov ra_width_height, unif # r1=pitch2 mask ; width_height
+  max r0, r0, r5        ; mov vrx_xshift, vrx_xshift_next
+  min r0, r0, rb_max_x  ; mov ra0, unif         # ; H filter coeffs
 
 .if v_bit_depth <= 8
   shl vrx_xshift_next, r0, 3
-  and r0, r0, -4        ; mov ra0, unif         # H filter coeffs
+  and r0, r0, -4        ; mov vra_y_next, ra2.16a
 .else
-  nop                   ; mov ra0, unif         # H filter coeffs
+  nop                   ; mov vra_y_next, ra2.16a
 .endif
-  nop                   ; mov vra_y_next, ra2.16a # [ra0 delay]
-  and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul  # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
+  and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul        # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        ; mov ra3, unif         # ; V filter coeffs
-  add vrx_base_next, r3, r0  ; mov r1, ra_height
+  add r0, r0, r1        ; mov ra3, unif                      # ; V filter coeffs
+  add vrx_base_next, r3, r0     ; mov r1, ra_height
 
 # set up VPM write
 
   sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif # Compute vdw_setup1(dst_pitch-width) ; U offset/weight
   add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
-  add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
+  add rb_lcount, r1, 3          ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
 
 # ; unpack filter coefficients
 
-  shl r0, r1, v_dma_h_shift
-  add r0, r0, r2        ; mov rb8, ra3.8a       # Combine width and height of destination area (r0=h<<8, r2=w*2)
-  shl r0, r0, v_dma_wh_shift ; mov rb9, ra3.8b  # Shift into bits 16 upwards of the vdw_setup0 register
+  shl r0, r1, v_dma_h_shift     ; mov rb8, ra3.8a
+  add r0, r0, r2                ; mov rb9, ra3.8b            # Combine width and height of destination area (r0=h<<8, r2=w*2)
+  shl r0, r0, v_dma_wh_shift    ; mov rb10, ra3.8c           # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base ; mov r1, ra_wt_off_l0       # ; r1=weight
 
-  mov rb_dest, unif     ; mov ra9, rb_max_y     # dst_addr ; alias rb_max_y
+  mov rb_dest, unif             ; mov ra9, rb_max_y          # dst_addr ; alias rb_max_y
 
-  shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
-  mov r5quad, 0         ; mov rb11, ra3.8d
+  shl r1, r1, rb_wt_den_p15     ; mov rb11, ra3.8d
 
   asr rb_wt_off, r1, 2
   sub ra3, rb_wt_den_p15, ra_k1
