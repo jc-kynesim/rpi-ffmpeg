@@ -2694,20 +2694,18 @@ rpi_pred_y_b(HEVCContext * const s,
     }
 }
 
-
+// h/v shifts fixed at one as that is all the qasm copes with
 static void
-rpi_pred_c(HEVCContext * const s, const unsigned int _lx, const int x0_c, const int y0_c,
+rpi_pred_c(HEVCContext * const s, const unsigned int lx, const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
   const Mv * const mv,
   const int16_t * const c_weights,
   const int16_t * const c_offsets,
   AVFrame * const src_frame)
 {
-//    const unsigned int lx = 0;
-    const unsigned int lx = _lx;
     const unsigned int c_off = av_rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
-    const int hshift           = s->ps.sps->hshift[1];
-    const int vshift           = s->ps.sps->vshift[1];
+    const int hshift = 1; // = s->ps.sps->hshift[1];
+    const int vshift = 1; // = s->ps.sps->vshift[1];
 
     const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
     const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
@@ -2720,33 +2718,33 @@ rpi_pred_c(HEVCContext * const s, const unsigned int _lx, const int x0_c, const 
     HEVCRpiInterPredEnv * const ipe = &s->jobs[s->pass0_job].chroma_ip;
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame) + 1;
     const unsigned int bh = nPbH_c;
+    const uint32_t qfn = lx == 0 ? s->qpu.c_pxx : s->qpu.c_pxx_l1;
 
     for(int start_x=0; start_x < nPbW_c; start_x+=RPI_CHROMA_BLOCK_WIDTH)
     {
-        HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh + 3, lx == 0 ? s->qpu.c_pxx : s->qpu.c_pxx_l1);
-        qpu_mc_pred_c_p_t * const u = &cp->qpu_mc_curr->c.p;
-        qpu_mc_src_t * const last_lx = (lx == 0) ? cp->last_l0 : cp->last_l1;
+        HEVCRpiInterPredQ * const cp = rpi_nxt_pred(ipe, bh + 3, qfn);
+        qpu_mc_pred_c_p_t * const cmd_c = &cp->qpu_mc_curr->c.p;
+        qpu_mc_src_t ** const plast_lx = (lx == 0) ? &cp->last_l0 : &cp->last_l1;
+        qpu_mc_src_t * const last_lx = *plast_lx;
         const int bw = FFMIN(nPbW_c-start_x, RPI_CHROMA_BLOCK_WIDTH);
 
         last_lx->x = x1_c + start_x;
         last_lx->y = y1_c;
         last_lx->base = src_base_u;
-        u[0].h = bh;
-        u[0].w = bw;
-        u[0].coeffs_x = x_coeffs;
-        u[0].coeffs_y = y_coeffs;
-        u[0].wo_u = wo_u;
-        u[0].wo_v = wo_v;
-        u[0].dst_addr_c = dst_base_u + (start_x << xshl);
-        if (lx == 0)
-            cp->last_l0 = &u->next_src;
-        else
-            cp->last_l1 = &u->next_src;
-        *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = u + 1;
+        cmd_c->h = bh;
+        cmd_c->w = bw;
+        cmd_c->coeffs_x = x_coeffs;
+        cmd_c->coeffs_y = y_coeffs;
+        cmd_c->wo_u = wo_u;
+        cmd_c->wo_v = wo_v;
+        cmd_c->dst_addr_c = dst_base_u + (start_x << xshl);
+        *plast_lx = &cmd_c->next_src;
+        *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = cmd_c + 1;
     }
     return;
 }
 
+// h/v shifts fixed at one as that is all the qasm copes with
 static void
 rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
@@ -2759,8 +2757,8 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
   AVFrame * const src_frame2)
 {
     const unsigned int c_off = av_rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
-    const int hshift = s->ps.sps->hshift[1];
-    const int vshift = s->ps.sps->vshift[1];
+    const int hshift = 1; // s->ps.sps->hshift[1];
+    const int vshift = 1; // s->ps.sps->vshift[1];
     const Mv * const mv = mv_field->mv + 0;
     const Mv * const mv2 = mv_field->mv + 1;
 
@@ -4007,7 +4005,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
             if (q_full) {
 #ifdef RPI_WORKER
-                if (s->used_for_ref || 1)
+                if (s->used_for_ref)
                 {
 //                  printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
 
