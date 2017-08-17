@@ -4007,7 +4007,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
             if (q_full) {
 #ifdef RPI_WORKER
-                if (s->used_for_ref)
+                if (s->used_for_ref || 1)
                 {
 //                  printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
 

@@ -98,17 +98,17 @@ unsigned int rpi_shader[] = {
 /* [0x00000228] */ 0x9581cff6, 0x10025c42, // mov vw_setup, rb_vpm_init ; mov ra2, unif
 /* [0x00000230] */ 0x14981dc0, 0xd00229e7, // and.setf -, elem_num, 1
 /* [0x00000238] */ 0x11081dc0, 0xd4020827, // shl r0, ra2.16b, v_x_shift
-/* [0x00000240] */ 0xec9c21c9, 0x10024821, // add r0, r0, rb_elem_x ; v8subs r1, r1, r1
-/* [0x00000248] */ 0x8d8103f6, 0x10024863, // sub r1, r1, rb_pitch  ; mov r3, unif
-/* [0x00000250] */ 0x935401f6, 0xd4024800, // max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next
+/* [0x00000240] */ 0xec9c21d2, 0x10024822, // add r0, r0, rb_elem_x ; v8subs r2, r2, r2
+/* [0x00000248] */ 0x8d8105f6, 0x10024863, // sub r1, r2, rb_pitch  ; mov r3, unif
+/* [0x00000250] */ 0x935670b6, 0x14024800, // max r0, r0, r2        ; mov vrx_xshift, vrx_xshift_next
 /* [0x00000258] */ 0x928191f6, 0x10025810, // min r0, r0, rb_max_x  ; mov ra_width_height, unif
-/* [0x00000260] */ 0x119c31c0, 0xd0220567, // shl ra_xshift_next, r0, 3
+/* [0x00000260] */ 0x119c31c0, 0xd0220567, // shl vrx_xshift_next, r0, 3
 /* [0x00000268] */ 0x9481c1f6, 0xd0025800, // and r0, r0, -4        ; mov ra0, unif
-/* [0x00000270] */ 0x800a7036, 0x122059d3, // nop                   ; mov ra_y_next, ra2.16a
+/* [0x00000270] */ 0x800a7036, 0x122059d3, // nop                   ; mov vra_y_next, ra2.16a
 /* [0x00000278] */ 0x54402077, 0xd4024862, // and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul
 /* [0x00000280] */ 0x569d404f, 0x10024821, // xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
 /* [0x00000288] */ 0x8c827076, 0x10025803, // add r0, r0, r1        ; mov ra3, unif
-/* [0x00000290] */ 0x8c427636, 0x120246a1, // add ra_base_next, r3, r0  ; mov r1, ra_height
+/* [0x00000290] */ 0x8c427636, 0x120246a1, // add vrx_base_next, r3, r0  ; mov r1, ra_height
 /* [0x00000298] */ 0x8d818eb6, 0x10025756, // sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif
 /* [0x000002a0] */ 0x8c5df3ce, 0xdc025461, // add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
 /* [0x000002a8] */ 0x8c8033f6, 0xd002d496, // add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif
@@ -125,14 +125,14 @@ unsigned int rpi_shader[] = {
 /* [0x00000300] */ 0x9181e1f6, 0xd00250de, // shl rb3, r0, i_shift30 ; mov ra_link, unif
 // :1
 /* [0x00000308] */ 0xcd511bee, 0xaa0269e5, // sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0
-/* [0x00000310] */ 0x8e4c09f6, 0x140288a3, // shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
-/* [0x00000318] */ 0x8e4485f6, 0xd402c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y
-/* [0x00000320] */ 0x8c683ff6, 0x1002b9d8, // add.setf -, rb3, rb3  ; mov.ifz ra_base, ra_base_next
-/* [0x00000328] */ 0x8c531789, 0xda224460, // add ra_y, r3, ra_k1   ; mov      r0, r1 << 15
+/* [0x00000310] */ 0x8e4c09f6, 0x140288a3, // shr r2, r4, vrx_xshift ; mov.ifz r3, vra_y_next
+/* [0x00000318] */ 0x8e4485f6, 0xd402c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+/* [0x00000320] */ 0x8c683ff6, 0x1002b9d8, // add.setf -, rb3, rb3  ; mov.ifz vra_base, vrx_base_next
+/* [0x00000328] */ 0x8c531789, 0xda224460, // add vra_y, r3, ra_k1   ; mov      r0, r1 << 15
 /* [0x00000330] */ 0x9353f792, 0xd803c8e1, // max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
 /* [0x00000338] */ 0x92267792, 0x1003c8e0, // min r3, r3, ra9       ; mov.ifnc r0, r2
 /* [0x00000340] */ 0x55150d9f, 0x10024122, // mov ra4, ra5          ; mul24 r2, r3, rb_pitch
-/* [0x00000348] */ 0x8c616c87, 0x10024e20, // add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask
+/* [0x00000348] */ 0x8c616c87, 0x10024e20, // add vr_txs, vra_base, r2 ; v8min r0, r0, rb_pmask
 /* [0x00000350] */ 0x540163f0, 0x18024863, // and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,       r0
 /* [0x00000358] */ 0x4003e030, 0xda0049e2, // nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
 /* [0x00000360] */ 0x40034031, 0xda0109e2, // nop                   ; mul24.ifn  r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
@@ -169,17 +169,17 @@ unsigned int rpi_shader[] = {
 /* [0x00000450] */ 0x9581cff6, 0x10025c42, // mov vw_setup, rb_vpm_init ; mov ra2, unif
 /* [0x00000458] */ 0x14981dc0, 0xd00229e7, // and.setf -, elem_num, 1
 /* [0x00000460] */ 0x11081dc0, 0xd4020827, // shl r0, ra2.16b, v_x_shift
-/* [0x00000468] */ 0xec9c21c9, 0x10024821, // add r0, r0, rb_elem_x ; v8subs r1, r1, r1
-/* [0x00000470] */ 0x8d8103f6, 0x10024863, // sub r1, r1, rb_pitch  ; mov r3, unif
-/* [0x00000478] */ 0x935011bf, 0x18125815, // max r0, r0, ra_k0     ; mov ra_xshift, rb_xshift2_next
+/* [0x00000468] */ 0xec9c21d2, 0x10024822, // add r0, r0, rb_elem_x ; v8subs r2, r2, r2
+/* [0x00000470] */ 0x8d8105f6, 0x10024863, // sub r1, r2, rb_pitch  ; mov r3, unif
+/* [0x00000478] */ 0x939c10bf, 0x10125815, // max r0, r0, r2        ; mov vrx_xshift, vrx_xshift_next
 /* [0x00000480] */ 0x928191f6, 0x10025810, // min r0, r0, rb_max_x  ; mov ra_width_height, unif
-/* [0x00000488] */ 0x119c31c0, 0xd0021067, // shl rb_xshift2_next, r0, 3
+/* [0x00000488] */ 0x119c31c0, 0xd0021067, // shl vrx_xshift_next, r0, 3
 /* [0x00000490] */ 0x9481c1f6, 0xd0025800, // and r0, r0, -4        ; mov ra0, unif
-/* [0x00000498] */ 0x800a7036, 0x121059d3, // nop                   ; mov ra_y2_next, ra2.16a
+/* [0x00000498] */ 0x800a7036, 0x121059d3, // nop                   ; mov vra_y_next, ra2.16a
 /* [0x000004a0] */ 0x54402077, 0xd4024862, // and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul
 /* [0x000004a8] */ 0x569d404f, 0x10024821, // xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
 /* [0x000004b0] */ 0x8c827076, 0x10025803, // add r0, r0, r1        ; mov ra3, unif
-/* [0x000004b8] */ 0x8c427636, 0x120254e1, // add rb_base2_next, r3, r0 ; mov r1, ra_height
+/* [0x000004b8] */ 0x8c427636, 0x120254e1, // add vrx_base_next, r3, r0  ; mov r1, ra_height
 /* [0x000004c0] */ 0x8d818eb6, 0x10025756, // sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif
 /* [0x000004c8] */ 0x8c5df3ce, 0xdc025461, // add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
 /* [0x000004d0] */ 0x8c8033f6, 0xd002d496, // add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif
@@ -196,14 +196,14 @@ unsigned int rpi_shader[] = {
 /* [0x00000528] */ 0x9181e1f6, 0xd00250de, // shl rb3, r0, i_shift30 ; mov ra_link, unif
 // :1
 /* [0x00000530] */ 0xcd511bee, 0xba0269e5, // sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu1
-/* [0x00000538] */ 0x8e5539bf, 0x12029899, // shr r2, r4, ra_xshift ; mov.ifz ra_base2, rb_base2_next
-/* [0x00000540] */ 0x8e4485f6, 0xd202c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y2
-/* [0x00000548] */ 0x8c4c3ff6, 0x1202a9e3, // add.setf -, rb3, rb3  ; mov.ifz r3, ra_y2_next
-/* [0x00000550] */ 0x8c531789, 0xda124460, // add ra_y2, r3, ra_k1  ; mov      r0, r1 << 15
+/* [0x00000538] */ 0x8e5539bf, 0x12029899, // shr r2, r4, vrx_xshift ; mov.ifz vra_base, vrx_base_next
+/* [0x00000540] */ 0x8e4485f6, 0xd202c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+/* [0x00000548] */ 0x8c4c3ff6, 0x1202a9e3, // add.setf -, rb3, rb3  ; mov.ifz r3, vra_y_next
+/* [0x00000550] */ 0x8c531789, 0xda124460, // add vra_y, r3, ra_k1   ; mov      r0, r1 << 15
 /* [0x00000558] */ 0x9353f792, 0xd803c8e1, // max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
 /* [0x00000560] */ 0x92267792, 0x1003c8e0, // min r3, r3, ra9       ; mov.ifnc r0, r2
 /* [0x00000568] */ 0x55150d9f, 0x10024122, // mov ra4, ra5          ; mul24 r2, r3, rb_pitch
-/* [0x00000570] */ 0x8c656c87, 0x10024f20, // add t1s, ra_base2, r2 ; v8min r0, r0, rb_pmask
+/* [0x00000570] */ 0x8c656c87, 0x10024f20, // add vr_txs, vra_base, r2 ; v8min r0, r0, rb_pmask
 /* [0x00000578] */ 0x540163f0, 0x18024863, // and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,       r0
 /* [0x00000580] */ 0x4003e030, 0xda0049e2, // nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
 /* [0x00000588] */ 0x40034031, 0xda0109e2, // nop                   ; mul24.ifn  r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
@@ -878,16 +878,16 @@ unsigned int rpi_shader[] = {
 /* [0x00001950] */ 0x9581cff6, 0x10025c42, // mov vw_setup, rb_vpm_init ; mov ra2, unif
 /* [0x00001958] */ 0x14981dc0, 0xd00229e7, // and.setf -, elem_num, 1
 /* [0x00001960] */ 0x11082dc0, 0xd4020827, // shl r0, ra2.16b, v_x_shift
-/* [0x00001968] */ 0xec9c21c9, 0x10024821, // add r0, r0, rb_elem_x ; v8subs r1, r1, r1
-/* [0x00001970] */ 0x8d8103f6, 0x10024863, // sub r1, r1, rb_pitch  ; mov r3, unif
-/* [0x00001978] */ 0x935401f6, 0xd4024800, // max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next
+/* [0x00001968] */ 0xec9c21d2, 0x10024822, // add r0, r0, rb_elem_x ; v8subs r2, r2, r2
+/* [0x00001970] */ 0x8d8105f6, 0x10024863, // sub r1, r2, rb_pitch  ; mov r3, unif
+/* [0x00001978] */ 0x935670b6, 0x14024800, // max r0, r0, r2        ; mov vrx_xshift, vrx_xshift_next
 /* [0x00001980] */ 0x928191f6, 0x10025810, // min r0, r0, rb_max_x  ; mov ra_width_height, unif
 /* [0x00001988] */ 0x80827036, 0x100059c0, // nop                   ; mov ra0, unif
-/* [0x00001990] */ 0x800a7036, 0x122059d3, // nop                   ; mov ra_y_next, ra2.16a
+/* [0x00001990] */ 0x800a7036, 0x122059d3, // nop                   ; mov vra_y_next, ra2.16a
 /* [0x00001998] */ 0x54404077, 0xd4024862, // and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul
 /* [0x000019a0] */ 0x569d404f, 0x10024821, // xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
 /* [0x000019a8] */ 0x8c827076, 0x10025803, // add r0, r0, r1        ; mov ra3, unif
-/* [0x000019b0] */ 0x8c427636, 0x120246a1, // add ra_base_next, r3, r0  ; mov r1, ra_height
+/* [0x000019b0] */ 0x8c427636, 0x120246a1, // add vrx_base_next, r3, r0  ; mov r1, ra_height
 /* [0x000019b8] */ 0x8d818eb6, 0x10025756, // sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif
 /* [0x000019c0] */ 0x8c5df3ce, 0xdc025461, // add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
 /* [0x000019c8] */ 0x8c8033f6, 0xd002d496, // add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif
@@ -904,14 +904,14 @@ unsigned int rpi_shader[] = {
 /* [0x00001a20] */ 0x9181e1f6, 0xd00250de, // shl rb3, r0, i_shift30 ; mov ra_link, unif
 // :1
 /* [0x00001a28] */ 0xcd511bee, 0xaa0269e5, // sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0
-/* [0x00001a30] */ 0x8e4c09f6, 0x140288a3, // shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
-/* [0x00001a38] */ 0x8e4505f6, 0xd402c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y
-/* [0x00001a40] */ 0x8c683ff6, 0x1002b9d8, // add.setf -, rb3, rb3  ; mov.ifz ra_base, ra_base_next
-/* [0x00001a48] */ 0x8c531789, 0xda224460, // add ra_y, r3, ra_k1   ; mov      r0, r1 << 15
+/* [0x00001a30] */ 0x8e4c09f6, 0x140288a3, // shr r2, r4, vrx_xshift ; mov.ifz r3, vra_y_next
+/* [0x00001a38] */ 0x8e4505f6, 0xd402c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+/* [0x00001a40] */ 0x8c683ff6, 0x1002b9d8, // add.setf -, rb3, rb3  ; mov.ifz vra_base, vrx_base_next
+/* [0x00001a48] */ 0x8c531789, 0xda224460, // add vra_y, r3, ra_k1   ; mov      r0, r1 << 15
 /* [0x00001a50] */ 0x9353f792, 0xd803c8e1, // max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
 /* [0x00001a58] */ 0x92267792, 0x1003c8e0, // min r3, r3, ra9       ; mov.ifnc r0, r2
 /* [0x00001a60] */ 0x55150d9f, 0x10024122, // mov ra4, ra5          ; mul24 r2, r3, rb_pitch
-/* [0x00001a68] */ 0x8c616c87, 0x10024e20, // add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask
+/* [0x00001a68] */ 0x8c616c87, 0x10024e20, // add vr_txs, vra_base, r2 ; v8min r0, r0, rb_pmask
 /* [0x00001a70] */ 0x540163f0, 0x18024863, // and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,       r0
 /* [0x00001a78] */ 0x4003e030, 0xda0049e2, // nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
 /* [0x00001a80] */ 0x40034031, 0xda0109e2, // nop                   ; mul24.ifn  r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0
@@ -949,16 +949,16 @@ unsigned int rpi_shader[] = {
 /* [0x00001b78] */ 0x9581cff6, 0x10025c42, // mov vw_setup, rb_vpm_init ; mov ra2, unif
 /* [0x00001b80] */ 0x14981dc0, 0xd00229e7, // and.setf -, elem_num, 1
 /* [0x00001b88] */ 0x11082dc0, 0xd4020827, // shl r0, ra2.16b, v_x_shift
-/* [0x00001b90] */ 0xec9c21c9, 0x10024821, // add r0, r0, rb_elem_x ; v8subs r1, r1, r1
-/* [0x00001b98] */ 0x8d8103f6, 0x10024863, // sub r1, r1, rb_pitch  ; mov r3, unif
-/* [0x00001ba0] */ 0x935011bf, 0x18125815, // max r0, r0, ra_k0     ; mov ra_xshift, rb_xshift2_next
+/* [0x00001b90] */ 0xec9c21d2, 0x10024822, // add r0, r0, rb_elem_x ; v8subs r2, r2, r2
+/* [0x00001b98] */ 0x8d8105f6, 0x10024863, // sub r1, r2, rb_pitch  ; mov r3, unif
+/* [0x00001ba0] */ 0x939c10bf, 0x10125815, // max r0, r0, r2        ; mov vrx_xshift, vrx_xshift_next
 /* [0x00001ba8] */ 0x928191f6, 0x10025810, // min r0, r0, rb_max_x  ; mov ra_width_height, unif
 /* [0x00001bb0] */ 0x80827036, 0x100059c0, // nop                   ; mov ra0, unif
-/* [0x00001bb8] */ 0x800a7036, 0x121059d3, // nop                   ; mov ra_y2_next, ra2.16a
+/* [0x00001bb8] */ 0x800a7036, 0x121059d3, // nop                   ; mov vra_y_next, ra2.16a
 /* [0x00001bc0] */ 0x54404077, 0xd4024862, // and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul
 /* [0x00001bc8] */ 0x569d404f, 0x10024821, // xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
 /* [0x00001bd0] */ 0x8c827076, 0x10025803, // add r0, r0, r1        ; mov ra3, unif
-/* [0x00001bd8] */ 0x8c427636, 0x120254e1, // add rb_base2_next, r3, r0 ; mov r1, ra_height
+/* [0x00001bd8] */ 0x8c427636, 0x120254e1, // add vrx_base_next, r3, r0  ; mov r1, ra_height
 /* [0x00001be0] */ 0x8d818eb6, 0x10025756, // sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif
 /* [0x00001be8] */ 0x8c5df3ce, 0xdc025461, // add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
 /* [0x00001bf0] */ 0x8c8033f6, 0xd002d496, // add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif
@@ -975,14 +975,14 @@ unsigned int rpi_shader[] = {
 /* [0x00001c48] */ 0x9181e1f6, 0xd00250de, // shl rb3, r0, i_shift30 ; mov ra_link, unif
 // :1
 /* [0x00001c50] */ 0xcd511bee, 0xba0269e5, // sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu1
-/* [0x00001c58] */ 0x8e5539bf, 0x12029899, // shr r2, r4, ra_xshift ; mov.ifz ra_base2, rb_base2_next
-/* [0x00001c60] */ 0x8e4505f6, 0xd202c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y2
-/* [0x00001c68] */ 0x8c4c3ff6, 0x1202a9e3, // add.setf -, rb3, rb3  ; mov.ifz r3, ra_y2_next
-/* [0x00001c70] */ 0x8c531789, 0xda124460, // add ra_y2, r3, ra_k1  ; mov      r0, r1 << 15
+/* [0x00001c58] */ 0x8e5539bf, 0x12029899, // shr r2, r4, vrx_xshift ; mov.ifz vra_base, vrx_base_next
+/* [0x00001c60] */ 0x8e4505f6, 0xd202c863, // shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+/* [0x00001c68] */ 0x8c4c3ff6, 0x1202a9e3, // add.setf -, rb3, rb3  ; mov.ifz r3, vra_y_next
+/* [0x00001c70] */ 0x8c531789, 0xda124460, // add vra_y, r3, ra_k1   ; mov      r0, r1 << 15
 /* [0x00001c78] */ 0x9353f792, 0xd803c8e1, // max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
 /* [0x00001c80] */ 0x92267792, 0x1003c8e0, // min r3, r3, ra9       ; mov.ifnc r0, r2
 /* [0x00001c88] */ 0x55150d9f, 0x10024122, // mov ra4, ra5          ; mul24 r2, r3, rb_pitch
-/* [0x00001c90] */ 0x8c656c87, 0x10024f20, // add t1s, ra_base2, r2 ; v8min r0, r0, rb_pmask
+/* [0x00001c90] */ 0x8c656c87, 0x10024f20, // add vr_txs, vra_base, r2 ; v8min r0, r0, rb_pmask
 /* [0x00001c98] */ 0x540163f0, 0x18024863, // and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,       r0
 /* [0x00001ca0] */ 0x4003e030, 0xda0049e2, // nop                   ; mul24      r2, ra0.8b << 2,  r0 << 2  @ "mul_used", 0
 /* [0x00001ca8] */ 0x40034031, 0xda0109e2, // nop                   ; mul24.ifn  r2, ra0.8b << 12, r1 << 12 @ "mul_used", 0

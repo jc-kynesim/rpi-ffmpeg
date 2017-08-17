@@ -428,6 +428,24 @@
 .set v_dma_wh_shift,    15
 .endif
 
+.if v_tmu == 0
+.set vrx_xshift,        rb_xshift2              # b side more convienient
+.set vrx_xshift_next,   ra_xshift_next
+.set vra_y_next,        ra_y_next
+.set vrx_base_next,     ra_base_next
+.set vra_y,             ra_y
+.set vra_base,          ra_base
+.set vr_txs,            t0s
+.else
+.set vrx_xshift,        ra_xshift               # a side more convienient
+.set vrx_xshift_next,   rb_xshift2_next
+.set vra_y_next,        ra_y2_next
+.set vrx_base_next,     rb_base2_next
+.set vra_y,             ra_y2
+.set vra_base,          ra_base2
+.set vr_txs,            t1s
+.endif
+
 # per-channel shifts were calculated on the *previous* invocation
 # get base addresses and per-channel shifts for *next* invocation
   mov vw_setup, rb_vpm_init ; mov ra2, unif     # ; x_y
@@ -435,22 +453,14 @@
   and.setf -, elem_num, 1                       # [ra2 delay]
 
   shl r0, ra2.16b, v_x_shift
-  add r0, r0, rb_elem_x ; v8subs r1, r1, r1     # ; r1=0
-  sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
+  add r0, r0, rb_elem_x ; v8subs r2, r2, r2     # ; r2=0
+  sub r1, r2, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
 # As it happens register layout is easier with xshift/xshift2 swapped
-.if v_tmu == 0
-  max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next
-.else
-  max r0, r0, ra_k0     ; mov ra_xshift, rb_xshift2_next
-.endif
+  max r0, r0, r2        ; mov vrx_xshift, vrx_xshift_next
   min r0, r0, rb_max_x  ; mov ra_width_height, unif # ; width_height
 
 .if v_bit_depth <= 8
-.if v_tmu == 0
-  shl ra_xshift_next, r0, 3
-.else
-  shl rb_xshift2_next, r0, 3
-.endif
+  shl vrx_xshift_next, r0, 3
 .endif
 
 .if v_bit_depth <= 8
@@ -458,19 +468,11 @@
 .else
   nop                   ; mov ra0, unif         # H filter coeffs
 .endif
-.if v_tmu == 0
-  nop                   ; mov ra_y_next, ra2.16a # [ra0 delay]
-.else
-  nop                   ; mov ra_y2_next, ra2.16a # [ra0 delay]
-.endif
+  nop                   ; mov vra_y_next, ra2.16a # [ra0 delay]
   and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul  # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        ; mov ra3, unif         # ; V filter coeffs
-.if v_tmu == 0
-  add ra_base_next, r3, r0  ; mov r1, ra_height
-.else
-  add rb_base2_next, r3, r0 ; mov r1, ra_height
-.endif
+  add vrx_base_next, r3, r0  ; mov r1, ra_height
 
 # set up VPM write
 
@@ -513,31 +515,23 @@
 # then submit two more texture requests
 
 .if v_tmu == 0
-  sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0     # loop counter increment
-  shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
-  shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y
-  add.setf -, rb3, rb3  ; mov.ifz ra_base, ra_base_next
-
-  add ra_y, r3, ra_k1   ; mov      r0, r1 << 15
-  max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
-  min r3, r3, ra9       ; mov.ifnc r0, r2
-
-  mov ra4, ra5          ; mul24 r2, r3, rb_pitch
-  add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
+  sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0   # loop counter increment
+  shr r2, r4, vrx_xshift ; mov.ifz r3, vra_y_next
+  shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+  add.setf -, rb3, rb3  ; mov.ifz vra_base, vrx_base_next
 .else
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu1     # loop counter increment
-  shr r2, r4, ra_xshift ; mov.ifz ra_base2, rb_base2_next
-  shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y2
-  add.setf -, rb3, rb3  ; mov.ifz r3, ra_y2_next
+  shr r2, r4, vrx_xshift ; mov.ifz vra_base, vrx_base_next
+  shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+  add.setf -, rb3, rb3  ; mov.ifz r3, vra_y_next
+.endif
 
-  add ra_y2, r3, ra_k1  ; mov      r0, r1 << 15
+  add vra_y, r3, ra_k1   ; mov      r0, r1 << 15
   max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
   min r3, r3, ra9       ; mov.ifnc r0, r2
 
   mov ra4, ra5          ; mul24 r2, r3, rb_pitch
-  add t1s, ra_base2, r2 ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
-.endif
-
+  add vr_txs, vra_base, r2 ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
 
 # apply horizontal filter
 # The filter coeffs for the two halves of this are the same (unlike in the

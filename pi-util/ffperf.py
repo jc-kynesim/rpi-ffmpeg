@@ -94,7 +94,7 @@ def main():
         prefix = pp[0] + pp[1]
         streams = [s[len(prefix):] for s in streams]
 
-    for f in sorted(streams):
+    for f in sorted(streams, key=lambda x : "~" * x.count(os.sep) + x.lower()):
         print ("====", f)
 
         t0 = tstats({"name":f, "elapsed":999, "user":999, "sys":999})
