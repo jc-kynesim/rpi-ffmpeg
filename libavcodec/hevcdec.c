@@ -86,7 +86,8 @@ const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12
 
 // UV still has min 4x4 pred
 // Allow for even spread +1 for setup, +1 for rounding
-// If we have load sharingw e will want different (bigger) numbers and/or a non-constant chunk size
+// As we have load sharing this can (in theory) be exceeded so we have to
+// check after each CTU, but it is a good base size
 
 // Worst case (all 4x4) commands per CTU
 #define QPU_Y_CMD_PER_CTU_MAX (8 * 8)
@@ -249,48 +250,63 @@ static void rpi_hevc_qpu_set_fns(HEVCContext * const s, const unsigned int bit_d
 #define LOG_ENTER
 #define LOG_EXIT
 
+#define USE_SEM 0
+
 // Call this when we have completed pass0 and wish to trigger pass1 for the current job
-static void worker_submit_job(HEVCContext *s)
+static void worker_submit_job(HEVCContext * const s)
 {
-  LOG_ENTER
-  pthread_mutex_lock(&s->worker_mutex);
-  s->worker_tail++;
-  s->pass0_job = (s->pass0_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
-  pthread_cond_broadcast(&s->worker_cond_tail); // Let people know that the tail has moved
-  pthread_mutex_unlock(&s->worker_mutex);
-  LOG_EXIT
+    LOG_ENTER
+#if USE_SEM
+    sem_post(&s->jb0->sem_in);
+    s->jb0->pending = 1;
+    s->pass0_job = (s->pass0_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
+#else
+    pthread_mutex_lock(&s->worker_mutex);
+    s->worker_tail++;
+    s->pass0_job = (s->pass0_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
+    pthread_cond_broadcast(&s->worker_cond_tail); // Let people know that the tail has moved
+    pthread_mutex_unlock(&s->worker_mutex);
+#endif
+    s->jb0 = s->jobs + s->pass0_job;
+    LOG_EXIT
 }
 
 // Call this to say we have completed pass1
-static void worker_complete_job(HEVCContext *s)
+static void worker_complete_job(HEVCContext * const s)
 {
-  LOG_ENTER
-  pthread_mutex_lock(&s->worker_mutex);
-  s->worker_head++;
-  s->pass1_job = (s->pass1_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
-  pthread_cond_broadcast(&s->worker_cond_head); // Let people know that the head has moved
-  pthread_mutex_unlock(&s->worker_mutex);
-  LOG_EXIT
+    LOG_ENTER
+#if USE_SEM
+    sem_t * const sem = &s->jb1->sem_out;
+    // Must set job no before signalling as otherwise rpi_do_all_passes
+    // may call worker_core from the main thread with a bad job number
+    s->pass1_job = (s->pass1_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
+    s->jb1 = s->jobs + s->pass1_job;
+    sem_post(sem);
+#else
+    pthread_mutex_lock(&s->worker_mutex);
+    s->worker_head++;
+    s->pass1_job = (s->pass1_job + 1) % RPI_MAX_JOBS; // Move onto the next slot
+    s->jb1 = s->jobs + s->pass1_job;
+    pthread_cond_broadcast(&s->worker_cond_head); // Let people know that the head has moved
+    pthread_mutex_unlock(&s->worker_mutex);
+#endif
+    LOG_EXIT
 }
 
-// Call this to wait for all jobs to have completed at the end of a frame
-static void worker_wait(HEVCContext *s)
-{
-  LOG_ENTER
-  pthread_mutex_lock(&s->worker_mutex);
-  while( s->worker_head !=s->worker_tail)
-  {
-    pthread_cond_wait(&s->worker_cond_head, &s->worker_mutex);
-  }
-  pthread_mutex_unlock(&s->worker_mutex);
-  LOG_EXIT
-}
 
 // Call worker_pass0_ready to wait until the s->pass0_job slot becomes
 // available to receive the next job.
 static void worker_pass0_ready(HEVCContext *s)
 {
-  LOG_ENTER
+    LOG_ENTER
+#if USE_SEM
+    HEVCRpiJob * const jb = s->jb0;
+    if (jb->pending) {
+        while (sem_wait(&jb->sem_out) == -1 && errno == EINTR)
+            /* Loop */;
+        jb->pending = 0;
+    }
+#else
     pthread_mutex_lock(&s->worker_mutex);
     // tail is number of submitted jobs
     // head is number of completed jobs
@@ -302,11 +318,54 @@ static void worker_pass0_ready(HEVCContext *s)
       pthread_cond_wait(&s->worker_cond_head, &s->worker_mutex);
     }
     pthread_mutex_unlock(&s->worker_mutex);
+#endif
+    LOG_EXIT
+}
+
+// Call this to wait for all jobs to have completed at the end of a frame
+static void worker_wait(HEVCContext * const s)
+{
+    LOG_ENTER
+#if USE_SEM
+    unsigned int i;
+    for (i = 0; i != RPI_MAX_JOBS; ++i) {
+        HEVCRpiJob * const jb = s->jobs + i;
+        if (jb->pending) {
+            while (sem_wait(&jb->sem_out) == -1 && errno == EINTR)
+                /* Loop */;
+            jb->pending = 0;
+        }
+    }
+#else
+  pthread_mutex_lock(&s->worker_mutex);
+  while( s->worker_head !=s->worker_tail)
+  {
+    pthread_cond_wait(&s->worker_cond_head, &s->worker_mutex);
+  }
+  pthread_mutex_unlock(&s->worker_mutex);
+#endif
   LOG_EXIT
 }
 
 static void *worker_start(void *arg)
 {
+#if USE_SEM
+    HEVCContext * const s = (HEVCContext *)arg;
+
+    for (;;)
+    {
+        HEVCRpiJob * const jb = s->jb1;
+        while (sem_wait(&jb->sem_in) == -1 && errno == EINTR)
+            /* Loop */;
+        if (jb->terminate)
+            break;
+
+        LOG_ENTER
+        worker_core(s);
+        worker_complete_job(s);
+        LOG_EXIT
+    }
+#else
   HEVCContext *s = (HEVCContext *)arg;
   while(1) {
     pthread_mutex_lock(&s->worker_mutex);
@@ -326,6 +385,7 @@ static void *worker_start(void *arg)
     worker_complete_job(s);
     LOG_EXIT
   }
+#endif
   return NULL;
 }
 
@@ -3918,6 +3978,9 @@ static void worker_core(HEVCContext * const s)
 
 static void rpi_do_all_passes(HEVCContext *s)
 {
+    // Called from main thread - must be no pending background jobs
+    av_assert0(s->pass0_job == s->pass1_job && s->jb0 == s->jb1 && !s->jb0->pending);
+
     // Do the various passes - common with the worker code
     worker_core(s);
     // Prepare next batch
@@ -3961,9 +4024,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
     }
 
 #ifdef RPI_WORKER
-    s->pass0_job = 0;
-    s->pass1_job = 0;
+    // Worker must be idle at start
+    av_assert0(s->pass0_job == s->pass1_job && s->jb0 == s->jb1 && !s->jb0->pending);
 #endif
+
 #ifdef RPI
     rpi_begin(s);
 #endif
@@ -4914,9 +4978,35 @@ fail:
 }
 
 #ifdef RPI_WORKER
-static av_cold void hevc_init_worker(HEVCContext *s)
+static av_cold void hevc_init_worker(HEVCContext * const s)
 {
     int err;
+
+    for (unsigned int job = 0; job < RPI_MAX_JOBS; job++) {
+        HEVCRpiJob * const jb = s->jobs + job;
+
+        jb->terminate = 0;
+        jb->pending = 0;
+        sem_init(&jb->sem_in, 0, 0);
+        sem_init(&jb->sem_out, 0, 0);
+
+        // ** Sizeof the union structure might be overkill but at the moment it
+        //    is correct (it certainly isn't going to be too small)
+
+        rpi_inter_pred_alloc(&jb->chroma_ip,
+                             QPU_N_MAX, QPU_N_GRP,
+                             QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t),
+                             QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t));
+        rpi_inter_pred_alloc(&jb->luma_ip,
+                             QPU_N_MAX,  QPU_N_GRP,
+                             QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
+                             QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
+    }
+    s->pass0_job = 0;
+    s->pass1_job = 0;
+    s->jb0 = s->jobs + 0;
+    s->jb1 = s->jobs + 0;
+#if !USE_SEM
     pthread_cond_init(&s->worker_cond_head, NULL);
     pthread_cond_init(&s->worker_cond_tail, NULL);
     pthread_mutex_init(&s->worker_mutex, NULL);
@@ -4924,6 +5014,7 @@ static av_cold void hevc_init_worker(HEVCContext *s)
     s->worker_tail=0;
     s->worker_head=0;
     s->kill_worker=0;
+#endif
     err = pthread_create(&s->worker_thread, NULL, worker_start, s);
     if (err) {
         printf("Failed to create worker thread\n");
@@ -4931,9 +5022,23 @@ static av_cold void hevc_init_worker(HEVCContext *s)
     }
 }
 
+static void rpi_free_inter_pred(HEVCRpiInterPredEnv * const ipe)
+{
+    av_freep(&ipe->q);
+    gpu_free(&ipe->gptr);
+}
+
 static av_cold void hevc_exit_worker(HEVCContext *s)
 {
     void *res;
+    unsigned int i;
+#if USE_SEM
+    for(i = 0; i < RPI_MAX_JOBS; i++)
+        s->jobs[i].terminate = 1;
+    for(i = 0; i < RPI_MAX_JOBS; i++)
+        sem_post(&s->jobs[i].sem_in);
+    pthread_join(s->worker_thread, &res);
+#else
     s->kill_worker=1;
     pthread_cond_broadcast(&s->worker_cond_tail);
     pthread_join(s->worker_thread, &res);
@@ -4941,16 +5046,20 @@ static av_cold void hevc_exit_worker(HEVCContext *s)
     pthread_cond_destroy(&s->worker_cond_head);
     pthread_cond_destroy(&s->worker_cond_tail);
     pthread_mutex_destroy(&s->worker_mutex);
+#endif
 
     s->worker_tail=0;
     s->worker_head=0;
     s->kill_worker=0;
-}
 
-static void rpi_free_inter_pred(HEVCRpiInterPredEnv * const ipe)
-{
-    av_freep(&ipe->q);
-    gpu_free(&ipe->gptr);
+    for(i=0;i<RPI_MAX_JOBS;i++) {
+        HEVCRpiJob * const jb = s->jobs + i;
+
+        sem_destroy(&jb->sem_in);
+        sem_destroy(&jb->sem_out);
+        rpi_free_inter_pred(&jb->chroma_ip);
+        rpi_free_inter_pred(&jb->luma_ip);
+    }
 }
 
 #endif
@@ -4973,13 +5082,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 #endif
 
     for(i=0;i<RPI_MAX_JOBS;i++) {
-
         av_freep(&s->univ_pred_cmds[i]);
-
-#if RPI_INTER
-        rpi_free_inter_pred(&s->jobs[i].chroma_ip);
-        rpi_free_inter_pred(&s->jobs[i].luma_ip);
-#endif
     }
 
     vpu_qpu_term();
@@ -5060,23 +5163,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     }
 
 #if RPI_INTER
-
-    for (job = 0; job < RPI_MAX_JOBS; job++) {
-        HEVCRpiJob * const jb = s->jobs + job;
-
-        // ** Sizeof the union structure might be overkill but at the moment it
-        //    is correct (it certainly isn't going to be too small)
-
-        rpi_inter_pred_alloc(&jb->chroma_ip,
-                             QPU_N_MAX, QPU_N_GRP,
-                             QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t),
-                             QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t));
-        rpi_inter_pred_alloc(&jb->luma_ip,
-                             QPU_N_MAX,  QPU_N_GRP,
-                             QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
-                             QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
-    }
-
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
     {
         static const uint32_t dframe[1] = {0x80808080};

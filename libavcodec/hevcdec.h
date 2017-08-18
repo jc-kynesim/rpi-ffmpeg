@@ -546,6 +546,7 @@ typedef struct HEVCPredCmd {
 #endif
 
 #ifdef RPI
+#include <semaphore.h>
 
 union qpu_mc_pred_cmd_s;
 struct qpu_mc_pred_y_p_s;
@@ -577,6 +578,10 @@ typedef struct HEVCRpiInterPredEnv
 } HEVCRpiInterPredEnv;
 
 typedef struct HEVCRpiJob {
+    volatile int terminate;
+    int pending;
+    sem_t sem_in;       // set by main
+    sem_t sem_out;      // set by worker
     HEVCRpiInterPredEnv chroma_ip;
     HEVCRpiInterPredEnv luma_ip;
 } HEVCRpiJob;
@@ -637,11 +642,13 @@ typedef struct HEVCContext {
     int num_pred_cmds[RPI_MAX_JOBS];
     int num_dblk_cmds[RPI_MAX_JOBS];
     int vpu_id;
-    int pass0_job; // Pass0 does coefficient decode
-    int pass1_job; // Pass1 does pixel processing
+    unsigned int pass0_job; // Pass0 does coefficient decode
+    unsigned int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
 
+    HEVCRpiJob * jb0;
+    HEVCRpiJob * jb1;
     HEVCRpiJob jobs[RPI_MAX_JOBS];
 #if RPI_TSTATS
     HEVCRpiStats tstats;
