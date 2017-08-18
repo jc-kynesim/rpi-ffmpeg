@@ -577,6 +577,11 @@ typedef struct HEVCRpiInterPredEnv
     GPU_MEM_PTR_T gptr;
 } HEVCRpiInterPredEnv;
 
+typedef struct HEVCRpiIntraPredEnv {
+    unsigned int n;        // Number of commands
+    HEVCPredCmd * cmds;
+} HEVCRpiIntraPredEnv;
+
 typedef struct HEVCRpiJob {
     volatile int terminate;
     int pending;
@@ -584,6 +589,7 @@ typedef struct HEVCRpiJob {
     sem_t sem_out;      // set by worker
     HEVCRpiInterPredEnv chroma_ip;
     HEVCRpiInterPredEnv luma_ip;
+    HEVCRpiIntraPredEnv intra;
 } HEVCRpiJob;
 
 #if RPI_TSTATS
@@ -629,19 +635,12 @@ typedef struct HEVCContext {
     int used_for_ref;  // rpi
 #ifdef RPI
     int enable_rpi;
-    HEVCPredCmd *univ_pred_cmds[RPI_MAX_JOBS];
-    int buf_width;
     GPU_MEM_PTR_T coeffs_buf_default[RPI_MAX_JOBS];
     GPU_MEM_PTR_T coeffs_buf_accelerated[RPI_MAX_JOBS];
     int16_t *coeffs_buf_arm[RPI_MAX_JOBS][4];
     unsigned int coeffs_buf_vc[RPI_MAX_JOBS][4];
     int num_coeffs[RPI_MAX_JOBS][4];
-    int num_xfm_cmds[RPI_MAX_JOBS];
-    int num_mv_cmds_y[RPI_MAX_JOBS];
-    int num_mv_cmds_c[RPI_MAX_JOBS];
-    int num_pred_cmds[RPI_MAX_JOBS];
     int num_dblk_cmds[RPI_MAX_JOBS];
-    int vpu_id;
     unsigned int pass0_job; // Pass0 does coefficient decode
     unsigned int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far
@@ -669,13 +668,6 @@ typedef struct HEVCContext {
 
 #ifdef RPI_WORKER
     pthread_t worker_thread;
-    pthread_cond_t worker_cond_head;
-    pthread_cond_t worker_cond_tail;
-    pthread_mutex_t worker_mutex;
-
-    int worker_tail; // Contains the number of posted jobs
-    int worker_head; // Contains the number of completed jobs
-    int kill_worker; // set to 1 to terminate the worker
 #endif
 
 #ifdef RPI_DEBLOCK_VPU
