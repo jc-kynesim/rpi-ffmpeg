@@ -21,6 +21,7 @@ HEADERS = avcodec.h                                                     \
           jni.h                                                         \
           mediacodec.h                                                  \
           qsv.h                                                         \
+	  user-vcsm.h                                                   \
           vaapi.h                                                       \
           vda.h                                                         \
           vdpau.h                                                       \
@@ -56,6 +57,7 @@ OBJS = allcodecs.o                                                      \
        resample.o                                                       \
        resample2.o                                                      \
        utils.o                                                          \
+       user-vcsm.o      						\
        rpi_qpu.o                                                        \
        rpi_shader.o                                                     \
        rpi_shader_template.o                                            \
