@@ -582,6 +582,29 @@ typedef struct HEVCRpiIntraPredEnv {
     HEVCPredCmd * cmds;
 } HEVCRpiIntraPredEnv;
 
+typedef struct HEVCRpiCeoffEnv {
+    unsigned int n;
+    uint16_t * buf;
+} HEVCRpiCoeffEnv;
+
+typedef struct HEVCRpiCeoffsEnv {
+    HEVCRpiCoeffEnv s[4];
+    GPU_MEM_PTR_T gptr;
+    void * mptr;
+} HEVCRpiCoeffsEnv;
+
+typedef struct HEVCRpiDeblkBlk {
+    uint16_t x_ctb;
+    uint16_t y_ctb;
+} HEVCRpiDeblkBlk;
+
+typedef struct HEVCRpiDeblkEnv {
+    unsigned int n;
+    HEVCRpiDeblkBlk * blks;
+} HEVCRpiDeblkEnv;
+
+
+
 typedef struct HEVCRpiJob {
     volatile int terminate;
     int pending;
@@ -590,6 +613,8 @@ typedef struct HEVCRpiJob {
     HEVCRpiInterPredEnv chroma_ip;
     HEVCRpiInterPredEnv luma_ip;
     HEVCRpiIntraPredEnv intra;
+    HEVCRpiCoeffsEnv coeffs;
+    HEVCRpiDeblkEnv deblk;
 } HEVCRpiJob;
 
 #if RPI_TSTATS
@@ -635,12 +660,6 @@ typedef struct HEVCContext {
     int used_for_ref;  // rpi
 #ifdef RPI
     int enable_rpi;
-    GPU_MEM_PTR_T coeffs_buf_default[RPI_MAX_JOBS];
-    GPU_MEM_PTR_T coeffs_buf_accelerated[RPI_MAX_JOBS];
-    int16_t *coeffs_buf_arm[RPI_MAX_JOBS][4];
-    unsigned int coeffs_buf_vc[RPI_MAX_JOBS][4];
-    int num_coeffs[RPI_MAX_JOBS][4];
-    int num_dblk_cmds[RPI_MAX_JOBS];
     unsigned int pass0_job; // Pass0 does coefficient decode
     unsigned int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far
@@ -817,10 +836,6 @@ typedef struct HEVCContext {
     uint16_t white_point[2];
     uint32_t max_mastering_luminance;
     uint32_t min_mastering_luminance;
-
-#ifdef RPI
-    int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
-#endif
 } HEVCContext;
 
 int ff_hevc_decode_nal_sei(HEVCContext *s);

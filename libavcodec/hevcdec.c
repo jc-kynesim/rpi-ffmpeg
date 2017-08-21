@@ -329,6 +329,65 @@ static void *worker_start(void *arg)
 
 #endif
 
+static void worker_pic_free_all(HEVCContext * const s)
+{
+    unsigned int i;
+
+    // Free coeff stuff - allocation not the same for all buffers
+    for(i = 0; i < RPI_MAX_JOBS; i++)
+    {
+        HEVCRpiCoeffsEnv * const cf = &s->jobs[i].coeffs;
+
+        if (cf->s[0].buf != NULL)
+            av_freep(&cf->mptr);
+        if (cf->s[2].buf != NULL)
+            gpu_free(&cf->gptr);
+        memset(cf, 0, sizeof(*cf));
+    }
+}
+
+static int worker_pic_alloc_all(HEVCContext * const s, const unsigned int coeff_count)
+{
+    unsigned int i;
+
+    // Free coeff stuff - allocation not the same for all buffers
+    for(i = 0; i < RPI_MAX_JOBS; i++)
+    {
+        HEVCRpiCoeffsEnv * const cf = &s->jobs[i].coeffs;
+
+//        av_assert0(cf->s[0].n == 0 && cf->s[0].buf == NULL);
+//        av_assert0(cf->s[1].n == 0 && cf->s[1].buf == NULL);
+//        av_assert0(cf->s[2].n == 0 && cf->s[2].buf == NULL);
+//        av_assert0(cf->s[3].n == 0 && cf->s[3].buf == NULL);
+
+        if (gpu_malloc_cached((coeff_count + 32*32) * sizeof(cf->s[2].buf[0]), &cf->gptr) != 0)
+            goto fail;
+        cf->s[2].buf = (int16_t *)cf->gptr.arm;
+        cf->s[3].buf = cf->s[2].buf + coeff_count;
+
+        // Must be 64 byte aligned for our zero apping code so over-allocate &
+        // round
+        if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0] + 63))) == NULL)
+            goto fail;
+        cf->s[0].buf = (void *)(((intptr_t)cf->mptr + 63) & ~63);
+    }
+    return 0;
+
+fail:
+    printf("%s: **** Failed\n", __func__);
+    worker_pic_free_all(s);
+    return -1;
+}
+
+static void worker_pic_reset(HEVCRpiCoeffsEnv * const cf)
+{
+    unsigned int i;
+    for (i = 0; i != 4; ++i) {
+        cf->s[i].n = 0;
+    }
+}
+
+
 /**
  * NOTE: Each function hls_foo correspond to the function foo in the
  * specification (HLS stands for High Level Syntax).
@@ -341,19 +400,8 @@ static void *worker_start(void *arg)
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCContext *s)
 {
-#ifdef RPI
-    int job;
-    for(job=0;job<RPI_MAX_JOBS;job++) {
-      if (s->coeffs_buf_arm[job][0]) {
-        gpu_free(&s->coeffs_buf_default[job]);
-        s->coeffs_buf_arm[job][0] = 0;
-      }
-      if (s->coeffs_buf_arm[job][2]) {
-        gpu_free(&s->coeffs_buf_accelerated[job]);
-        s->coeffs_buf_arm[job][2] = 0;
-      }
-    }
-#endif
+    worker_pic_free_all(s);
+
 #ifdef RPI_DEBLOCK_VPU
     {
         int i;
@@ -408,32 +456,12 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     const int coefs_per_luma = 64*64*RPI_CHUNK_SIZE*RPI_NUM_CHUNKS;
     const int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
     const int coefs_per_row = coefs_per_luma + coefs_per_chroma;
-    int job;
 
     av_assert0(sps);
-//    s->max_ctu_count = sps->ctb_width;
-//    printf("CTB with=%d\n", sps->ctb_width);
-//    s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
     s->max_ctu_count = FFMIN(coefs_per_luma / coefs_in_ctb, sps->ctb_width);
-//    s->ctu_per_y_chan = s->max_ctu_count / QPU_N_Y;
-//    s->ctu_per_uv_chan = s->max_ctu_count / QPU_N_UV;
 
-    for(job=0;job<RPI_MAX_JOBS;job++) {
-        for(job=0;job<RPI_MAX_JOBS;job++) {
-            gpu_malloc_cached(sizeof(int16_t) * coefs_per_row, &s->coeffs_buf_default[job]);
-            s->coeffs_buf_arm[job][0] = (int16_t*) s->coeffs_buf_default[job].arm;
-            if (!s->coeffs_buf_arm[job][0])
-                goto fail;
-
-            gpu_malloc_cached(sizeof(int16_t) * (coefs_per_row + 32*32), &s->coeffs_buf_accelerated[job]);  // We prefetch past the end so provide an extra blocks worth of data
-            s->coeffs_buf_arm[job][2] = (int16_t*) s->coeffs_buf_accelerated[job].arm;
-            s->coeffs_buf_vc[job][2] = s->coeffs_buf_accelerated[job].vc;
-            if (!s->coeffs_buf_arm[job][2])
-                goto fail;
-            s->coeffs_buf_arm[job][3] = coefs_per_row + s->coeffs_buf_arm[job][2];  // This points to just beyond the end of the buffer.  Coefficients fill in backwards.
-            s->coeffs_buf_vc[job][3] = sizeof(int16_t) * coefs_per_row + s->coeffs_buf_vc[job][2];
-        }
-    }
+    if (worker_pic_alloc_all(s, coefs_per_row) != 0)
+        goto fail;
 #endif
 #ifdef RPI_DEBLOCK_VPU
     {
@@ -1845,10 +1873,9 @@ static int pcm_extract(HEVCContext * const s, const uint8_t * pcm, const int len
 #ifdef RPI
 int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n)
 {
-    int16_t * const coeffs = (buf_no != 3) ?
-        s->coeffs_buf_arm[s->pass0_job][buf_no] + s->num_coeffs[s->pass0_job][buf_no] :
-        s->coeffs_buf_arm[s->pass0_job][buf_no] - s->num_coeffs[s->pass0_job][buf_no] - n;
-    s->num_coeffs[s->pass0_job][buf_no] += n;
+    HEVCRpiCoeffEnv *const cfe = s->jb0->coeffs.s + buf_no;
+    int16_t * const coeffs = (buf_no != 3) ? cfe->buf + cfe->n : cfe->buf - (cfe->n + n);
+    cfe->n += n;
     return coeffs;
 }
 #endif
@@ -3498,14 +3525,15 @@ static void hls_decode_neighbour(HEVCContext *s, int x_ctb, int y_ctb,
 #ifdef RPI
 static void rpi_execute_dblk_cmds(HEVCContext *s)
 {
-    int n;
-    int job = s->pass1_job;
-    int ctb_size    = 1 << s->ps.sps->log2_ctb_size;
-    int (*p)[2] = s->dblk_cmds[job];
-    for(n = s->num_dblk_cmds[job]; n>0 ;n--,p++) {
-        ff_hevc_hls_filters(s, (*p)[0], (*p)[1], ctb_size);
+    const unsigned int ctb_size    = 1 << s->ps.sps->log2_ctb_size;
+    HEVCRpiDeblkEnv *const de = &s->jb1->deblk;
+    unsigned int i;
+
+    for (i = 0; i != de->n; ++i)
+    {
+        ff_hevc_hls_filters(s, de->blks[i].x_ctb, de->blks[i].y_ctb, ctb_size);
     }
-    s->num_dblk_cmds[job] = 0;
+    de->n = 0;
 }
 
 #if 0
@@ -3807,39 +3835,42 @@ static void worker_core(HEVCContext * const s)
 #endif
     vpu_qpu_wait_h sync_y;
 
-    const int job = s->pass1_job;
     unsigned int flush_start = 0;
     unsigned int flush_count = 0;
-    HEVCRpiJob * const jb = s->jobs + job;
+    HEVCRpiJob * const jb = s->jb1;
 
     const vpu_qpu_job_h vqj = vpu_qpu_job_new();
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
 
-    if (s->num_coeffs[job][3] + s->num_coeffs[job][2] != 0) {
-        vpu_qpu_job_add_vpu(vqj,
-            vpu_get_fn(s->ps.sps->bit_depth),
-            vpu_get_constants(),
-            s->coeffs_buf_vc[job][2],
-            s->num_coeffs[job][2] >> 8,
-            s->coeffs_buf_vc[job][3] - sizeof(int16_t) * s->num_coeffs[job][3],
-            s->num_coeffs[job][3] >> 10,
-            0);
+    {
+        const HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
+        if (cf->s[3].n + cf->s[2].n != 0)
+        {
+            vpu_qpu_job_add_vpu(vqj,
+                vpu_get_fn(s->ps.sps->bit_depth),
+                vpu_get_constants(),
+                cf->gptr.vc,
+                cf->s[2].n >> 8,
+                cf->gptr.vc + ((cf->s[3].buf - cf->s[2].buf) - cf->s[3].n) * sizeof(cf->s[3].buf[0]),
+                cf->s[3].n >> 10,
+                0);
 
-        rpi_cache_flush_add_gm_ptr(rfe, s->coeffs_buf_accelerated + job, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+            rpi_cache_flush_add_gm_ptr(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+        }
     }
-
 
 #if RPI_INTER
     {
-        int (*d)[2] = s->dblk_cmds[job];
-        unsigned int high=(*d)[1];
-        int n;
+        const HEVCRpiDeblkEnv *const de = &jb->deblk;
+        unsigned int i;
+        unsigned int high = de->blks[0].y_ctb;
 
         flush_start = high;
-        for(n = s->num_dblk_cmds[job]; n>0 ;n--,d++) {
-            unsigned int y = (*d)[1];
+        for (i = 1; i < de->n; ++i)
+        {
+            const unsigned int y = de->blks[i].y_ctb;
             flush_start = FFMIN(flush_start, y);
-            high=FFMAX(high,y);
+            high = FFMAX(high, y);
         }
         flush_count = FFMIN(high + (1 << s->ps.sps->log2_ctb_size), s->ps.sps->height) - flush_start;
     }
@@ -3869,7 +3900,7 @@ static void worker_core(HEVCContext * const s)
     rpi_cache_flush_finish(rfe);
     vpu_qpu_job_finish(vqj);
 
-    memset(s->num_coeffs[job], 0, sizeof(s->num_coeffs[job]));
+    worker_pic_reset(&jb->coeffs);
 
     // We would do ARM inter prediction here but no longer
     // Look back in git if you find you want it back - As we have
@@ -4005,8 +4036,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             if (rpi_inter_pred_next_ctu(&s->jb0->chroma_ip) != 0)
                 q_full = 1;
 
-            s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]][0] = x_ctb;
-            s->dblk_cmds[s->pass0_job][s->num_dblk_cmds[s->pass0_job]++][1] = y_ctb;
+            s->jb0->deblk.blks[s->jb0->deblk.n].x_ctb = x_ctb;
+            s->jb0->deblk.blks[s->jb0->deblk.n++].y_ctb = y_ctb;
             s->ctu_count++;
 
             if (q_full) {
@@ -4924,11 +4955,11 @@ static av_cold void hevc_init_worker(HEVCContext * const s)
 {
     int err;
 
+    memset(s->jobs, 0, sizeof(s->jobs));
+
     for (unsigned int job = 0; job < RPI_MAX_JOBS; job++) {
         HEVCRpiJob * const jb = s->jobs + job;
 
-        jb->terminate = 0;
-        jb->pending = 0;
         sem_init(&jb->sem_in, 0, 0);
         sem_init(&jb->sem_out, 0, 0);
 
@@ -4946,6 +4977,9 @@ static av_cold void hevc_init_worker(HEVCContext * const s)
                              QPU_N_MAX,  QPU_N_GRP,
                              QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
                              QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
+
+        jb->deblk.n = 0;
+        jb->deblk.blks = av_malloc(sizeof(jb->deblk.blks[0]) * RPI_MAX_DEBLOCK_CMDS);
     }
     s->pass0_job = 0;
     s->pass1_job = 0;
@@ -4983,6 +5017,7 @@ static av_cold void hevc_exit_worker(HEVCContext *s)
         sem_destroy(&jb->sem_in);
         sem_destroy(&jb->sem_out);
         av_freep(&jb->intra.cmds);
+        av_freep(&jb->deblk.blks);
         rpi_free_inter_pred(&jb->chroma_ip);
         rpi_free_inter_pred(&jb->luma_ip);
     }
