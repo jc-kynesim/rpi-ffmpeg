@@ -877,8 +877,8 @@
 .macro m_sync_q, n_qpu, n_quads
 # Do not generate code for qpu >= quads * 4 -  fns should never be called
 .if n_qpu < n_quads * 4
-  mov ra_link, unif
-  mov -, vw_wait
+  mov ra_link, unif     # Can only branch to an a reg (not r0)
+  mov -, vw_wait        # [ra_link delay]
 
 .set n_sem_sync, n_qpu - (n_qpu % 4)
 .set n_sem_in, n_qpu
