@@ -1528,8 +1528,8 @@ static void rpi_add_residual(HEVCContext * const s,
             av_rpi_sand_frame_pos_c(frame, x, y);
 
     if (s->enable_rpi) {
-        const unsigned int i = s->num_pred_cmds[s->pass0_job];
-        HEVCPredCmd * const pc = s->univ_pred_cmds[s->pass0_job] + i - 1;
+        const unsigned int i = s->jb0->intra.n;
+        HEVCPredCmd *const pc = s->jb0->intra.cmds + i - 1;
 
         if (i != 0 && c_idx == 2 && pc->type == RPI_PRED_ADD_RESIDUAL_U &&
             pc->ta.dst == dst)
@@ -1544,7 +1544,7 @@ static void rpi_add_residual(HEVCContext * const s,
         else
         {
             HEVCPredCmd * const cmd = pc + 1;
-            s->num_pred_cmds[s->pass0_job] = i + 1;
+            s->jb0->intra.n = i + 1;
 
             cmd->type = RPI_PRED_ADD_RESIDUAL + (is_sliced ? c_idx : 0);
             cmd->size = log2_trafo_size;

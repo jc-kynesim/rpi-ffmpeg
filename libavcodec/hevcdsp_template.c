@@ -668,6 +668,7 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 // --- Plaited chroma versions
 
 #if RPI_HEVC_SAND
+
 static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
@@ -721,6 +722,7 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
     int a_stride, b_stride;
     int x, y;
     ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
+
     stride_dst /= sizeof(pixel);
     width *= 2;
 

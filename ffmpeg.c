@@ -203,6 +203,7 @@ typedef struct rpi_display_env_s
 
     MMAL_POOL_T *rpi_pool;
     volatile int rpi_display_count;
+    enum AVPixelFormat avfmt;
 } rpi_display_env_t;
 
 static rpi_display_env_t * rpi_display_env = NULL;
@@ -229,6 +230,8 @@ static void display_cb_control(MMAL_PORT_T *port,MMAL_BUFFER_HEADER_T *buffer) {
   mmal_buffer_header_release(buffer);
 }
 
+#define DISPLAY_PORT_DEPTH 4
+
 static rpi_display_env_t *
 display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, size_t h)
 {
@@ -241,8 +244,11 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         .fullscreen = 0,
         .dest_rect = {x, y, w, h}
     };
-//    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+#if RPI_ZC_SAND_8_IN_10_BUF
+    const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10 || av_rpi_is_sand_format(req_fmt)) ? AV_PIX_FMT_SAND128 : req_fmt;
+#else
     const enum AVPixelFormat fmt = (req_fmt == AV_PIX_FMT_YUV420P10) ? AV_PIX_FMT_SAND128 : req_fmt;
+#endif
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(fmt, w, h);
     rpi_display_env_t * de;
     int isp_req = (fmt == AV_PIX_FMT_SAND64_10);
@@ -269,6 +275,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         MMAL_PORT_T * const port = de->port_in;
         MMAL_ES_FORMAT_T* const format = port->format;
         port->userdata = (struct MMAL_PORT_USERDATA_T *)de;
+        port->buffer_num = DISPLAY_PORT_DEPTH;
         format->encoding = fmt == AV_PIX_FMT_SAND128 ? MMAL_ENCODING_YUVUV128 :
             fmt == AV_PIX_FMT_SAND64_10 ? MMAL_ENCODING_YUVUV64_16 :
                 MMAL_ENCODING_I420;
@@ -290,7 +297,8 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
         mmal_log_dump_port(de->port_in);
         mmal_format_copy(port_out->format, de->port_in->format);
         if (fmt == AV_PIX_FMT_SAND64_10) {
-            if ((err = mmal_port_parameter_set_int32(port_out, MMAL_PARAMETER_OUTPUT_SHIFT, 6)) != MMAL_SUCCESS)
+            if ((err = mmal_port_parameter_set_int32(de->port_in, MMAL_PARAMETER_CCM_SHIFT, 5)) != MMAL_SUCCESS ||
+                (err = mmal_port_parameter_set_int32(port_out, MMAL_PARAMETER_OUTPUT_SHIFT, 1)) != MMAL_SUCCESS)
             {
                 av_log(NULL, AV_LOG_WARNING, "Failed to set ISP output port shift\n");
             }
@@ -319,6 +327,7 @@ display_init(const enum AVPixelFormat req_fmt, size_t x, size_t y, size_t w, siz
 
     mmal_component_enable(de->display);
     mmal_port_enable(de->display->control,display_cb_control);
+    de->avfmt = fmt;
 
     printf("Allocated display %dx%d in %dx%d, fmt=%d\n", w, h, geo.stride_y, geo.height_y, fmt);
 
@@ -336,7 +345,7 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
     if (de == NULL)
         return;
 
-    if (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
+    if (avpriv_atomic_int_get(&de->rpi_display_count) >= DISPLAY_PORT_DEPTH - 1) {
         av_log(s, AV_LOG_VERBOSE, "Frame dropped\n");
         return;
     }
@@ -352,7 +361,7 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
     {
-        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, 1);
+        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, de->avfmt, 1);
         if (fr_buf == NULL) {
             mmal_buffer_header_release(buf);
             return;
@@ -366,9 +375,9 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
         avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, 1);
     }
 
-    while (avpriv_atomic_int_get(&de->rpi_display_count) >= 3) {
-        usleep(5000);
-    }
+//    while (avpriv_atomic_int_get(&de->rpi_display_count) >= DISPLAY_PORT_DEPTH - 1) {
+//        usleep(5000);
+//    }
 
     if (mmal_port_send_buffer(de->port_in, buf) != MMAL_SUCCESS)
     {

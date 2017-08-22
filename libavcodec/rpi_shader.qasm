@@ -17,7 +17,7 @@
 # However in the current world there seems to be no benefit (and a small
 # overhead) in setting this bigger than 2.
 
-.set PREREAD,                      2
+.set PREREAD,                      4
 
 # Block heights - 8 & 16 are the only numbers we currently support
 
@@ -410,7 +410,7 @@
 # At this point we have already issued two pairs of texture requests for the current block
 # ra_x, ra_x16_base point to the current coordinates for this block
 
-.macro m_filter_c_p, v_bit_depth
+.macro m_filter_c_p, v_tmu, v_bit_depth
 
 .if v_bit_depth <= 8
 .set v_x_shift,         1
@@ -428,53 +428,63 @@
 .set v_dma_wh_shift,    15
 .endif
 
-# per-channel shifts were calculated on the *previous* invoca
-#
-# tion
+.if v_tmu == 0
+.set vrx_xshift,        rb_xshift2              # b side more convienient
+.set vrx_xshift_next,   ra_xshift_next
+.set vra_y_next,        ra_y_next
+.set vrx_base_next,     ra_base_next
+.set vra_y,             ra_y
+.set vra_base,          ra_base
+.set vr_txs,            t0s
+.else
+.set vrx_xshift,        ra_xshift               # a side more convienient
+.set vrx_xshift_next,   rb_xshift2_next
+.set vra_y_next,        ra_y2_next
+.set vrx_base_next,     rb_base2_next
+.set vra_y,             ra_y2
+.set vra_base,          ra_base2
+.set vr_txs,            t1s
+.endif
 
+# per-channel shifts were calculated on the *previous* invocation
 # get base addresses and per-channel shifts for *next* invocation
   mov vw_setup, rb_vpm_init ; mov ra2, unif     # ; x_y
 
-  and.setf -, elem_num, 1                       # [ra2 delay]
+  and.setf -, elem_num, 1 ; v8subs r5rep, r0, r0 # [ra2 delay] ; r5 = 0
 
   shl r0, ra2.16b, v_x_shift
-  add r0, r0, rb_elem_x ; v8subs r1, r1, r1     # ; r1=0
-  sub r1, r1, rb_pitch  ; mov r3, unif          # r1=pitch2 mask ; r3=base
-  max r0, r0, 0         ; mov rb_xshift2, ra_xshift_next
-  min r0, r0, rb_max_x  ; mov ra_width_height, unif # ; width_height
+  add r0, r0, rb_elem_x ; mov r3, unif          # ; base
+  sub r1, r5, rb_pitch  ; mov ra_width_height, unif # r1=pitch2 mask ; width_height
+  max r0, r0, r5        ; mov vrx_xshift, vrx_xshift_next
+  min r0, r0, rb_max_x  ; mov ra0, unif         # ; H filter coeffs
 
 .if v_bit_depth <= 8
-  shl ra_xshift_next, r0, 3
-.endif
-
-.if v_bit_depth <= 8
-  and r0, r0, -4        ; mov ra0, unif         # H filter coeffs
+  shl vrx_xshift_next, r0, 3
+  and r0, r0, -4        ; mov vra_y_next, ra2.16a
 .else
-  nop                   ; mov ra0, unif         # H filter coeffs
+  nop                   ; mov vra_y_next, ra2.16a
 .endif
-  nop                   ; mov ra_y_next, ra2.16a # [ra0 delay]
-  and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul  # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
+  and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul        # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
-  add r0, r0, r1        ; mov ra3, unif         # ; V filter coeffs
-  add ra_base_next, r3, r0  ; mov r1, ra_height
+  add r0, r0, r1        ; mov ra3, unif                      # ; V filter coeffs
+  add vrx_base_next, r3, r0     ; mov r1, ra_height
 
 # set up VPM write
 
   sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif # Compute vdw_setup1(dst_pitch-width) ; U offset/weight
   add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
-  add rb_lcount, r1, 3  ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
+  add rb_lcount, r1, 3          ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
 
 # ; unpack filter coefficients
 
-  shl r0, r1, v_dma_h_shift
-  add r0, r0, r2        ; mov rb8, ra3.8a       # Combine width and height of destination area (r0=h<<8, r2=w*2)
-  shl r0, r0, v_dma_wh_shift ; mov rb9, ra3.8b  # Shift into bits 16 upwards of the vdw_setup0 register
+  shl r0, r1, v_dma_h_shift     ; mov rb8, ra3.8a
+  add r0, r0, r2                ; mov rb9, ra3.8b            # Combine width and height of destination area (r0=h<<8, r2=w*2)
+  shl r0, r0, v_dma_wh_shift    ; mov rb10, ra3.8c           # Shift into bits 16 upwards of the vdw_setup0 register
   add rb_dma0, r0, rb_dma0_base ; mov r1, ra_wt_off_l0       # ; r1=weight
 
-  mov rb_dest, unif     ; mov ra9, rb_max_y     # dst_addr ; alias rb_max_y
+  mov rb_dest, unif             ; mov ra9, rb_max_y          # dst_addr ; alias rb_max_y
 
-  shl r1, r1, rb_wt_den_p15 ; mov rb10, ra3.8c
-  mov r5quad, 0         ; mov rb11, ra3.8d
+  shl r1, r1, rb_wt_den_p15     ; mov rb11, ra3.8d
 
   asr rb_wt_off, r1, 2
   sub ra3, rb_wt_den_p15, ra_k1
@@ -498,17 +508,24 @@
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
 
-  sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0     # loop counter increment
-  shr r2, r4, rb_xshift2 ; mov.ifz r3, ra_y_next
-  shr r1, r2, v_v_shift ; mov.ifnz r3, ra_y
-  add.setf -, rb3, rb3  ; mov.ifz ra_base, ra_base_next
+.if v_tmu == 0
+  sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0   # loop counter increment
+  shr r2, r4, vrx_xshift ; mov.ifz r3, vra_y_next
+  shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+  add.setf -, rb3, rb3  ; mov.ifz vra_base, vrx_base_next
+.else
+  sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu1     # loop counter increment
+  shr r2, r4, vrx_xshift ; mov.ifz vra_base, vrx_base_next
+  shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
+  add.setf -, rb3, rb3  ; mov.ifz r3, vra_y_next
+.endif
 
-  add ra_y, r3, ra_k1   ; mov      r0, r1 << 15
+  add vra_y, r3, ra_k1   ; mov      r0, r1 << 15
   max r3, r3, ra_k0     ; mov.ifnc r1, r2 << 1
   min r3, r3, ra9       ; mov.ifnc r0, r2
 
   mov ra4, ra5          ; mul24 r2, r3, rb_pitch
-  add t0s, ra_base, r2  ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
+  add vr_txs, vra_base, r2 ; v8min r0, r0, rb_pmask  # v8subs masks out all but bottom byte
 
 # apply horizontal filter
 # The filter coeffs for the two halves of this are the same (unlike in the
@@ -604,7 +621,10 @@
 # this should work) or splitting the rounding & offsetting
 
 ::mc_filter_c_p
-  m_filter_c_p 8
+  m_filter_c_p 0, 8
+
+::mc_filter_c_p_l1
+  m_filter_c_p 1, 8
 
 ################################################################################
 
@@ -857,8 +877,8 @@
 .macro m_sync_q, n_qpu, n_quads
 # Do not generate code for qpu >= quads * 4 -  fns should never be called
 .if n_qpu < n_quads * 4
-  mov ra_link, unif
-  mov -, vw_wait
+  mov ra_link, unif     # Can only branch to an a reg (not r0)
+  mov -, vw_wait        # [ra_link delay]
 
 .set n_sem_sync, n_qpu - (n_qpu % 4)
 .set n_sem_in, n_qpu
@@ -1662,7 +1682,11 @@
   m_setup_c 10
 
 ::mc_filter_c10_p
-  m_filter_c_p 10
+  m_filter_c_p 0, 10
+
+::mc_filter_c10_p_l1
+  m_filter_c_p 1, 10
+
 
 ::mc_filter_c10_b
   m_filter_c_b 10

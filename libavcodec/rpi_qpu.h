@@ -155,6 +155,7 @@ void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T * const p, const rpi_cache_f
 
 typedef struct HEVCRpiQpu {
     uint32_t c_pxx;
+    uint32_t c_pxx_l1;
     uint32_t c_bxx;
     uint32_t y_pxx;
     uint32_t y_bxx;

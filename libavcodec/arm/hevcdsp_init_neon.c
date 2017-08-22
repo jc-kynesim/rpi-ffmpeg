@@ -133,19 +133,20 @@ void ff_hevc_add_residual_16x16_c_neon_10(uint8_t *_dst, const int16_t * residua
                                        ptrdiff_t stride);
 #endif
 
-void ff_hevc_sao_band_w8_neon_8(uint8_t *_dst, uint8_t *_src, int8_t * offset_table, ptrdiff_t stride_src, ptrdiff_t stride_dst, int height);
-void ff_hevc_sao_band_w16_neon_8(uint8_t *_dst, uint8_t *_src, int8_t * offset_table, ptrdiff_t stride_src, ptrdiff_t stride_dst, int height);
-void ff_hevc_sao_band_w32_neon_8(uint8_t *_dst, uint8_t *_src, int8_t * offset_table, ptrdiff_t stride_src, ptrdiff_t stride_dst, int height);
-void ff_hevc_sao_band_w64_neon_8(uint8_t *_dst, uint8_t *_src, int8_t * offset_table, ptrdiff_t stride_src, ptrdiff_t stride_dst, int height);
-
+void ff_hevc_sao_edge_8_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
+void ff_hevc_sao_edge_16_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 void ff_hevc_sao_edge_32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 void ff_hevc_sao_edge_64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 
+void ff_hevc_sao_edge_8_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 void ff_hevc_sao_edge_16_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 void ff_hevc_sao_edge_32_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 void ff_hevc_sao_edge_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
 
 #if RPI_HEVC_SAND
+void ff_hevc_sao_edge_c_8_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height);
 void ff_hevc_sao_edge_c_16_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
                                   const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
                                   int eo, int width, int height);
@@ -153,6 +154,9 @@ void ff_hevc_sao_edge_c_32_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t 
                                   const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
                                   int eo, int width, int height);
 
+void ff_hevc_sao_edge_c_8_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height);
 void ff_hevc_sao_edge_c_16_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
                                   const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
                                   int eo, int width, int height);
@@ -160,12 +164,32 @@ void ff_hevc_sao_edge_c_32_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t
                                   const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
                                   int eo, int width, int height);
 
-void ff_hevc_sao_band_c_neon_8(uint8_t *_dst, const uint8_t *_src,
+void ff_hevc_sao_band_c_8_neon_8(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height);
+void ff_hevc_sao_band_c_16_neon_8(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height);
+void ff_hevc_sao_band_c_32_neon_8(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
                                   const int16_t *sao_offset_val_v, int sao_left_class_v,
                                   int width, int height);
 
+void ff_hevc_sao_band_c_8_neon_10(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height);
+void ff_hevc_sao_band_c_16_neon_10(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height);
 void ff_hevc_sao_band_c_32_neon_10(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
@@ -173,7 +197,18 @@ void ff_hevc_sao_band_c_32_neon_10(uint8_t *_dst, const uint8_t *_src,
                                   int width, int height);
 #endif
 
+void ff_hevc_sao_band_8_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
+void ff_hevc_sao_band_16_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
+void ff_hevc_sao_band_32_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
 void ff_hevc_sao_band_64_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
+
+void ff_hevc_sao_band_8_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
+void ff_hevc_sao_band_16_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                 int16_t *sao_offset_val, int sao_left_class, int width, int height);
 void ff_hevc_sao_band_32_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                 int16_t *sao_offset_val, int sao_left_class, int width, int height);
@@ -289,51 +324,105 @@ void ff_hevc_put_qpel_bi_neon_wrapper(uint8_t *dst, ptrdiff_t dststride, uint8_t
     put_hevc_qpel_uw_neon[my][mx](dst, dststride, src, srcstride, width, height, src2, MAX_PB_SIZE);
 }
 
-static void ff_hevc_sao_band_neon_wrapper(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
-                                          int16_t *sao_offset_val, int sao_left_class, int width, int height)
-{
-    pixel *dst = (pixel *)_dst;
-    pixel *src = (pixel *)_src;
-    int8_t offset_table[32] = { 0 };
-    int k, y, x;
-    int shift  = 3; // BIT_DEPTH - 5
-    int cwidth = 0;
-
-    stride_src /= sizeof(pixel);
-    stride_dst /= sizeof(pixel);
-
-    for (k = 0; k < 4; k++)
-        offset_table[(k + sao_left_class) & 31] = sao_offset_val[k + 1];
-
-    if (height % 8 == 0)
-        cwidth = width;
-
-    switch(cwidth){
-    case 8:
-        ff_hevc_sao_band_w8_neon_8(_dst, _src, offset_table, stride_src, stride_dst, height);
-        break;
-    case 16:
-        ff_hevc_sao_band_w16_neon_8(_dst, _src, offset_table, stride_src, stride_dst, height);
-        break;
-    case 32:
-        ff_hevc_sao_band_w32_neon_8(_dst, _src, offset_table, stride_src, stride_dst, height);
-        break;
-    default:
-        for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x++)
-                dst[x] = av_clip_pixel(src[x] + offset_table[src[x] >> shift]);
-            dst += stride_dst;
-            src += stride_src;
-        }
-    }
-}
-
 void ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,
                                                 int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
                                                 MvField *curr, MvField *neigh, uint8_t *bs);
 
+
+static void ff_hevc_sao_edge_48_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height)
+{
+    ff_hevc_sao_edge_32_neon_8(_dst, _src, stride_dst, _sao_offset_val, eo, 32, height);
+    ff_hevc_sao_edge_16_neon_8(_dst + 32, _src + 32, stride_dst, _sao_offset_val, eo, 16, height);
+}
+static void ff_hevc_sao_edge_48_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height)
+{
+    ff_hevc_sao_edge_32_neon_10(_dst, _src, stride_dst, _sao_offset_val, eo, 32, height);
+    ff_hevc_sao_edge_16_neon_10(_dst + 64, _src + 64, stride_dst, _sao_offset_val, eo, 16, height);
+}
+
+static void ff_hevc_sao_band_48_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height)
+{
+    ff_hevc_sao_band_32_neon_8(_dst, _src, stride_dst, stride_src, sao_offset_val, sao_left_class, 32, height);
+    ff_hevc_sao_band_16_neon_8(_dst + 32, _src + 32, stride_dst, stride_src, sao_offset_val, sao_left_class, 16, height);
+}
+static void ff_hevc_sao_band_48_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height)
+{
+    ff_hevc_sao_band_32_neon_10(_dst, _src, stride_dst, stride_src, sao_offset_val, sao_left_class, 32, height);
+    ff_hevc_sao_band_16_neon_10(_dst + 64, _src + 64, stride_dst, stride_src, sao_offset_val, sao_left_class, 16, height);
+}
+
+#if SAO_FILTER_N == 6
+static void ff_hevc_sao_edge_24_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height)
+{
+    ff_hevc_sao_edge_16_neon_8(_dst, _src, stride_dst, _sao_offset_val, eo, 16, height);
+    ff_hevc_sao_edge_8_neon_8(_dst + 16, _src + 16, stride_dst, _sao_offset_val, eo, 8, height);
+}
+static void ff_hevc_sao_edge_24_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height)
+{
+    ff_hevc_sao_edge_16_neon_10(_dst, _src, stride_dst, _sao_offset_val, eo, 16, height);
+    ff_hevc_sao_edge_8_neon_10(_dst + 32, _src + 32, stride_dst, _sao_offset_val, eo, 8, height);
+}
+
+static void ff_hevc_sao_band_24_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height)
+{
+    ff_hevc_sao_band_16_neon_8(_dst, _src, stride_dst, stride_src, sao_offset_val, sao_left_class, 16, height);
+    ff_hevc_sao_band_8_neon_8(_dst + 16, _src + 16, stride_dst, stride_src, sao_offset_val, sao_left_class, 8, height);
+}
+static void ff_hevc_sao_band_24_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                int16_t *sao_offset_val, int sao_left_class, int width, int height)
+{
+    ff_hevc_sao_band_16_neon_10(_dst, _src, stride_dst, stride_src, sao_offset_val, sao_left_class, 16, height);
+    ff_hevc_sao_band_8_neon_10(_dst + 32, _src + 32, stride_dst, stride_src, sao_offset_val, sao_left_class, 8, height);
+}
+
+#if RPI_HEVC_SAND
+static void ff_hevc_sao_edge_c_24_neon_8(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height)
+{
+    ff_hevc_sao_edge_c_16_neon_8(_dst, _src, stride_dst, _sao_offset_val_u, _sao_offset_val_v, eo, 16, height);
+    ff_hevc_sao_edge_c_8_neon_8(_dst + 32, _src + 32, stride_dst, _sao_offset_val_u, _sao_offset_val_v, eo, 8, height);
+}
+static void ff_hevc_sao_edge_c_24_neon_10(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *_sao_offset_val_u, const int16_t *_sao_offset_val_v,
+                                  int eo, int width, int height)
+{
+    ff_hevc_sao_edge_c_16_neon_10(_dst, _src, stride_dst, _sao_offset_val_u, _sao_offset_val_v, eo, 16, height);
+    ff_hevc_sao_edge_c_8_neon_10(_dst + 64, _src + 64, stride_dst, _sao_offset_val_u, _sao_offset_val_v, eo, 8, height);
+}
+
+static void ff_hevc_sao_band_c_24_neon_8(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height)
+{
+    ff_hevc_sao_band_c_16_neon_8(_dst, _src, stride_dst, stride_src,
+                                sao_offset_val_u, sao_left_class_u, sao_offset_val_v, sao_left_class_v, 16, height);
+    ff_hevc_sao_band_c_8_neon_8(_dst + 32, _src + 32, stride_dst, stride_src,
+                                sao_offset_val_u, sao_left_class_u, sao_offset_val_v, sao_left_class_v, 8, height);
+}
+static void ff_hevc_sao_band_c_24_neon_10(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height)
+{
+    ff_hevc_sao_band_c_16_neon_10(_dst, _src, stride_dst, stride_src,
+                                sao_offset_val_u, sao_left_class_u, sao_offset_val_v, sao_left_class_v, 16, height);
+    ff_hevc_sao_band_c_8_neon_10(_dst + 64, _src + 64, stride_dst, stride_src,
+                                sao_offset_val_u, sao_left_class_u, sao_offset_val_v, sao_left_class_v, 8, height);
+}
+#endif
+#endif
+
+
+
 #if (2*MAX_PB_SIZE + FF_INPUT_BUFFER_PADDING_SIZE) != 160
-#error SAO edge src stride not 160
+#error SAO edge src stride not 160 - value used in .S
 #endif
 
 av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
@@ -375,19 +464,33 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_8;
 #endif
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_8;
-        for (x = 0; x < sizeof c->sao_band_filter / sizeof *c->sao_band_filter; x++) {
-          c->sao_band_filter[x]        = ff_hevc_sao_band_neon_wrapper;
-        }
+        c->sao_band_filter[0]          = ff_hevc_sao_band_8_neon_8;
+        c->sao_band_filter[1]          = ff_hevc_sao_band_16_neon_8;
+        c->sao_band_filter[2]          = ff_hevc_sao_band_32_neon_8;
+        c->sao_band_filter[3]          = ff_hevc_sao_band_48_neon_8;
         c->sao_band_filter[4]          = ff_hevc_sao_band_64_neon_8;
+        c->sao_edge_filter[0]          = ff_hevc_sao_edge_8_neon_8;
+        c->sao_edge_filter[1]          = ff_hevc_sao_edge_16_neon_8;
         c->sao_edge_filter[2]          = ff_hevc_sao_edge_32_neon_8;
+        c->sao_edge_filter[3]          = ff_hevc_sao_edge_48_neon_8;
         c->sao_edge_filter[4]          = ff_hevc_sao_edge_64_neon_8;
+#if SAO_FILTER_N == 6
+        c->sao_band_filter[5]          = ff_hevc_sao_band_24_neon_8;
+        c->sao_edge_filter[5]          = ff_hevc_sao_edge_24_neon_8;
+#endif
 #if RPI_HEVC_SAND
-        c->sao_band_filter_c[0]        = ff_hevc_sao_band_c_neon_8;
-        c->sao_band_filter_c[1]        = ff_hevc_sao_band_c_neon_8;
-        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_neon_8;
+        c->sao_band_filter_c[0]        = ff_hevc_sao_band_c_8_neon_8;
+        c->sao_band_filter_c[1]        = ff_hevc_sao_band_c_16_neon_8;
+        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_32_neon_8;
 
+        c->sao_edge_filter_c[0]        = ff_hevc_sao_edge_c_8_neon_8;
         c->sao_edge_filter_c[1]        = ff_hevc_sao_edge_c_16_neon_8;
         c->sao_edge_filter_c[2]        = ff_hevc_sao_edge_c_32_neon_8;
+
+#if SAO_FILTER_N == 6
+        c->sao_band_filter_c[5]        = ff_hevc_sao_band_c_24_neon_8;
+        c->sao_edge_filter_c[5]        = ff_hevc_sao_edge_c_24_neon_8;
+#endif
 #endif
         put_hevc_qpel_neon[1][0]       = ff_hevc_put_qpel_v1_neon_8;
         put_hevc_qpel_neon[2][0]       = ff_hevc_put_qpel_v2_neon_8;
@@ -499,17 +602,34 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_10;
 #endif
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_10;
+        c->sao_band_filter[0]          = ff_hevc_sao_band_8_neon_10;
+        c->sao_band_filter[1]          = ff_hevc_sao_band_16_neon_10;
         c->sao_band_filter[2]          = ff_hevc_sao_band_32_neon_10;
+        c->sao_band_filter[3]          = ff_hevc_sao_band_48_neon_10;
         c->sao_band_filter[4]          = ff_hevc_sao_band_64_neon_10;
-#if RPI_HEVC_SAND
-        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_32_neon_10;
-#endif
+
+        c->sao_edge_filter[0]          = ff_hevc_sao_edge_8_neon_10;
         c->sao_edge_filter[1]          = ff_hevc_sao_edge_16_neon_10;
         c->sao_edge_filter[2]          = ff_hevc_sao_edge_32_neon_10;
+        c->sao_edge_filter[3]          = ff_hevc_sao_edge_48_neon_10;
         c->sao_edge_filter[4]          = ff_hevc_sao_edge_64_neon_10;
+#if SAO_FILTER_N == 6
+        c->sao_band_filter[5]          = ff_hevc_sao_band_24_neon_10;
+        c->sao_edge_filter[5]          = ff_hevc_sao_edge_24_neon_10;
+#endif
 #if RPI_HEVC_SAND
+        c->sao_band_filter_c[0]        = ff_hevc_sao_band_c_8_neon_10;
+        c->sao_band_filter_c[1]        = ff_hevc_sao_band_c_16_neon_10;
+        c->sao_band_filter_c[2]        = ff_hevc_sao_band_c_32_neon_10;
+
+        c->sao_edge_filter_c[0]        = ff_hevc_sao_edge_c_8_neon_10;
         c->sao_edge_filter_c[1]        = ff_hevc_sao_edge_c_16_neon_10;
         c->sao_edge_filter_c[2]        = ff_hevc_sao_edge_c_32_neon_10;
+
+#if SAO_FILTER_N == 6
+        c->sao_band_filter_c[5]        = ff_hevc_sao_band_c_24_neon_10;
+        c->sao_edge_filter_c[5]        = ff_hevc_sao_edge_c_24_neon_10;
+#endif
 #endif
     }
 

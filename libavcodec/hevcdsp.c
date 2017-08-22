@@ -331,17 +331,11 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->hevc_h_loop_filter_uv    = FUNC(hevc_h_loop_filter_uv, depth);    \
     hevcdsp->hevc_v_loop_filter_uv2   = FUNC(hevc_v_loop_filter_uv2, depth)
 #define SLICED_SAO(depth)\
-    hevcdsp->sao_band_filter_c[0] =                                            \
-    hevcdsp->sao_band_filter_c[1] =                                            \
-    hevcdsp->sao_band_filter_c[2] =                                            \
-    hevcdsp->sao_band_filter_c[3] =                                            \
-    hevcdsp->sao_band_filter_c[4] = FUNC(sao_band_filter_c, depth);            \
-    hevcdsp->sao_edge_filter_c[0] =                                            \
-    hevcdsp->sao_edge_filter_c[1] =                                            \
-    hevcdsp->sao_edge_filter_c[2] =                                            \
-    hevcdsp->sao_edge_filter_c[3] =                                            \
-    hevcdsp->sao_edge_filter_c[4] = FUNC(sao_edge_filter_c, depth);            \
-    hevcdsp->sao_edge_restore_c[0] = FUNC(sao_edge_restore_c_0, depth);        \
+    for (i = 0; i != SAO_FILTER_N; ++i) {                                     \
+        hevcdsp->sao_band_filter_c[i] = FUNC(sao_band_filter_c, depth);       \
+        hevcdsp->sao_edge_filter_c[i] = FUNC(sao_edge_filter_c, depth);       \
+    }                                                                         \
+    hevcdsp->sao_edge_restore_c[0] = FUNC(sao_edge_restore_c_0, depth);       \
     hevcdsp->sao_edge_restore_c[1] = FUNC(sao_edge_restore_c_1, depth)
 
 #endif
@@ -366,16 +360,10 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->idct_dc[2]             = FUNC(idct_16x16_dc, depth);           \
     hevcdsp->idct_dc[3]             = FUNC(idct_32x32_dc, depth);           \
                                                                             \
-    hevcdsp->sao_band_filter[0] =                                              \
-    hevcdsp->sao_band_filter[1] =                                              \
-    hevcdsp->sao_band_filter[2] =                                              \
-    hevcdsp->sao_band_filter[3] =                                              \
-    hevcdsp->sao_band_filter[4] = FUNC(sao_band_filter, depth);                \
-    hevcdsp->sao_edge_filter[0] =                                              \
-    hevcdsp->sao_edge_filter[1] =                                              \
-    hevcdsp->sao_edge_filter[2] =                                              \
-    hevcdsp->sao_edge_filter[3] =                                              \
-    hevcdsp->sao_edge_filter[4] = FUNC(sao_edge_filter, depth);                \
+    for (i = 0; i != SAO_FILTER_N; ++i) {                                   \
+        hevcdsp->sao_band_filter[i] = FUNC(sao_band_filter, depth);         \
+        hevcdsp->sao_edge_filter[i] = FUNC(sao_edge_filter, depth);         \
+    }                                                                       \
     hevcdsp->sao_edge_restore[0] = FUNC(sao_edge_restore_0, depth);            \
     hevcdsp->sao_edge_restore[1] = FUNC(sao_edge_restore_1, depth);            \
     SLICED_SAO(depth);                                                         \
