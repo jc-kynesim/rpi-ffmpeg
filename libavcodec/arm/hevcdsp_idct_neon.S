@@ -100,7 +100,6 @@ endfunc
 
 function ff_hevc_add_residual_4x4_dc_neon_8, export=1
         vdup.16     q15, r2
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
         vld1.32     d4[0], [r0], r1
         vld1.32     d4[1], [r0], r1
@@ -129,7 +128,6 @@ endfunc
 function ff_hevc_add_residual_8x8_dc_neon_8, export=1
         vdup.16     q15, r2
         mov         r3,  #8
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
 1:      subs        r3,   #1
         vld1.8      d16,  [r0]
@@ -150,7 +148,6 @@ endfunc
 function ff_hevc_add_residual_16x16_dc_neon_8, export=1
         vdup.16     q15, r2
         mov         r3,  #16
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
 1:      subs        r3,   #1
         vld1.8      {q8},  [r0]
@@ -174,7 +171,6 @@ endfunc
 function ff_hevc_add_residual_32x32_dc_neon_8, export=1
         vdup.16     q15, r2
         mov         r3,  #32
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
 1:      subs        r3,   #1
         vld1.8      {q8, q9},  [r0]
