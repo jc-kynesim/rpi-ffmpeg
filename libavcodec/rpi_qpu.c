@@ -11,8 +11,8 @@
 #include <pthread.h>
 #include <time.h>
 
-//#include <interface/vcsm/user-vcsm.h>
-#include "user-vcsm.h"
+#include <interface/vcsm/user-vcsm.h>
+//#include "user-vcsm.h"
 
 #include "rpi_mailbox.h"
 #include "rpi_qpu.h"
@@ -219,8 +219,8 @@ static void ttw_print(trace_time_wait_t * const ttw, const int64_t now)
 
 // GPU_MEM_PTR_T alloc fns
 static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
-  p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
+  p->numbytes = (numbytes + 255) & ~255;  // Round up
+  p->vcsm_handle = vcsm_malloc_cache(p->numbytes, VCSM_CACHE_TYPE_HOST | 0x80, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
@@ -505,10 +505,22 @@ void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM
         return;
 #if 1
     av_assert0(rfe->v.op_count < CACHE_EL_MAX - 1);
+    av_assert0(((intptr_t)gm->arm & 63) == 0);
+    av_assert0((gm->numbytes & 63) == 0);
 
     {
       struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
-      b->invalidate_mode = mode;
+//      b->invalidate_mode = mode;
+      b->invalidate_mode = RPI_CACHE_FLUSH_MODE_WRITEBACK;
+      b->block_count = 1;
+      b->start_address = gm->arm;
+      b->block_size = gm->numbytes;
+      b->inter_block_stride = 0;
+    }
+    {
+      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
+//      b->invalidate_mode = mode;
+      b->invalidate_mode = RPI_CACHE_FLUSH_MODE_INVALIDATE;
       b->block_count = 1;
       b->start_address = gm->arm;
       b->block_size = gm->numbytes;
@@ -632,24 +644,27 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
   else
   {
 #if 1
+    const unsigned int stride1 = av_rpi_sand_frame_stride1(frame);
     const unsigned int stride2 = av_rpi_sand_frame_stride2(frame);
-    const unsigned int stride1 = frame->linesize[0];
+    const unsigned int block_count = ((frame->width << av_rpi_sand_frame_xshl(frame)) + stride1 - 1) / stride1;  // Same for Y & C
     av_assert0(rfe->v.op_count + do_chroma + do_luma < CACHE_EL_MAX);
 
     if (do_luma)
     {
       struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
       b->invalidate_mode = mode;
-      b->block_count = (frame->width + stride1 - 1) / stride1;
+      b->block_count = block_count;
       b->start_address = av_rpi_sand_frame_pos_y(frame, 0, y0);
       b->block_size = y_size;
       b->inter_block_stride = stride1 * stride2;
+      av_assert0(((intptr_t)b->start_address & 63) == 0);
+      av_assert0(((intptr_t)b->inter_block_stride & 63) == 0);
     }
     if (do_chroma)
     {
       struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
       b->invalidate_mode = mode;
-      b->block_count = (frame->width + stride1 - 1) / stride1;
+      b->block_count = block_count;
       b->start_address = av_rpi_sand_frame_pos_c(frame, 0, y0 >> 1);
       b->block_size = uv_size;
       b->inter_block_stride = stride1 * stride2;
