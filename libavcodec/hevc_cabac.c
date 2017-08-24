@@ -1900,7 +1900,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #ifdef RPI
         use_vpu = 0;
         if (s->enable_rpi) {
-            const int special = trans_skip_or_bypass || !lc->tu.cross_pf;  // These need special processinmg
+            const int special = trans_skip_or_bypass || lc->tu.cross_pf;  // These need special processinmg
             use_dc = num_coeff == 1 && !special &&
                 !(lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2);
 
