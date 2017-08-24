@@ -30,6 +30,12 @@
 #define RPI_DISPLAY_ALL 0
 #endif
 
+#define _GNU_SOURCE
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sched.h>
+#include <unistd.h>
+
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
@@ -4866,6 +4872,11 @@ static int transcode(void)
     InputStream *ist;
     int64_t timer_start;
     int64_t total_packets_written = 0;
+
+    struct sched_param sched_param = { .sched_priority = 95 };
+    int result = sched_setscheduler(syscall(SYS_gettid), SCHED_FIFO, &sched_param);
+    if (result != 0)
+        perror("transcode setscheduler");
 
     ret = transcode_init();
     if (ret < 0)
