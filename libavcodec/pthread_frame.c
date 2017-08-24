@@ -25,7 +25,13 @@
 #include "config.h"
 
 #include <stdatomic.h>
+#define _GNU_SOURCE
 #include <stdint.h>
+
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sched.h>
+#include <unistd.h>
 
 #include "avcodec.h"
 #include "hwaccel.h"
@@ -170,6 +176,11 @@ static attribute_align_arg void *frame_worker_thread(void *arg)
     PerThreadContext *p = arg;
     AVCodecContext *avctx = p->avctx;
     const AVCodec *codec = avctx->codec;
+
+    struct sched_param sched_param = { .sched_priority = 1 };
+    int result = sched_setscheduler(syscall(SYS_gettid), SCHED_FIFO, &sched_param);
+    if (result != 0)
+        perror("frame_worker_thread: sched_setscheduler");
 
     pthread_mutex_lock(&p->mutex);
     while (1) {

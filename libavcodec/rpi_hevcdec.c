@@ -23,6 +23,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#define _GNU_SOURCE
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sched.h>
+#include <unistd.h>
+
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
 #include "libavutil/display.h"
@@ -575,6 +581,10 @@ static void * pass_worker(void *arg)
 {
     HEVCRpiPassQueue *const pq = (HEVCRpiPassQueue *)arg;
     HEVCRpiContext *const s = pq->context;
+    struct sched_param sched_param = { .sched_priority = 1 };
+    int result = sched_setscheduler(syscall(SYS_gettid), SCHED_FIFO, &sched_param);
+    if (result != 0)
+        perror("pass_worker: sched_setscheduler");
 
     for (;;)
     {
@@ -4435,6 +4445,10 @@ static void * bit_thread(void * v)
 {
     HEVCRpiLocalContext * const lc = v;
     HEVCRpiContext *const s = lc->context;
+    struct sched_param sched_param = { .sched_priority = 1 };
+    int result = sched_setscheduler(syscall(SYS_gettid), SCHED_FIFO, &sched_param);
+    if (result != 0)
+        perror("bit_thread: sched_setscheduler");
 
     while (wait_bt_sem_in(lc) == 0)
     {
