@@ -67,8 +67,8 @@ typedef struct HEVCDSPContext {
 
     void (*add_residual[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
 #if RPI_HEVC_SAND
-    void (*add_residual_u[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride);
-    void (*add_residual_v[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride);
+    void (*add_residual_u[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride, int dc_v);
+    void (*add_residual_v[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride, int dc_u);
 
     void (*add_residual_c[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride);
     void (*put_pcm_c)(uint8_t *_dst, ptrdiff_t _stride, int width, int height,

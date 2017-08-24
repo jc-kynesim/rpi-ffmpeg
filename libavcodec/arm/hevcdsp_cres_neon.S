@@ -14,7 +14,8 @@
 @ add_residual4x4_c(
 @   uint8_t *_dst,        [r0]
 @   const int16_t *res,   [r1]
-@   ptrdiff_t stride)     [r2]
+@   ptrdiff_t stride,     [r2]
+@   int dc_v)             [r3]
 
 function ff_hevc_add_residual_4x4_u_neon_8, export=1
         vld1.8      {d16}, [r0, :64], r2
@@ -22,8 +23,8 @@ function ff_hevc_add_residual_4x4_u_neon_8, export=1
         vld1.8      {d18}, [r0, :64], r2
         vld1.8      {d19}, [r0, :64], r2
         vld1.16     {q0, q1}, [r1]
-        vmov.i64    q2, #0
-        vmov.i64    q3, #0
+        vdup.16     q2, r3
+        vdup.16     q3, r3
         vmovl.u8    q10, d16
         sub         r0, r0, r2, lsl #2
         vmovl.u8    q11, d17
@@ -50,9 +51,11 @@ endfunc
 @   uint8_t *_dst,        [r0]
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
+@   int dc_v)             [r3]
 
 function ff_hevc_add_residual_8x8_u_neon_8, export=1
         mov         r12,    #4
+        vdup.16     q15, r3
 1:
         vld2.8      {d16, d17}, [r0, :128], r2
         vld2.8      {d18, d19}, [r0, :128]
@@ -62,9 +65,13 @@ function ff_hevc_add_residual_8x8_u_neon_8, export=1
         sub         r0, r2
         vmovl.u8    q11, d18
         vqadd.s16   q0,  q10
+        vaddw.u8    q2,  q15, d17
         vqadd.s16   q1,  q11
+        vaddw.u8    q3,  q15, d19
         vqmovun.s16 d16,  q0
+        vqmovun.s16 d17,  q2
         vqmovun.s16 d18,  q1
+        vqmovun.s16 d19,  q3
         vst2.8      {d16, d17}, [r0, :128], r2
         vst2.8      {d18, d19}, [r0, :128], r2
         bne         1b
@@ -75,9 +82,11 @@ endfunc
 @   uint8_t *_dst,        [r0]
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
+@   int dc_v)             [r3]
 
 function ff_hevc_add_residual_16x16_u_neon_8, export=1
         mov         r12,    #16
+        vdup.16     q15, r3
 1:
         vld2.8      {q8, q9}, [r0, :256]
         vld1.16     {q0, q1}, [r1, :256]!
@@ -86,8 +95,12 @@ function ff_hevc_add_residual_16x16_u_neon_8, export=1
         vmovl.u8    q11, d17
         vqadd.s16   q0,  q10
         vqadd.s16   q1,  q11
+        vaddw.u8    q2,  q15, d18
+        vaddw.u8    q3,  q15, d19
         vqmovun.s16 d16, q0
         vqmovun.s16 d17, q1
+        vqmovun.s16 d18, q2
+        vqmovun.s16 d19, q3
         vst2.8      {q8, q9}, [r0, :256], r2
         bne         1b
         bx          lr
@@ -107,8 +120,8 @@ function ff_hevc_add_residual_4x4_v_neon_8, export=1
         vld1.8      {d18}, [r0, :64], r2
         vld1.8      {d19}, [r0, :64], r2
         vld1.16     {q2, q3}, [r1]
-        vmov.i64    q0, #0
-        vmov.i64    q1, #0
+        vdup.16     q0, r3
+        vdup.16     q1, r3
         vmovl.u8    q10, d16
         sub         r0, r0, r2, lsl #2
         vmovl.u8    q11, d17
@@ -138,6 +151,7 @@ endfunc
 
 function ff_hevc_add_residual_8x8_v_neon_8, export=1
         mov         r12,    #4
+        vdup.16     q15, r3
 1:
         vld2.8      {d16, d17}, [r0, :128], r2
         vld2.8      {d18, d19}, [r0, :128]
@@ -148,8 +162,12 @@ function ff_hevc_add_residual_8x8_v_neon_8, export=1
         vmovl.u8    q11, d19
         vqadd.s16   q0,  q10
         vqadd.s16   q1,  q11
+        vaddw.u8    q2,  q15, d16
+        vaddw.u8    q3,  q15, d18
         vqmovun.s16 d17,  q0
+        vqmovun.s16 d16,  q2
         vqmovun.s16 d19,  q1
+        vqmovun.s16 d18,  q3
         vst2.8      {d16, d17}, [r0, :128], r2
         vst2.8      {d18, d19}, [r0, :128], r2
         bne         1b
@@ -163,14 +181,19 @@ endfunc
 
 function ff_hevc_add_residual_16x16_v_neon_8, export=1
         mov         r12,    #16
+        vdup.16     q15, r3
 1:
         vld2.8      {q8, q9}, [r0, :256]
         vld1.16     {q0, q1}, [r1, :256]!
         subs        r12,   #1
         vmovl.u8    q10, d18
         vmovl.u8    q11, d19
+        vaddw.u8    q2,  q15, d16
+        vaddw.u8    q3,  q15, d17
         vqadd.s16   q0,  q10
         vqadd.s16   q1,  q11
+        vqmovun.s16 d16, q2
+        vqmovun.s16 d17, q3
         vqmovun.s16 d18, q0
         vqmovun.s16 d19, q1
         vst2.8      {q8, q9}, [r0, :256], r2

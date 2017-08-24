@@ -3628,10 +3628,10 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
               break;
 #if RPI_HEVC_SAND
           case RPI_PRED_ADD_RESIDUAL_U:
-              s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
+              s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride, cmd->ta.dc);
               break;
           case RPI_PRED_ADD_RESIDUAL_V:
-              s->hevcdsp.add_residual_v[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
+              s->hevcdsp.add_residual_v[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride, cmd->ta.dc);
               break;
           case RPI_PRED_ADD_RESIDUAL_C:
               s->hevcdsp.add_residual_c[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);

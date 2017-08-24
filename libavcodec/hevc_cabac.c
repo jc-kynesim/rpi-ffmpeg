@@ -1552,17 +1552,19 @@ static void rpi_add_residual(HEVCContext * const s,
             cmd->ta.buf = coeffs;
             cmd->ta.dst = dst;
             cmd->ta.stride = stride;
+            cmd->ta.dc = 0;
         }
     }
     else if (!is_sliced || c_idx == 0) {
         s->hevcdsp.add_residual[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
     }
 #if RPI_HEVC_SAND
+    // * These should probably never happen
     else if (c_idx == 1) {
-        s->hevcdsp.add_residual_u[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
+        s->hevcdsp.add_residual_u[log2_trafo_size-2](dst, (int16_t *)coeffs, stride, 0);
     }
     else {
-        s->hevcdsp.add_residual_v[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
+        s->hevcdsp.add_residual_v[log2_trafo_size-2](dst, (int16_t *)coeffs, stride, 0);
     }
 #endif
 }

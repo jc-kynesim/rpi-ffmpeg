@@ -85,8 +85,8 @@ static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
 }
 
 #if RPI_HEVC_SAND
-static av_always_inline void FUNC(add_residual_u_v)(uint8_t *_dst, const int16_t *res,
-                                                ptrdiff_t stride, int size)
+static av_always_inline void FUNC(add_residual_u)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, const int dc_v, int size)
 {
     int x, y;
     pixel *dst = (pixel *)_dst;
@@ -96,6 +96,25 @@ static av_always_inline void FUNC(add_residual_u_v)(uint8_t *_dst, const int16_t
     for (y = 0; y < size; y++) {
         for (x = 0; x < size * 2; x += 2) {
             dst[x] = av_clip_pixel(dst[x] + *res);
+            dst[x + 1] = av_clip_pixel(dst[x] + dc_v);
+            res++;
+        }
+        dst += stride;
+    }
+}
+
+static av_always_inline void FUNC(add_residual_v)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, const int dc_u, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + dc_u);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + *res);
             res++;
         }
         dst += stride;
@@ -156,25 +175,25 @@ static void FUNC(add_residual32x32)(uint8_t *_dst, int16_t *res,
 // -- U -- (plaited)
 
 static void FUNC(add_residual4x4_u)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_u)
 {
-    FUNC(add_residual_u_v)(_dst, res, stride, 4);
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 4);
 }
 
 static void FUNC(add_residual8x8_u)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_u)
 {
-    FUNC(add_residual_u_v)(_dst, res, stride, 8);
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 8);
 }
 
 static void FUNC(add_residual16x16_u)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_u)
 {
-    FUNC(add_residual_u_v)(_dst, res, stride, 16);
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 16);
 }
 
 static void FUNC(add_residual32x32_u)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_u)
 {
     // Should never occur for 420, which is all that sand supports
     av_assert0(0);
@@ -183,25 +202,25 @@ static void FUNC(add_residual32x32_u)(uint8_t *_dst, const int16_t * res,
 // -- V -- (plaited)
 
 static void FUNC(add_residual4x4_v)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_v)
 {
-    FUNC(add_residual_u_v)(_dst + sizeof(pixel), res, stride, 4);
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 4);
 }
 
 static void FUNC(add_residual8x8_v)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_v)
 {
-    FUNC(add_residual_u_v)(_dst + sizeof(pixel), res, stride, 8);
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 8);
 }
 
 static void FUNC(add_residual16x16_v)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_v)
 {
-    FUNC(add_residual_u_v)(_dst + sizeof(pixel), res, stride, 16);
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 16);
 }
 
 static void FUNC(add_residual32x32_v)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_v)
 {
     // Should never occur for 420, which is all that sand supports
     av_assert0(0);

@@ -528,7 +528,8 @@ typedef struct HEVCPredCmd {
         struct {  // TRANSFORM_ADD
             uint8_t * dst;
             const int16_t * buf;
-            uint32_t stride;
+            uint16_t stride;  // Should be good enough for all pic fmts we use
+            int16_t dc;
         } ta;
         struct {
             uint8_t * dst;
