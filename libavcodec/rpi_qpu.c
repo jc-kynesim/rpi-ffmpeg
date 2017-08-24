@@ -865,6 +865,74 @@ void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h)
   }
 }
 
+#include <dirent.h>
+#include <unistd.h>
+
+typedef struct thread_list
+{
+    struct thread_list *next;
+    pid_t tid;
+} thread_list_t;
+
+/* We're not expecting these lists to be particularly long, so don't worry about making
+ * these routines super-efficient! */
+
+static void add_to_list(pid_t tid, void *arg)
+{
+    thread_list_t **list = arg;
+    thread_list_t *t = malloc(sizeof *t);
+    if (t)
+    {
+        t->tid = tid;
+        t->next = *list;
+        *list = t;
+    }
+}
+
+static void list_subtract(thread_list_t **base, const thread_list_t *delta)
+{
+    thread_list_t *p, *t;
+    for (; delta; delta = delta->next)
+    {
+        for (p = NULL, t = *base; t && t->tid != delta->tid; p = t, t = t->next);
+        if (p)
+            p->next = t->next;
+        else
+            *base = t->next;
+        free(t);
+    }
+}
+
+static void list_free(thread_list_t *list)
+{
+    thread_list_t *next;
+    for (; list; list = next)
+    {
+        next = list->next;
+        free(list);
+    }
+}
+
+static void for_all_threads(void (*callback)(pid_t, void *), void *arg)
+{
+    DIR *d;
+    pid_t pid = getpid();
+    char path[20];
+    sprintf(path, "/proc/%u/task", pid);
+    if ((d = opendir(path)) != NULL)
+    {
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL)
+        {
+            if (de->d_name[0] >= '0' && de->d_name[0] <= '9')
+            {
+                pid_t tid = atoi(de->d_name);
+                callback(tid, arg);
+            }
+        }
+    }
+}
+
 int vpu_qpu_init()
 {
   gpu_env_t * const ge = gpu_lock_ref();
@@ -873,7 +941,21 @@ int vpu_qpu_init()
 
   if (ge->init_count++ == 0)
   {
+    thread_list_t *before = NULL, *after = NULL;
+
+    for_all_threads(add_to_list, &before);
     vc_gpuserv_init();
+    for_all_threads(add_to_list, &after);
+    list_subtract(&after, before);
+    for (thread_list_t *t = after; t; t = t->next)
+    {
+        struct sched_param sched_param = { .sched_priority = 2 };
+        int result = sched_setscheduler(t->tid, SCHED_FIFO, &sched_param);
+        if (result != 0)
+            perror("vpu_qpu_init");
+    }
+    list_free(before);
+    list_free(after);
   }
 
   gpu_unlock();
