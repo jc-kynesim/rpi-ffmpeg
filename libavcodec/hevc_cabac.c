@@ -1534,7 +1534,7 @@ static void rpi_add_residual(HEVCContext * const s,
         if (i != 0 && c_idx == 2 && pc->type == RPI_PRED_ADD_RESIDUAL_U &&
             pc->ta.dst == dst)
         {
-            av_assert0(pc->size == log2_trafo_size &&
+            av_assert1(pc->size == log2_trafo_size &&
                        pc->c_idx == 1 &&
                        pc->ta.stride == stride);
 
@@ -1544,7 +1544,7 @@ static void rpi_add_residual(HEVCContext * const s,
             pc->dc.dst == dst)
         {
             const int16_t dc = (int16_t)pc->dc.dc;  // Discard top bits
-            av_assert0(pc->size == log2_trafo_size &&
+            av_assert1(pc->size == log2_trafo_size &&
                        pc->c_idx == 1 &&
                        pc->dc.stride == stride);
 
@@ -1590,20 +1590,18 @@ static void rpi_add_dc(HEVCContext * const s,
     const unsigned int x0, const unsigned int y0, const int16_t * const coeffs)
 {
     const AVFrame * const frame = s->frame;
-    unsigned int stride = frame->linesize[c_idx];
-    unsigned int x = x0 >> s->ps.sps->hshift[c_idx];
-    unsigned int y = y0 >> s->ps.sps->vshift[c_idx];
+    const unsigned int stride = frame->linesize[c_idx];
+    const unsigned int x = x0 >> s->ps.sps->hshift[c_idx];
+    const unsigned int y = y0 >> s->ps.sps->vshift[c_idx];
     const int is_sliced = av_rpi_is_sand_frame(frame);
-    uint8_t * dst = !is_sliced ?
+    uint8_t * const dst = !is_sliced ?
             s->frame->data[c_idx] + y * stride + (x << s->ps.sps->pixel_shift) :
         c_idx == 0 ?
             av_rpi_sand_frame_pos_y(frame, x, y) :
             av_rpi_sand_frame_pos_c(frame, x, y);
-    int shift = 14 - s->ps.sps->bit_depth;
-    int add   = 1 << (shift - 1);
-    const int coeff = (((coeffs[0] + 1) >> 1) + add) >> shift;
 
-    av_assert0(coeff <= 0x7fff && coeff >= -0x7fff);
+    const unsigned int shift = FFMAX(14 - s->ps.sps->bit_depth, 0);
+    const int coeff = (coeffs[0] + (1 | (1 << shift))) >> (shift + 1);
 
     if (s->enable_rpi) {
         const unsigned int i = s->jb0->intra.n;
@@ -1612,7 +1610,7 @@ static void rpi_add_dc(HEVCContext * const s,
         if (i != 0 && c_idx == 2 && pc->type == RPI_PRED_ADD_RESIDUAL_U &&
             pc->ta.dst == dst)
         {
-            av_assert0(pc->size == log2_trafo_size &&
+            av_assert1(pc->size == log2_trafo_size &&
                        pc->c_idx == 1 &&
                        pc->ta.stride == stride);
 
@@ -1621,9 +1619,10 @@ static void rpi_add_dc(HEVCContext * const s,
         else if (i != 0 && c_idx == 2 && pc->type == RPI_PRED_ADD_DC_U &&
             pc->dc.dst == dst)
         {
-            av_assert0(pc->size == log2_trafo_size &&
+            av_assert1(pc->size == log2_trafo_size &&
                        pc->c_idx == 1 &&
-                       pc->dc.stride == stride);
+                       pc->dc.stride == stride &&
+                       (pc->dc.dc & ~0xffff) == 0);
 
             pc->dc.dc |= (coeff << 16);
         }
@@ -1691,7 +1690,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 
     int may_hide_sign;
     int use_dc = 0;
-
 
     // Derive QP for dequant
     if (!lc->cu.cu_transquant_bypass_flag) {
@@ -1902,17 +1900,18 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #ifdef RPI
         use_vpu = 0;
         if (s->enable_rpi) {
-            use_dc = num_coeff == 1 &&
-                !trans_skip_or_bypass && !lc->tu.cross_pf &&
+            const int special = trans_skip_or_bypass || !lc->tu.cross_pf;  // These need special processinmg
+            use_dc = num_coeff == 1 && !special &&
                 !(lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2);
 
             if (use_dc) {
-                coeffs = (int16_t*)lc->edge_emu_buffer;  // Anywhere will do
+                // Just need a little empty space
+                coeffs = (int16_t*)(c_idx_nz ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
                 // No need to clear
             }
             else
             {
-                use_vpu = !trans_skip_or_bypass && !lc->tu.cross_pf && log2_trafo_size >= 4 && !use_dc;
+                use_vpu = !special && log2_trafo_size >= 4;
                 coeffs = rpi_alloc_coeff_buf(s, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
 #if HAVE_NEON
                 rpi_zap_coeff_vals_neon(coeffs, log2_trafo_size - 2);
