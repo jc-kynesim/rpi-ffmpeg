@@ -949,7 +949,7 @@ int vpu_qpu_init()
     list_subtract(&after, before);
     for (thread_list_t *t = after; t; t = t->next)
     {
-        struct sched_param sched_param = { .sched_priority = 2 };
+        struct sched_param sched_param = { .sched_priority = 95 };
         int result = sched_setscheduler(t->tid, SCHED_FIFO, &sched_param);
         if (result != 0)
             perror("vpu_qpu_init");

@@ -177,10 +177,7 @@ static attribute_align_arg void *frame_worker_thread(void *arg)
     AVCodecContext *avctx = p->avctx;
     const AVCodec *codec = avctx->codec;
 
-    struct sched_param sched_param = { .sched_priority = 1 };
-    int result = sched_setscheduler(syscall(SYS_gettid), SCHED_FIFO, &sched_param);
-    if (result != 0)
-        perror("frame_worker_thread: sched_setscheduler");
+    ff_thread_attach_worker(avctx);
 
     pthread_mutex_lock(&p->mutex);
     while (1) {
@@ -485,6 +482,28 @@ static int submit_packet(PerThreadContext *p, AVCodecContext *user_avctx,
     return 0;
 }
 
+void ff_thread_attach_worker(AVCodecContext *avctx)
+{
+    pthread_mutex_lock(&avctx->internal->worker_mutex);
+    if (avctx->internal->worker_threads < sizeof avctx->internal->worker_tid / sizeof *avctx->internal->worker_tid)
+        avctx->internal->worker_tid[avctx->internal->worker_threads++] = syscall(SYS_gettid);
+    pthread_mutex_unlock(&avctx->internal->worker_mutex);
+}
+
+static void apply_sched_priority(AVCodecContext *avctx)
+{
+    int i;
+    struct sched_param sched_param = { .sched_priority = avctx->internal->sched_priority };
+    pthread_mutex_lock(&avctx->internal->worker_mutex);
+    for (i = 0; i < avctx->internal->worker_threads; i++)
+    {
+        int result = sched_setscheduler(avctx->internal->worker_tid[i], SCHED_FIFO, &sched_param);
+        if (result != 0)
+            perror("promote worker thread");
+    }
+    pthread_mutex_unlock(&avctx->internal->worker_mutex);
+}
+
 int ff_thread_decode_frame(AVCodecContext *avctx,
                            AVFrame *picture, int *got_picture_ptr,
                            AVPacket *avpkt)
@@ -503,6 +522,24 @@ int ff_thread_decode_frame(AVCodecContext *avctx,
      */
 
     p = &fctx->threads[fctx->next_decoding];
+    static int sched_priority = 32;
+    if (sched_priority == 0)
+    {
+        /* Can't assign such a low priority to the thread for the next frame.
+         * Promote all existing threads. */
+        int promoting = finished;
+        sched_priority = 32 - fctx->threads[finished].avctx->internal->sched_priority;
+        while (promoting != fctx->next_decoding)
+        {
+            fctx->threads[promoting].avctx->internal->sched_priority += sched_priority;
+            apply_sched_priority(fctx->threads[promoting].avctx);
+            promoting++;
+            if (promoting == avctx->thread_count) promoting = 0;
+        }
+    }
+    p->avctx->internal->sched_priority = sched_priority;
+    apply_sched_priority(p->avctx);
+    sched_priority--;
     err = submit_packet(p, avctx, avpkt);
     if (err)
         goto finish;
@@ -820,6 +857,8 @@ int ff_frame_thread_init(AVCodecContext *avctx)
         *copy->internal = *src->internal;
         copy->internal->thread_ctx = p;
         copy->internal->last_pkt_props = &p->avpkt;
+        pthread_mutex_init(&copy->internal->worker_mutex, NULL);
+        copy->internal->worker_threads = 0;
 
         if (!i) {
             src = copy;

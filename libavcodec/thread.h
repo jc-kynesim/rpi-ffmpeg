@@ -49,6 +49,14 @@ typedef struct ThreadFrame {
 void ff_thread_flush(AVCodecContext *avctx);
 
 /**
+ * Attach the calling thread to the list of threads whose real time
+ * scheduling policy are associated with the stated frame context.
+ *
+ * @param avctx The context.
+ */
+void ff_thread_attach_worker(AVCodecContext *avctx);
+
+/**
  * Submit a new frame to a decoding thread.
  * Returns the next available frame in picture. *got_picture_ptr
  * will be 0 if none is available.

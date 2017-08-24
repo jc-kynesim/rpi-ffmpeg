@@ -220,6 +220,11 @@ typedef struct AVCodecInternal {
 
     /* to prevent infinite loop on errors when draining */
     int nb_draining_errors;
+
+    pthread_mutex_t worker_mutex;
+    int worker_threads;
+    pid_t worker_tid[6];
+    int sched_priority;
 } AVCodecInternal;
 
 struct AVCodecDefault {
