@@ -3571,20 +3571,6 @@ static void rpi_execute_transform(HEVCContext *s)
 #define RPI_OPT_SEP_PRED 0
 
 
-typedef void ff_hevc_add_residual_dc_neon_fn(uint8_t * dst, unsigned int stride, int dc);
-ff_hevc_add_residual_dc_neon_fn ff_hevc_add_residual_4x4_dc_neon_8;
-ff_hevc_add_residual_dc_neon_fn ff_hevc_add_residual_8x8_dc_neon_8;
-ff_hevc_add_residual_dc_neon_fn ff_hevc_add_residual_16x16_dc_neon_8;
-ff_hevc_add_residual_dc_neon_fn ff_hevc_add_residual_32x32_dc_neon_8;
-
-static ff_hevc_add_residual_dc_neon_fn * const ff_hevc_add_residual_dc_neon_8[4] =
-{
-    ff_hevc_add_residual_4x4_dc_neon_8,
-    ff_hevc_add_residual_8x8_dc_neon_8,
-    ff_hevc_add_residual_16x16_dc_neon_8,
-    ff_hevc_add_residual_32x32_dc_neon_8
-};
-
 #if RPI_OPT_SEP_PRED
 static void rpi_execute_pred_cmds(HEVCContext * const s, const int do_luma, const int do_chroma)
 #else
@@ -3626,6 +3612,9 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
           case RPI_PRED_ADD_RESIDUAL:
               s->hevcdsp.add_residual[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
+          case RPI_PRED_ADD_DC:
+              s->hevcdsp.add_residual_dc[cmd->size - 2](cmd->dc.dst, cmd->dc.stride, cmd->dc.dc);
+              break;
 #if RPI_HEVC_SAND
           case RPI_PRED_ADD_RESIDUAL_U:
               s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride, cmd->ta.dc);
@@ -3636,10 +3625,11 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
           case RPI_PRED_ADD_RESIDUAL_C:
               s->hevcdsp.add_residual_c[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride);
               break;
-#endif
-          case RPI_PRED_ADD_DC:
-              ff_hevc_add_residual_dc_neon_8[cmd->size - 2](cmd->dc.dst, cmd->dc.stride, cmd->dc.dc);
+          case RPI_PRED_ADD_DC_U:
+          case RPI_PRED_ADD_DC_V:
+              s->hevcdsp.add_residual_dc_c[cmd->size - 2](cmd->dc.dst, cmd->dc.stride, cmd->dc.dc);
               break;
+#endif
 
           case RPI_PRED_I_PCM:
               pcm_extract(s, cmd->i_pcm.src, cmd->i_pcm.src_len, cmd->i_pcm.x, cmd->i_pcm.y, 1 << cmd->size);

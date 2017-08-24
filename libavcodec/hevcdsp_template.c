@@ -84,6 +84,22 @@ static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
     }
 }
 
+static av_always_inline void FUNC(add_residual_dc)(uint8_t *_dst, ptrdiff_t stride, const int dc, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size; x++) {
+            dst[x] = av_clip_pixel(dst[x] + dc);
+        }
+        dst += stride;
+    }
+}
+
+
 #if RPI_HEVC_SAND
 static av_always_inline void FUNC(add_residual_u)(uint8_t *_dst, const int16_t *res,
                                                 ptrdiff_t stride, const int dc_v, int size)
@@ -96,7 +112,7 @@ static av_always_inline void FUNC(add_residual_u)(uint8_t *_dst, const int16_t *
     for (y = 0; y < size; y++) {
         for (x = 0; x < size * 2; x += 2) {
             dst[x] = av_clip_pixel(dst[x] + *res);
-            dst[x + 1] = av_clip_pixel(dst[x] + dc_v);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + dc_v);
             res++;
         }
         dst += stride;
@@ -145,6 +161,27 @@ static av_always_inline void FUNC(add_residual_c)(uint8_t *_dst, const int16_t *
 
 //    rpi_sand_dump16("ARC Out", _dst, stride * 2, 0, 0, 0, size, size, 1);
 }
+
+
+static av_always_inline void FUNC(add_residual_dc_c)(uint8_t *_dst, ptrdiff_t stride, const int32_t dc, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+    const int dc_v = dc >> 16;
+    const int dc_u = (dc << 16) >> 16;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + dc_u);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + dc_v);
+        }
+        dst += stride;
+    }
+}
+
+
 #endif
 
 static void FUNC(add_residual4x4)(uint8_t *_dst, int16_t *res,
@@ -169,6 +206,26 @@ static void FUNC(add_residual32x32)(uint8_t *_dst, int16_t *res,
                                     ptrdiff_t stride)
 {
     FUNC(add_residual)(_dst, res, stride, 32);
+}
+
+static void FUNC(add_residual4x4_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 4);
+}
+
+static void FUNC(add_residual8x8_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 8);
+}
+
+static void FUNC(add_residual16x16_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 16);
+}
+
+static void FUNC(add_residual32x32_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 32);
 }
 
 #if RPI_HEVC_SAND
@@ -252,6 +309,28 @@ static void FUNC(add_residual32x32_c)(uint8_t *_dst, const int16_t * res,
     // Should never occur for 420, which is all that sand supports
     av_assert0(0);
 }
+
+static void FUNC(add_residual4x4_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 4);
+}
+
+static void FUNC(add_residual8x8_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 8);
+}
+
+static void FUNC(add_residual16x16_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 16);
+}
+
+static void FUNC(add_residual32x32_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
+}
+
 #endif
 
 

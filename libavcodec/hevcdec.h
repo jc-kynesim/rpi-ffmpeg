@@ -514,6 +514,8 @@ enum rpi_pred_cmd_e
     RPI_PRED_ADD_RESIDUAL_V, // = RPI_PRED_TRANSFORM_ADD + c_idx
     RPI_PRED_ADD_RESIDUAL_C, // Merged U+V
     RPI_PRED_ADD_DC,
+    RPI_PRED_ADD_DC_U,       // Both U & V are effectively C
+    RPI_PRED_ADD_DC_V,
     RPI_PRED_INTRA,
     RPI_PRED_I_PCM,
     RPI_PRED_CMD_MAX

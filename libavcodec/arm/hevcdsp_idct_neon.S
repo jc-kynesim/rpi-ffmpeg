@@ -118,6 +118,17 @@ function ff_hevc_add_residual_4x4_dc_neon_8, export=1
 endfunc
 
 
+@ ff_hevc_add_residual_4x4_dc_c_neon_8(
+@   uint8_t * dst,              // [r0]
+@   unsigned int stride,        // [r1]
+@   int dc)                     // [r2]
+
+function ff_hevc_add_residual_4x4_dc_c_neon_8, export=1
+        vdup.32     q15, r2
+        mov         r3,  #4
+        b           1f
+endfunc
+
 @ ff_hevc_add_residual_8x8_dc_neon_8(
 @   uint8_t * dst,              // [r0]
 @   unsigned int stride,        // [r1]
@@ -136,6 +147,17 @@ function ff_hevc_add_residual_8x8_dc_neon_8, export=1
         bx          lr
 endfunc
 
+
+@ ff_hevc_add_residual_8x8_dc_c_neon_8(
+@   uint8_t * dst,              // [r0]
+@   unsigned int stride,        // [r1]
+@   int dc)                     // [r2]
+
+function ff_hevc_add_residual_8x8_dc_c_neon_8, export=1
+        vdup.32     q15, r2
+        mov         r3,  #8
+        b           1f
+endfunc
 
 @ ff_hevc_add_residual_16x16_dc_neon_8(
 @   uint8_t * dst,              // [r0]
@@ -157,6 +179,17 @@ function ff_hevc_add_residual_16x16_dc_neon_8, export=1
         bx          lr
 endfunc
 
+
+@ ff_hevc_add_residual_16x16_dc_c_neon_8(
+@   uint8_t * dst,              // [r0]
+@   unsigned int stride,        // [r1]
+@   int dc)                     // [r2]
+
+function ff_hevc_add_residual_16x16_dc_c_neon_8, export=1
+        vdup.32     q15, r2
+        mov         r3,  #16
+        b           1f
+endfunc
 
 @ ff_hevc_add_residual_32x32_dc_neon_8(
 @   uint8_t * dst,              // [r0]
