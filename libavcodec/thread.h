@@ -48,6 +48,8 @@ typedef struct ThreadFrame {
  */
 void ff_thread_flush(AVCodecContext *avctx);
 
+void ff_thread_apply_sched_priority(AVCodecContext *avctx);
+
 /**
  * Attach the calling thread to the list of threads whose real time
  * scheduling policy are associated with the stated frame context.

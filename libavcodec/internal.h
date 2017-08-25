@@ -224,7 +224,8 @@ typedef struct AVCodecInternal {
     pthread_mutex_t worker_mutex;
     int worker_threads;
     pid_t worker_tid[6];
-    int sched_priority;
+    int sched_base_priority;
+    int sched_priority_offset;
 } AVCodecInternal;
 
 struct AVCodecDefault {

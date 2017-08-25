@@ -707,7 +707,7 @@ int attribute_align_arg avcodec_open2(AVCodecContext *avctx, const AVCodec *code
 
     pthread_mutex_init(&avctx->internal->worker_mutex, NULL);
     avctx->internal->worker_threads = 0;
-    avctx->internal->sched_priority = 1;
+    avctx->internal->sched_base_priority = 1;
 
     if (codec->priv_data_size > 0) {
         if (!avctx->priv_data) {
