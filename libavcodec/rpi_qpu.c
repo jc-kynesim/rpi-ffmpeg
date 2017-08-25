@@ -11,8 +11,7 @@
 #include <pthread.h>
 #include <time.h>
 
-//#include <interface/vcsm/user-vcsm.h>
-#include "user-vcsm.h"
+#include <interface/vcsm/user-vcsm.h>
 
 #include "rpi_mailbox.h"
 #include "rpi_qpu.h"
@@ -220,7 +219,7 @@ static void ttw_print(trace_time_wait_t * const ttw, const int64_t now)
 // GPU_MEM_PTR_T alloc fns
 static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
   p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST | 0x80, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
