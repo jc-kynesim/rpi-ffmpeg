@@ -513,6 +513,9 @@ enum rpi_pred_cmd_e
     RPI_PRED_ADD_RESIDUAL_U, // = RPI_PRED_TRANSFORM_ADD + c_idx
     RPI_PRED_ADD_RESIDUAL_V, // = RPI_PRED_TRANSFORM_ADD + c_idx
     RPI_PRED_ADD_RESIDUAL_C, // Merged U+V
+    RPI_PRED_ADD_DC,
+    RPI_PRED_ADD_DC_U,       // Both U & V are effectively C
+    RPI_PRED_ADD_DC_V,
     RPI_PRED_INTRA,
     RPI_PRED_I_PCM,
     RPI_PRED_CMD_MAX
@@ -527,8 +530,14 @@ typedef struct HEVCPredCmd {
         struct {  // TRANSFORM_ADD
             uint8_t * dst;
             const int16_t * buf;
-            uint32_t stride;
+            uint16_t stride;  // Should be good enough for all pic fmts we use
+            int16_t dc;
         } ta;
+        struct {
+            uint8_t * dst;
+            uint32_t stride;
+            int dc;
+        } dc;
         struct {  // INTRA
             uint16_t x;
             uint16_t y;
@@ -546,6 +555,7 @@ typedef struct HEVCPredCmd {
 #endif
 
 #ifdef RPI
+#include <semaphore.h>
 
 union qpu_mc_pred_cmd_s;
 struct qpu_mc_pred_y_p_s;
@@ -576,9 +586,44 @@ typedef struct HEVCRpiInterPredEnv
     GPU_MEM_PTR_T gptr;
 } HEVCRpiInterPredEnv;
 
+typedef struct HEVCRpiIntraPredEnv {
+    unsigned int n;        // Number of commands
+    HEVCPredCmd * cmds;
+} HEVCRpiIntraPredEnv;
+
+typedef struct HEVCRpiCeoffEnv {
+    unsigned int n;
+    uint16_t * buf;
+} HEVCRpiCoeffEnv;
+
+typedef struct HEVCRpiCeoffsEnv {
+    HEVCRpiCoeffEnv s[4];
+    GPU_MEM_PTR_T gptr;
+    void * mptr;
+} HEVCRpiCoeffsEnv;
+
+typedef struct HEVCRpiDeblkBlk {
+    uint16_t x_ctb;
+    uint16_t y_ctb;
+} HEVCRpiDeblkBlk;
+
+typedef struct HEVCRpiDeblkEnv {
+    unsigned int n;
+    HEVCRpiDeblkBlk * blks;
+} HEVCRpiDeblkEnv;
+
+
+
 typedef struct HEVCRpiJob {
+    volatile int terminate;
+    int pending;
+    sem_t sem_in;       // set by main
+    sem_t sem_out;      // set by worker
     HEVCRpiInterPredEnv chroma_ip;
     HEVCRpiInterPredEnv luma_ip;
+    HEVCRpiIntraPredEnv intra;
+    HEVCRpiCoeffsEnv coeffs;
+    HEVCRpiDeblkEnv deblk;
 } HEVCRpiJob;
 
 #if RPI_TSTATS
@@ -624,24 +669,13 @@ typedef struct HEVCContext {
     int used_for_ref;  // rpi
 #ifdef RPI
     int enable_rpi;
-    HEVCPredCmd *univ_pred_cmds[RPI_MAX_JOBS];
-    int buf_width;
-    GPU_MEM_PTR_T coeffs_buf_default[RPI_MAX_JOBS];
-    GPU_MEM_PTR_T coeffs_buf_accelerated[RPI_MAX_JOBS];
-    int16_t *coeffs_buf_arm[RPI_MAX_JOBS][4];
-    unsigned int coeffs_buf_vc[RPI_MAX_JOBS][4];
-    int num_coeffs[RPI_MAX_JOBS][4];
-    int num_xfm_cmds[RPI_MAX_JOBS];
-    int num_mv_cmds_y[RPI_MAX_JOBS];
-    int num_mv_cmds_c[RPI_MAX_JOBS];
-    int num_pred_cmds[RPI_MAX_JOBS];
-    int num_dblk_cmds[RPI_MAX_JOBS];
-    int vpu_id;
-    int pass0_job; // Pass0 does coefficient decode
-    int pass1_job; // Pass1 does pixel processing
+    unsigned int pass0_job; // Pass0 does coefficient decode
+    unsigned int pass1_job; // Pass1 does pixel processing
     int ctu_count; // Number of CTUs done in pass0 so far
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
 
+    HEVCRpiJob * jb0;
+    HEVCRpiJob * jb1;
     HEVCRpiJob jobs[RPI_MAX_JOBS];
 #if RPI_TSTATS
     HEVCRpiStats tstats;
@@ -662,13 +696,6 @@ typedef struct HEVCContext {
 
 #ifdef RPI_WORKER
     pthread_t worker_thread;
-    pthread_cond_t worker_cond_head;
-    pthread_cond_t worker_cond_tail;
-    pthread_mutex_t worker_mutex;
-
-    int worker_tail; // Contains the number of posted jobs
-    int worker_head; // Contains the number of completed jobs
-    int kill_worker; // set to 1 to terminate the worker
 #endif
 
 #ifdef RPI_DEBLOCK_VPU
@@ -818,10 +845,6 @@ typedef struct HEVCContext {
     uint16_t white_point[2];
     uint32_t max_mastering_luminance;
     uint32_t min_mastering_luminance;
-
-#ifdef RPI
-    int dblk_cmds[RPI_MAX_JOBS][RPI_MAX_DEBLOCK_CMDS][2];
-#endif
 } HEVCContext;
 
 int ff_hevc_decode_nal_sei(HEVCContext *s);

@@ -82,6 +82,12 @@ void ff_hevc_add_residual_16x16_neon_8(uint8_t *_dst, int16_t *coeffs,
 void ff_hevc_add_residual_32x32_neon_8(uint8_t *_dst, int16_t *coeffs,
                                        ptrdiff_t stride);
 
+void ff_hevc_add_residual_4x4_dc_neon_8(uint8_t *_dst, ptrdiff_t stride, int dc);
+void ff_hevc_add_residual_8x8_dc_neon_8(uint8_t *_dst, ptrdiff_t stride, int dc);
+void ff_hevc_add_residual_16x16_dc_neon_8(uint8_t *_dst, ptrdiff_t stride, int dc);
+void ff_hevc_add_residual_32x32_dc_neon_8(uint8_t *_dst, ptrdiff_t stride, int dc);
+
+
 void ff_hevc_add_residual_4x4_neon_10(uint8_t *_dst, int16_t *coeffs,
                                      ptrdiff_t stride);
 void ff_hevc_add_residual_8x8_neon_10(uint8_t *_dst, int16_t *coeffs,
@@ -91,46 +97,57 @@ void ff_hevc_add_residual_16x16_neon_10(uint8_t *_dst, int16_t *coeffs,
 void ff_hevc_add_residual_32x32_neon_10(uint8_t *_dst, int16_t *coeffs,
                                        ptrdiff_t stride);
 
+void ff_hevc_add_residual_4x4_dc_neon_10(uint8_t *_dst, ptrdiff_t stride, int dc);
+void ff_hevc_add_residual_8x8_dc_neon_10(uint8_t *_dst, ptrdiff_t stride, int dc);
+void ff_hevc_add_residual_16x16_dc_neon_10(uint8_t *_dst, ptrdiff_t stride, int dc);
+void ff_hevc_add_residual_32x32_dc_neon_10(uint8_t *_dst, ptrdiff_t stride, int dc);
+
 
 #if RPI_HEVC_SAND
 void ff_hevc_add_residual_4x4_u_neon_8(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_v);
 void ff_hevc_add_residual_8x8_u_neon_8(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_v);
 void ff_hevc_add_residual_16x16_u_neon_8(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_v);
 void ff_hevc_add_residual_4x4_v_neon_8(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_u);
 void ff_hevc_add_residual_8x8_v_neon_8(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_u);
 void ff_hevc_add_residual_16x16_v_neon_8(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_u);
 void ff_hevc_add_residual_4x4_c_neon_8(uint8_t *_dst, const int16_t * residual,
                                        ptrdiff_t stride);
 void ff_hevc_add_residual_8x8_c_neon_8(uint8_t *_dst, const int16_t * residual,
                                        ptrdiff_t stride);
 void ff_hevc_add_residual_16x16_c_neon_8(uint8_t *_dst, const int16_t * residual,
                                        ptrdiff_t stride);
+void ff_hevc_add_residual_4x4_dc_c_neon_8(uint8_t *_dst, ptrdiff_t stride, int32_t dc);
+void ff_hevc_add_residual_8x8_dc_c_neon_8(uint8_t *_dst, ptrdiff_t stride, int32_t dc);
+void ff_hevc_add_residual_16x16_dc_c_neon_8(uint8_t *_dst, ptrdiff_t stride, int32_t dc);
 
 
 void ff_hevc_add_residual_4x4_u_neon_10(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_v);
 void ff_hevc_add_residual_8x8_u_neon_10(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_v);
 void ff_hevc_add_residual_16x16_u_neon_10(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_v);
 void ff_hevc_add_residual_4x4_v_neon_10(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_u);
 void ff_hevc_add_residual_8x8_v_neon_10(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_u);
 void ff_hevc_add_residual_16x16_v_neon_10(uint8_t *_dst, const int16_t * residual,
-                                       ptrdiff_t stride);
+                                       ptrdiff_t stride, int dc_u);
 void ff_hevc_add_residual_4x4_c_neon_10(uint8_t *_dst, const int16_t * residual,
                                        ptrdiff_t stride);
 void ff_hevc_add_residual_8x8_c_neon_10(uint8_t *_dst, const int16_t * residual,
                                        ptrdiff_t stride);
 void ff_hevc_add_residual_16x16_c_neon_10(uint8_t *_dst, const int16_t * residual,
                                        ptrdiff_t stride);
+void ff_hevc_add_residual_4x4_dc_c_neon_10(uint8_t *_dst, ptrdiff_t stride, int32_t dc);
+void ff_hevc_add_residual_8x8_dc_c_neon_10(uint8_t *_dst, ptrdiff_t stride, int32_t dc);
+void ff_hevc_add_residual_16x16_dc_c_neon_10(uint8_t *_dst, ptrdiff_t stride, int32_t dc);
 #endif
 
 void ff_hevc_sao_edge_8_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height);
@@ -452,6 +469,10 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual[1]             = ff_hevc_add_residual_8x8_neon_8;
         c->add_residual[2]             = ff_hevc_add_residual_16x16_neon_8;
         c->add_residual[3]             = ff_hevc_add_residual_32x32_neon_8;
+        c->add_residual_dc[0]          = ff_hevc_add_residual_4x4_dc_neon_8;
+        c->add_residual_dc[1]          = ff_hevc_add_residual_8x8_dc_neon_8;
+        c->add_residual_dc[2]          = ff_hevc_add_residual_16x16_dc_neon_8;
+        c->add_residual_dc[3]          = ff_hevc_add_residual_32x32_dc_neon_8;
 #if RPI_HEVC_SAND
         c->add_residual_u[0]           = ff_hevc_add_residual_4x4_u_neon_8;
         c->add_residual_u[1]           = ff_hevc_add_residual_8x8_u_neon_8;
@@ -462,6 +483,9 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[0]           = ff_hevc_add_residual_4x4_c_neon_8;
         c->add_residual_c[1]           = ff_hevc_add_residual_8x8_c_neon_8;
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_8;
+        c->add_residual_dc_c[0]        = ff_hevc_add_residual_4x4_dc_c_neon_8;
+        c->add_residual_dc_c[1]        = ff_hevc_add_residual_8x8_dc_c_neon_8;
+        c->add_residual_dc_c[2]        = ff_hevc_add_residual_16x16_dc_c_neon_8;
 #endif
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_8;
         c->sao_band_filter[0]          = ff_hevc_sao_band_8_neon_8;
@@ -590,6 +614,10 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual[1]             = ff_hevc_add_residual_8x8_neon_10;
         c->add_residual[2]             = ff_hevc_add_residual_16x16_neon_10;
         c->add_residual[3]             = ff_hevc_add_residual_32x32_neon_10;
+        c->add_residual_dc[0]          = ff_hevc_add_residual_4x4_dc_neon_10;
+        c->add_residual_dc[1]          = ff_hevc_add_residual_8x8_dc_neon_10;
+        c->add_residual_dc[2]          = ff_hevc_add_residual_16x16_dc_neon_10;
+        c->add_residual_dc[3]          = ff_hevc_add_residual_32x32_dc_neon_10;
 #if RPI_HEVC_SAND
         c->add_residual_u[0]           = ff_hevc_add_residual_4x4_u_neon_10;
         c->add_residual_u[1]           = ff_hevc_add_residual_8x8_u_neon_10;
@@ -600,6 +628,9 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->add_residual_c[0]           = ff_hevc_add_residual_4x4_c_neon_10;
         c->add_residual_c[1]           = ff_hevc_add_residual_8x8_c_neon_10;
         c->add_residual_c[2]           = ff_hevc_add_residual_16x16_c_neon_10;
+        c->add_residual_dc_c[0]        = ff_hevc_add_residual_4x4_dc_c_neon_10;
+        c->add_residual_dc_c[1]        = ff_hevc_add_residual_8x8_dc_c_neon_10;
+        c->add_residual_dc_c[2]        = ff_hevc_add_residual_16x16_dc_c_neon_10;
 #endif
         c->transform_4x4_luma          = ff_hevc_transform_luma_4x4_neon_10;
         c->sao_band_filter[0]          = ff_hevc_sao_band_8_neon_10;
