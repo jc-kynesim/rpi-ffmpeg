@@ -93,24 +93,21 @@ function ff_hevc_add_residual_32x32_neon_8, export=1
 endfunc
 
 
-@ ff_hevc_add_residual_8x8_dc_neon_8(
+@ ff_hevc_add_residual_4x4_dc_neon_8(
 @   uint8_t * dst,              // [r0]
 @   unsigned int stride,        // [r1]
 @   int dc)                     // [r2]
 
 function ff_hevc_add_residual_4x4_dc_neon_8, export=1
         vdup.16     q15, r2
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
         vld1.32     d4[0], [r0], r1
         vld1.32     d4[1], [r0], r1
         vld1.32     d5[0], [r0], r1
         vld1.32     d5[1], [r0], r1
         sub         r0, r0, r1, lsl #2
-        vmovl.u8    q8, d4
-        vmovl.u8    q9, d5
-        vqadd.s16   q0, q8, q15
-        vqadd.s16   q1, q9, q15
+        vaddw.u8    q0, q15, d4
+        vaddw.u8    q1, q15, d5
         vqmovun.s16 d0, q0
         vqmovun.s16 d1, q1
         vst1.32     d0[0], [r0], r1
@@ -121,6 +118,17 @@ function ff_hevc_add_residual_4x4_dc_neon_8, export=1
 endfunc
 
 
+@ ff_hevc_add_residual_4x4_dc_c_neon_8(
+@   uint8_t * dst,              // [r0]
+@   unsigned int stride,        // [r1]
+@   int dc)                     // [r2]
+
+function ff_hevc_add_residual_4x4_dc_c_neon_8, export=1
+        vdup.32     q15, r2
+        mov         r3,  #4
+        b           1f
+endfunc
+
 @ ff_hevc_add_residual_8x8_dc_neon_8(
 @   uint8_t * dst,              // [r0]
 @   unsigned int stride,        // [r1]
@@ -129,18 +137,27 @@ endfunc
 function ff_hevc_add_residual_8x8_dc_neon_8, export=1
         vdup.16     q15, r2
         mov         r3,  #8
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
 1:      subs        r3,   #1
         vld1.8      d16,  [r0]
-        vmovl.u8    q8,   d16
-        vqadd.s16   q0,   q8, q15
+        vaddw.u8    q0,   q15, d16
         vqmovun.s16 d0,   q0
         vst1.32     d0,   [r0], r1
         bne         1b
         bx          lr
 endfunc
 
+
+@ ff_hevc_add_residual_8x8_dc_c_neon_8(
+@   uint8_t * dst,              // [r0]
+@   unsigned int stride,        // [r1]
+@   int dc)                     // [r2]
+
+function ff_hevc_add_residual_8x8_dc_c_neon_8, export=1
+        vdup.32     q15, r2
+        mov         r3,  #8
+        b           1f
+endfunc
 
 @ ff_hevc_add_residual_16x16_dc_neon_8(
 @   uint8_t * dst,              // [r0]
@@ -150,14 +167,11 @@ endfunc
 function ff_hevc_add_residual_16x16_dc_neon_8, export=1
         vdup.16     q15, r2
         mov         r3,  #16
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
 1:      subs        r3,   #1
         vld1.8      {q8},  [r0]
-        vmovl.u8    q9,  d16
-        vmovl.u8    q10, d17
-        vqadd.s16   q0,  q9,  q15
-        vqadd.s16   q1,  q10, q15
+        vaddw.u8    q0,  q15, d16
+        vaddw.u8    q1,  q15, d17
         vqmovun.s16 d0,  q0
         vqmovun.s16 d1,  q1
         vst1.8      {q0},   [r0], r1
@@ -165,6 +179,17 @@ function ff_hevc_add_residual_16x16_dc_neon_8, export=1
         bx          lr
 endfunc
 
+
+@ ff_hevc_add_residual_16x16_dc_c_neon_8(
+@   uint8_t * dst,              // [r0]
+@   unsigned int stride,        // [r1]
+@   int dc)                     // [r2]
+
+function ff_hevc_add_residual_16x16_dc_c_neon_8, export=1
+        vdup.32     q15, r2
+        mov         r3,  #16
+        b           1f
+endfunc
 
 @ ff_hevc_add_residual_32x32_dc_neon_8(
 @   uint8_t * dst,              // [r0]
@@ -174,18 +199,13 @@ endfunc
 function ff_hevc_add_residual_32x32_dc_neon_8, export=1
         vdup.16     q15, r2
         mov         r3,  #32
-        vrshr.s16   q15, #7     @ 15 - BIT_DEPTH
 
 1:      subs        r3,   #1
         vld1.8      {q8, q9},  [r0]
-        vmovl.u8    q10, d16
-        vmovl.u8    q11, d17
-        vmovl.u8    q12, d18
-        vmovl.u8    q13, d19
-        vqadd.s16   q0,  q10, q15
-        vqadd.s16   q1,  q11, q15
-        vqadd.s16   q2,  q12, q15
-        vqadd.s16   q3,  q13, q15
+        vaddw.u8    q0,  q15, d16
+        vaddw.u8    q1,  q15, d17
+        vaddw.u8    q2,  q15, d18
+        vaddw.u8    q3,  q15, d19
         vqmovun.s16 d0,  q0
         vqmovun.s16 d1,  q1
         vqmovun.s16 d2,  q2
