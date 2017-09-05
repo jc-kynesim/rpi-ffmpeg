@@ -25,6 +25,7 @@
 
 #ifdef RPI
 #define RPI_DISPLAY
+#define RPI_DISPLAY_ALL 0
 #endif
 
 #include "config.h"
@@ -374,10 +375,11 @@ static void display_frame(struct AVCodecContext * const s, rpi_display_env_t * c
         buf->alloc_size = av_rpi_zc_numbytes(fr_buf);
         avpriv_atomic_int_add_and_fetch(&de->rpi_display_count, 1);
     }
-
+#if RPI_DISPLAY_ALL
     while (avpriv_atomic_int_get(&de->rpi_display_count) >= DISPLAY_PORT_DEPTH - 1) {
         usleep(5000);
     }
+#endif
 
     if (mmal_port_send_buffer(de->port_in, buf) != MMAL_SUCCESS)
     {

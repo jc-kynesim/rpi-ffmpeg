@@ -467,6 +467,7 @@ typedef struct HEVCLocalContext {
 // but allocate more memory and increase the latency before data in the next frame can be processed
 #define RPI_NUM_CHUNKS 4
 #define RPI_CHUNK_SIZE 12
+#define RPI_ROUND_TO_LINES 0
 
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
 #define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*RPI_CHUNK_SIZE)

@@ -458,7 +458,12 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     const int coefs_per_row = coefs_per_luma + coefs_per_chroma;
 
     av_assert0(sps);
-    s->max_ctu_count = FFMIN(coefs_per_luma / coefs_in_ctb, sps->ctb_width);
+    s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
+#if RPI_ROUND_TO_LINES
+    // Round down to an integral quantity of lines
+    if (s->max_ctu_count > sps->ctb_width)
+        s->max_ctu_count -= s->max_ctu_count % sps->ctb_width;
+#endif
 
     if (worker_pic_alloc_all(s, coefs_per_row) != 0)
         goto fail;
@@ -3679,7 +3684,7 @@ static void rpi_begin(HEVCContext *s)
         u->pic_cw = pic_width_c;
         u->pic_ch = pic_height_c;
         u->stride2 = av_rpi_sand_frame_stride2(s->frame);
-        u->stride1 = s->frame->linesize[1];
+        u->stride1 = av_rpi_sand_frame_stride1(s->frame);
         u->wdenom = s->sh.chroma_log2_weight_denom;
         cp->last_l0 = &u->next_src1;
 
@@ -3706,7 +3711,7 @@ static void rpi_begin(HEVCContext *s)
         y->pic_h = pic_height_y;
         y->pic_w = pic_width_y;
         y->stride2 = av_rpi_sand_frame_stride2(s->frame);
-        y->stride1 = s->frame->linesize[0];
+        y->stride1 = av_rpi_sand_frame_stride1(s->frame);
         y->wdenom = s->sh.luma_log2_weight_denom;
         y->next_fn = 0;
         yp->last_l0 = &y->next_src1;
@@ -3847,6 +3852,7 @@ static void worker_core(HEVCContext * const s)
     unsigned int flush_start = 0;
     unsigned int flush_count = 0;
     HEVCRpiJob * const jb = s->jb1;
+    int pred_y, pred_c;
 
     const vpu_qpu_job_h vqj = vpu_qpu_job_new();
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
@@ -3868,27 +3874,7 @@ static void worker_core(HEVCContext * const s)
         }
     }
 
-#if RPI_INTER
-    {
-        const HEVCRpiDeblkEnv *const de = &jb->deblk;
-        unsigned int i;
-        unsigned int high = de->blks[0].y_ctb;
-
-        flush_start = high;
-        for (i = 1; i < de->n; ++i)
-        {
-            const unsigned int y = de->blks[i].y_ctb;
-            flush_start = FFMIN(flush_start, y);
-            high = FFMAX(high, y);
-        }
-        flush_count = FFMIN(high + (1 << s->ps.sps->log2_ctb_size), s->ps.sps->height) - flush_start;
-    }
-
-    if (mc_terminate_add_c(s, vqj, rfe, &jb->chroma_ip) != 0)
-    {
-        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
-          0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 0, 1);
-    }
+    pred_c = mc_terminate_add_c(s, vqj, rfe, &jb->chroma_ip);
 
 // We can take a sync here and try to locally overlap QPU processing with ARM
 // but testing showed a slightly negative benefit with noticable extra complexity
@@ -3896,14 +3882,74 @@ static void worker_core(HEVCContext * const s)
     vpu_qpu_job_add_sync_this(vqj, &sync_c);
 #endif
 
-    if (mc_terminate_add_y(s, vqj, rfe, &jb->luma_ip) != 0)
-    {
-        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
-          0, flush_start, s->ps.sps->width, flush_count, s->ps.sps->vshift[1], 1, 0);
-    }
-#endif
+    pred_y = mc_terminate_add_y(s, vqj, rfe, &jb->luma_ip);
 
     vpu_qpu_job_add_sync_this(vqj, &sync_y);
+
+
+    // We are expecting a contiguous Z-shaped set of blocks
+    // So generate up to 3 blocks:
+    //   1st line
+    //   body
+    //   last line
+    // This will work even if we don't have the expected geometry
+    if (pred_y || pred_c)
+    {
+        const HEVCRpiDeblkEnv *const de = &jb->deblk;
+        const HEVCRpiDeblkBlk * db = de->blks + 0;
+        const unsigned int ctb_size = 1 << s->ps.sps->log2_ctb_size;
+        unsigned int x0 = db->x_ctb;
+        unsigned int xx = x0 + ctb_size;
+        unsigned int y0 = db->y_ctb;
+
+        unsigned int blks_tlbr[3][4] = {{~0U, ~0U, 0, 0}, {~0U, ~0U, 0, 0}, {~0U, ~0U, 0, 0}};
+        unsigned int b = 0;
+        unsigned int i;
+
+        for (i = 1, ++db; i < de->n; ++i, ++db)
+        {
+            if (db->x_ctb == xx && db->y_ctb == y0) {
+                xx += ctb_size;
+            }
+            else
+            {
+                unsigned int * const tlbr = blks_tlbr[b];
+//                printf("%d->%d,%d\n", x0, xx, y0);
+                if (tlbr[0] > y0)
+                    tlbr[0] = y0;
+                if (tlbr[1] > x0)
+                    tlbr[1] = x0;
+                if (tlbr[2] < y0 + ctb_size)
+                    tlbr[2] = y0 + ctb_size;
+                if (tlbr[3] < xx)
+                    tlbr[3] = xx;
+                x0 = db->x_ctb;
+                xx = x0 + ctb_size;
+                y0 = db->y_ctb;
+                b = 1;
+            }
+        }
+
+        if (blks_tlbr[b][0] != ~0U)
+            ++b;
+
+        {
+            unsigned int * const tlbr = blks_tlbr[b];
+            tlbr[0] = y0;
+            tlbr[1] = x0;
+            tlbr[2] = y0 + ctb_size;
+            tlbr[3] = xx;
+        }
+
+        // ??? Coalesce blocks ???
+        for (i = 0; i <= b; ++i) {
+            const unsigned int * const tlbr = blks_tlbr[i];
+//            printf("tlbr[%d]=%d,%d,%d,%d\n", i, tlbr[0], tlbr[1], tlbr[2], tlbr[3]);
+            rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
+              tlbr[1], tlbr[0], tlbr[3] - tlbr[1], tlbr[2] - tlbr[0], s->ps.sps->vshift[1], pred_y, pred_c);
+        }
+    }
+
 
     // Having accumulated some commands - do them
     rpi_cache_flush_finish(rfe);
@@ -3911,10 +3957,7 @@ static void worker_core(HEVCContext * const s)
 
     worker_pic_reset(&jb->coeffs);
 
-    // We would do ARM inter prediction here but no longer
-    // Look back in git if you find you want it back - As we have
-    // no arm/neon sand pred code there doesn't seem a lot of point
-    // keeping it around
+    // If we have emulated VPU ops - do it here
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
     if (av_rpi_is_sand8_frame(s->frame))
 #if RPI_QPU_EMU_Y && RPI_QPU_EMU_C
@@ -4038,7 +4081,7 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
 #ifdef RPI
         if (s->enable_rpi) {
-            int q_full = (s->ctu_count >= s->max_ctu_count);
+            int q_full = (++s->ctu_count >= s->max_ctu_count);
 
             if (rpi_inter_pred_next_ctu(&s->jb0->luma_ip) != 0)
                 q_full = 1;
@@ -4047,7 +4090,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
             s->jb0->deblk.blks[s->jb0->deblk.n].x_ctb = x_ctb;
             s->jb0->deblk.blks[s->jb0->deblk.n++].y_ctb = y_ctb;
-            s->ctu_count++;
 
             if (q_full) {
 #ifdef RPI_WORKER
