@@ -498,27 +498,33 @@ int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
     return rc;
 }
 
+inline void rpi_cache_flush_add_gm_blocks(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
+  const unsigned int offset0, const unsigned int block_size, const unsigned int blocks, const unsigned int block_stride)
+{
+    struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
+
+    av_assert0(rfe->v.op_count < CACHE_EL_MAX);
+
+    b->invalidate_mode = mode;
+    b->block_count = blocks;
+    b->start_address = gm->arm + offset0;
+    b->block_size = block_size;
+    b->inter_block_stride = block_stride;
+}
+
 void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
   const unsigned int offset, const unsigned int size)
 {
     // Deal with empty pointer trivially
-    if (gm == NULL || gm->numbytes == 0)
+    if (gm == NULL || size == 0)
         return;
 
-    av_assert0(rfe->v.op_count < CACHE_EL_MAX - 1);
     av_assert0(offset <= gm->numbytes);
     av_assert0(size <= gm->numbytes);
     av_assert0(offset + size <= gm->numbytes);
 
 #if 1
-    {
-      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
-      b->invalidate_mode = mode;
-      b->block_count = 1;
-      b->start_address = gm->arm + offset;
-      b->block_size = size;
-      b->inter_block_stride = 0;
-    }
+    rpi_cache_flush_add_gm_blocks(rfe, gm, mode, offset, size, 1, 0);
 #else
     if (mode == RPI_CACHE_FLUSH_MODE_WRITEBACK || mode == RPI_CACHE_FLUSH_MODE_WB_INVALIDATE)
     {

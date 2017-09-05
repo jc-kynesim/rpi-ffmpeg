@@ -3737,6 +3737,8 @@ static unsigned int mc_terminate_add_qpu(HEVCContext * const s,
 {
     unsigned int i;
     uint32_t mail[QPU_N_MAX][QPU_MAIL_EL_VALS];
+    unsigned int max_block = 0;
+
     if (!ipe->used) {
         return 0;
     }
@@ -3750,6 +3752,10 @@ static unsigned int mc_terminate_add_qpu(HEVCContext * const s,
         HEVCRpiInterPredQ * const yp = ipe->q + i;
         qpu_mc_src_t *const p0 = yp->last_l0;
         qpu_mc_src_t *const p1 = yp->last_l1;
+        const unsigned int block_size = (char *)yp->qpu_mc_curr - (char *)yp->qpu_mc_base;
+
+        if (block_size > max_block)
+            max_block = block_size;
 
         ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
 
@@ -3770,7 +3776,16 @@ static unsigned int mc_terminate_add_qpu(HEVCContext * const s,
     }
 
 #if RPI_CACHE_UNIF_MVS
-    rpi_cache_flush_add_gm_ptr(rfe, &ipe->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+    // We don't need invalidate here as the uniforms aren't changed by the QPU
+    // and leaving them in ARM cache avoids (pointless) pre-reads when writing
+    // new values which seems to give us a small performance advantage
+    //
+    // In most cases we will not have a completely packed set of uniforms and as
+    // we have a 2d invalidate we writeback all uniform Qs to the depth of the
+    // fullest
+    rpi_cache_flush_add_gm_blocks(rfe, &ipe->gptr, RPI_CACHE_FLUSH_MODE_WRITEBACK,
+                                  (uint8_t *)ipe->q[0].qpu_mc_base - ipe->gptr.arm, max_block,
+                                  ipe->n, ipe->max_fill + ipe->min_gap);
 #endif
     vpu_qpu_job_add_qpu(vqj, ipe->n, (uint32_t *)mail);
 
@@ -3849,8 +3864,6 @@ static void worker_core(HEVCContext * const s)
 #endif
     vpu_qpu_wait_h sync_y;
 
-    unsigned int flush_start = 0;
-    unsigned int flush_count = 0;
     HEVCRpiJob * const jb = s->jb1;
     int pred_y, pred_c;
 
@@ -3861,16 +3874,19 @@ static void worker_core(HEVCContext * const s)
         const HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
         if (cf->s[3].n + cf->s[2].n != 0)
         {
+            const unsigned int csize = sizeof(cf->s[3].buf[0]);
+            const unsigned int offset32 = ((cf->s[3].buf - cf->s[2].buf) - cf->s[3].n) * csize;
             vpu_qpu_job_add_vpu(vqj,
                 vpu_get_fn(s->ps.sps->bit_depth),
                 vpu_get_constants(),
                 cf->gptr.vc,
                 cf->s[2].n >> 8,
-                cf->gptr.vc + ((cf->s[3].buf - cf->s[2].buf) - cf->s[3].n) * sizeof(cf->s[3].buf[0]),
+                cf->gptr.vc + offset32,
                 cf->s[3].n >> 10,
                 0);
 
-            rpi_cache_flush_add_gm_ptr(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+            rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, 0, cf->s[2].n * csize);
+            rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, offset32, cf->s[3].n * csize);
         }
     }
 
@@ -3914,7 +3930,6 @@ static void worker_core(HEVCContext * const s)
             else
             {
                 unsigned int * const tlbr = blks_tlbr[b];
-//                printf("%d->%d,%d\n", x0, xx, y0);
                 if (tlbr[0] > y0)
                     tlbr[0] = y0;
                 if (tlbr[1] > x0)
@@ -3944,7 +3959,6 @@ static void worker_core(HEVCContext * const s)
         // ??? Coalesce blocks ???
         for (i = 0; i <= b; ++i) {
             const unsigned int * const tlbr = blks_tlbr[i];
-//            printf("tlbr[%d]=%d,%d,%d,%d\n", i, tlbr[0], tlbr[1], tlbr[2], tlbr[3]);
             rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
               tlbr[1], tlbr[0], tlbr[3] - tlbr[1], tlbr[2] - tlbr[0], s->ps.sps->vshift[1], pred_y, pred_c);
         }
