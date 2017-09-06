@@ -2510,7 +2510,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
         // current dest block and mono-pred.
 
         qpu_mc_pred_y_p_t *const last_y8_p = s->last_y8_p;
-        if (last_y8_p != NULL && last_y8_p->h == bh && last_y8_p->dst_addr + 8 == dst_addr)
+        if (last_y8_p != NULL && last_y8_p->h == bh && last_y8_p->dst_addr + (8 << xshl) == dst_addr)
         {
             const int bw = FFMIN(nPbW, 8);
             qpu_mc_src_t *const last_y8_src2 = s->last_y8_l1;
