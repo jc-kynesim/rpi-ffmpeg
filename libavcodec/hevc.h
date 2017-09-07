@@ -33,8 +33,6 @@
   #include "rpi_qpu.h"
   #define RPI_INTER          1          // 0 use ARM for UV inter-pred, 1 use QPU
 
-  // Define RPI_WORKER to launch a worker thread for pixel processing tasks
-  #define RPI_WORKER
   // By passing jobs to a worker thread we hope to be able to catch up during slow frames
   // This has no effect unless RPI_WORKER is defined
   // N.B. The extra thread count is effectively RPI_MAX_JOBS - 1 as

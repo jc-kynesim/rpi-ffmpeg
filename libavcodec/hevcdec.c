@@ -53,12 +53,7 @@
   // Define RPI_CACHE_UNIF_MVS to write motion vector uniform stream to cached memory
   #define RPI_CACHE_UNIF_MVS  1
 
-  // Define RPI_SIMULATE_QPUS for debugging to run QPU code on the ARMs (*rotted*)
-  //#define RPI_SIMULATE_QPUS
-  #ifdef RPI_WORKER
-    #include "pthread.h"
-  #endif
-
+  #include "pthread.h"
   #include "libavutil/atomic.h"
 
   static void worker_core(HEVCContext * const s);
@@ -242,7 +237,7 @@ static void rpi_hevc_qpu_set_fns(HEVCContext * const s, const unsigned int bit_d
 #endif
 
 
-#ifdef RPI_WORKER
+#ifdef RPI
 
 //#define LOG_ENTER printf("Enter %s: p0=%d p1=%d (%d jobs) %p\n", __func__,s->pass0_job,s->pass1_job,s->worker_tail-s->worker_head,s);
 //#define LOG_EXIT printf("Exit %s: p0=%d p1=%d (%d jobs) %p\n", __func__,s->pass0_job,s->pass1_job,s->worker_tail-s->worker_head,s);
@@ -327,8 +322,6 @@ static void *worker_start(void *arg)
     return NULL;
 }
 
-#endif
-
 static void worker_pic_free_all(HEVCContext * const s)
 {
     unsigned int i;
@@ -386,6 +379,7 @@ static void worker_pic_reset(HEVCRpiCoeffsEnv * const cf)
         cf->s[i].n = 0;
     }
 }
+#endif
 
 
 /**
@@ -400,7 +394,9 @@ static void worker_pic_reset(HEVCRpiCoeffsEnv * const cf)
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCContext *s)
 {
+#ifdef RPI
     worker_pic_free_all(s);
+#endif
 
 #ifdef RPI_DEBLOCK_VPU
     {
@@ -3585,7 +3581,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s)
   int i;
   HEVCRpiIntraPredEnv * iap = &s->jb1->intra;
   const HEVCPredCmd *cmd = iap->cmds;
-#ifdef RPI_WORKER
+#ifdef RPI
   HEVCLocalContextIntra *lc = &s->HEVClcIntra;
 #else
   HEVCLocalContext *lc = s->HEVClc;
@@ -4062,12 +4058,9 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         }
     }
 
-#ifdef RPI_WORKER
+#ifdef RPI
     // Worker must be idle at start
     av_assert0(s->pass0_job == s->pass1_job && s->jb0 == s->jb1 && !s->jb0->pending);
-#endif
-
-#ifdef RPI
     rpi_begin(s);
 #endif
 
@@ -4106,7 +4099,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
             s->jb0->deblk.blks[s->jb0->deblk.n++].y_ctb = y_ctb;
 
             if (q_full) {
-#ifdef RPI_WORKER
                 if (s->used_for_ref)
                 {
 //                  printf("%d %d/%d job=%d, x,y=%d,%d\n",s->ctu_count,s->num_dblk_cmds[s->pass0_job],RPI_MAX_DEBLOCK_CMDS,s->pass0_job, x_ctb, y_ctb);
@@ -4125,9 +4117,6 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
                     // Non-ref frame so do it all on this thread
                     rpi_do_all_passes(s);
                 }
-#else
-                rpi_do_all_passes(s);
-#endif
             }
 
         }
@@ -4151,12 +4140,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
 #ifdef RPI
 
-#ifdef RPI_WORKER
     // Wait for the worker to finish all its jobs
     if (s->enable_rpi) {
         worker_wait(s);
     }
-#endif
 
     // Finish off any half-completed rows
     if (s->enable_rpi && s->ctu_count) {
@@ -5015,7 +5002,7 @@ fail:
     return AVERROR(ENOMEM);
 }
 
-#ifdef RPI_WORKER
+#ifdef RPI
 static av_cold void hevc_init_worker(HEVCContext * const s)
 {
     int err;
@@ -5103,10 +5090,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
 #ifdef RPI
 
-#ifdef RPI_WORKER
     hevc_exit_worker(s);
-#endif
-
     vpu_qpu_term();
 
     av_rpi_zc_uninit(avctx);
@@ -5190,10 +5174,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     s->enable_rpi = 0;
 
-#ifdef RPI_WORKER
     hevc_init_worker(s);
-#endif
-
 #endif
 
     s->cabac_state = av_malloc(HEVC_CONTEXTS);

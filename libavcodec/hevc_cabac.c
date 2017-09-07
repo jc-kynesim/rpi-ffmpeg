@@ -1670,6 +1670,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
 #endif
 #ifdef RPI
     int use_vpu;
+    int use_dc = 0;
 #endif
     int16_t *coeffs;
     uint8_t significant_coeff_group_flag[9] = {0};  // Allow 1 final byte that is always zero
@@ -1689,7 +1690,6 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
     const int c_idx_nz = (c_idx != 0);
 
     int may_hide_sign;
-    int use_dc = 0;
 
     // Derive QP for dequant
     if (!lc->cu.cu_transquant_bypass_flag) {
@@ -1901,7 +1901,7 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
         use_vpu = 0;
         if (s->enable_rpi) {
             const int special = trans_skip_or_bypass || lc->tu.cross_pf;  // These need special processinmg
-            use_dc = num_coeff == 1 && !special &&
+            use_dc = (num_coeff == 1) && !special &&
                 !(lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2);
 
             if (use_dc) {
@@ -2255,13 +2255,12 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
             int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
             if (max_xy == 0)
             {
-                if (!use_dc) {  // This still needs a real coeff buf
-                    s->hevcdsp.idct_dc[log2_trafo_size - 2](coeffs);
-                }
-                else
-                {
+#ifdef RPI
+                if (use_dc)
                     rpi_add_dc(s, log2_trafo_size, c_idx, x0, y0, coeffs);
-                }
+                else
+#endif
+                    s->hevcdsp.idct_dc[log2_trafo_size - 2](coeffs);
             }
             else {
                 int col_limit = last_significant_coeff_x + last_significant_coeff_y + 4;

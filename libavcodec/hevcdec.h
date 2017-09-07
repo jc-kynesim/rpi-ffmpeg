@@ -410,7 +410,7 @@ typedef struct HEVCFrame {
     uint8_t flags;
 } HEVCFrame;
 
-#ifdef RPI_WORKER
+#ifdef RPI
 typedef struct HEVCLocalContextIntra {
     TransformUnit tu;
     NeighbourAvailable na;
@@ -657,9 +657,6 @@ typedef struct HEVCContext {
 
     HEVCLocalContext    *HEVClcList[MAX_NB_THREADS];
     HEVCLocalContext    *HEVClc;
-#ifdef RPI_WORKER
-    HEVCLocalContextIntra HEVClcIntra;
-#endif
 
     uint8_t             threads_type;
     uint8_t             threads_number;
@@ -695,9 +692,7 @@ typedef struct HEVCContext {
     HEVCRpiQpu qpu;
 #endif
 
-#ifdef RPI_WORKER
     pthread_t worker_thread;
-#endif
 
 #ifdef RPI_DEBLOCK_VPU
 #define RPI_DEBLOCK_VPU_Q_COUNT 2
@@ -728,6 +723,7 @@ typedef struct HEVCContext {
     unsigned int dvq_n;
 
 #endif
+    HEVCLocalContextIntra HEVClcIntra;
 #endif
 
     uint8_t *cabac_state;
