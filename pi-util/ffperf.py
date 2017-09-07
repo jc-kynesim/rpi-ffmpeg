@@ -59,7 +59,11 @@ def common_prefix(s1, s2):
 def main():
     global flog
 
-    argp = argparse.ArgumentParser(description="FFmpeg performance tester")
+    argp = argparse.ArgumentParser(description="FFmpeg performance tester", epilog="""
+To blank the screen before starting use "xdg-screensaver activate"
+(For some reason this doesn't seem to work from within python).
+""")
+
     argp.add_argument("streams", nargs='*')
     argp.add_argument("--csv_out", default="ffperf_out.csv", help="CSV output filename")
     argp.add_argument("--csv_in", help="CSV input filename")

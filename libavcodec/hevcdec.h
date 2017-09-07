@@ -410,7 +410,7 @@ typedef struct HEVCFrame {
     uint8_t flags;
 } HEVCFrame;
 
-#ifdef RPI_WORKER
+#ifdef RPI
 typedef struct HEVCLocalContextIntra {
     TransformUnit tu;
     NeighbourAvailable na;
@@ -467,6 +467,7 @@ typedef struct HEVCLocalContext {
 // but allocate more memory and increase the latency before data in the next frame can be processed
 #define RPI_NUM_CHUNKS 4
 #define RPI_CHUNK_SIZE 12
+#define RPI_ROUND_TO_LINES 0
 
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
 #define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*RPI_CHUNK_SIZE)
@@ -656,9 +657,6 @@ typedef struct HEVCContext {
 
     HEVCLocalContext    *HEVClcList[MAX_NB_THREADS];
     HEVCLocalContext    *HEVClc;
-#ifdef RPI_WORKER
-    HEVCLocalContextIntra HEVClcIntra;
-#endif
 
     uint8_t             threads_type;
     uint8_t             threads_number;
@@ -694,9 +692,7 @@ typedef struct HEVCContext {
     HEVCRpiQpu qpu;
 #endif
 
-#ifdef RPI_WORKER
     pthread_t worker_thread;
-#endif
 
 #ifdef RPI_DEBLOCK_VPU
 #define RPI_DEBLOCK_VPU_Q_COUNT 2
@@ -727,6 +723,7 @@ typedef struct HEVCContext {
     unsigned int dvq_n;
 
 #endif
+    HEVCLocalContextIntra HEVClcIntra;
 #endif
 
     uint8_t *cabac_state;
