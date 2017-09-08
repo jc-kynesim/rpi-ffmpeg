@@ -3567,11 +3567,11 @@ static void rpi_execute_transform(HEVCContext *s)
 #endif
 
 
-// I-pred, transform_and_add for all blocks types done here
-// All ARM
 #define RPI_OPT_SEP_PRED 0
 
 
+// I-pred, transform_and_add for all blocks types done here
+// All ARM
 #if RPI_OPT_SEP_PRED
 static void rpi_execute_pred_cmds(HEVCContext * const s, const int do_luma, const int do_chroma)
 #else
