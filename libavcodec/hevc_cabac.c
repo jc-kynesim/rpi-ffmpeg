@@ -1487,22 +1487,21 @@ static inline int next_subset(HEVCContext * const s, int i, const int c_idx_nz,
     int * const pPrev_sig)
 {
     while (--i >= 0) {
-        unsigned int x_cg = scan_x_cg[i];
-        unsigned int y_cg = scan_y_cg[i];
+        uint8_t * const gf_y = scan_y_cg[i] + significant_coeff_group_flag;
+        const unsigned int x_cg = scan_x_cg[i];
 
         // For the flag decode we only care about Z/NZ but
-        // we use the full Right + Down * 2 when calculating
-        // significant coeff flags so we obtain it here
-        //.
+        // we use the full Right * 2 + Down when calculating
+        // significant coeff flags so we obtain it here.
+        //
         // The group flag array is one longer than it needs to
         // be so we don't need to check for y_cg limits
-        unsigned int prev_sig = ((significant_coeff_group_flag[y_cg] >> (x_cg + 1)) & 1) |
-            (((significant_coeff_group_flag[y_cg + 1] >> x_cg) & 1) << 1);
+        const unsigned int prev_sig = ((gf_y[0] >> x_cg) & 2) | ((gf_y[1] >> x_cg) & 1);
 
         if (i == 0 ||
             significant_coeff_group_flag_decode(s, c_idx_nz, prev_sig))
         {
-            significant_coeff_group_flag[y_cg] |= (1 << x_cg);
+            gf_y[0] |= (1 << x_cg);
             *pPrev_sig = prev_sig;
             break;
         }
@@ -1953,23 +1952,24 @@ void ff_hevc_hls_residual_coding(HEVCContext *s, int x0, int y0,
                 H4x4(0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8), // log2_trafo_size == 2
                 V4x4(0, 1, 4, 5, 2, 3, 4, 5, 6, 6, 8, 8, 7, 7, 8, 8)  // log2_trafo_size == 2
             };
+            // N.B. prev_sig = Right * 2 + Down
             static const uint8_t ctx_idx_maps[3][4][16] = {
                 {
                     D4x4(1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 0
-                    D4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 1
-                    D4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 2
+                    D4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 1
+                    D4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 2
                     D4x4(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)  // prev_sig == 3, default
                 },
                 {
                     H4x4(1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 0
-                    H4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 1
-                    H4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 2
+                    H4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 1
+                    H4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 2
                     H4x4(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)  // prev_sig == 3, default
                 },
                 {
                     V4x4(1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 0
-                    V4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 1
-                    V4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 2
+                    V4x4(2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0), // prev_sig == 1
+                    V4x4(2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0), // prev_sig == 2
                     V4x4(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2)  // prev_sig == 3, default
                 }
             };
