@@ -123,9 +123,9 @@
 # C:  (elem & 1) == 0 ? elem * 2 : (elem + 4) * 2
 .set rb_elem_x,                    rb2
 
-# rb3
-# C: Temp (U/V flag)
-# Y: free
+# El Flags
+# After adding to self we to have el even/odd on nc/c and lo/hi on nn/n
+.set rb_ef,                        rb3
 
 # rb4-7
 # C-B: L1 H filter out FIFO
@@ -273,6 +273,9 @@
 
 # Load first request location
   mov ra0, unif                                 # next_x_y
+
+  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
+  shl rb_ef, r0, i_shift30
 
   mov ra_base, unif                             # Store frame c base
 
@@ -489,11 +492,9 @@
   asr rb_wt_off, r1, 2
   sub ra3, rb_wt_den_p15, ra_k1
 
-  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
-  shl rb3, r0, i_shift30 ; mov ra_link, unif    # ; Link
+  nop                           ; mov ra_link, unif    # ; Link
 
 # r5           = 0 (loop counter)
-# rb3          = even/odd lo/hi el test value
 # ra9          = alias for rb_max_y
 # ra_wt_mul_l0 = weight L0
 # ra3          = weight denom + 22 - bit_depth [= rb_wt_den_p15 - 1, max 19]
@@ -512,12 +513,12 @@
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0   # loop counter increment
   shr r2, r4, vrx_xshift ; mov.ifz r3, vra_y_next
   shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
-  add.setf -, rb3, rb3  ; mov.ifz vra_base, vrx_base_next
+  add.setf -, rb_ef, rb_ef ; mov.ifz vra_base, vrx_base_next
 .else
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu1     # loop counter increment
   shr r2, r4, vrx_xshift ; mov.ifz vra_base, vrx_base_next
   shr r1, r2, v_v_shift ; mov.ifnz r3, vra_y
-  add.setf -, rb3, rb3  ; mov.ifz r3, vra_y_next
+  add.setf -, rb_ef, rb_ef ; mov.ifz r3, vra_y_next
 .endif
 
   add vra_y, r3, ra_k1   ; mov      r0, r1 << 15
@@ -722,17 +723,13 @@
 # rb8-rb11  V coeffs L1
 # ra9       rb_max_y alias
 
-  # This allows us to have el even/odd on nn/n and lo/hi on nc/c after add to self
-  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
-  shl rb3, r0, i_shift30
-
 :1
 # retrieve texture results and pick out bytes
 # then submit two more texture requests
   sub.setf -, r5, rb_i_tmu ; v8adds r5rep, r5, ra_k1 ; ldtmu0     # loop counter increment
   shr r2, r4, ra_xshift ; mov.ifz ra_base2, rb_base2_next
   shr r1, r2, v_v_shift ; mov.ifz ra_y_y2, ra_y_y2_next
-  add.setf -, rb3, rb3  ; mov.ifz ra_base, ra_base_next
+  add.setf -, rb_ef, rb_ef ; mov.ifz ra_base, ra_base_next
   add ra_y, 1, ra_y     ; mov r3, ra_y
 
   max r3, r3, ra_k0     ; mov      r0, r1 << 15
@@ -1010,6 +1007,9 @@
   mov ra11, unif                                # ref_y2_base
 
 # load constants
+  mov r0, [0,2,0,2,0,2,0,2,1,3,1,3,1,3,1,3]
+  shl rb_ef, r0, i_shift30
+
 
   mov ra_kff100100, 0xff100100
   mov rb_pmask, v_pmask
@@ -1138,8 +1138,8 @@
 .elif v_bit_depth == 10
   brr ra_link, r:per_block_setup_10
 .endif
-  mov ra0, unif         ; mov r3, elem_num  # y_x ; elem_num has implicit unpack??
-  mov.setf -, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1] # [ra0 delay]
+  mov ra0, unif         ; mov r3, elem_num      # y_x ; elem_num has implicit unpack??
+  add.setf -, rb_ef, rb_ef                      # [ra0 delay]
   add r0, ra0.16b, r3   ; mov rb_xshift2, rb_xshift2_next
 .endm
 
@@ -1196,7 +1196,7 @@
   add rb_dma0, r0, rb_dma0_base ; mov r0, unif  # ; Packed filter offsets
 
 # get filter coefficients and discard unused B frame values
-  shl.ifz r0, r0, i_shift16 ; mov ra_wt_off_mul_l0, unif     #  Pick half to use ; L0 offset/weight
+  shl.ifnn r0, r0, i_shift16 ; mov ra_wt_off_mul_l0, unif     #  Pick half to use ; L0 offset/weight
   shl ra8, r0, 3        ; mov r3, ra_k255
 
 # Pack the 1st 4 filter coefs for H & V tightly
@@ -1232,11 +1232,10 @@
   ror r0, r1, ra8.8d
   ror ra1.8c, r1, ra8.8c ; v8min rb6, r0, r3
 
-  mov.ifnz ra_wt_off_mul_l0, ra_wt_off_mul_l1 ; mov rb_dest, unif # ; Destination address
+  mov.ifn ra_wt_off_mul_l0, ra_wt_off_mul_l1 ; mov rb_dest, unif # ; Destination address
 
   mov r1,0x01010000  # -ve
   ror r0, r1, ra8.8d
-  mov rb3, [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
 
   bra -, ra_link
   ror ra1.8d, r1, ra8.8c ; v8min rb7, r0, r3
@@ -1247,7 +1246,6 @@
 # >>> branch ra_link
 
 # r5 = 0
-# rb3           = hi/lo el flag
 # ra_wt_mul_l1  = weight L1
 # ra5.16a       = weight L0/L1 depending on side (wanted for 2x mono-pred)
 # rb_wt_off     = (((is P) ? offset L0/L1 * 2 : offset L1 + offset L0) + 1) << (rb_wt_den_p15 - 1)
@@ -1294,25 +1292,25 @@
   add ra_y2, ra_y2, 1           ; mul24 r2, r2, r3
   add t1s, ra_base2, r2         ; v8min r0, r0, rb_pmask # v8subs masks out all but bottom byte
 
-  mov.setf -, rb3       ; mov ra8, ra9
+  add.setf -, rb_ef, rb_ef      ; mov ra8, ra9
 
 # apply horizontal filter
   and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,      r0
   nop                   ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
-  nop                   ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
+  nop                   ; mul24.ifn  r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 2, r0 << 2    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8d << 3, r0 << 3    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra0.8d << 11, r1 << 11  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8a << 4, r0 << 4    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8a << 12, r1 << 12  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8a << 12, r1 << 12  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8b << 5, r0 << 5    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8b << 13, r1 << 13  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8b << 13, r1 << 13  @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra1.8c << 6, r0 << 6    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
 
   sub.setf -, r5, 8     ; mov ra9,  ra10
   sub r2, r2, r3        ; mul24 r0, rb9,  ra2.8a
@@ -1405,25 +1403,25 @@
   add ra_y2, ra_y2, 1           ; mul24 r2, r2, r3
   add t1s, ra_base2, r2         ; v8min r0, r0, rb_pmask # v8subs masks out all but bottom byte
 
-  mov.setf -, rb3       ; mov ra8, ra9
+  add.setf -, rb_ef, rb_ef      ; mov ra8, ra9
 
 # apply horizontal filter
   and r1, r1, rb_pmask  ; mul24      r3, ra0.8a,      r0
   nop                   ; mul24      r2, ra0.8b << 1, r0 << 1    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
-  nop                   ; mul24.ifnz r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra0.8a << 8, r1 << 8    @ "mul_used", 0
+  nop                   ; mul24.ifn  r2, ra0.8b << 9, r1 << 9    @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8c << 2, r0 << 2    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra0.8c << 10, r1 << 10  @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra0.8d << 3, r0 << 3    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra0.8d << 11, r1 << 11  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra0.8d << 11, r1 << 11  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8a << 4, r0 << 4    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8a << 12, r1 << 12  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8a << 12, r1 << 12  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8b << 5, r0 << 5    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8b << 13, r1 << 13  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8b << 13, r1 << 13  @ "mul_used", 0
   sub r2, r2, r3        ; mul24      r3, ra1.8c << 6, r0 << 6    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8c << 14, r1 << 14  @ "mul_used", 0
   add r2, r2, r3        ; mul24      r3, ra1.8d << 7, r0 << 7    @ "mul_used", 0
-  nop                   ; mul24.ifnz r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
+  nop                   ; mul24.ifn  r3, ra1.8d << 15, r1 << 15  @ "mul_used", 0
 
   sub.setf -, r5, 8     ; mov ra9,  ra10
   sub r2, r2, r3        ; mul24 r0, rb9,  ra2.8a
@@ -1515,7 +1513,7 @@
 .set v_dma_wh_shift,    15
 .endif
 
-  mov ra0, unif         ; mov r3, elem_num      # y_x ; elem_num has implicit unpack??
+  mov ra0, unif         ; mov r3, elem_num      # y_x
   mov ra_xshift, ra_xshift_next                 # [ra0 delay]
   add r0, ra0.16b, r3
 .if v_x_shift != 0
@@ -1538,10 +1536,9 @@
   shl r1, ra_width, v_x_shift
   sub rb_dma1, rb_dma1_base, r1 ; mov r0, ra_height
   sub rb_i_tmu, r0, PREREAD ; v8min r0, r0, ra_blk_height
-  add rb_lcount, r0, 0  ; mov ra_wt_off_mul_l0, unif
-  shl r0, r0, v_dma_h_shift ; mov rb_dest, unif # Destination address
-  add r0, r0, r1                                # Combine width and height of destination area
-  shl r0, r0, v_dma_wh_shift                    # Shift into bits 16 upwards of the vdw_setup0 register
+  shl r0, r0, v_dma_h_shift ; mov rb_lcount, r0
+  add r0, r0, r1        ; mov ra_wt_off_mul_l0, unif # Combine width and height of destination area ; weight_offset
+  shl r0, r0, v_dma_wh_shift ; mov rb_dest, unif  # Shift into bits 16 upwards of the vdw_setup0 register ; dest addr
   add rb_dma0, r0, rb_dma0_base
 
   shl r0, ra_wt_off_l0, rb_wt_den_p15 ; v8subs r5rep, r3, r3     # Offset calc ; r5 = 0
