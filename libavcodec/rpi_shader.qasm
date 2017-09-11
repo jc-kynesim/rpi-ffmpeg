@@ -453,19 +453,17 @@
 # get base addresses and per-channel shifts for *next* invocation
   mov vw_setup, rb_vpm_init ; mov ra2, unif     # ; x_y
 
-  and.setf -, elem_num, 1 ; v8subs r5rep, r0, r0 # [ra2 delay] ; r5 = 0
+  add.setf -, rb_ef, rb_ef ; mov r3, unif       # [ra2 delay] ; base
 
-  shl r0, ra2.16b, v_x_shift
-  add r0, r0, rb_elem_x ; mov r3, unif          # ; base
-  sub r1, r5, rb_pitch  ; mov ra_width_height, unif # r1=pitch2 mask ; width_height
+  shl r0, ra2.16b, v_x_shift ; v8subs r5rep, r0, r0 # r5 = 0
+  add r0, r0, rb_elem_x ; mov ra_width_height, unif # r1=pitch2 mask ; width_height
+  sub r1, r5, rb_pitch  ; mov ra0, unif         # ; H filter coeffs
   max r0, r0, r5        ; mov vrx_xshift, vrx_xshift_next
-  min r0, r0, rb_max_x  ; mov ra0, unif         # ; H filter coeffs
+  min r0, r0, rb_max_x  ; mov vra_y_next, ra2.16a
 
 .if v_bit_depth <= 8
   shl vrx_xshift_next, r0, 3
-  and r0, r0, -4        ; mov vra_y_next, ra2.16a
-.else
-  nop                   ; mov vra_y_next, ra2.16a
+  and r0, r0, -4
 .endif
   and r1, r0, r1        ; mul24 r2, ra_width, v_x_mul        # r2=w*2 (we are working in pel pairs)  ** x*2 already calced!
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
@@ -473,10 +471,9 @@
   add vrx_base_next, r3, r0     ; mov r1, ra_height
 
 # set up VPM write
-
   sub rb_dma1, rb_dma1_base, r2 ; mov ra_wt_off_mul_l0, unif # Compute vdw_setup1(dst_pitch-width) ; U offset/weight
   add rb_i_tmu, r1, 3 - PREREAD ; v8min r1, r1, ra_blk_height
-  add rb_lcount, r1, 3          ; mov.ifnz ra_wt_off_mul_l0, unif    # ; V offset/weight
+  add rb_lcount, r1, 3          ; mov.ifc ra_wt_off_mul_l0, unif    # ; V offset/weight
 
 # ; unpack filter coefficients
 
@@ -489,10 +486,8 @@
 
   shl r1, r1, rb_wt_den_p15     ; mov rb11, ra3.8d
 
-  asr rb_wt_off, r1, 2
+  asr rb_wt_off, r1, 2          ; mov ra_link, unif    # ; Link
   sub ra3, rb_wt_den_p15, ra_k1
-
-  nop                           ; mov ra_link, unif    # ; Link
 
 # r5           = 0 (loop counter)
 # ra9          = alias for rb_max_y
@@ -682,8 +677,8 @@
 
   shl r0, r1, v_dma_h_shift ; mov ra3, unif     # ; x2_y2
   add r0, r0, r2        ; mov r3, unif          # [ra3 delay] ; base
-  shl r0, r0, v_dma_wh_shift ; mov ra1, unif    # Shift into bits 16 upwards of the vdw_setup0 register ; H filter coeffs
-  add rb_dma0, r0, rb_dma0_base ; mov ra_y2_next, ra3.16a
+  shl r0, r0, v_dma_wh_shift ; mov ra_y2_next, ra3.16a    # Shift into bits 16 upwards of the vdw_setup0 register
+  add rb_dma0, r0, rb_dma0_base ; mov ra1, unif # ; H filter coeffs
 
 # L1 - uniform layout could possibly be optimized
 
@@ -1133,7 +1128,7 @@
   brr ra_link, r:per_block_setup_10
 .endif
   mov ra0, unif         ; mov r3, elem_num      # y_x ; elem_num has implicit unpack??
-  add.setf -, rb_ef, rb_ef                      # [ra0 delay]
+  add.setf -, rb_ef, rb_ef; v8subs r5rep, r2, r2 # [ra0 delay] ; r5 = 0
   add r0, ra0.16b, r3   ; mov rb_xshift2, rb_xshift2_next
 .endm
 
@@ -1156,12 +1151,12 @@
 .if v_x_shift != 0
   shl r0, r0, v_x_shift
 .endif
-  max r0, r0, 0         ; mov ra_xshift, ra_xshift_next
+  max r0, r0, r5         ; mov ra_xshift, ra_xshift_next
   min r0, r0, rb_max_x
 
   shl ra_xshift_next, r0, 3         # Compute shifts
-  and r0, r0, -4        ; v8subs r2, r2, r2
-  sub r2, r2, rb_pitch  ; mov ra_base_next, unif # src1.base
+  and r0, r0, -4
+  sub r2, r5, rb_pitch  ; mov ra_base_next, unif # src1.base
   and r1, r0, r2        ; mov ra_y_next, ra0.16a
   xor r0, r0, r1        ; mul24 r1, r1, rb_xpitch
   add r0, r0, r1        ; mov ra1, unif         # Add stripe offsets ; src2.x_y
@@ -1171,7 +1166,7 @@
 .if v_x_shift != 0
   shl r0, r0, v_x_shift
 .endif
-  max r0, r0, 0         ; mov ra_y2_next, ra1.16a
+  max r0, r0, r5        ; mov ra_y2_next, ra1.16a
   min r0, r0, rb_max_x  ; mov rb_base2_next, unif # ; src2.base
   shl rb_xshift2_next, r0, 3                    # Compute shifts
   and r0, r0, -4        ; mov ra_width_height, unif # ; width_height
@@ -1215,7 +1210,7 @@
 # In the 2nd vertical half we use b registers due to using a-side fifo regs
 
   mov r1,0x3a281100
-  ror r0, r1, ra8.8d    ; mov ra_wt_off_mul_l1, unif
+  ror r0, r1, ra8.8d  ; mov ra_wt_off_mul_l1, unif
   ror ra1.8a, r1, ra8.8c ; v8min rb4, r0, r3
 
   mov r1,0x0a0b0500  # -ve
@@ -1234,7 +1229,7 @@
   bra -, ra_link
   ror ra1.8d, r1, ra8.8c ; v8min rb7, r0, r3
 
-  shl r0, ra_wt_off_l0, rb_wt_den_p15 ; v8subs r5rep, r3, r3     # Offset calc ; r5 = 0
+  shl r0, ra_wt_off_l0, rb_wt_den_p15           # Offset calc
   # For B l1 & L0 offsets should be identical so it doesn't matter which we use
   asr rb_wt_off, r0, 9  ; mov ra_link, unif    # ; link - load after we've used its previous val
 # >>> branch ra_link
