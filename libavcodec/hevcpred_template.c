@@ -166,7 +166,7 @@ do {                                  \
                 AV_WN4P(&ptr[i], a);                                           \
             else                                                               \
                 a = PIXEL_SPLAT_X4(ptr[i + 3])
-#ifdef RPI_WORKER
+#ifdef RPI
     HEVCLocalContextIntra *lc = (s->enable_rpi) ? &s->HEVClcIntra : (HEVCLocalContextIntra *)s->HEVClc ;
 #else
     HEVCLocalContext *lc = s->HEVClc;

@@ -386,6 +386,30 @@ void FUNC(rpi_shader_c)(HEVCContext *const s,
                         st->last_l0 = &c->next_src;
                         cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
                     }
+                    else if (link == s->qpu.c_pxx_l1) {
+                        const qpu_mc_pred_c_p_t *const c = &cmd->c.p;
+                        const int mx = fctom(c->coeffs_x);
+                        const int my = fctom(c->coeffs_y);
+
+                        uint8_t patch_u1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
+                        uint8_t patch_v1[PATCH_STRIDE * 72]; // (Max width + 8) * (max height + 8)
+                        uint8_t patch_u3[8 * 16 * PW];
+                        uint8_t patch_v3[8 * 16 * PW];
+
+                        FUNC(get_patch_c)(st, patch_u1, patch_v1, PATCH_STRIDE, st->last_l1, 8+3, c->h + 3);
+
+                        s->hevcdsp.put_hevc_epel_uni_w[wtoidx(c->w)][my != 0][mx != 0](
+                            patch_u3, 8 * PW, patch_u1 + PATCH_STRIDE + PW, PATCH_STRIDE,
+                            c->h, st->wdenom, wweight(c->wo_u), woff_p(s, c->wo_u), mx, my, c->w);
+                        s->hevcdsp.put_hevc_epel_uni_w[wtoidx(c->w)][my != 0][mx != 0](
+                            patch_v3, 8 * PW, patch_v1 + PATCH_STRIDE + PW, PATCH_STRIDE,
+                            c->h, st->wdenom, wweight(c->wo_v), woff_p(s, c->wo_v), mx, my, c->w);
+
+                        FUNC(av_rpi_planar_to_sand_c)((uint8_t *)c->dst_addr_c, st->stride1, st->stride2, patch_u3, 8 * PW, patch_v3, 8 * PW, 0, 0, c->w * PW, c->h);
+
+                        st->last_l1 = &c->next_src;
+                        cmd = (const qpu_mc_pred_cmd_t *)(c + 1);
+                    }
                     else if (link == s->qpu.c_bxx) {
                         const qpu_mc_pred_c_b_t *const c = &cmd->c.b;
                         const int mx1 = fctom(c->coeffs_x1);

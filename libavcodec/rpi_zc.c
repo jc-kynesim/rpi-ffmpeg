@@ -398,6 +398,11 @@ static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
     frame->extended_data = frame->data;
     // Leave extended buf alone
 
+#if RPI_ZC_SAND_8_IN_10_BUF != 0
+    // *** If we intend to use this for real we will want a 2nd buffer pool
+    frame->buf[RPI_ZC_SAND_8_IN_10_BUF] = rpi_buf_pool_alloc(&zc->pool, size_pic);  // *** 2 * wanted size - kludge
+#endif
+
     return 0;
 }
 
@@ -567,7 +572,7 @@ static AVBufferRef * zc_sand64_16_to_sand128(struct AVCodecContext * const s,
 
 
 AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
-    const AVFrame * const frame, const int maycopy)
+    const AVFrame * const frame, const enum AVPixelFormat expected_format, const int maycopy)
 {
     assert(s != NULL);
 
@@ -579,12 +584,23 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
         return NULL;
     }
 
-    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10)
-//    if (frame->buf[1] != NULL || frame->format == AV_PIX_FMT_YUV420P10 || rpi_is_sand16_frame(frame))
+    if (frame->buf[1] != NULL || frame->format != expected_format)
     {
+#if RPI_ZC_SAND_8_IN_10_BUF
+        if (frame->format == AV_PIX_FMT_SAND64_10 && expected_format == AV_PIX_FMT_SAND128 && frame->buf[RPI_ZC_SAND_8_IN_10_BUF] != NULL)
+        {
+//            av_log(s, AV_LOG_INFO, "%s: --- found buf[4]\n", __func__);
+            return av_buffer_ref(frame->buf[RPI_ZC_SAND_8_IN_10_BUF]);
+        }
+#endif
+
         if (maycopy)
         {
-            av_log(s, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);
+            if (frame->buf[1] != NULL)
+                av_log(s, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);
+            else
+                av_log(s, AV_LOG_INFO, "%s: *** Unexpected frame format %d: copying to %d\n", __func__, frame->format, expected_format);
+
             switch (frame->format)
             {
                 case AV_PIX_FMT_YUV420P10:
@@ -599,7 +615,10 @@ AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
         }
         else
         {
-            av_log(s, AV_LOG_WARNING, "%s: *** Not a single buf frame: NULL\n", __func__);
+            if (frame->buf[1] != NULL)
+                av_log(s, AV_LOG_WARNING, "%s: *** Not a single buf frame: buf[1] != NULL\n", __func__);
+            else
+                av_log(s, AV_LOG_INFO, "%s: *** Unexpected frame format: %d != %d\n", __func__, frame->format, expected_format);
             return NULL;
         }
     }

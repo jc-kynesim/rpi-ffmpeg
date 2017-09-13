@@ -101,8 +101,9 @@ struct GPU
 #define CFE_A_COUNT    (CFE_ENT_COUNT / CFE_ENTS_PER_A)
 
 struct rpi_cache_flush_env_s {
-    unsigned int n;
-    struct vcsm_user_clean_invalid_s a[CFE_A_COUNT];
+//    unsigned int n;
+//    struct vcsm_user_clean_invalid_s a[CFE_A_COUNT];
+  struct vcsm_user_clean_invalid2_s v;
 };
 
 #define WAIT_COUNT_MAX 16
@@ -217,8 +218,8 @@ static void ttw_print(trace_time_wait_t * const ttw, const int64_t now)
 
 // GPU_MEM_PTR_T alloc fns
 static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
-  p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST, (char *)"Video Frame" );
+  p->numbytes = (numbytes + 255) & ~255;  // Round up
+  p->vcsm_handle = vcsm_malloc_cache(p->numbytes, VCSM_CACHE_TYPE_HOST | 0x80, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
   //p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_HOST_AND_VC, (char *)"Video Frame" );
@@ -230,12 +231,13 @@ static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_
   p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
 //  printf("***** %s, %d\n", __func__, numbytes);
+
   return 0;
 }
 
 static int gpu_malloc_uncached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
   p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE, (char *)"Video Frame" );
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE | 0x80, (char *)"Video Frame" );
   av_assert0(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
   av_assert0(p->vc_handle);
@@ -448,94 +450,74 @@ void gpu_unref(void)
 //
 // Cache flush functions
 
+#define CACHE_EL_MAX 16
 
 rpi_cache_flush_env_t * rpi_cache_flush_init()
 {
-    rpi_cache_flush_env_t * const rfe = malloc(sizeof(rpi_cache_flush_env_t));
-    if (rfe == NULL)
-        return NULL;
+  rpi_cache_flush_env_t * const rfe = malloc(sizeof(rpi_cache_flush_env_t) +
+            sizeof(struct vcsm_user_clean_invalid2_block_s) * CACHE_EL_MAX);
+  if (rfe == NULL)
+    return NULL;
 
-    rfe->n = 0;
-    return rfe;
+  rfe->v.op_count = 0;
+  return rfe;
 }
 
 void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe)
 {
-    if (rfe != NULL)
-        free(rfe);
+  if (rfe != NULL)
+    free(rfe);
 }
 
 int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
 {
-    int rc = 0;
-    unsigned int na;
-    unsigned int nr;
+  int rc = 0;
 
-    // Clear any reamaining ents in the final block
-    if ((nr = rfe->n % CFE_ENTS_PER_A) != 0)
-        memset(rfe->a[rfe->n / CFE_ENTS_PER_A].s + nr, 0, (CFE_ENTS_PER_A - nr) * sizeof(rfe->a[0].s[0]));
+  if (vcsm_clean_invalid2(&rfe->v) != 0)
+    rc = -1;
 
-    for (na = 0; na * CFE_ENTS_PER_A < rfe->n; ++na)
-    {
-        if (vcsm_clean_invalid(rfe->a + na) != 0)
-            rc = -1;
-    }
+  free(rfe);
 
-    free(rfe);
+  if (rc == 0)
+    return 0;
 
-    if (rc == 0)
-        return 0;
-
-    av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid failed: errno=%d\n", errno);
-    return rc;
+  av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid failed: errno=%d\n", errno);
+  return rc;
 }
 
-void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode)
+inline void rpi_cache_flush_add_gm_blocks(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
+  const unsigned int offset0, const unsigned int block_size, const unsigned int blocks, const unsigned int block_stride)
 {
-    // Deal with empty pointer trivially
-    if (gm == NULL || gm->numbytes == 0)
-        return;
+  struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
 
-    {
-        struct vcsm_user_clean_invalid_s * const a = rfe->a + (rfe->n / CFE_ENTS_PER_A);
-        const unsigned int n = rfe->n % CFE_ENTS_PER_A;
+  av_assert0(rfe->v.op_count <= CACHE_EL_MAX);
 
-        av_assert0(rfe->n < CFE_ENT_COUNT);
-
-        a->s[n].cmd = mode;
-        a->s[n].handle = gm->vcsm_handle;
-        a->s[n].addr = (unsigned int)gm->arm;
-        a->s[n].size = gm->numbytes;
-        ++rfe->n;
-    }
+  b->invalidate_mode = mode;
+  b->block_count = blocks;
+  b->start_address = gm->arm + offset0;
+  b->block_size = block_size;
+  b->inter_block_stride = block_stride;
 }
 
 void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
   const unsigned int offset, const unsigned int size)
 {
-    // Deal with empty pointer trivially
-    if (gm == NULL || size == 0)
-        return;
+  // Deal with empty pointer trivially
+  if (gm == NULL || size == 0)
+    return;
 
-//    printf("[%d] offset=%d, size=%d, numbytes=%d\n", rfe->n, offset, size, gm->numbytes);
+  av_assert0(offset <= gm->numbytes);
+  av_assert0(size <= gm->numbytes);
+  av_assert0(offset + size <= gm->numbytes);
 
-    av_assert0(offset <= gm->numbytes);
-    av_assert0(size <= gm->numbytes);
-    av_assert0(offset + size <= gm->numbytes);
-
-    {
-        struct vcsm_user_clean_invalid_s * const a = rfe->a + (rfe->n / CFE_ENTS_PER_A);
-        const unsigned int n = rfe->n % CFE_ENTS_PER_A;
-
-        av_assert0(rfe->n < CFE_ENT_COUNT);
-
-        a->s[n].cmd = mode;
-        a->s[n].handle = gm->vcsm_handle;
-        a->s[n].addr = (unsigned int)gm->arm + offset;
-        a->s[n].size = size;
-        ++rfe->n;
-    }
+  rpi_cache_flush_add_gm_blocks(rfe, gm, mode, offset, size, 1, 0);
 }
+
+void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode)
+{
+  rpi_cache_flush_add_gm_blocks(rfe, gm, mode, 0, gm->numbytes, 1, 0);
+}
+
 
 void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode)
 {
@@ -598,19 +580,30 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
   }
   else
   {
-    const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
-//    printf("%s: start_line=%d, lines=%d, %c%c\n", __func__, start_line, n, do_luma ? 'l' : ' ', do_chroma ? 'c' : ' ');
-    // **** Use x0!
-    // We are working in pels here so halve linesize if 16-bit frame
-    const unsigned int slice_width = av_rpi_is_sand8_frame(frame) ? frame->linesize[0] : (frame->linesize[0] >> 1);
-    for (unsigned int x = 0; x < x0 + width; x += slice_width) {
-      if (do_luma) {
-        rpi_cache_flush_add_gm_range(rfe, gm, mode, av_rpi_sand_frame_off_y(frame, x, y0), y_size);
-      }
-      if (do_chroma) {
-        rpi_cache_flush_add_gm_range(rfe, gm, mode,
-                                     (frame->data[1] - gm->arm) + av_rpi_sand_frame_off_c(frame, x >> 1, y0 >> 1), uv_size);
-      }
+    const unsigned int stride1 = av_rpi_sand_frame_stride1(frame);
+    const unsigned int stride2 = av_rpi_sand_frame_stride2(frame);
+    const unsigned int xshl = av_rpi_sand_frame_xshl(frame);
+    const unsigned int xleft = x0 & ~((stride1 >> xshl) - 1);
+    const unsigned int block_count = (((x0 + width - xleft) << xshl) + stride1 - 1) / stride1;  // Same for Y & C
+    av_assert0(rfe->v.op_count + do_chroma + do_luma < CACHE_EL_MAX);
+
+    if (do_chroma)
+    {
+      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
+      b->invalidate_mode = mode;
+      b->block_count = block_count;
+      b->start_address = av_rpi_sand_frame_pos_c(frame, xleft >> 1, y0 >> 1);
+      b->block_size = uv_size;
+      b->inter_block_stride = stride1 * stride2;
+    }
+    if (do_luma)
+    {
+      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
+      b->invalidate_mode = mode;
+      b->block_count = block_count;
+      b->start_address = av_rpi_sand_frame_pos_y(frame, xleft, y0);
+      b->block_size = y_size;
+      b->inter_block_stride = stride1 * stride2;
     }
   }
 }
@@ -916,14 +909,17 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
   switch (bit_depth) {
     case 8:
       qf->y_pxx = qpu_fn(mc_filter_y_pxx);
+      qf->y_pxx = qpu_fn(mc_filter_y_pxx);
       qf->y_bxx = qpu_fn(mc_filter_y_bxx);
       qf->y_p00 = qpu_fn(mc_filter_y_p00);
       qf->y_b00 = qpu_fn(mc_filter_y_b00);
       qf->c_pxx = qpu_fn(mc_filter_c_p);
+      qf->c_pxx_l1 = qpu_fn(mc_filter_c_p_l1);
       qf->c_bxx = qpu_fn(mc_filter_c_b);
       break;
     case 10:
       qf->c_pxx = qpu_fn(mc_filter_c10_p);
+      qf->c_pxx_l1 = qpu_fn(mc_filter_c10_p_l1);
       qf->c_bxx = qpu_fn(mc_filter_c10_b);
       qf->y_pxx = qpu_fn(mc_filter_y10_pxx);
       qf->y_bxx = qpu_fn(mc_filter_y10_bxx);
