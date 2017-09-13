@@ -587,15 +587,6 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
     const unsigned int block_count = (((x0 + width - xleft) << xshl) + stride1 - 1) / stride1;  // Same for Y & C
     av_assert0(rfe->v.op_count + do_chroma + do_luma < CACHE_EL_MAX);
 
-    if (do_luma)
-    {
-      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
-      b->invalidate_mode = mode;
-      b->block_count = block_count;
-      b->start_address = av_rpi_sand_frame_pos_y(frame, xleft, y0);
-      b->block_size = y_size;
-      b->inter_block_stride = stride1 * stride2;
-    }
     if (do_chroma)
     {
       struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
@@ -603,6 +594,15 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
       b->block_count = block_count;
       b->start_address = av_rpi_sand_frame_pos_c(frame, xleft >> 1, y0 >> 1);
       b->block_size = uv_size;
+      b->inter_block_stride = stride1 * stride2;
+    }
+    if (do_luma)
+    {
+      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
+      b->invalidate_mode = mode;
+      b->block_count = block_count;
+      b->start_address = av_rpi_sand_frame_pos_y(frame, xleft, y0);
+      b->block_size = y_size;
       b->inter_block_stride = stride1 * stride2;
     }
   }
