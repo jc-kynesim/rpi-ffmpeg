@@ -2344,7 +2344,7 @@ rpi_nxt_pred(HEVCRpiInterPredEnv * const ipe, const unsigned int load_val, const
 
     yp->load += load_val;
     ipe->used_grp = 1;
-    ((uint32_t *)yp->qpu_mc_curr)[-1] = fn;  // Link is always last el of previous cmd
+    yp->qpu_mc_curr->data[-1] = fn;  // Link is always last el of previous cmd
 
     return yp;
 }
@@ -2354,8 +2354,8 @@ static void rpi_inter_pred_sync(HEVCRpiInterPredEnv * const ipe)
 {
     for (unsigned int i = 0; i != ipe->n; ++i) {
         HEVCRpiInterPredQ * const q = ipe->q + i;
-        ((uint32_t *)q->qpu_mc_curr)[-1] = q->code_sync;
-        q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)((uint32_t *)q->qpu_mc_curr + 1);
+        q->qpu_mc_curr->data[-1] = q->code_sync;
+        q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(q->qpu_mc_curr->data + 1);
         q->load = 0;
     }
 }
@@ -2489,7 +2489,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             cmd_y->wo1 = wo;
             cmd_y->dst_addr =  dst_addr + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
-            *(qpu_mc_pred_y_p00_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
         }
     }
     else
@@ -2584,7 +2584,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             cmd_y->dst_addr =  dst_addr + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
             yp->last_l1 = &cmd_y->next_src2;
-            *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
 
             if (bw == 8) {
                 s->last_y8_l1 = src2;
@@ -2666,7 +2666,7 @@ rpi_pred_y_b(HEVCContext * const s,
             cmd_y->dst_addr =  dst + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
             yp->last_l1 = &cmd_y->next_src2;
-            *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
         }
     }
     else
@@ -2720,7 +2720,7 @@ rpi_pred_y_b(HEVCContext * const s,
             cmd_y->dst_addr =  dst + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
             yp->last_l1 = &cmd_y->next_src2;
-            *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
         }
     }
 }
@@ -2770,7 +2770,7 @@ rpi_pred_c(HEVCContext * const s, const unsigned int lx, const int x0_c, const i
         cmd_c->wo_v = wo_v;
         cmd_c->dst_addr_c = dst_base_u + (start_x << xshl);
         *plast_lx = &cmd_c->next_src;
-        *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = cmd_c + 1;
+        cp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_c + 1);
     }
     return;
 }
@@ -2848,7 +2848,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
 
         cp->last_l0 = &u[0].next_src1;
         cp->last_l1 = &u[0].next_src2;
-        *(qpu_mc_pred_c_b_t **)&cp->qpu_mc_curr = u + 1;
+        cp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(u + 1);
     }
 }
 
@@ -3690,7 +3690,7 @@ static void rpi_begin(HEVCContext *s)
         u->next_src2.base = 0;
         cp->last_l1 = &u->next_src2;
 
-        *(qpu_mc_pred_c_s_t **)&cp->qpu_mc_curr = u + 1;
+        cp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(u + 1);
     }
 
     rpi_inter_pred_reset(yipe);
@@ -3713,7 +3713,7 @@ static void rpi_begin(HEVCContext *s)
         yp->last_l0 = &y->next_src1;
         yp->last_l1 = &y->next_src2;
 
-        *(qpu_mc_pred_y_s_t **)&yp->qpu_mc_curr = y + 1;
+        yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(y + 1);
     }
 
     s->last_y8_p = NULL;
@@ -3753,7 +3753,7 @@ static unsigned int mc_terminate_add_qpu(HEVCContext * const s,
         if (block_size > max_block)
             max_block = block_size;
 
-        ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
+        yp->qpu_mc_curr->data[-1] = yp->code_exit;
 
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->x = MC_DUMMY_X;
@@ -3810,7 +3810,7 @@ static unsigned int mc_terminate_add_emu(HEVCContext * const s,
         qpu_mc_src_t *const p0 = yp->last_l0;
         qpu_mc_src_t *const p1 = yp->last_l1;
 
-        ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
+        yp->qpu_mc_curr->data[-1] = yp->code_exit;
 
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->x = MC_DUMMY_X;
