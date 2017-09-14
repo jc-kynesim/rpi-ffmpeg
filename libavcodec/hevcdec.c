@@ -4093,12 +4093,11 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #endif
 
     while (more_data && ctb_addr_ts < s->ps.sps->ctb_size) {
-        int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
+        const int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
 
         x_ctb = (ctb_addr_rs % ((s->ps.sps->width + ctb_size - 1) >> s->ps.sps->log2_ctb_size)) << s->ps.sps->log2_ctb_size;
         y_ctb = (ctb_addr_rs / ((s->ps.sps->width + ctb_size - 1) >> s->ps.sps->log2_ctb_size)) << s->ps.sps->log2_ctb_size;
         hls_decode_neighbour(s, x_ctb, y_ctb, ctb_addr_ts);
-
 
         ff_hevc_cabac_init(s, ctb_addr_ts);
 
@@ -4110,8 +4109,8 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
-        if (s->ref && s->threads_type == FF_THREAD_FRAME && y_ctb > ctb_size) {
-            ff_thread_report_progress(&s->ref->tf, y_ctb - ctb_size, 1);
+        if (s->ref && s->threads_type == FF_THREAD_FRAME && x_ctb + ctb_size >= s->ps.sps->width) {
+            ff_thread_report_progress(&s->ref->tf, y_ctb + ctb_size - 1, 1);
         }
 
 #ifdef RPI
