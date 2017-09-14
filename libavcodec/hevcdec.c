@@ -2275,6 +2275,96 @@ static void chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVF
                                                          _mx1, _my1, block_w);
 }
 
+
+void ff_hevc_rpi_progress_wait_field(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int val, const int field)
+{
+    if (ref->tf.progress != NULL && ((int *)ref->tf.progress->data)[field] < val) {
+        HEVCContext *const fs = ref->tf.owner[field]->priv_data;
+        HEVCRPiFrameProgressState * const pstate = fs->progress_states + field;
+        sem_t * sem = NULL;
+
+        av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
+        if (((volatile int *)ref->tf.progress->data)[field] < val) {
+            HEVCRPiFrameProgressWait * const pwait = &jb->progress_wait;
+
+            av_assert0(pwait->req == -1 && pwait->next == NULL);
+
+            pwait->req = val;
+            pwait->next = NULL;
+            if (pstate->first == NULL)
+                pstate->first = pwait;
+            else
+                pstate->last->next = pwait;
+            pstate->last = pwait;
+            sem = &pwait->sem;
+        }
+        pthread_mutex_unlock(&pstate->lock);
+
+        if (sem != NULL) {
+            while (sem_wait(sem) != 0)
+                av_assert0(errno == EINTR);
+        }
+    }
+}
+
+void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, const int field)
+{
+    if (s->used_for_ref && s->threads_type == FF_THREAD_FRAME && s->ref->tf.progress != NULL)
+    {
+        HEVCRPiFrameProgressState *const pstate = s->progress_states + field;
+
+        ((int *)s->ref->tf.progress->data)[field] = val;
+
+        av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
+        {
+            HEVCRPiFrameProgressWait ** ppwait = &pstate->first;
+            HEVCRPiFrameProgressWait * pwait;
+
+            while ((pwait = *ppwait) != NULL) {
+                if (pwait->req > val)
+                {
+                    ppwait = &pwait->next;
+                }
+                else
+                {
+                    *ppwait = pwait->next;
+                    pwait->req = -1;
+                    pwait->next = NULL;
+                    sem_post(&pwait->sem);
+                }
+            }
+        }
+        pthread_mutex_unlock(&pstate->lock);
+    }
+}
+
+static void ff_hevc_rpi_progress_init_state(HEVCRPiFrameProgressState * const pstate)
+{
+    pstate->first = NULL;
+    pstate->last = NULL;
+    pthread_mutex_init(&pstate->lock, NULL);
+}
+
+static void ff_hevc_rpi_progress_init_wait(HEVCRPiFrameProgressWait * const pwait)
+{
+    pwait->req = -1;
+    pwait->next = NULL;
+    sem_init(&pwait->sem, 0, 0);
+}
+
+static void ff_hevc_rpi_progress_kill_state(HEVCRPiFrameProgressState * const pstate)
+{
+    av_assert0(pstate->first == NULL);
+    pthread_mutex_destroy(&pstate->lock);
+}
+
+static void ff_hevc_rpi_progress_kill_wait(HEVCRPiFrameProgressWait * const pwait)
+{
+    sem_destroy(&pwait->sem);
+}
+
+
 static void hevc_await_progress(HEVCContext *s, const HEVCFrame * const ref,
                                 const Mv * const mv, const int y0, const int height)
 {
@@ -3986,7 +4076,8 @@ static void worker_core(HEVCContext * const s)
         unsigned int i;
         for (i = 0; i != FF_ARRAY_ELEMS(jb->progress); ++i) {
             if (jb->progress[i] >= 0) {
-                ff_thread_await_progress(&s->DPB[i].tf, jb->progress[i], 0);
+                ff_hevc_progress_wait_recon(s, jb, s->DPB + i, jb->progress[i]);
+//                ff_thread_await_progress(&s->DPB[i].tf, jb->progress[i], 0);
             }
         }
     }
@@ -4109,8 +4200,13 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
-        if (s->ref && s->threads_type == FF_THREAD_FRAME && x_ctb + ctb_size >= s->ps.sps->width) {
-            ff_thread_report_progress(&s->ref->tf, y_ctb + ctb_size - 1, 1);
+        // Report progress so we can use our MVs in other frames
+        // If we are tiled then this isn't really optimal but given that tiling
+        // can change on a per pic basis (described in PPS) other schemes are
+        // quite a lot harder
+        if (x_ctb + ctb_size >= s->ps.sps->width) {
+            ff_hevc_progress_signal_mv(s, y_ctb + ctb_size - 1);
+//            ff_thread_report_progress(&s->ref->tf, y_ctb + ctb_size - 1, 1);
         }
 
 #ifdef RPI
@@ -4768,8 +4864,8 @@ fail:  // Also success path
 #if RPI_INTER
         rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
-        ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
-        ff_thread_report_progress(&s->ref->tf, INT_MAX, 1);
+        ff_hevc_progress_signal_mv(s, INT_MAX);
+        ff_hevc_progress_signal_recon(s, INT_MAX);
     }
 #if RPI_INTER
     else if (s->ref && s->enable_rpi) {
@@ -5041,6 +5137,7 @@ static av_cold void hevc_init_worker(HEVCContext * const s)
 
         sem_init(&jb->sem_in, 0, 0);
         sem_init(&jb->sem_out, 0, 0);
+        ff_hevc_rpi_progress_init_wait(&jb->progress_wait);
 
         jb->intra.n = 0;
         jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS);
@@ -5095,6 +5192,7 @@ static av_cold void hevc_exit_worker(HEVCContext *s)
 
         sem_destroy(&jb->sem_in);
         sem_destroy(&jb->sem_out);
+        ff_hevc_rpi_progress_kill_wait(&jb->progress_wait);
         av_freep(&jb->intra.cmds);
         av_freep(&jb->deblk.blks);
         rpi_free_inter_pred(&jb->chroma_ip);
@@ -5119,6 +5217,9 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     hevc_exit_worker(s);
     vpu_qpu_term();
+    for (i = 0; i != 2; ++i) {
+        ff_hevc_rpi_progress_kill_state(s->progress_states + i);
+    }
 
     av_rpi_zc_uninit(avctx);
 #endif
@@ -5201,6 +5302,9 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     s->enable_rpi = 0;
 
+    for (i = 0; i != 2; ++i) {
+        ff_hevc_rpi_progress_init_state(s->progress_states + i);
+    }
     hevc_init_worker(s);
 #endif
 

@@ -617,7 +617,17 @@ typedef struct HEVCRpiDeblkEnv {
     HEVCRpiDeblkBlk * blks;
 } HEVCRpiDeblkEnv;
 
+typedef struct HEVCRPiFrameProgressWait {
+    int req;
+    struct HEVCRPiFrameProgressWait * next;
+    sem_t sem;
+} HEVCRPiFrameProgressWait;
 
+typedef struct HEVCRPiFrameProgressState {
+    struct HEVCRPiFrameProgressWait * first;
+    struct HEVCRPiFrameProgressWait * last;
+    pthread_mutex_t lock;
+} HEVCRPiFrameProgressState;
 
 typedef struct HEVCRpiJob {
     volatile int terminate;
@@ -630,6 +640,7 @@ typedef struct HEVCRpiJob {
     HEVCRpiIntraPredEnv intra;
     HEVCRpiCoeffsEnv coeffs;
     HEVCRpiDeblkEnv deblk;
+    HEVCRPiFrameProgressWait progress_wait;
 } HEVCRpiJob;
 
 #if RPI_TSTATS
@@ -729,6 +740,7 @@ typedef struct HEVCContext {
 
 #endif
     HEVCLocalContextIntra HEVClcIntra;
+    HEVCRPiFrameProgressState progress_states[2];
 #endif
 
     uint8_t *cabac_state;
@@ -980,6 +992,35 @@ int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int
 #if HAVE_NEON
 extern void rpi_zap_coeff_vals_neon(int16_t * dst, unsigned int l2ts_m2);
 #endif
+
+void ff_hevc_rpi_progress_wait_field(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int val, const int field);
+
+void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, const int field);
+
+
+static inline void ff_hevc_progress_wait_mv(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int y)
+{
+    ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
+}
+
+static inline void ff_hevc_progress_signal_mv(HEVCContext * const s, const int y)
+{
+    ff_hevc_rpi_progress_signal_field(s, y, 1);
+}
+
+static inline void ff_hevc_progress_wait_recon(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int y)
+{
+    ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 0);
+}
+
+static inline void ff_hevc_progress_signal_recon(HEVCContext * const s, const int y)
+{
+    ff_hevc_rpi_progress_signal_field(s, y, 0);
+}
+
 
 #endif
 
