@@ -2275,13 +2275,112 @@ static void chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVF
                                                          _mx1, _my1, block_w);
 }
 
-static void hevc_await_progress(HEVCContext *s, HEVCFrame *ref,
-                                const Mv *mv, int y0, int height)
+#ifdef RPI
+void ff_hevc_rpi_progress_wait_field(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int val, const int field)
 {
-    int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
+    if (ref->tf.progress != NULL && ((int *)ref->tf.progress->data)[field] < val) {
+        HEVCContext *const fs = ref->tf.owner[field]->priv_data;
+        HEVCRPiFrameProgressState * const pstate = fs->progress_states + field;
+        sem_t * sem = NULL;
 
-    if (s->threads_type == FF_THREAD_FRAME )
-        ff_thread_await_progress(&ref->tf, y, 0);
+        av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
+        if (((volatile int *)ref->tf.progress->data)[field] < val) {
+            HEVCRPiFrameProgressWait * const pwait = &jb->progress_wait;
+
+            av_assert0(pwait->req == -1 && pwait->next == NULL);
+
+            pwait->req = val;
+            pwait->next = NULL;
+            if (pstate->first == NULL)
+                pstate->first = pwait;
+            else
+                pstate->last->next = pwait;
+            pstate->last = pwait;
+            sem = &pwait->sem;
+        }
+        pthread_mutex_unlock(&pstate->lock);
+
+        if (sem != NULL) {
+            while (sem_wait(sem) != 0)
+                av_assert0(errno == EINTR);
+        }
+    }
+}
+
+void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, const int field)
+{
+    HEVCRPiFrameProgressState *const pstate = s->progress_states + field;
+
+    ((int *)s->ref->tf.progress->data)[field] = val;
+
+    av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
+    {
+        HEVCRPiFrameProgressWait ** ppwait = &pstate->first;
+        HEVCRPiFrameProgressWait * pwait;
+
+        while ((pwait = *ppwait) != NULL) {
+            if (pwait->req > val)
+            {
+                ppwait = &pwait->next;
+                pstate->last = pwait;
+            }
+            else
+            {
+                *ppwait = pwait->next;
+                pwait->req = -1;
+                pwait->next = NULL;
+                sem_post(&pwait->sem);
+            }
+        }
+    }
+    pthread_mutex_unlock(&pstate->lock);
+}
+
+static void ff_hevc_rpi_progress_init_state(HEVCRPiFrameProgressState * const pstate)
+{
+    pstate->first = NULL;
+    pstate->last = NULL;
+    pthread_mutex_init(&pstate->lock, NULL);
+}
+
+static void ff_hevc_rpi_progress_init_wait(HEVCRPiFrameProgressWait * const pwait)
+{
+    pwait->req = -1;
+    pwait->next = NULL;
+    sem_init(&pwait->sem, 0, 0);
+}
+
+static void ff_hevc_rpi_progress_kill_state(HEVCRPiFrameProgressState * const pstate)
+{
+    av_assert0(pstate->first == NULL);
+    pthread_mutex_destroy(&pstate->lock);
+}
+
+static void ff_hevc_rpi_progress_kill_wait(HEVCRPiFrameProgressWait * const pwait)
+{
+    sem_destroy(&pwait->sem);
+}
+#endif
+
+static void hevc_await_progress(HEVCContext *s, const HEVCFrame * const ref,
+                                const Mv * const mv, const int y0, const int height)
+{
+    if (s->threads_type == FF_THREAD_FRAME) {
+        const int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
+
+#ifdef RPI
+        if (s->enable_rpi) {
+            int16_t *const pr = s->jb0->progress + ref->dpb_no;
+            if (*pr < y) {
+                *pr = y;
+            }
+        }
+        else
+#endif
+        // It is a const ThreadFrame but the prototype isn't
+        ff_hevc_progress_wait_mv(s, s->jb0, ref, y);
+    }
 }
 
 static void hevc_luma_mv_mvp_mode(HEVCContext *s, int x0, int y0, int nPbW,
@@ -2344,7 +2443,7 @@ rpi_nxt_pred(HEVCRpiInterPredEnv * const ipe, const unsigned int load_val, const
 
     yp->load += load_val;
     ipe->used_grp = 1;
-    ((uint32_t *)yp->qpu_mc_curr)[-1] = fn;  // Link is always last el of previous cmd
+    yp->qpu_mc_curr->data[-1] = fn;  // Link is always last el of previous cmd
 
     return yp;
 }
@@ -2354,8 +2453,8 @@ static void rpi_inter_pred_sync(HEVCRpiInterPredEnv * const ipe)
 {
     for (unsigned int i = 0; i != ipe->n; ++i) {
         HEVCRpiInterPredQ * const q = ipe->q + i;
-        ((uint32_t *)q->qpu_mc_curr)[-1] = q->code_sync;
-        q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)((uint32_t *)q->qpu_mc_curr + 1);
+        q->qpu_mc_curr->data[-1] = q->code_sync;
+        q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(q->qpu_mc_curr->data + 1);
         q->load = 0;
     }
 }
@@ -2489,7 +2588,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             cmd_y->wo1 = wo;
             cmd_y->dst_addr =  dst_addr + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
-            *(qpu_mc_pred_y_p00_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
         }
     }
     else
@@ -2584,7 +2683,7 @@ rpi_pred_y(HEVCContext *const s, const int x0, const int y0,
             cmd_y->dst_addr =  dst_addr + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
             yp->last_l1 = &cmd_y->next_src2;
-            *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
 
             if (bw == 8) {
                 s->last_y8_l1 = src2;
@@ -2666,7 +2765,7 @@ rpi_pred_y_b(HEVCContext * const s,
             cmd_y->dst_addr =  dst + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
             yp->last_l1 = &cmd_y->next_src2;
-            *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
         }
     }
     else
@@ -2720,7 +2819,7 @@ rpi_pred_y_b(HEVCContext * const s,
             cmd_y->dst_addr =  dst + (start_x << xshl);
             yp->last_l0 = &cmd_y->next_src1;
             yp->last_l1 = &cmd_y->next_src2;
-            *(qpu_mc_pred_y_p_t **)&yp->qpu_mc_curr = cmd_y + 1;
+            yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_y + 1);
         }
     }
 }
@@ -2770,7 +2869,7 @@ rpi_pred_c(HEVCContext * const s, const unsigned int lx, const int x0_c, const i
         cmd_c->wo_v = wo_v;
         cmd_c->dst_addr_c = dst_base_u + (start_x << xshl);
         *plast_lx = &cmd_c->next_src;
-        *(qpu_mc_pred_c_p_t **)&cp->qpu_mc_curr = cmd_c + 1;
+        cp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(cmd_c + 1);
     }
     return;
 }
@@ -2848,7 +2947,7 @@ rpi_pred_c_b(HEVCContext * const s, const int x0_c, const int y0_c,
 
         cp->last_l0 = &u[0].next_src1;
         cp->last_l1 = &u[0].next_src2;
-        *(qpu_mc_pred_c_b_t **)&cp->qpu_mc_curr = u + 1;
+        cp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(u + 1);
     }
 }
 
@@ -3690,7 +3789,7 @@ static void rpi_begin(HEVCContext *s)
         u->next_src2.base = 0;
         cp->last_l1 = &u->next_src2;
 
-        *(qpu_mc_pred_c_s_t **)&cp->qpu_mc_curr = u + 1;
+        cp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(u + 1);
     }
 
     rpi_inter_pred_reset(yipe);
@@ -3713,11 +3812,16 @@ static void rpi_begin(HEVCContext *s)
         yp->last_l0 = &y->next_src1;
         yp->last_l1 = &y->next_src2;
 
-        *(qpu_mc_pred_y_s_t **)&yp->qpu_mc_curr = y + 1;
+        yp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(y + 1);
     }
 
     s->last_y8_p = NULL;
     s->last_y8_l1 = NULL;
+
+    for (i = 0; i != FF_ARRAY_ELEMS(jb->progress); ++i) {
+        jb->progress[i] = -1;
+    }
+
 #endif
     s->ctu_count = 0;
 }
@@ -3753,7 +3857,7 @@ static unsigned int mc_terminate_add_qpu(HEVCContext * const s,
         if (block_size > max_block)
             max_block = block_size;
 
-        ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
+        yp->qpu_mc_curr->data[-1] = yp->code_exit;
 
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->x = MC_DUMMY_X;
@@ -3810,7 +3914,7 @@ static unsigned int mc_terminate_add_emu(HEVCContext * const s,
         qpu_mc_src_t *const p0 = yp->last_l0;
         qpu_mc_src_t *const p1 = yp->last_l1;
 
-        ((uint32_t *)yp->qpu_mc_curr)[-1] = yp->code_exit;
+        yp->qpu_mc_curr->data[-1] = yp->code_exit;
 
         // Need to set the srcs for L0 & L1 to something that can be (pointlessly) prefetched
         p0->x = MC_DUMMY_X;
@@ -3963,6 +4067,17 @@ static void worker_core(HEVCContext * const s)
 
     // Having accumulated some commands - do them
     rpi_cache_flush_finish(rfe);
+
+    // Await progress as required
+    {
+        unsigned int i;
+        for (i = 0; i != FF_ARRAY_ELEMS(jb->progress); ++i) {
+            if (jb->progress[i] >= 0) {
+                ff_hevc_progress_wait_recon(s, jb, s->DPB + i, jb->progress[i]);
+            }
+        }
+    }
+
     vpu_qpu_job_finish(vqj);
 
     worker_pic_reset(&jb->coeffs);
@@ -4065,12 +4180,11 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #endif
 
     while (more_data && ctb_addr_ts < s->ps.sps->ctb_size) {
-        int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
+        const int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
 
         x_ctb = (ctb_addr_rs % ((s->ps.sps->width + ctb_size - 1) >> s->ps.sps->log2_ctb_size)) << s->ps.sps->log2_ctb_size;
         y_ctb = (ctb_addr_rs / ((s->ps.sps->width + ctb_size - 1) >> s->ps.sps->log2_ctb_size)) << s->ps.sps->log2_ctb_size;
         hls_decode_neighbour(s, x_ctb, y_ctb, ctb_addr_ts);
-
 
         ff_hevc_cabac_init(s, ctb_addr_ts);
 
@@ -4082,11 +4196,15 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
-        if (s->ref && s->threads_type == FF_THREAD_FRAME && y_ctb > ctb_size) {
-            ff_thread_report_progress(&s->ref->tf, y_ctb - ctb_size, 1);
+#ifdef RPI
+        // Report progress so we can use our MVs in other frames
+        // If we are tiled then this isn't really optimal but given that tiling
+        // can change on a per pic basis (described in PPS) other schemes are
+        // quite a lot harder
+        if (s->threads_type == FF_THREAD_FRAME && x_ctb + ctb_size >= s->ps.sps->width) {
+            ff_hevc_progress_signal_mv(s, y_ctb + ctb_size - 1);
         }
 
-#ifdef RPI
         if (s->enable_rpi) {
             int q_full = (++s->ctu_count >= s->max_ctu_count);
 
@@ -4737,19 +4855,24 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
     }
 
 fail:  // Also success path
-    if (s->ref && s->threads_type == FF_THREAD_FRAME) {
-#if RPI_INTER
-        rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
+    if (s->ref != NULL) {
+        if (s->used_for_ref && s->threads_type == FF_THREAD_FRAME) {
+#ifdef RPI
+            rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
-        ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
-        ff_thread_report_progress(&s->ref->tf, INT_MAX, 1);
-    }
-#if RPI_INTER
-    else if (s->ref && s->enable_rpi) {
-      // When running single threaded we need to flush the whole frame
-      flush_frame(s,s->frame);
-    }
+            ff_hevc_progress_signal_all_done(s);
+        }
+#ifdef RPI
+        // * Flush frame will become confused if we pass it something
+        //   that doesn't have an expected number of planes (e.g. 400)
+        //   So only flush if we are sure we can.
+        else if (s->enable_rpi) {
+            // Flush frame to real memory as we expect to be able to pass
+            // it straight on to mmal
+            flush_frame(s, s->frame);
+        }
 #endif
+    }
     return ret;
 }
 
@@ -5014,6 +5137,7 @@ static av_cold void hevc_init_worker(HEVCContext * const s)
 
         sem_init(&jb->sem_in, 0, 0);
         sem_init(&jb->sem_out, 0, 0);
+        ff_hevc_rpi_progress_init_wait(&jb->progress_wait);
 
         jb->intra.n = 0;
         jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS);
@@ -5068,6 +5192,7 @@ static av_cold void hevc_exit_worker(HEVCContext *s)
 
         sem_destroy(&jb->sem_in);
         sem_destroy(&jb->sem_out);
+        ff_hevc_rpi_progress_kill_wait(&jb->progress_wait);
         av_freep(&jb->intra.cmds);
         av_freep(&jb->deblk.blks);
         rpi_free_inter_pred(&jb->chroma_ip);
@@ -5092,6 +5217,9 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     hevc_exit_worker(s);
     vpu_qpu_term();
+    for (i = 0; i != 2; ++i) {
+        ff_hevc_rpi_progress_kill_state(s->progress_states + i);
+    }
 
     av_rpi_zc_uninit(avctx);
 #endif
@@ -5174,6 +5302,9 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     s->enable_rpi = 0;
 
+    for (i = 0; i != 2; ++i) {
+        ff_hevc_rpi_progress_init_state(s->progress_states + i);
+    }
     hevc_init_worker(s);
 #endif
 
@@ -5190,6 +5321,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         if (!s->DPB[i].frame)
             goto fail;
         s->DPB[i].tf.f = s->DPB[i].frame;
+        s->DPB[i].dpb_no = i;
     }
 
     s->max_ra = INT_MAX;

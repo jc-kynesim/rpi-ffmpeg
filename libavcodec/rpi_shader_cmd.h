@@ -113,6 +113,7 @@ typedef struct qpu_mc_pred_y_s {
 typedef union qpu_mc_pred_cmd_u {
     qpu_mc_pred_y_t y;
     qpu_mc_pred_c_t c;
+    uint32_t data[1];
 } qpu_mc_pred_cmd_t;
 
 #define QPU_MC_PRED_N_Y8        12
