@@ -4858,15 +4858,16 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
 fail:  // Also success path
     if (s->ref != NULL) {
         if (s->used_for_ref && s->threads_type == FF_THREAD_FRAME) {
-#if RPI_INTER
+#ifdef RPI
             rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
             ff_hevc_progress_signal_all_done(s);
         }
-#if RPI_INTER
-        else if (s->enable_rpi) {
-          // When running single threaded we need to flush the whole frame
-          flush_frame(s, s->frame);
+#ifdef RPI
+        else {
+            // Flush frame to real memory as we expect to be able to pass
+            // it straight on to mmal
+            flush_frame(s, s->frame);
         }
 #endif
     }
