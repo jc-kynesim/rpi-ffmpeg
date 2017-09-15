@@ -2325,6 +2325,7 @@ void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, con
                 if (pwait->req > val)
                 {
                     ppwait = &pwait->next;
+                    pstate->last = pwait;
                 }
                 else
                 {
