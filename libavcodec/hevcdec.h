@@ -998,30 +998,75 @@ void ff_hevc_rpi_progress_wait_field(HEVCContext * const s, HEVCRpiJob * const j
 
 void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, const int field);
 
+// All of these expect that s->threads_type == FF_THREAD_FRAME
 
 static inline void ff_hevc_progress_wait_mv(HEVCContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int y)
 {
-    ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
+    if (s->enable_rpi)
+        ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
+    else
+        ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
 }
 
 static inline void ff_hevc_progress_signal_mv(HEVCContext * const s, const int y)
 {
-    ff_hevc_rpi_progress_signal_field(s, y, 1);
+    if (s->enable_rpi && s->used_for_ref)
+        ff_hevc_rpi_progress_signal_field(s, y, 1);
 }
 
 static inline void ff_hevc_progress_wait_recon(HEVCContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int y)
 {
-    ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 0);
+    if (s->enable_rpi)
+        ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 0);
+    else
+        ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
 }
 
 static inline void ff_hevc_progress_signal_recon(HEVCContext * const s, const int y)
 {
-    ff_hevc_rpi_progress_signal_field(s, y, 0);
+    if (s->used_for_ref)
+    {
+        if (s->enable_rpi)
+            ff_hevc_rpi_progress_signal_field(s, y, 0);
+        else
+            ff_thread_report_progress(&s->ref->tf, y, 0);
+    }
 }
 
+static inline void ff_hevc_progress_signal_all_done(HEVCContext * const s)
+{
+    if (s->enable_rpi)
+    {
+        ff_hevc_rpi_progress_signal_field(s, INT_MAX, 0);
+        ff_hevc_rpi_progress_signal_field(s, INT_MAX, 1);
+    }
+    else
+        ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
+}
+
+#else
+
+// Use #define as that allows us to discard "jb" which won't exist in non-RPI world
+#define ff_hevc_progress_wait_mv(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
+#define ff_hevc_progress_wait_recon(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
+#define ff_hevc_progress_signal_mv(s, y)
+#define ff_hevc_progress_signal_recon(s, y) ff_thread_report_progress(&s->ref->tf, y, 0)
+#define ff_hevc_progress_signal_all_done(s) ff_thread_report_progress(&s->ref->tf, INT_MAX, 0)
 
 #endif
+
+// Set all done - signal nothing (used in missing refs)
+// Works for both rpi & non-rpi
+static inline void ff_hevc_progress_set_all_done(HEVCFrame * const ref)
+{
+    if (ref->tf.progress != NULL)
+    {
+        int * const p = (int *)&ref->tf.progress->data;
+        p[0] = INT_MAX;
+        p[1] = INT_MAX;
+    }
+}
 
 #endif /* AVCODEC_HEVCDEC_H */

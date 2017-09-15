@@ -445,11 +445,7 @@ static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
     frame->sequence = s->seq_decode;
     frame->flags    = 0;
 
-    if (s->threads_type == FF_THREAD_FRAME)
-    {
-        ff_hevc_progress_signal_mv(s, INT_MAX);
-        ff_hevc_progress_signal_recon(s, INT_MAX);
-    }
+    ff_hevc_progress_set_all_done(frame);
 
     return frame;
 }

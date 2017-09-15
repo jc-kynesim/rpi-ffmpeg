@@ -1265,20 +1265,19 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
         //if (((y + ctb_size)&63)==0)
 #ifdef RPI_DEBLOCK_VPU
         if (s->enable_rpi_deblock) {
-          // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
-          if (done_deblock) {
-              ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
-          }
+            // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
+            if (done_deblock) {
+                ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
+            }
         } else {
 #if RPI_INTER
-          ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
+            rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
 #endif
-          ff_thread_report_progress(&s->ref->tf, y + ctb_size - 4, 0);
+            ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
         }
 #else
 #if RPI_INTER
         rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
-        // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
 #endif
         ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
 #endif

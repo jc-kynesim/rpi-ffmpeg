@@ -2275,7 +2275,7 @@ static void chroma_mc_bi(HEVCContext *s, uint8_t *dst0, ptrdiff_t dststride, AVF
                                                          _mx1, _my1, block_w);
 }
 
-
+#ifdef RPI
 void ff_hevc_rpi_progress_wait_field(HEVCContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int val, const int field)
 {
@@ -2310,34 +2310,31 @@ void ff_hevc_rpi_progress_wait_field(HEVCContext * const s, HEVCRpiJob * const j
 
 void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, const int field)
 {
-    if (s->used_for_ref && s->threads_type == FF_THREAD_FRAME && s->ref->tf.progress != NULL)
+    HEVCRPiFrameProgressState *const pstate = s->progress_states + field;
+
+    ((int *)s->ref->tf.progress->data)[field] = val;
+
+    av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
     {
-        HEVCRPiFrameProgressState *const pstate = s->progress_states + field;
+        HEVCRPiFrameProgressWait ** ppwait = &pstate->first;
+        HEVCRPiFrameProgressWait * pwait;
 
-        ((int *)s->ref->tf.progress->data)[field] = val;
-
-        av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
-        {
-            HEVCRPiFrameProgressWait ** ppwait = &pstate->first;
-            HEVCRPiFrameProgressWait * pwait;
-
-            while ((pwait = *ppwait) != NULL) {
-                if (pwait->req > val)
-                {
-                    ppwait = &pwait->next;
-                    pstate->last = pwait;
-                }
-                else
-                {
-                    *ppwait = pwait->next;
-                    pwait->req = -1;
-                    pwait->next = NULL;
-                    sem_post(&pwait->sem);
-                }
+        while ((pwait = *ppwait) != NULL) {
+            if (pwait->req > val)
+            {
+                ppwait = &pwait->next;
+                pstate->last = pwait;
+            }
+            else
+            {
+                *ppwait = pwait->next;
+                pwait->req = -1;
+                pwait->next = NULL;
+                sem_post(&pwait->sem);
             }
         }
-        pthread_mutex_unlock(&pstate->lock);
     }
+    pthread_mutex_unlock(&pstate->lock);
 }
 
 static void ff_hevc_rpi_progress_init_state(HEVCRPiFrameProgressState * const pstate)
@@ -2364,7 +2361,7 @@ static void ff_hevc_rpi_progress_kill_wait(HEVCRPiFrameProgressWait * const pwai
 {
     sem_destroy(&pwait->sem);
 }
-
+#endif
 
 static void hevc_await_progress(HEVCContext *s, const HEVCFrame * const ref,
                                 const Mv * const mv, const int y0, const int height)
@@ -2372,8 +2369,7 @@ static void hevc_await_progress(HEVCContext *s, const HEVCFrame * const ref,
     if (s->threads_type == FF_THREAD_FRAME) {
         const int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
 
-//#ifdef RPI
-#if 1
+#ifdef RPI
         if (s->enable_rpi) {
             int16_t *const pr = s->jb0->progress + ref->dpb_no;
             if (*pr < y) {
@@ -2383,7 +2379,7 @@ static void hevc_await_progress(HEVCContext *s, const HEVCFrame * const ref,
         else
 #endif
         // It is a const ThreadFrame but the prototype isn't
-        ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0);
+        ff_hevc_progress_wait_mv(s, s->jb0, ref, y);
     }
 }
 
@@ -4201,16 +4197,15 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
         more_data = hls_coding_quadtree(s, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
+#ifdef RPI
         // Report progress so we can use our MVs in other frames
         // If we are tiled then this isn't really optimal but given that tiling
         // can change on a per pic basis (described in PPS) other schemes are
         // quite a lot harder
-        if (x_ctb + ctb_size >= s->ps.sps->width) {
+        if (s->threads_type == FF_THREAD_FRAME && x_ctb + ctb_size >= s->ps.sps->width) {
             ff_hevc_progress_signal_mv(s, y_ctb + ctb_size - 1);
-//            ff_thread_report_progress(&s->ref->tf, y_ctb + ctb_size - 1, 1);
         }
 
-#ifdef RPI
         if (s->enable_rpi) {
             int q_full = (++s->ctu_count >= s->max_ctu_count);
 
@@ -4861,19 +4856,20 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
     }
 
 fail:  // Also success path
-    if (s->ref && s->threads_type == FF_THREAD_FRAME) {
+    if (s->ref != NULL) {
+        if (s->used_for_ref && s->threads_type == FF_THREAD_FRAME) {
 #if RPI_INTER
-        rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
+            rpi_flush_ref_frame_progress(s, &s->ref->tf, s->ps.sps->height);
 #endif
-        ff_hevc_progress_signal_mv(s, INT_MAX);
-        ff_hevc_progress_signal_recon(s, INT_MAX);
-    }
+            ff_hevc_progress_signal_all_done(s);
+        }
 #if RPI_INTER
-    else if (s->ref && s->enable_rpi) {
-      // When running single threaded we need to flush the whole frame
-      flush_frame(s,s->frame);
-    }
+        else if (s->enable_rpi) {
+          // When running single threaded we need to flush the whole frame
+          flush_frame(s, s->frame);
+        }
 #endif
+    }
     return ret;
 }
 
