@@ -112,7 +112,7 @@ static av_always_inline int compare_mv_ref_idx(struct MvField A, struct MvField 
     return 0;
 }
 
-static av_always_inline void mv_scale(Mv *dst, Mv *src, int td, int tb)
+static av_always_inline void mv_scale(Mv * const dst, const Mv * const src, int td, int tb)
 {
     int tx, scale_factor;
 
@@ -126,10 +126,10 @@ static av_always_inline void mv_scale(Mv *dst, Mv *src, int td, int tb)
                            (scale_factor * src->y < 0)) >> 8);
 }
 
-static int check_mvset(Mv *mvLXCol, Mv *mvCol,
-                       int colPic, int poc,
-                       RefPicList *refPicList, int X, int refIdxLx,
-                       RefPicList *refPicList_col, int listCol, int refidxCol)
+static int check_mvset(Mv * const mvLXCol, const Mv * const mvCol,
+                       const int colPic, const int poc,
+                       const RefPicList * const refPicList, const int X, const int refIdxLx,
+                       const RefPicList * const refPicList_col, const int listCol, const int refidxCol)
 {
     int cur_lt = refPicList[X].isLongTerm[refIdxLx];
     int col_lt = refPicList_col[listCol].isLongTerm[refidxCol];
@@ -160,11 +160,11 @@ static int check_mvset(Mv *mvLXCol, Mv *mvCol,
                 refPicList_col, L ## l, temp_col.ref_idx[l])
 
 // derive the motion vectors section 8.5.3.1.8
-static int derive_temporal_colocated_mvs(HEVCContext *s, MvField temp_col,
-                                         int refIdxLx, Mv *mvLXCol, int X,
-                                         int colPic, RefPicList *refPicList_col)
+static int derive_temporal_colocated_mvs(const HEVCContext * const s, const MvField temp_col,
+                                         const int refIdxLx, Mv * const mvLXCol, const int X,
+                                         const int colPic, const RefPicList * const refPicList_col)
 {
-    RefPicList *refPicList = s->ref->refPicList;
+    const RefPicList * const refPicList = s->ref->refPicList;
 
     if (temp_col.pred_flag == PF_INTRA)
         return 0;
@@ -215,20 +215,20 @@ static int derive_temporal_colocated_mvs(HEVCContext *s, MvField temp_col,
 /*
  * 8.5.3.1.7  temporal luma motion vector prediction
  */
-static int temporal_luma_motion_vector(HEVCContext *s, int x0, int y0,
-                                       int nPbW, int nPbH, int refIdxLx,
-                                       Mv *mvLXCol, int X)
+static int temporal_luma_motion_vector(HEVCContext * const s, const int x0, const int y0,
+                                       const int nPbW, const int nPbH, const int refIdxLx,
+                                       Mv * const mvLXCol, const int X)
 {
     MvField *tab_mvf;
     MvField temp_col;
     int x, y, x_pu, y_pu;
-    int min_pu_width = s->ps.sps->min_pu_width;
+    const int min_pu_width = s->ps.sps->min_pu_width;
     int availableFlagLXCol = 0;
     int colPic;
 
-    HEVCFrame *ref = s->ref->collocated_ref;
+    HEVCFrame * const ref = s->ref->collocated_ref;
 
-    if (!ref) {
+    if (ref == NULL || ref->tab_mvf == NULL) {
         memset(mvLXCol, 0, sizeof(*mvLXCol));
         return 0;
     }
@@ -240,8 +240,7 @@ static int temporal_luma_motion_vector(HEVCContext *s, int x0, int y0,
     x = x0 + nPbW;
     y = y0 + nPbH;
 
-    if (tab_mvf &&
-        (y0 >> s->ps.sps->log2_ctb_size) == (y >> s->ps.sps->log2_ctb_size) &&
+    if ((y0 >> s->ps.sps->log2_ctb_size) == (y >> s->ps.sps->log2_ctb_size) &&
         y < s->ps.sps->height &&
         x < s->ps.sps->width) {
         x                 &= ~15;
@@ -255,7 +254,7 @@ static int temporal_luma_motion_vector(HEVCContext *s, int x0, int y0,
     }
 
     // derive center collocated motion vector
-    if (tab_mvf && !availableFlagLXCol) {
+    if (!availableFlagLXCol) {
         x                  = x0 + (nPbW >> 1);
         y                  = y0 + (nPbH >> 1);
         x                 &= ~15;

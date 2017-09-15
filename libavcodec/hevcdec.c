@@ -4074,7 +4074,6 @@ static void worker_core(HEVCContext * const s)
         for (i = 0; i != FF_ARRAY_ELEMS(jb->progress); ++i) {
             if (jb->progress[i] >= 0) {
                 ff_hevc_progress_wait_recon(s, jb, s->DPB + i, jb->progress[i]);
-//                ff_thread_await_progress(&s->DPB[i].tf, jb->progress[i], 0);
             }
         }
     }
@@ -4864,7 +4863,10 @@ fail:  // Also success path
             ff_hevc_progress_signal_all_done(s);
         }
 #ifdef RPI
-        else {
+        // * Flush frame will become confused if we pass it something
+        //   that doesn't have an expected number of planes (e.g. 400)
+        //   So only flush if we are sure we can.
+        else if (s->enable_rpi) {
             // Flush frame to real memory as we expect to be able to pass
             // it straight on to mmal
             flush_frame(s, s->frame);
