@@ -533,6 +533,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     if ((ret = av_opt_set_dict(s, &tmp)) < 0)
         goto fail;
 
+    av_strlcpy(s->filename, filename ? filename : "", sizeof(s->filename));
     if ((ret = init_input(s, filename, &tmp)) < 0)
         goto fail;
     s->probe_score = ret;
@@ -570,7 +571,6 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
     }
 
     s->duration = s->start_time = AV_NOPTS_VALUE;
-    av_strlcpy(s->filename, filename ? filename : "", sizeof(s->filename));
 
     /* Allocate private data. */
     if (s->iformat->priv_data_size > 0) {
@@ -4199,8 +4199,8 @@ void avformat_free_context(AVFormatContext *s)
     av_dict_free(&s->metadata);
     av_dict_free(&s->internal->id3v2_meta);
     av_freep(&s->streams);
-    av_freep(&s->internal);
     flush_packet_queue(s);
+    av_freep(&s->internal);
     av_free(s);
 }
 

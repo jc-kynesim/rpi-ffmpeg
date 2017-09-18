@@ -373,8 +373,20 @@ static av_cold int nvenc_check_device(AVCodecContext *avctx, int idx)
         return 0;
 
 fail3:
+    cu_res = dl_fn->cuda_dl->cuCtxPushCurrent(ctx->cu_context);
+    if (cu_res != CUDA_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "cuCtxPushCurrent failed\n");
+        return AVERROR_EXTERNAL;
+    }
+
     p_nvenc->nvEncDestroyEncoder(ctx->nvencoder);
     ctx->nvencoder = NULL;
+
+    cu_res = dl_fn->cuda_dl->cuCtxPopCurrent(&dummy);
+    if (cu_res != CUDA_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "cuCtxPopCurrent failed\n");
+        return AVERROR_EXTERNAL;
+    }
 
 fail2:
     dl_fn->cuda_dl->cuCtxDestroy(ctx->cu_context_internal);
@@ -951,6 +963,8 @@ static av_cold int nvenc_setup_encoder(AVCodecContext *avctx)
     NV_ENC_PRESET_CONFIG preset_config = { 0 };
     NVENCSTATUS nv_status = NV_ENC_SUCCESS;
     AVCPBProperties *cpb_props;
+    CUresult cu_res;
+    CUcontext dummy;
     int res = 0;
     int dw, dh;
 
@@ -1038,7 +1052,20 @@ static av_cold int nvenc_setup_encoder(AVCodecContext *avctx)
     if (res)
         return res;
 
+    cu_res = dl_fn->cuda_dl->cuCtxPushCurrent(ctx->cu_context);
+    if (cu_res != CUDA_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "cuCtxPushCurrent failed\n");
+        return AVERROR_EXTERNAL;
+    }
+
     nv_status = p_nvenc->nvEncInitializeEncoder(ctx->nvencoder, &ctx->init_encode_params);
+
+    cu_res = dl_fn->cuda_dl->cuCtxPopCurrent(&dummy);
+    if (cu_res != CUDA_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "cuCtxPopCurrent failed\n");
+        return AVERROR_EXTERNAL;
+    }
+
     if (nv_status != NV_ENC_SUCCESS) {
         return nvenc_print_error(avctx, nv_status, "InitializeEncoder failed");
     }
@@ -1106,8 +1133,8 @@ static av_cold int nvenc_alloc_surface(AVCodecContext *avctx, int idx)
         }
 
         allocSurf.version = NV_ENC_CREATE_INPUT_BUFFER_VER;
-        allocSurf.width = (avctx->width + 31) & ~31;
-        allocSurf.height = (avctx->height + 31) & ~31;
+        allocSurf.width = avctx->width;
+        allocSurf.height = avctx->height;
         allocSurf.memoryHeap = NV_ENC_MEMORY_HEAP_SYSMEM_CACHED;
         allocSurf.bufferFmt = ctx->surfaces[idx].format;
 
@@ -1147,6 +1174,9 @@ static av_cold int nvenc_alloc_surface(AVCodecContext *avctx, int idx)
 static av_cold int nvenc_setup_surfaces(AVCodecContext *avctx)
 {
     NvencContext *ctx = avctx->priv_data;
+    NvencDynLoadFunctions *dl_fn = &ctx->nvenc_dload_funcs;
+    CUresult cu_res;
+    CUcontext dummy;
     int i, res;
 
     ctx->surfaces = av_mallocz_array(ctx->nb_surfaces, sizeof(*ctx->surfaces));
@@ -1163,9 +1193,28 @@ static av_cold int nvenc_setup_surfaces(AVCodecContext *avctx)
     if (!ctx->output_surface_ready_queue)
         return AVERROR(ENOMEM);
 
+    cu_res = dl_fn->cuda_dl->cuCtxPushCurrent(ctx->cu_context);
+    if (cu_res != CUDA_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "cuCtxPushCurrent failed\n");
+        return AVERROR_EXTERNAL;
+    }
+
     for (i = 0; i < ctx->nb_surfaces; i++) {
         if ((res = nvenc_alloc_surface(avctx, i)) < 0)
+        {
+            cu_res = dl_fn->cuda_dl->cuCtxPopCurrent(&dummy);
+            if (cu_res != CUDA_SUCCESS) {
+                av_log(avctx, AV_LOG_ERROR, "cuCtxPopCurrent failed\n");
+                return AVERROR_EXTERNAL;
+            }
             return res;
+        }
+    }
+
+    cu_res = dl_fn->cuda_dl->cuCtxPopCurrent(&dummy);
+    if (cu_res != CUDA_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "cuCtxPopCurrent failed\n");
+        return AVERROR_EXTERNAL;
     }
 
     return 0;
@@ -1209,12 +1258,20 @@ av_cold int ff_nvenc_encode_close(AVCodecContext *avctx)
     NvencContext *ctx               = avctx->priv_data;
     NvencDynLoadFunctions *dl_fn = &ctx->nvenc_dload_funcs;
     NV_ENCODE_API_FUNCTION_LIST *p_nvenc = &dl_fn->nvenc_funcs;
+    CUresult cu_res;
+    CUcontext dummy;
     int i;
 
     /* the encoder has to be flushed before it can be closed */
     if (ctx->nvencoder) {
         NV_ENC_PIC_PARAMS params        = { .version        = NV_ENC_PIC_PARAMS_VER,
                                             .encodePicFlags = NV_ENC_PIC_FLAG_EOS };
+
+        cu_res = dl_fn->cuda_dl->cuCtxPushCurrent(ctx->cu_context);
+        if (cu_res != CUDA_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "cuCtxPushCurrent failed\n");
+            return AVERROR_EXTERNAL;
+        }
 
         p_nvenc->nvEncEncodePicture(ctx->nvencoder, &params);
     }
@@ -1247,8 +1304,15 @@ av_cold int ff_nvenc_encode_close(AVCodecContext *avctx)
     av_freep(&ctx->surfaces);
     ctx->nb_surfaces = 0;
 
-    if (ctx->nvencoder)
+    if (ctx->nvencoder) {
         p_nvenc->nvEncDestroyEncoder(ctx->nvencoder);
+
+        cu_res = dl_fn->cuda_dl->cuCtxPopCurrent(&dummy);
+        if (cu_res != CUDA_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "cuCtxPopCurrent failed\n");
+            return AVERROR_EXTERNAL;
+        }
+    }
     ctx->nvencoder = NULL;
 
     if (ctx->cu_context_internal)
@@ -1718,8 +1782,8 @@ int ff_nvenc_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 
         pic_params.inputBuffer = inSurf->input_surface;
         pic_params.bufferFmt = inSurf->format;
-        pic_params.inputWidth = avctx->width;
-        pic_params.inputHeight = avctx->height;
+        pic_params.inputWidth = inSurf->width;
+        pic_params.inputHeight = inSurf->height;
         pic_params.inputPitch = inSurf->pitch;
         pic_params.outputBitstream = inSurf->output_surface;
 
@@ -1785,7 +1849,19 @@ int ff_nvenc_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     if (output_ready(avctx, !frame)) {
         av_fifo_generic_read(ctx->output_surface_ready_queue, &tmpoutsurf, sizeof(tmpoutsurf), NULL);
 
+        cu_res = dl_fn->cuda_dl->cuCtxPushCurrent(ctx->cu_context);
+        if (cu_res != CUDA_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "cuCtxPushCurrent failed\n");
+            return AVERROR_EXTERNAL;
+        }
+
         res = process_output_surface(avctx, pkt, tmpoutsurf);
+
+        cu_res = dl_fn->cuda_dl->cuCtxPopCurrent(&dummy);
+        if (cu_res != CUDA_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "cuCtxPopCurrent failed\n");
+            return AVERROR_EXTERNAL;
+        }
 
         if (res)
             return res;
