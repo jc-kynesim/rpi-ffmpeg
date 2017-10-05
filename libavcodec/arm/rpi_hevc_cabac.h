@@ -61,19 +61,18 @@ static inline void update_rice_arm(uint8_t * const stat_coeff,
     const unsigned int last_coeff_abs_level_remaining,
     const unsigned int c_rice_param)
 {
-    int t;
+    int t = last_coeff_abs_level_remaining << 1;
     __asm__ (
-    "lsl   %[t], %[coeff], #1               \n\t"
     "lsrs  %[t], %[t], %[shift]             \n\t"
+
     "it    eq                               \n\t"
     "subeq %[stat], %[stat], #1             \n\t"
     "cmp   %[t], #6                         \n\t"
     "adc   %[stat], %[stat], #0             \n\t"
     "usat  %[stat], #8, %[stat]             \n\t"
-    : [stat]"+&r"(*stat_coeff),
-         [t]"=&r"(t)
-    :  [coeff]"r"(last_coeff_abs_level_remaining),
-       [shift]"r"(c_rice_param)
+    : [stat]"+r"(*stat_coeff),
+         [t]"+r"(t)
+    :  [shift]"r"(c_rice_param)
     : "cc"
     );
 }
@@ -158,10 +157,10 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "bne        1b                                          \n\t"
          "2:                                                     \n\t"
          :    [bit]"=&r"(bit),
-              [low]"+&r"(c->low),
-            [range]"+&r"(c->range),
+              [low]"+r"(c->low),
+            [range]"+r"(c->range),
               [r_b]"=&r"(reg_b),
-             [bptr]"+&r"(c->bytestream),
+             [bptr]"+r"(c->bytestream),
                 [i]"=&r"(i),
               [tmp]"=&r"(tmp),
                [st]"=&r"(st),
@@ -259,12 +258,12 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
          "bne        1b                                          \n\t"
          "2:                                                     \n\t"
          :    [bit]"=&r"(bit),
-              [low]"+&r"(c->low),
-            [range]"+&r"(c->range),
+              [low]"+r"(c->low),
+            [range]"+r"(c->range),
               [r_b]"=&r"(reg_b),
-             [bptr]"+&r"(c->bytestream),
-              [idx]"+&r"(p),
-                [n]"+&r"(n),
+             [bptr]"+r"(c->bytestream),
+              [idx]"+r"(p),
+                [n]"+r"(n),
               [tmp]"=&r"(tmp),
                [st]"=&r"(st)
           :  [state0]"r"(state0),
@@ -293,17 +292,15 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 #define get_cabac_by22_peek get_cabac_by22_peek_arm
 static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
 {
-    uint32_t rv, tmp;
+    uint32_t rv = c->low &~ 1, tmp;
     __asm__ (
-        "bic      %[rv]  , %[low], #1            \n\t"
         "cmp      %[inv] , #0                    \n\t"
         "it       ne                             \n\t"
         "umullne  %[tmp] , %[rv] , %[inv], %[rv] \n\t"
         :  // Outputs
-             [rv]"=&r"(rv),
+             [rv]"+r"(rv),
              [tmp]"=r"(tmp)
         :  // Inputs
-             [low]"r"(c->low),
              [inv]"r"(c->range)
         :  // Clobbers
                 "cc"
@@ -338,8 +335,8 @@ static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigne
         :  // Outputs
              [m]"=&r"(m),
            [tmp]"=&r"(tmp),
-          [bits]"+&r"(c->by22.bits),
-           [low]"+&r"(c->low)
+          [bits]"+r"(c->by22.bits),
+           [low]"+r"(c->low)
         :  // Inputs
                [n]"r"(n),
              [val]"r"(val),
@@ -469,8 +466,8 @@ static int coeff_abs_level_remaining_decode_by22_arm(CABACContext * const c, con
              [n]"=&r"(n),
            [val]"=&r"(val),
            [tmp]"=&r"(tmp),
-          [bits]"+&r"(c->by22.bits),
-           [low]"+&r"(c->low)
+          [bits]"+r"(c->by22.bits),
+           [low]"+r"(c->low)
         :  // Inputs
             [rice]"r"(c_rice_param),
              [inv]"r"(c->range),
