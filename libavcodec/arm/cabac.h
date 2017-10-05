@@ -106,8 +106,8 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "add        %[low]        , %[low]      , %[tmp]        \n\t"
         "2:                                                     \n\t"
         :    [bit]"=&r"(bit),
-             [low]"+&r"(c->low),
-           [range]"+&r"(c->range),
+             [low]"+r"(c->low),
+           [range]"+r"(c->range),
              [r_b]"=&r"(reg_b),
              [r_c]"=&r"(reg_c),
              [tmp]"=&r"(tmp)
@@ -168,10 +168,10 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
 #endif
         "2:                                                     \n\t"
         :    [bit]"=&r"(bit),
-             [low]"+&r"(c->low),
-           [range]"+&r"(c->range),
+             [low]"+r"(c->low),
+           [range]"+r"(c->range),
              [r_b]"=&r"(reg_b),
-             [ptr]"+&r"(c->bytestream),
+             [ptr]"+r"(c->bytestream),
              [tmp]"=&r"(tmp)
           :  [state]"r"(state),
             [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
@@ -207,10 +207,10 @@ static inline int get_cabac_bypass_arm(CABACContext * const c)
         "sub        %[low]        , %[low]      , %[tmp]        \n\t"
         "1:                                                     \n\t"
         : // Outputs
-              [rv]"+&r"(rv),
-             [low]"+&r"(c->low),
-             [tmp]"=&r"(tmp),
-             [ptr]"+&r"(c->bytestream)
+              [rv]"+r"(rv),
+             [low]"+r"(c->low),
+             [tmp]"=r"(tmp),
+             [ptr]"+r"(c->bytestream)
         : // Inputs
 #if !UNCHECKED_BITSTREAM_READER
                  [c]"r"(c),
@@ -241,10 +241,10 @@ static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
         "sub        %[low]        , %[low]      , %[tmp]        \n\t"
         "1:                                                     \n\t"
         : // Outputs
-              [rv]"+&r"(rv),
-             [low]"+&r"(c->low),
-             [tmp]"=&r"(tmp),
-             [ptr]"+&r"(c->bytestream)
+              [rv]"+r"(rv),
+             [low]"+r"(c->low),
+             [tmp]"=r"(tmp),
+             [ptr]"+r"(c->bytestream)
         : // Inputs
 #if !UNCHECKED_BITSTREAM_READER
                  [c]"r"(c),
