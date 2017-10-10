@@ -31,16 +31,15 @@
 #define MAX_PB_SIZE 64
 
 typedef struct SAOParams {
-    int offset_abs[3][4];   ///< sao_offset_abs
-    int offset_sign[3][4];  ///< sao_offset_sign
+//    int offset_abs[3][4];   ///< sao_offset_abs
+//    int offset_sign[3][4];  ///< sao_offset_sign
 
     uint8_t band_position[3];   ///< sao_band_position
-
-    int eo_class[3];        ///< sao_eo_class
+    uint8_t eo_class[3];        ///< sao_eo_class
+    uint8_t type_idx[3];    ///< sao_type_idx
 
     int16_t offset_val[3][5];   ///<SaoOffsetVal
 
-    uint8_t type_idx[3];    ///< sao_type_idx
 } SAOParams;
 
 typedef struct Mv {
@@ -178,8 +177,8 @@ typedef struct HEVCDSPContext {
 #endif
 
     void (*hevc_deblocking_boundary_strengths)(int pus, int dup, int in_inc, int out_inc,
-                                               int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
-                                               MvField *curr, MvField *neigh, uint8_t *bs);
+                                               const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
+                                               const MvField *curr, const MvField *neigh, uint8_t *bs);
 } HEVCDSPContext;
 
 void ff_hevc_dsp_init(HEVCDSPContext *hpc, int bit_depth);

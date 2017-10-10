@@ -124,8 +124,8 @@ DECLARE_ALIGNED(16, const int8_t, ff_hevc_qpel_filters[3][16]) = {
 #undef BIT_DEPTH
 
 static void hevc_deblocking_boundary_strengths(int pus, int dup, int in_inc, int out_inc,
-                                               int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
-                                               MvField *curr, MvField *neigh, uint8_t *bs)
+                                               const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
+                                               const MvField *curr, const MvField *neigh, uint8_t *bs)
 {
     for (; pus > 0; pus--) {
         int strength, out;

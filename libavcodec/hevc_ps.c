@@ -1299,6 +1299,7 @@ static void hevc_pps_free(void *opaque, uint8_t *data)
     av_freep(&pps->ctb_addr_rs_to_ts);
     av_freep(&pps->ctb_addr_ts_to_rs);
     av_freep(&pps->tile_pos_rs);
+    av_freep(&pps->tile_size);
     av_freep(&pps->tile_id);
     av_freep(&pps->min_tb_addr_zs_tab);
 
@@ -1383,7 +1384,7 @@ static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
         pps->row_bd[i + 1] = pps->row_bd[i] + pps->row_height[i];
 
     for (i = 0, j = 0; i < sps->ctb_width; i++) {
-        if (i > pps->col_bd[j])
+        if (i >= pps->col_bd[j + 1])
             j++;
         pps->col_idxX[i] = j;
     }
@@ -1396,6 +1397,7 @@ static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
     pps->ctb_addr_rs_to_ts = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_addr_rs_to_ts));
     pps->ctb_addr_ts_to_rs = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_addr_ts_to_rs));
     pps->tile_id           = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->tile_id));
+    pps->tile_size         = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->tile_size));
     pps->min_tb_addr_zs_tab = av_malloc_array((sps->tb_mask+2) * (sps->tb_mask+2), sizeof(*pps->min_tb_addr_zs_tab));
     if (!pps->ctb_addr_rs_to_ts || !pps->ctb_addr_ts_to_rs ||
         !pps->tile_id || !pps->min_tb_addr_zs_tab) {
@@ -1447,8 +1449,12 @@ static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
 
     for (j = 0; j < pps->num_tile_rows; j++)
         for (i = 0; i < pps->num_tile_columns; i++)
+        {
+            pps->tile_size[j * pps->num_tile_columns + i] =
+                pps->column_width[i] * pps->row_height[j];
             pps->tile_pos_rs[j * pps->num_tile_columns + i] =
                 pps->row_bd[j] * sps->ctb_width + pps->col_bd[i];
+        }
 
     log2_diff = sps->log2_ctb_size - sps->log2_min_tb_size;
     pps->min_tb_addr_zs = &pps->min_tb_addr_zs_tab[1*(sps->tb_mask+2)+1];

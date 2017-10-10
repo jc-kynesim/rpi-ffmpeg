@@ -129,6 +129,8 @@ typedef struct rpi_cache_flush_env_s rpi_cache_flush_env_t;
 rpi_cache_flush_env_t * rpi_cache_flush_init(void);
 // Free env without flushing
 void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe);
+// Do the accumulated flush & clear but do not free the env
+int rpi_cache_flush_execute(rpi_cache_flush_env_t * const rfe);
 // Do the accumulated flush & free the env
 int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe);
 

@@ -342,8 +342,8 @@ void ff_hevc_put_qpel_bi_neon_wrapper(uint8_t *dst, ptrdiff_t dststride, uint8_t
 }
 
 void ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,
-                                                int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
-                                                MvField *curr, MvField *neigh, uint8_t *bs);
+                                                const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
+                                                const MvField *curr, const MvField *neigh, uint8_t *bs);
 
 
 static void ff_hevc_sao_edge_48_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height)

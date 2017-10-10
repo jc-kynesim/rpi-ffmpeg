@@ -91,14 +91,13 @@ static int chroma_tc(HEVCContext *s, int qp_y, int c_idx, int tc_offset)
     return tctable[idxt];
 }
 
-static int get_qPy_pred(HEVCContext *s, int xBase, int yBase, int log2_cb_size)
+static inline int get_qPy_pred(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
 {
-    HEVCLocalContext *lc     = s->HEVClc;
     int ctb_size_mask        = (1 << s->ps.sps->log2_ctb_size) - 1;
-    int MinCuQpDeltaSizeMask = (1 << (s->ps.sps->log2_ctb_size -
-                                      s->ps.pps->diff_cu_qp_delta_depth)) - 1;
-    int xQgBase              = xBase - (xBase & MinCuQpDeltaSizeMask);
-    int yQgBase              = yBase - (yBase & MinCuQpDeltaSizeMask);
+    int MinCuQpDeltaSizeMask = ~((1 << (s->ps.sps->log2_ctb_size -
+                                      s->ps.pps->diff_cu_qp_delta_depth)) - 1);
+    int xQgBase              = xBase & MinCuQpDeltaSizeMask;
+    int yQgBase              = yBase & MinCuQpDeltaSizeMask;
     int min_cb_width         = s->ps.sps->min_cb_width;
     int x_cb                 = xQgBase >> s->ps.sps->log2_min_cb_size;
     int y_cb                 = yQgBase >> s->ps.sps->log2_min_cb_size;
@@ -106,51 +105,31 @@ static int get_qPy_pred(HEVCContext *s, int xBase, int yBase, int log2_cb_size)
                                (xQgBase & ctb_size_mask);
     int availableB           = (yBase   & ctb_size_mask) &&
                                (yQgBase & ctb_size_mask);
-    int qPy_pred, qPy_a, qPy_b;
+    const int qPy_pred = lc->qPy_pred;
 
-    // qPy_pred
-    if (lc->first_qp_group || (!xQgBase && !yQgBase)) {
-        lc->first_qp_group = !lc->tu.is_cu_qp_delta_coded;
-        qPy_pred = s->sh.slice_qp;
-    } else {
-        qPy_pred = lc->qPy_pred;
-    }
-
-    // qPy_a
-    if (availableA == 0)
-        qPy_a = qPy_pred;
-    else
-        qPy_a = s->qp_y_tab[(x_cb - 1) + y_cb * min_cb_width];
-
-    // qPy_b
-    if (availableB == 0)
-        qPy_b = qPy_pred;
-    else
-        qPy_b = s->qp_y_tab[x_cb + (y_cb - 1) * min_cb_width];
-
-    av_assert2(qPy_a >= -s->ps.sps->qp_bd_offset && qPy_a < 52);
-    av_assert2(qPy_b >= -s->ps.sps->qp_bd_offset && qPy_b < 52);
-
-    return (qPy_a + qPy_b + 1) >> 1;
+    return ((!availableA ? qPy_pred : s->qp_y_tab[(x_cb - 1) + y_cb * min_cb_width]) +
+            (!availableB ? qPy_pred : s->qp_y_tab[x_cb + (y_cb - 1) * min_cb_width]) + 1) >> 1;
 }
 
-void ff_hevc_set_qPy(HEVCContext *s, int xBase, int yBase, int log2_cb_size)
+// * Only called from bitstream decode in foreground
+//   so should be safe
+void ff_hevc_set_qPy(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
 {
-    int qp_y = get_qPy_pred(s, xBase, yBase, log2_cb_size);
+    const int qp_y = get_qPy_pred(s, lc, xBase, yBase, log2_cb_size);
 
-    if (s->HEVClc->tu.cu_qp_delta != 0) {
+    if (lc->tu.cu_qp_delta != 0) {
         int off = s->ps.sps->qp_bd_offset;
-        s->HEVClc->qp_y = FFUMOD(qp_y + s->HEVClc->tu.cu_qp_delta + 52 + 2 * off,
+        lc->qp_y = FFUMOD(qp_y + lc->tu.cu_qp_delta + 52 + 2 * off,
                                  52 + off) - off;
     } else
-        s->HEVClc->qp_y = qp_y;
+        lc->qp_y = qp_y;
 }
 
-static int get_qPy(HEVCContext *s, int xC, int yC)
+static int get_qPy(const HEVCContext * const s, const int xC, const int yC)
 {
-    int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
-    int x                 = xC >> log2_min_cb_size;
-    int y                 = yC >> log2_min_cb_size;
+    const int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
+    const int x                 = xC >> log2_min_cb_size;
+    const int y                 = yC >> log2_min_cb_size;
     return s->qp_y_tab[x + y * s->ps.sps->min_cb_width];
 }
 
@@ -233,7 +212,7 @@ static void copy_vert(uint8_t *dst, const uint8_t *src,
     }
 }
 
-static void copy_CTB_to_hv(HEVCContext *s, const uint8_t *src,
+static void copy_CTB_to_hv(const HEVCContext * const s, const uint8_t * const src,
                            ptrdiff_t stride_src, int x, int y, int width, int height,
                            int c_idx, int x_ctb, int y_ctb)
 {
@@ -253,7 +232,8 @@ static void copy_CTB_to_hv(HEVCContext *s, const uint8_t *src,
     copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 1) * h + y) << sh), src + ((width - 1) << sh), sh, height, 1 << sh, stride_src);
 }
 
-static void restore_tqb_pixels(HEVCContext *s,
+// N.B. Src & dst are swapped as this is a restore!
+static void restore_tqb_pixels(const HEVCContext * const s,
                                uint8_t *src1, const uint8_t *dst1,
                                ptrdiff_t stride_src, ptrdiff_t stride_dst,
                                int x0, int y0, int width, int height, int c_idx)
@@ -289,7 +269,7 @@ static void restore_tqb_pixels(HEVCContext *s,
 
 #define CTB(tab, x, y) ((tab)[(y) * s->ps.sps->ctb_width + (x)])
 
-static void sao_filter_CTB(HEVCContext *s, int x, int y)
+static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y)
 {
 #if SAO_FILTER_N == 5
     static const uint8_t sao_tab[8] = { 0 /* 8 */, 1 /* 16 */, 2 /* 24 */, 2 /* 32 */, 3, 3 /* 48 */, 4, 4 /* 64 */};
@@ -298,7 +278,6 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
 #else
 #error Confused by size of sao fn array
 #endif
-    HEVCLocalContext *lc = s->HEVClc;
     int c_idx;
     int edges[4];  // 0 left 1 top 2 right 3 bottom
     int x_ctb                = x >> s->ps.sps->log2_ctb_size;
@@ -414,7 +393,14 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
                            x_ctb, y_ctb);
             if (s->ps.pps->transquant_bypass_enable_flag ||
                 (s->ps.sps->pcm.loop_filter_disable_flag && s->ps.sps->pcm_enabled_flag)) {
-                dst = lc->edge_emu_buffer;
+#ifdef RPI
+                // Can't use the edge buffer here as it may be in use by the foreground
+                DECLARE_ALIGNED(64, uint8_t, dstbuf)
+                    [2*MAX_PB_SIZE*MAX_PB_SIZE];
+#else
+                uint8_t * const dstbuf = s->HEVClc->edge_emu_buffer;
+#endif
+                dst = dstbuf;
                 stride_dst = 2*MAX_PB_SIZE;
                 copy_CTB(dst, src, width << sh, height, stride_dst, stride_src);
 #if RPI_HEVC_SAND
@@ -461,9 +447,16 @@ static void sao_filter_CTB(HEVCContext *s, int x, int y)
             int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
             int top_edge = edges[1];
             int bottom_edge = edges[3];
+#ifdef RPI
+            // Can't use the edge buffer here as it may be in use by the foreground
+            DECLARE_ALIGNED(64, uint8_t, dstbuf)
+                [2*(MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE)*(MAX_PB_SIZE + 2) + 64];
+#else
+            uint8_t * const dstbuf = s->HEVClc->edge_emu_buffer;
+#endif
 
             stride_dst = 2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE;
-            dst = lc->edge_emu_buffer + stride_dst + AV_INPUT_BUFFER_PADDING_SIZE;
+            dst = dstbuf + stride_dst + AV_INPUT_BUFFER_PADDING_SIZE;
 
             if (!top_edge) {
                 uint8_t *dst1;
@@ -984,10 +977,9 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 }
 
 
-void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
+void ff_hevc_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
                                            int log2_trafo_size)
 {
-    HEVCLocalContext *lc = s->HEVClc;
     MvField *tab_mvf     = s->ref->tab_mvf;
     int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
     int log2_min_tu_size = s->ps.sps->log2_min_tb_size;
@@ -995,7 +987,7 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
     int min_tu_width     = s->ps.sps->min_tb_width;
     int boundary_upper, boundary_left;
     int i, j;
-    RefPicList *rpl      = s->ref->refPicList;
+    const RefPicList *rpl = s->ref->refPicList;
     const unsigned int log2_dup = FFMIN(log2_min_pu_size, log2_trafo_size);
     const unsigned int min_pu_in_4pix = 1 << (log2_dup - 2);  // Dup
     const unsigned int trafo_in_min_pus = 1 << (log2_trafo_size - log2_dup); // Rep
@@ -1023,7 +1015,7 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
     bs = &s->horizontal_bs[(x0 + y0 * s->bs_width) >> 2];
 
     if (boundary_upper) {
-        RefPicList *rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
+        const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
                               ff_hevc_get_ref_list(s, s->ref, x0, y0 - 1) :
                               rpl;
         MvField *top = curr - min_pu_width;
@@ -1084,7 +1076,7 @@ void ff_hevc_deblocking_boundary_strengths(HEVCContext *s, int x0, int y0,
     bs = &s->vertical_bs[(x0 + y0 * s->bs_width) >> 2];
 
     if (boundary_left) {
-        RefPicList *rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
+        const RefPicList *rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
                                ff_hevc_get_ref_list(s, s->ref, x0 - 1, y0) :
                                rpl;
         MvField *left = curr - 1;
@@ -1146,29 +1138,7 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
       0, start, s->ps.sps->width, end - start, 0, s->ps.sps->vshift[1], flush_luma, flush_chroma);
     rpi_cache_flush_finish(rfe);
 }
-#endif
 
-#if RPI_INTER
-
-// Flush some lines of a reference frames
-void rpi_flush_ref_frame_progress(HEVCContext * const s, ThreadFrame * const f, const unsigned int n)
-{
-    if (s->enable_rpi && s->used_for_ref) {
-        const int d0 = ((int *)f->progress->data)[0];
-        const unsigned int curr_y = d0 == -1 ? 0 : d0;  // At start of time progress is -1
-
-        if (curr_y < (unsigned int)s->ps.sps->height) {
-            rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
-            rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-              0, curr_y, s->ps.sps->width, FFMIN(n, (unsigned int)s->ps.sps->height) - curr_y,
-              s->ps.sps->vshift[1], 1, 1);
-            rpi_cache_flush_finish(rfe);
-        }
-    }
-}
-#endif
-
-#ifdef RPI_DEBLOCK_VPU
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
 static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 {
@@ -1214,15 +1184,15 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 
 #endif
 
-void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
+void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const int ctb_size)
 {
-    int x_end = x >= s->ps.sps->width  - ctb_size;
-#ifdef RPI_DEBLOCK_VPU
-    int done_deblock = 0;
-#endif
+    const int x_end = x >= s->ps.sps->width  - ctb_size;
+
     if (s->avctx->skip_loop_filter < AVDISCARD_ALL)
         deblocking_filter_CTB(s, x, y);
+
 #ifdef RPI_DEBLOCK_VPU
+#error Deblock VPU thoroughly rotted
     if (s->enable_rpi_deblock && x_end)
     {
       int y_at_end = y >= s->ps.sps->height - ctb_size;
@@ -1235,63 +1205,42 @@ void ff_hevc_hls_filter(HEVCContext *s, int x, int y, int ctb_size)
       }
     }
 #endif
+
     if (s->ps.sps->sao_enabled) {
         int y_end = y >= s->ps.sps->height - ctb_size;
-        if (y && x)
+        if (y != 0 && x != 0)
             sao_filter_CTB(s, x - ctb_size, y - ctb_size);
-        if (x && y_end)
+        if (x != 0 && y_end)
             sao_filter_CTB(s, x - ctb_size, y);
-        if (y && x_end) {
+        if (y != 0 && x_end)
             sao_filter_CTB(s, x, y - ctb_size);
-            if (s->threads_type == FF_THREAD_FRAME ) {
-#if RPI_INTER
-                rpi_flush_ref_frame_progress(s,&s->ref->tf, y);
-#endif
-                ff_hevc_progress_signal_recon(s, y);
-            }
-        }
-        if (x_end && y_end) {
+        if (x_end && y_end)
             sao_filter_CTB(s, x , y);
-            if (s->threads_type == FF_THREAD_FRAME ) {
-#if RPI_INTER
-                rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size);
-#endif
-                ff_hevc_progress_signal_recon(s, y + ctb_size);
-            }
-        }
-    } else if (s->threads_type == FF_THREAD_FRAME && x_end) {
-        //int newh = y + ctb_size - 4;
-        //int currh = s->ref->tf.progress->data[0];
-        //if (((y + ctb_size)&63)==0)
-#ifdef RPI_DEBLOCK_VPU
-        if (s->enable_rpi_deblock) {
-            // we no longer need to flush the luma buffer as it is in GPU memory when using deblocking on the rpi
-            if (done_deblock) {
-                ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
-            }
-        } else {
-#if RPI_INTER
-            rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
-#endif
-            ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
-        }
-#else
-#if RPI_INTER
-        rpi_flush_ref_frame_progress(s, &s->ref->tf, y + ctb_size - 4);
-#endif
-        ff_hevc_progress_signal_recon(s, y + ctb_size - 4);
-#endif
     }
 }
 
 void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size)
 {
-    int x_end = x_ctb >= s->ps.sps->width  - ctb_size;
-    int y_end = y_ctb >= s->ps.sps->height - ctb_size;
+    // * This can break strict L->R then U->D ordering - mostly it doesn't matter
+    // Never called if rpi_enabled so no need for cache flush ops
+    const int x_end = x_ctb >= s->ps.sps->width  - ctb_size;
+    const int y_end = y_ctb >= s->ps.sps->height - ctb_size;
     if (y_ctb && x_ctb)
         ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb - ctb_size, ctb_size);
     if (y_ctb && x_end)
+    {
         ff_hevc_hls_filter(s, x_ctb, y_ctb - ctb_size, ctb_size);
+        // Signal progress - this is safe for SAO
+        if (s->threads_type == FF_THREAD_FRAME && y_ctb > ctb_size)
+            ff_hevc_progress_signal_recon(s, y_ctb - ctb_size - 1);
+    }
     if (x_ctb && y_end)
         ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb, ctb_size);
+    if (x_end && y_end)
+    {
+        ff_hevc_hls_filter(s, x_ctb, y_ctb, ctb_size);
+        // All done - signal such
+        if (s->threads_type == FF_THREAD_FRAME)
+            ff_hevc_progress_signal_recon(s, INT_MAX);
+    }
 }

@@ -38,7 +38,7 @@
   // N.B. The extra thread count is effectively RPI_MAX_JOBS - 1 as
   // RPI_MAX_JOBS defines the number of worker parameter sets and we must have one
   // free for the foreground to fill in.
-  #define RPI_MAX_JOBS 2
+  #define RPI_MAX_JOBS 8
 
   // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
   // As it stands there is something mildy broken in VPU deblock - looks mostly OK

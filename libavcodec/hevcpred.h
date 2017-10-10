@@ -27,9 +27,10 @@
 #include <stdint.h>
 
 struct HEVCContext;
+struct HEVCLocalContext;
 
 typedef struct HEVCPredContext {
-    void (*intra_pred[4])(struct HEVCContext *s, int x0, int y0, int c_idx);
+    void (*intra_pred[4])(const struct HEVCContext * const s, struct HEVCLocalContext * const lc, int x0, int y0, int c_idx);
 
     void (*pred_planar[4])(uint8_t *src, const uint8_t *top,
                            const uint8_t *left, ptrdiff_t stride);
@@ -39,7 +40,7 @@ typedef struct HEVCPredContext {
                             const uint8_t *left, ptrdiff_t stride,
                             int c_idx, int mode);
 #ifdef RPI
-    void (*intra_pred_c[4])(struct HEVCContext *s, int x0, int y0, int c_idx);
+    void (*intra_pred_c[4])(const struct HEVCContext * const s, struct HEVCLocalContext * const lc, int x0, int y0, int c_idx);
 
     void (*pred_planar_c[4])(uint8_t *src, const uint8_t *top,
                            const uint8_t *left, ptrdiff_t stride);

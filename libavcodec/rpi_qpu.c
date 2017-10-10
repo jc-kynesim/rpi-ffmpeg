@@ -469,19 +469,25 @@ void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe)
     free(rfe);
 }
 
+int rpi_cache_flush_execute(rpi_cache_flush_env_t * const rfe)
+{
+    int rc = 0;
+    if (rfe->v.op_count != 0) {
+        if (vcsm_clean_invalid2(&rfe->v) != 0)
+        {
+          av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid2 failed: errno=%d\n", errno);
+          rc = -1;
+        }
+        rfe->v.op_count = 0;
+    }
+    return rc;
+}
+
 int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
 {
-  int rc = 0;
-
-  if (vcsm_clean_invalid2(&rfe->v) != 0)
-    rc = -1;
+  int rc = rpi_cache_flush_execute(rfe);;
 
   free(rfe);
-
-  if (rc == 0)
-    return 0;
-
-  av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid failed: errno=%d\n", errno);
   return rc;
 }
 

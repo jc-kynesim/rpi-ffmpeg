@@ -124,7 +124,7 @@ static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const 
 }
 #endif
 
-static av_always_inline void FUNC(intra_pred)(HEVCContext *s, int x0, int y0,
+static av_always_inline void FUNC(intra_pred)(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
                                               int log2_size, int c_idx)
 {
 #define PU(x) \
@@ -166,11 +166,6 @@ do {                                  \
                 AV_WN4P(&ptr[i], a);                                           \
             else                                                               \
                 a = PIXEL_SPLAT_X4(ptr[i + 3])
-#ifdef RPI
-    HEVCLocalContextIntra *lc = (s->enable_rpi) ? &s->HEVClcIntra : (HEVCLocalContextIntra *)s->HEVClc ;
-#else
-    HEVCLocalContext *lc = s->HEVClc;
-#endif
     int i;
     int hshift = s->ps.sps->hshift[c_idx];
     int vshift = s->ps.sps->vshift[c_idx];
@@ -512,9 +507,9 @@ do {                                  \
 }
 
 #define INTRA_PRED(size)                                                            \
-static void FUNC(intra_pred_ ## size)(HEVCContext *s, int x0, int y0, int c_idx)    \
+static void FUNC(intra_pred_ ## size)(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0, int c_idx)    \
 {                                                                                   \
-    FUNC(intra_pred)(s, x0, y0, size, c_idx);                                       \
+    FUNC(intra_pred)(s, lc, x0, y0, size, c_idx);                                       \
 }
 
 INTRA_PRED(2)

@@ -180,7 +180,7 @@
 1,RExt/Main_422_10_B_RExt_Sony_2,Main_422_10_B_RExt_Sony_2.bin,md5sum.txt
 1,RExt/PERSIST_RPARAM_A_RExt_Sony_3,PERSIST_RPARAM_A_RExt_Sony_3.bit,PERSIST_RPARAM_A_RExt_Sony_3.md5
 1,RExt/QMATRIX_A_RExt_Sony_1,QMATRIX_A_RExt_Sony_1.bit,QMATRIX_A_RExt_Sony_1.md5
-1,RExt/SAO_A_RExt_MediaTek_1,SAO_A_RExt_MediaTek_1.bit,SAO_A_RExt_MediaTek_1.md5
+0,RExt/SAO_A_RExt_MediaTek_1,SAO_A_RExt_MediaTek_1.bit,SAO_A_RExt_MediaTek_1.md5, # Runs out of memory - could be fixed
 0,RExt/TSCTX_10bit_I_RExt_SHARP_1,TSCTX_10bit_I_RExt_SHARP_1.bin,TSCTX_10bit_I_RExt_SHARP_1.md5
 0,RExt/TSCTX_10bit_RExt_SHARP_1,TSCTX_10bit_RExt_SHARP_1.bin,TSCTX_10bit_RExt_SHARP_1.md5
 0,RExt/TSCTX_12bit_I_RExt_SHARP_1,TSCTX_12bit_I_RExt_SHARP_1.bin,TSCTX_12bit_I_RExt_SHARP_1.md5
