@@ -696,6 +696,7 @@ static void register_all(void)
     REGISTER_PARSER(H261,               h261);
     REGISTER_PARSER(H263,               h263);
     REGISTER_PARSER(H264,               h264);
+    REGISTER_PARSER(H264_MVC,           h264_mvc);
     REGISTER_PARSER(HEVC,               hevc);
     REGISTER_PARSER(MJPEG,              mjpeg);
     REGISTER_PARSER(MLP,                mlp);

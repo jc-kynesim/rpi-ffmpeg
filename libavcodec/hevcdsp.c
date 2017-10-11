@@ -123,6 +123,120 @@ DECLARE_ALIGNED(16, const int8_t, ff_hevc_qpel_filters[3][16]) = {
 #include "hevcdsp_template.c"
 #undef BIT_DEPTH
 
+static void hevc_deblocking_boundary_strengths(int pus, int dup, int in_inc, int out_inc,
+                                               int *curr_rpl0, int *curr_rpl1, int *neigh_rpl0, int *neigh_rpl1,
+                                               MvField *curr, MvField *neigh, uint8_t *bs)
+{
+    for (; pus > 0; pus--) {
+        int strength, out;
+        int curr_refL0 = curr_rpl0[curr->ref_idx[0]];
+        int curr_refL1 = curr_rpl1[curr->ref_idx[1]];
+        int neigh_refL0 = neigh_rpl0[neigh->ref_idx[0]];
+        int neigh_refL1 = neigh_rpl1[neigh->ref_idx[1]];
+
+#if 1 // This more directly matches the original implementation
+        if (curr->pred_flag == PF_BI &&  neigh->pred_flag == PF_BI) {
+            // same L0 and L1
+            if (curr_refL0 == neigh_refL0 &&
+                curr_refL0 == curr_refL1 &&
+                neigh_refL0 == neigh_refL1) {
+                if ((FFABS(neigh->mv[0].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[0].y) >= 4 ||
+                     FFABS(neigh->mv[1].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[1].y) >= 4) &&
+                    (FFABS(neigh->mv[1].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[0].y) >= 4 ||
+                     FFABS(neigh->mv[0].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[1].y) >= 4))
+                    strength = 1;
+                else
+                    strength = 0;
+            } else if (neigh_refL0 == curr_refL0 &&
+                       neigh_refL1 == curr_refL1) {
+                if (FFABS(neigh->mv[0].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[0].y) >= 4 ||
+                    FFABS(neigh->mv[1].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[1].y) >= 4)
+                    strength = 1;
+                else
+                    strength = 0;
+            } else if (neigh_refL1 == curr_refL0 &&
+                       neigh_refL0 == curr_refL1) {
+                if (FFABS(neigh->mv[1].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[0].y) >= 4 ||
+                    FFABS(neigh->mv[0].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[1].y) >= 4)
+                    strength = 1;
+                else
+                    strength = 0;
+            } else {
+                strength = 1;
+            }
+        } else if ((curr->pred_flag != PF_BI) && (neigh->pred_flag != PF_BI)){ // 1 MV
+            Mv curr_mv0, neigh_mv0;
+
+            if (curr->pred_flag & 1) {
+                curr_mv0   = curr->mv[0];
+            } else {
+                curr_mv0   = curr->mv[1];
+                curr_refL0 = curr_refL1;
+            }
+
+            if (neigh->pred_flag & 1) {
+                neigh_mv0   = neigh->mv[0];
+            } else {
+                neigh_mv0   = neigh->mv[1];
+                neigh_refL0 = neigh_refL1;
+            }
+
+            if (curr_refL0 == neigh_refL0) {
+                if (FFABS(curr_mv0.x - neigh_mv0.x) >= 4 || FFABS(curr_mv0.y - neigh_mv0.y) >= 4)
+                    strength = 1;
+                else
+                    strength = 0;
+            } else
+                strength = 1;
+        } else
+            strength = 1;
+#else // This has exactly the same effect, but is more suitable for vectorisation
+        Mv curr_mv[2];
+        Mv neigh_mv[2];
+        memcpy(curr_mv, curr->mv, sizeof curr_mv);
+        memcpy(neigh_mv, neigh->mv, sizeof neigh_mv);
+
+        if (!(curr->pred_flag & 2)) {
+            curr_mv[1] = curr_mv[0];
+            curr_refL1 = curr_refL0;
+        }
+        if (!(neigh->pred_flag & 2)) {
+            neigh_mv[1] = neigh_mv[0];
+            neigh_refL1 = neigh_refL0;
+        }
+        if (!(curr->pred_flag & 1)) {
+            curr_mv[0] = curr_mv[1];
+            curr_refL0 = curr_refL1;
+        }
+        if (!(neigh->pred_flag & 1)) {
+            neigh_mv[0] = neigh_mv[1];
+            neigh_refL0 = neigh_refL1;
+        }
+
+        strength = 1;
+
+        strength &= (neigh_refL0 != curr_refL0) | (neigh_refL1 != curr_refL1) |
+                (FFABS(neigh_mv[0].x - curr_mv[0].x) >= 4) | (FFABS(neigh_mv[0].y - curr_mv[0].y) >= 4) |
+                (FFABS(neigh_mv[1].x - curr_mv[1].x) >= 4) | (FFABS(neigh_mv[1].y - curr_mv[1].y) >= 4);
+
+        strength &= (neigh_refL1 != curr_refL0) | (neigh_refL0 != curr_refL1) |
+                (FFABS(neigh_mv[1].x - curr_mv[0].x) >= 4) | (FFABS(neigh_mv[1].y - curr_mv[0].y) >= 4) |
+                (FFABS(neigh_mv[0].x - curr_mv[1].x) >= 4) | (FFABS(neigh_mv[0].y - curr_mv[1].y) >= 4);
+
+        strength |= (((curr->pred_flag + 1) ^ (neigh->pred_flag + 1)) >> 2);
+#endif
+
+        curr += in_inc / sizeof (MvField);
+        neigh += in_inc / sizeof (MvField);
+
+        for (out = dup; out > 0; out--)
+        {
+            *bs = strength;
+            bs += out_inc;
+        }
+    }
+}
+
 void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
 {
 #undef FUNC
@@ -193,12 +307,38 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 0, put_hevc_qpel_bi_w_v, depth);          \
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 1, put_hevc_qpel_bi_w_hv, depth)
 
+#if !RPI_HEVC_SAND
+#define SLICED_LOOP_FILTERS(depth)
+#define SLICED_ADD_RESIDUAL(depth)
+#else
+#define SLICED_ADD_RESIDUAL(depth)\
+    hevcdsp->add_residual_u[0]      = FUNC(add_residual4x4_u, depth);         \
+    hevcdsp->add_residual_u[1]      = FUNC(add_residual8x8_u, depth);         \
+    hevcdsp->add_residual_u[2]      = FUNC(add_residual16x16_u, depth);       \
+    hevcdsp->add_residual_u[3]      = FUNC(add_residual32x32_u, depth);       \
+    hevcdsp->add_residual_v[0]      = FUNC(add_residual4x4_v, depth);         \
+    hevcdsp->add_residual_v[1]      = FUNC(add_residual8x8_v, depth);         \
+    hevcdsp->add_residual_v[2]      = FUNC(add_residual16x16_v, depth);       \
+    hevcdsp->add_residual_v[3]      = FUNC(add_residual32x32_v, depth);       \
+    hevcdsp->add_residual_c[0]      = FUNC(add_residual4x4_c, depth);         \
+    hevcdsp->add_residual_c[1]      = FUNC(add_residual8x8_c, depth);         \
+    hevcdsp->add_residual_c[2]      = FUNC(add_residual16x16_c, depth);       \
+    hevcdsp->add_residual_c[3]      = FUNC(add_residual32x32_c, depth);       \
+    hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth);
+#define SLICED_LOOP_FILTERS(depth)\
+    hevcdsp->hevc_v_loop_filter_luma2 = FUNC(hevc_v_loop_filter_luma2, depth); \
+    hevcdsp->hevc_h_loop_filter_uv    = FUNC(hevc_h_loop_filter_uv, depth);    \
+    hevcdsp->hevc_v_loop_filter_uv2   = FUNC(hevc_v_loop_filter_uv2, depth)
+#endif
+
+
 #define HEVC_DSP(depth)                                                     \
     hevcdsp->put_pcm                = FUNC(put_pcm, depth);                 \
     hevcdsp->add_residual[0]        = FUNC(add_residual4x4, depth);         \
     hevcdsp->add_residual[1]        = FUNC(add_residual8x8, depth);         \
     hevcdsp->add_residual[2]        = FUNC(add_residual16x16, depth);       \
     hevcdsp->add_residual[3]        = FUNC(add_residual32x32, depth);       \
+    SLICED_ADD_RESIDUAL(depth);                                             \
     hevcdsp->dequant                = FUNC(dequant, depth);                 \
     hevcdsp->transform_rdpcm        = FUNC(transform_rdpcm, depth);         \
     hevcdsp->transform_4x4_luma     = FUNC(transform_4x4_luma, depth);      \
@@ -225,6 +365,19 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->sao_edge_restore[0] = FUNC(sao_edge_restore_0, depth);            \
     hevcdsp->sao_edge_restore[1] = FUNC(sao_edge_restore_1, depth);            \
                                                                                \
+    hevcdsp->sao_band_filter_c[0] =                                            \
+    hevcdsp->sao_band_filter_c[1] =                                            \
+    hevcdsp->sao_band_filter_c[2] =                                            \
+    hevcdsp->sao_band_filter_c[3] =                                            \
+    hevcdsp->sao_band_filter_c[4] = FUNC(sao_band_filter_c, depth);            \
+    hevcdsp->sao_edge_filter_c[0] =                                            \
+    hevcdsp->sao_edge_filter_c[1] =                                            \
+    hevcdsp->sao_edge_filter_c[2] =                                            \
+    hevcdsp->sao_edge_filter_c[3] =                                            \
+    hevcdsp->sao_edge_filter_c[4] = FUNC(sao_edge_filter_c, depth);            \
+    hevcdsp->sao_edge_restore_c[0] = FUNC(sao_edge_restore_c_0, depth);        \
+    hevcdsp->sao_edge_restore_c[1] = FUNC(sao_edge_restore_c_1, depth);        \
+                                                                               \
     QPEL_FUNCS(depth);                                                         \
     QPEL_UNI_FUNCS(depth);                                                     \
     QPEL_BI_FUNCS(depth);                                                      \
@@ -232,6 +385,7 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     EPEL_UNI_FUNCS(depth);                                                     \
     EPEL_BI_FUNCS(depth);                                                      \
                                                                                \
+    SLICED_LOOP_FILTERS(depth);                                                \
     hevcdsp->hevc_h_loop_filter_luma     = FUNC(hevc_h_loop_filter_luma, depth);   \
     hevcdsp->hevc_v_loop_filter_luma     = FUNC(hevc_v_loop_filter_luma, depth);   \
     hevcdsp->hevc_h_loop_filter_chroma   = FUNC(hevc_h_loop_filter_chroma, depth); \
@@ -256,6 +410,8 @@ int i = 0;
         HEVC_DSP(8);
         break;
     }
+
+    hevcdsp->hevc_deblocking_boundary_strengths = hevc_deblocking_boundary_strengths;
 
     if (ARCH_X86)
         ff_hevc_dsp_init_x86(hevcdsp, bit_depth);
