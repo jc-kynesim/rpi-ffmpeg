@@ -310,6 +310,7 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
 #if !RPI_HEVC_SAND
 #define SLICED_LOOP_FILTERS(depth)
 #define SLICED_ADD_RESIDUAL(depth)
+#define SLICED_SAO(depth)
 #else
 #define SLICED_ADD_RESIDUAL(depth)\
     hevcdsp->add_residual_u[0]      = FUNC(add_residual4x4_u, depth);         \
@@ -324,13 +325,24 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->add_residual_c[1]      = FUNC(add_residual8x8_c, depth);         \
     hevcdsp->add_residual_c[2]      = FUNC(add_residual16x16_c, depth);       \
     hevcdsp->add_residual_c[3]      = FUNC(add_residual32x32_c, depth);       \
-    hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth);
+    hevcdsp->add_residual_dc_c[0]   = FUNC(add_residual4x4_dc_c, depth);         \
+    hevcdsp->add_residual_dc_c[1]   = FUNC(add_residual8x8_dc_c, depth);         \
+    hevcdsp->add_residual_dc_c[2]   = FUNC(add_residual16x16_dc_c, depth);       \
+    hevcdsp->add_residual_dc_c[3]   = FUNC(add_residual32x32_dc_c, depth);       \
+    hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth)
 #define SLICED_LOOP_FILTERS(depth)\
     hevcdsp->hevc_v_loop_filter_luma2 = FUNC(hevc_v_loop_filter_luma2, depth); \
     hevcdsp->hevc_h_loop_filter_uv    = FUNC(hevc_h_loop_filter_uv, depth);    \
     hevcdsp->hevc_v_loop_filter_uv2   = FUNC(hevc_v_loop_filter_uv2, depth)
-#endif
+#define SLICED_SAO(depth)\
+    for (i = 0; i != SAO_FILTER_N; ++i) {                                     \
+        hevcdsp->sao_band_filter_c[i] = FUNC(sao_band_filter_c, depth);       \
+        hevcdsp->sao_edge_filter_c[i] = FUNC(sao_edge_filter_c, depth);       \
+    }                                                                         \
+    hevcdsp->sao_edge_restore_c[0] = FUNC(sao_edge_restore_c_0, depth);       \
+    hevcdsp->sao_edge_restore_c[1] = FUNC(sao_edge_restore_c_1, depth)
 
+#endif
 
 #define HEVC_DSP(depth)                                                     \
     hevcdsp->put_pcm                = FUNC(put_pcm, depth);                 \
@@ -338,6 +350,10 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->add_residual[1]        = FUNC(add_residual8x8, depth);         \
     hevcdsp->add_residual[2]        = FUNC(add_residual16x16, depth);       \
     hevcdsp->add_residual[3]        = FUNC(add_residual32x32, depth);       \
+    hevcdsp->add_residual_dc[0]     = FUNC(add_residual4x4_dc, depth);         \
+    hevcdsp->add_residual_dc[1]     = FUNC(add_residual8x8_dc, depth);         \
+    hevcdsp->add_residual_dc[2]     = FUNC(add_residual16x16_dc, depth);       \
+    hevcdsp->add_residual_dc[3]     = FUNC(add_residual32x32_dc, depth);       \
     SLICED_ADD_RESIDUAL(depth);                                             \
     hevcdsp->dequant                = FUNC(dequant, depth);                 \
     hevcdsp->transform_rdpcm        = FUNC(transform_rdpcm, depth);         \
@@ -352,31 +368,13 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->idct_dc[2]             = FUNC(idct_16x16_dc, depth);           \
     hevcdsp->idct_dc[3]             = FUNC(idct_32x32_dc, depth);           \
                                                                             \
-    hevcdsp->sao_band_filter[0] =                                              \
-    hevcdsp->sao_band_filter[1] =                                              \
-    hevcdsp->sao_band_filter[2] =                                              \
-    hevcdsp->sao_band_filter[3] =                                              \
-    hevcdsp->sao_band_filter[4] = FUNC(sao_band_filter, depth);                \
-    hevcdsp->sao_edge_filter[0] =                                              \
-    hevcdsp->sao_edge_filter[1] =                                              \
-    hevcdsp->sao_edge_filter[2] =                                              \
-    hevcdsp->sao_edge_filter[3] =                                              \
-    hevcdsp->sao_edge_filter[4] = FUNC(sao_edge_filter, depth);                \
+    for (i = 0; i != SAO_FILTER_N; ++i) {                                   \
+        hevcdsp->sao_band_filter[i] = FUNC(sao_band_filter, depth);         \
+        hevcdsp->sao_edge_filter[i] = FUNC(sao_edge_filter, depth);         \
+    }                                                                       \
     hevcdsp->sao_edge_restore[0] = FUNC(sao_edge_restore_0, depth);            \
     hevcdsp->sao_edge_restore[1] = FUNC(sao_edge_restore_1, depth);            \
-                                                                               \
-    hevcdsp->sao_band_filter_c[0] =                                            \
-    hevcdsp->sao_band_filter_c[1] =                                            \
-    hevcdsp->sao_band_filter_c[2] =                                            \
-    hevcdsp->sao_band_filter_c[3] =                                            \
-    hevcdsp->sao_band_filter_c[4] = FUNC(sao_band_filter_c, depth);            \
-    hevcdsp->sao_edge_filter_c[0] =                                            \
-    hevcdsp->sao_edge_filter_c[1] =                                            \
-    hevcdsp->sao_edge_filter_c[2] =                                            \
-    hevcdsp->sao_edge_filter_c[3] =                                            \
-    hevcdsp->sao_edge_filter_c[4] = FUNC(sao_edge_filter_c, depth);            \
-    hevcdsp->sao_edge_restore_c[0] = FUNC(sao_edge_restore_c_0, depth);        \
-    hevcdsp->sao_edge_restore_c[1] = FUNC(sao_edge_restore_c_1, depth);        \
+    SLICED_SAO(depth);                                                         \
                                                                                \
     QPEL_FUNCS(depth);                                                         \
     QPEL_UNI_FUNCS(depth);                                                     \

@@ -1,5 +1,5 @@
 TARGET_DIR=../src/eupton_vc4dev_2012a/software/vc4/DEV/applications/tutorials/user_shader_example_tex
-QASM=python\ pi-util/qasm.py
+QASM=python\ ../local/bin/qasm.py
 SRC_FILE=libavcodec/rpi_shader.qasm
 DST_BASE=shader
 

@@ -45,6 +45,7 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/pixdesc.h"
+#include "libavutil/rpi_sand_fns.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/samplefmt.h"
 #include "libavutil/dict.h"
@@ -790,7 +791,7 @@ int avcodec_default_get_buffer2(AVCodecContext *avctx, AVFrame *frame, int flags
 
 #ifdef RPI
     // This is going to end badly if we let it continue
-    av_assert0(frame->format != AV_PIX_FMT_SAND128);
+    av_assert0(!av_rpi_is_sand_frame(frame));
 #endif
 
     if (avctx->hw_frames_ctx)

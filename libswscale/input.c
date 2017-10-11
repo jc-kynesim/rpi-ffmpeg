@@ -1132,7 +1132,8 @@ av_cold void ff_sws_init_input_funcs(SwsContext *c)
         c->chrToYV12 = p016BEToUV_c;
         break;
     case AV_PIX_FMT_SAND128:
-        c->chrToYV12 = sand128ToUV_c;
+    case AV_PIX_FMT_SAND64_10:
+        c->chrToYV12 = sand128ToUV_c;  // NIF
         break;
     }
     if (c->chrSrcHSubSample) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import string
 import os
 import subprocess
 import re
@@ -10,8 +11,17 @@ from stat import *
 
 ffmpeg_exec = "./ffmpeg"
 
-def testone(fileroot, name, es_file, md5_file):
+def testone(fileroot, srcname, es_file, md5_file):
     tmp_root = "/tmp"
+
+    names = srcname.split('/')
+    while len(names) > 1:
+        tmp_root = os.path.join(tmp_root, names[0])
+        del names[0]
+    name = names[0]
+
+    if not os.path.exists(tmp_root):
+        os.makedirs(tmp_root)
 
     dec_file = os.path.join(tmp_root, name + ".dec.md5")
     try:
@@ -71,7 +81,7 @@ def scandir(root):
                     pass
                 elif ext == ".bit" or ext == ".bin":
                     es_file = f
-                elif ext == ".md5" or (ext == ".txt" and base[-4:] == "_md5"):
+                elif ext == ".md5" or (ext == ".txt" and (base[-4:] == "_md5" or base[-6:] == "md5sum")):
                     if md5_file == "?":
                         md5_file = f
                     elif base[-3:] == "yuv":
@@ -83,9 +93,9 @@ def runtest(name, tests):
     if not tests:
         return True
     for t in tests:
-        if name[0:len(t)] == t:
+        if name[0:len(t)] == t or name.find("/" + t) != -1:
             return True
-        return False
+    return False
 
 def doconf(csva, tests, test_root):
     unx_failures = []
@@ -147,9 +157,9 @@ if __name__ == '__main__':
 
     argp = argparse.ArgumentParser(description="FFmpeg h265 conformance tester")
     argp.add_argument("tests", nargs='*')
-    argp.add_argument("--test_root", default="/opt/conform/h265", help="Root dir for test")
+    argp.add_argument("--test_root", default="/opt/conform/h265.2016", help="Root dir for test")
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
-    argp.add_argument("--csv", default="pi-util/conf_h265.csv", help="CSV filename")
+    argp.add_argument("--csv", default="pi-util/conf_h265.2016.csv", help="CSV filename")
     args = argp.parse_args()
 
     if args.csvgen:

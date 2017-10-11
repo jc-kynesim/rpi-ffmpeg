@@ -26,9 +26,7 @@
 #include "bit_depth_template.c"
 #include "hevcdsp.h"
 
-#ifdef RPI
-#include "rpi_zc.h"
-#endif
+#include "rpi_shader_template.h"
 
 static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
@@ -45,6 +43,7 @@ static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height
     }
 }
 
+#if RPI_HEVC_SAND
 static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
 {
@@ -66,7 +65,7 @@ static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int heig
         dst += stride;
     }
 }
-
+#endif
 
 static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
                                                 ptrdiff_t stride, int size)
@@ -85,9 +84,25 @@ static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
     }
 }
 
+static av_always_inline void FUNC(add_residual_dc)(uint8_t *_dst, ptrdiff_t stride, const int dc, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size; x++) {
+            dst[x] = av_clip_pixel(dst[x] + dc);
+        }
+        dst += stride;
+    }
+}
+
+
 #if RPI_HEVC_SAND
-static av_always_inline void FUNC(add_residual_u_v)(uint8_t *_dst, const int16_t *res,
-                                                ptrdiff_t stride, int size)
+static av_always_inline void FUNC(add_residual_u)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, const int dc_v, int size)
 {
     int x, y;
     pixel *dst = (pixel *)_dst;
@@ -97,6 +112,25 @@ static av_always_inline void FUNC(add_residual_u_v)(uint8_t *_dst, const int16_t
     for (y = 0; y < size; y++) {
         for (x = 0; x < size * 2; x += 2) {
             dst[x] = av_clip_pixel(dst[x] + *res);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + dc_v);
+            res++;
+        }
+        dst += stride;
+    }
+}
+
+static av_always_inline void FUNC(add_residual_v)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, const int dc_u, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + dc_u);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + *res);
             res++;
         }
         dst += stride;
@@ -111,6 +145,10 @@ static av_always_inline void FUNC(add_residual_c)(uint8_t *_dst, const int16_t *
     const int16_t * ru = res;
     const int16_t * rv = res + size * size;
 
+//    rpi_sand_dump16("ARC In Pred", _dst, stride, 0, 0, 0, size, size, 1);
+//    rpi_sand_dump16("ARC In RU", ru, size * 2, 0, 0, 0, size, size, 0);
+//    rpi_sand_dump16("ARC In RV", rv, size * 2, 0, 0, 0, size, size, 0);
+
     stride /= sizeof(pixel);
 
     for (y = 0; y < size; y++) {
@@ -120,7 +158,30 @@ static av_always_inline void FUNC(add_residual_c)(uint8_t *_dst, const int16_t *
         }
         dst += stride;
     }
+
+//    rpi_sand_dump16("ARC Out", _dst, stride * 2, 0, 0, 0, size, size, 1);
 }
+
+
+static av_always_inline void FUNC(add_residual_dc_c)(uint8_t *_dst, ptrdiff_t stride, const int32_t dc, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+    const int dc_v = dc >> 16;
+    const int dc_u = (dc << 16) >> 16;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + dc_u);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + dc_v);
+        }
+        dst += stride;
+    }
+}
+
+
 #endif
 
 static void FUNC(add_residual4x4)(uint8_t *_dst, int16_t *res,
@@ -147,29 +208,49 @@ static void FUNC(add_residual32x32)(uint8_t *_dst, int16_t *res,
     FUNC(add_residual)(_dst, res, stride, 32);
 }
 
+static void FUNC(add_residual4x4_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 4);
+}
+
+static void FUNC(add_residual8x8_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 8);
+}
+
+static void FUNC(add_residual16x16_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 16);
+}
+
+static void FUNC(add_residual32x32_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 32);
+}
+
 #if RPI_HEVC_SAND
 // -- U -- (plaited)
 
 static void FUNC(add_residual4x4_u)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_u)
 {
-    FUNC(add_residual_u_v)(_dst, res, stride, 4);
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 4);
 }
 
 static void FUNC(add_residual8x8_u)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_u)
 {
-    FUNC(add_residual_u_v)(_dst, res, stride, 8);
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 8);
 }
 
 static void FUNC(add_residual16x16_u)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_u)
 {
-    FUNC(add_residual_u_v)(_dst, res, stride, 16);
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 16);
 }
 
 static void FUNC(add_residual32x32_u)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_u)
 {
     // Should never occur for 420, which is all that sand supports
     av_assert0(0);
@@ -178,25 +259,25 @@ static void FUNC(add_residual32x32_u)(uint8_t *_dst, const int16_t * res,
 // -- V -- (plaited)
 
 static void FUNC(add_residual4x4_v)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_v)
 {
-    FUNC(add_residual_u_v)(_dst + 1, res, stride, 4);
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 4);
 }
 
 static void FUNC(add_residual8x8_v)(uint8_t *_dst, const int16_t * res,
-                                  ptrdiff_t stride)
+                                  ptrdiff_t stride, int dc_v)
 {
-    FUNC(add_residual_u_v)(_dst + 1, res, stride, 8);
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 8);
 }
 
 static void FUNC(add_residual16x16_v)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_v)
 {
-    FUNC(add_residual_u_v)(_dst + 1, res, stride, 16);
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 16);
 }
 
 static void FUNC(add_residual32x32_v)(uint8_t *_dst, const int16_t * res,
-                                    ptrdiff_t stride)
+                                    ptrdiff_t stride, int dc_v)
 {
     // Should never occur for 420, which is all that sand supports
     av_assert0(0);
@@ -228,6 +309,28 @@ static void FUNC(add_residual32x32_c)(uint8_t *_dst, const int16_t * res,
     // Should never occur for 420, which is all that sand supports
     av_assert0(0);
 }
+
+static void FUNC(add_residual4x4_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 4);
+}
+
+static void FUNC(add_residual8x8_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 8);
+}
+
+static void FUNC(add_residual16x16_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 16);
+}
+
+static void FUNC(add_residual32x32_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
+}
+
 #endif
 
 
@@ -501,6 +604,32 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
     }
 }
 
+
+#if BIT_DEPTH == 10
+#if RPI_HEVC_SAND
+// We need a 32 bit variation for the _c restores so hijack bit depth 10
+#undef pixel
+#undef BIT_DEPTH
+#define pixel uint32_t
+#define BIT_DEPTH 32
+#endif
+// All 16 bit variations are the same
+#define sao_edge_restore_0_10 sao_edge_restore_0_9
+#define sao_edge_restore_1_10 sao_edge_restore_1_9
+#define sao_edge_restore_0_11 sao_edge_restore_0_9
+#define sao_edge_restore_1_11 sao_edge_restore_1_9
+#define sao_edge_restore_0_12 sao_edge_restore_0_9
+#define sao_edge_restore_1_12 sao_edge_restore_1_9
+#define sao_edge_restore_0_13 sao_edge_restore_0_9
+#define sao_edge_restore_1_13 sao_edge_restore_1_9
+#define sao_edge_restore_0_14 sao_edge_restore_0_9
+#define sao_edge_restore_1_14 sao_edge_restore_1_9
+#define sao_edge_restore_0_15 sao_edge_restore_0_9
+#define sao_edge_restore_1_15 sao_edge_restore_1_9
+#define sao_edge_restore_0_16 sao_edge_restore_0_9
+#define sao_edge_restore_1_16 sao_edge_restore_1_9
+#endif
+#if BIT_DEPTH <= 9 || BIT_DEPTH == 32
 static void FUNC(sao_edge_restore_0)(uint8_t *_dst, uint8_t *_src,
                                     ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
                                     int *borders, int _width, int _height,
@@ -626,21 +755,18 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
     }
 }
-
+#endif
+#if BIT_DEPTH == 32
+#undef BIT_DEPTH
+#undef pixel
+#define BIT_DEPTH 10
+#define pixel uint16_t
+#endif
 
 // --- Plaited chroma versions
 
-#if BIT_DEPTH != 8
-static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
-                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
-                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
-                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
-                                  int width, int height)
-{
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-#else
+#if RPI_HEVC_SAND
+
 static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
@@ -666,23 +792,17 @@ static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
     for (y = 0; y < height; y++) {
         for (x = 0; x < width; x += 2)
         {
-            dst[x + 0] = av_clip_pixel(src[x + 0] + offset_table_u[src[x + 0] >> shift]);
-            dst[x + 1] = av_clip_pixel(src[x + 1] + offset_table_v[src[x + 1] >> shift]);
+//            printf("dst=%p, src=%p, x=%d, shift=%d\n", dst, src, x, shift);
+//            printf("offsets=%x,%x\n", src[x + 0], src[x + 1]);
+            // *** & 31 shouldn't be wanted but just now we generate broken input that
+            // crashes us in 10-bit world
+            dst[x + 0] = av_clip_pixel(src[x + 0] + offset_table_u[(src[x + 0] >> shift) & 31]);
+            dst[x + 1] = av_clip_pixel(src[x + 1] + offset_table_v[(src[x + 1] >> shift) & 31]);
         }
         dst += stride_dst;
         src += stride_src;
     }
 }
-#endif
-
-#if BIT_DEPTH != 8
-static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
-                                  const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v,
-                                  int eo, int width, int height) {
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-#else
 
 static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
                                   const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v,
@@ -700,8 +820,11 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
     int a_stride, b_stride;
     int x, y;
     ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
+
     stride_dst /= sizeof(pixel);
     width *= 2;
+
+    av_assert0(width <= 64);
 
     a_stride = pos[eo][0][0] * 2 + pos[eo][0][1] * stride_src;
     b_stride = pos[eo][1][0] * 2 + pos[eo][1][1] * stride_src;
@@ -720,32 +843,32 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
         dst += stride_dst;
     }
 }
+
+// Do once
+#if BIT_DEPTH == 8
+// Any old 2 byte 'normal' restore will work for these
+#define sao_edge_restore_c_0_8  sao_edge_restore_0_16
+#define sao_edge_restore_c_1_8  sao_edge_restore_1_16
+// We need 32 bit for 9 bit+
+#define sao_edge_restore_c_0_9  sao_edge_restore_0_32
+#define sao_edge_restore_c_1_9  sao_edge_restore_1_32
+#define sao_edge_restore_c_0_10 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_10 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_11 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_11 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_12 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_12 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_13 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_13 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_14 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_14 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_15 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_15 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_16 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_16 sao_edge_restore_1_32
 #endif
 
-#if BIT_DEPTH != 8
-static void FUNC(sao_edge_restore_c_0)(uint8_t *_dst, uint8_t *_src,
-                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
-                                    int *borders, int _width, int _height,
-                                    int c_idx, uint8_t *vert_edge,
-                                    uint8_t *horiz_edge, uint8_t *diag_edge)
-{
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-static void FUNC(sao_edge_restore_c_1)(uint8_t *_dst, uint8_t *_src,
-                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
-                                    int *borders, int _width, int _height,
-                                    int c_idx, uint8_t *vert_edge,
-                                    uint8_t *horiz_edge, uint8_t *diag_edge)
-{
-    av_log(NULL, AV_LOG_PANIC, "%s: NIF\n", __func__);                              \
-    abort();                                                                        \
-}
-#else
-// Any old 2 byte 'normal' restore will work for these
-#define sao_edge_restore_c_0_8 sao_edge_restore_0_10
-#define sao_edge_restore_c_1_8 sao_edge_restore_1_10
-#endif
+#endif  // RPI_HEVC_SAND
 
 
 #undef CMP
@@ -1951,7 +2074,7 @@ static void FUNC(hevc_v_loop_filter_luma)(uint8_t *pix, ptrdiff_t stride,
 #undef TQ2
 #undef TQ3
 
-#ifdef RPI
+#if RPI_HEVC_SAND
 
 // line zero
 #define P3 pix_l[0 * xstride]

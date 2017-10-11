@@ -8,23 +8,33 @@
 // bit of memory for the frame when can then be reference counted until
 // display has finished with it.
 
-#include "libavutil/frame.h"
-#include "libavcodec/avcodec.h"
+// Frame buffer number in which to stuff an 8-bit copy of a 16-bit frame
+// 0 disables
+// *** This option still in development
+//     Only works if SAO active
+//     Allocates buffers that are twice the required size
+#define RPI_ZC_SAND_8_IN_10_BUF  0
+
+struct AVBufferRef;
+struct AVFrame;
+struct AVCodecContext;
+enum AVPixelFormat;
 
 // "Opaque" pointer to whatever we are using as a buffer reference
-typedef AVBufferRef * AVRpiZcRefPtr;
+typedef struct AVBufferRef * AVRpiZcRefPtr;
 
 struct AVZcEnv;
 typedef struct AVZcEnv * AVZcEnvPtr;
 
 typedef struct AVRpiZcFrameGeometry
 {
-    unsigned int stride_y;
-    unsigned int height_y;
-    unsigned int stride_c;
-    unsigned int height_c;
-    unsigned int planes_c;
-    unsigned int stripes;
+    unsigned int stride_y;  // Luma stride (bytes)
+    unsigned int height_y;  // Luma height (lines)
+    unsigned int stride_c;  // Chroma stride (bytes)
+    unsigned int height_c;  // Chroma stride (lines)
+    unsigned int planes_c;  // Chroma plane count (U, V = 2, interleaved = 1)
+    unsigned int stripes;   // Number of stripes (sand)
+    unsigned int bytes_per_pel;
 } AVRpiZcFrameGeometry;
 
 
@@ -50,7 +60,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 //     the data, then allocate a new buffer and copy the data into it
 //   Otherwise return NULL
 AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
-    const AVFrame * const frame, const int maycopy);
+    const struct AVFrame * const frame, const enum AVPixelFormat expected_format, const int maycopy);
 
 // Get the vc_handle from the frame ref
 // Returns -1 if ref doesn't look valid
@@ -89,48 +99,6 @@ int av_rpi_zc_init(struct AVCodecContext * const s);
 // get_buffer2 & get_buffer_context
 void av_rpi_zc_uninit(struct AVCodecContext * const s);
 
-
-
-static inline unsigned int rpi_sliced_frame_stride2(const AVFrame * const frame)
-{
-    return frame->linesize[3];
-}
-
-static inline unsigned int rpi_sliced_frame_off_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
-{
-    const unsigned int stride1 = frame->linesize[0];
-    const unsigned int stride2 = rpi_sliced_frame_stride2(frame);
-    const unsigned int x1 = x & (stride1 - 1);
-    const unsigned int x2 = x ^ x1;
-
-    return x1 + stride1 * y + stride2 * x2;
-}
-
-static inline unsigned int rpi_sliced_frame_off_c(const AVFrame * const frame, const unsigned int x_c, const unsigned int y_c)
-{
-    const unsigned int stride1 = frame->linesize[0];
-    const unsigned int stride2 = rpi_sliced_frame_stride2(frame);
-    const unsigned int x = x_c * 2;
-    const unsigned int x1 = x & (stride1 - 1);
-    const unsigned int x2 = x ^ x1;
-
-    return x1 + stride1 * y_c + stride2 * x2;
-}
-
-static inline uint8_t * rpi_sliced_frame_pos_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
-{
-    return frame->data[0] + rpi_sliced_frame_off_y(frame, x, y);
-}
-
-static inline uint8_t * rpi_sliced_frame_pos_c(const AVFrame * const frame, const unsigned int x, const unsigned int y)
-{
-    return frame->data[1] + rpi_sliced_frame_off_c(frame, x, y);
-}
-
-static inline int rpi_sliced_frame(const AVFrame * const frame)
-{
-    return frame->format == AV_PIX_FMT_SAND128;
-}
 
 
 #endif

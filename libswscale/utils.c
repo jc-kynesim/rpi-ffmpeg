@@ -256,6 +256,7 @@ static const FormatEntry format_entries[AV_PIX_FMT_NB] = {
     [AV_PIX_FMT_P016BE]      = { 1, 0 },
 #ifdef RPI
     [AV_PIX_FMT_SAND128]     = { 1, 0 },
+    [AV_PIX_FMT_SAND64_10]   = { 1, 0 },
 #endif
 };
 
