@@ -1109,6 +1109,7 @@ static av_always_inline int abs_mvd_greater1_flag_decode(HEVCLocalContext * cons
     return GET_CABAC_LC(elem_offset[ABS_MVD_GREATER1_FLAG] + 1);
 }
 
+#if !USE_BY22
 static av_always_inline int mvd_decode(HEVCLocalContext * const lc)
 {
     int ret = 2;
@@ -1122,10 +1123,12 @@ static av_always_inline int mvd_decode(HEVCLocalContext * const lc)
         av_log(NULL, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", k);
         return 0;
     }
+
     while (k--)
         ret += get_cabac_bypass(&lc->cc) << k;
     return get_cabac_bypass_sign(&lc->cc, -ret);
 }
+#endif
 
 static av_always_inline int mvd_sign_flag_decode(HEVCLocalContext * const lc)
 {
@@ -2282,6 +2285,7 @@ void ff_hevc_hls_residual_coding(const HEVCContext * const s, HEVCLocalContext *
 #endif
 }
 
+#if !USE_BY22
 // Stores results to lc
 void ff_hevc_hls_mvd_coding(HEVCLocalContext * const lc)
 {
@@ -2305,4 +2309,117 @@ void ff_hevc_hls_mvd_coding(HEVCLocalContext * const lc)
     case 0: lc->pu.mvd.y = 0;                       break;
     }
 }
+#else
+void ff_hevc_hls_mvd_coding(HEVCLocalContext * const lc)
+{
+    int x = abs_mvd_greater0_flag_decode(lc);
+    int y = abs_mvd_greater0_flag_decode(lc);
 
+    lc->pu.mvd.x = 0;
+    lc->pu.mvd.y = 0;
+
+    if ((x | y) == 0)
+        return;
+
+    if (x != 0)
+        x += abs_mvd_greater1_flag_decode(lc);
+    if (y != 0)
+        y += abs_mvd_greater1_flag_decode(lc);
+
+    if ((x | y) == 1)
+    {
+        // Not worth starting BY22
+        if (x != 0)
+            lc->pu.mvd.x = mvd_sign_flag_decode(lc);
+        if (y != 0)
+            lc->pu.mvd.y = mvd_sign_flag_decode(lc);
+    }
+    else
+    {
+        CABACContext * const cc = &lc->cc;
+        uint32_t val;
+        uint32_t b;
+        unsigned int n = 0;
+
+        bypass_start(cc);
+        b = val = get_cabac_by22_peek(cc);
+
+        if (x == 1) {
+            lc->pu.mvd.x = ((int32_t)b >> 31) | 1;
+            n = 1;
+            b <<= 1;
+        }
+        else if (x == 2) {
+            // EG1 so we have (leading one bits + 1) of suffix
+            // This makes prefix & suffix lengths the same
+            const unsigned int k = hevc_clz32(~b) + 1;
+            int s;
+
+            av_assert2(k <= 15);
+
+            b <<= k;
+            n = 2 * k + 1; // Includes suffix & sign
+
+            // We need to have k*2 + 2 (prefix, suffix, sign, y-sign) bits peeked
+            // if we are going to do this without a flush
+            if (k > CABAC_BY22_PEEK_BITS / 2 - 1)
+            {
+                // Need too many bits - flush
+                // n = k
+                get_cabac_by22_flush(cc, k, val);
+                b = val = get_cabac_by22_peek(cc);
+                n = k + 1;
+            }
+
+            x = (b >> (32 - k)) + (1 << k);
+            b <<= k;
+            s = (int32_t)b >> 31;
+            lc->pu.mvd.x = (x ^ s) - s;
+            b <<= 1;
+
+            // Max abs value of an mv is 2^15 - 1 (i.e. a prefix len of 15 bits)
+            if (y > 1 && n > CABAC_BY22_PEEK_BITS - 15)
+            {
+                get_cabac_by22_flush(cc, n, val);
+                b = val = get_cabac_by22_peek(cc);
+                n = 0;
+            }
+        }
+
+        if (y == 1) {
+            lc->pu.mvd.y = ((int32_t)b >> 31) | 1;
+            ++n;
+            // don't care about b anymore
+        }
+        else if (y == 2) {
+            const unsigned int k = hevc_clz32(~b) + 1;
+            int s;
+
+            av_assert2(k <= 15);
+
+            // We need to have k*2 + 1 (prefix, suffix, sign) bits peeked
+            // if we are going to do this without a flush
+            b <<= k;
+            n += 2 * k + 1;
+
+            if (n > CABAC_BY22_PEEK_BITS)
+            {
+                // Need too many bits - flush
+                get_cabac_by22_flush(cc, n - (k + 1), val);
+                b = val = get_cabac_by22_peek(cc);
+                n = k + 1;
+            }
+
+            y = (b >> (32 - k)) + (1 << k);
+            s = (int32_t)(b << k) >> 31;
+            lc->pu.mvd.y = (y ^ s) - s;
+            // don't care about b anymore
+        }
+
+        get_cabac_by22_flush(cc, n, val);
+        bypass_finish(cc);
+    }
+
+//    printf("BY: X=%d,Y=%d\n", lc->pu.mvd.x, lc->pu.mvd.y);
+}
+#endif
