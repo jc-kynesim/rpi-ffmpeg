@@ -785,7 +785,12 @@ static int map_pixel_format(AVCodecContext *avctx, HEVCSPS *sps)
     switch (sps->bit_depth) {
     case 8:
         if (sps->chroma_format_idc == 0) sps->pix_fmt = AV_PIX_FMT_GRAY8;
+#if RPI_HEVC_SAND
+        // *** Horrid kludge s.t. we start out with sand format
+        if (sps->chroma_format_idc == 1) sps->pix_fmt = sps->width <= 2048 && sps->height <= 1088 ? AV_PIX_FMT_SAND128 : AV_PIX_FMT_YUV420P;
+#else
         if (sps->chroma_format_idc == 1) sps->pix_fmt = AV_PIX_FMT_YUV420P;
+#endif
         if (sps->chroma_format_idc == 2) sps->pix_fmt = AV_PIX_FMT_YUV422P;
         if (sps->chroma_format_idc == 3) sps->pix_fmt = AV_PIX_FMT_YUV444P;
        break;
@@ -797,7 +802,12 @@ static int map_pixel_format(AVCodecContext *avctx, HEVCSPS *sps)
         break;
     case 10:
         if (sps->chroma_format_idc == 0) sps->pix_fmt = AV_PIX_FMT_GRAY16;
+#if RPI_HEVC_SAND
+        // *** Horrid kludge s.t. we start out with sand format
+        if (sps->chroma_format_idc == 1) sps->pix_fmt = sps->width <= 2048 && sps->height <= 1088 ? AV_PIX_FMT_SAND64_10 : AV_PIX_FMT_YUV420P10;
+#else
         if (sps->chroma_format_idc == 1) sps->pix_fmt = AV_PIX_FMT_YUV420P10;
+#endif
         if (sps->chroma_format_idc == 2) sps->pix_fmt = AV_PIX_FMT_YUV422P10;
         if (sps->chroma_format_idc == 3) sps->pix_fmt = AV_PIX_FMT_YUV444P10;
         break;
@@ -1064,7 +1074,6 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
         skip_bits(gb, 7); //sps_extension_7bits = get_bits(gb, 7);
         if (sps_extension_flag[0]) {
             int extended_precision_processing_flag;
-            int high_precision_offsets_enabled_flag;
             int cabac_bypass_alignment_enabled_flag;
 
             sps->transform_skip_rotation_enabled_flag = get_bits1(gb);
@@ -1079,10 +1088,10 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
                    "extended_precision_processing_flag not yet implemented\n");
 
             sps->intra_smoothing_disabled_flag       = get_bits1(gb);
-            high_precision_offsets_enabled_flag  = get_bits1(gb);
-            if (high_precision_offsets_enabled_flag)
+            sps->high_precision_offsets_enabled_flag  = get_bits1(gb);
+            if (sps->high_precision_offsets_enabled_flag)
                 av_log(avctx, AV_LOG_WARNING,
-                   "high_precision_offsets_enabled_flag not yet implemented\n");
+                   "high_precision_offsets_enabled_flag not fully implemented\n");
 
             sps->persistent_rice_adaptation_enabled_flag = get_bits1(gb);
 

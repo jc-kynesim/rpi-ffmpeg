@@ -1,6 +1,7 @@
 *.a
 *.o
 *.o.*
+*.bin
 *.d
 *.def
 *.dll
@@ -23,6 +24,7 @@
 .\#*
 /.config
 /.version
+/build/
 /ffmpeg
 /ffplay
 /ffprobe

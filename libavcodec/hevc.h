@@ -23,6 +23,47 @@
 #ifndef AVCODEC_HEVC_H
 #define AVCODEC_HEVC_H
 
+// define RPI to split the CABAC/prediction/transform into separate stages
+#ifndef RPI
+
+  #define RPI_INTER          0
+  #define RPI_TSTATS         0
+  #define RPI_HEVC_SAND      0
+
+#else
+
+  #include "rpi_qpu.h"
+  #define RPI_INTER          1          // 0 use ARM for UV inter-pred, 1 use QPU
+
+  // By passing jobs to a worker thread we hope to be able to catch up during slow frames
+  // This has no effect unless RPI_WORKER is defined
+  // N.B. The extra thread count is effectively RPI_MAX_JOBS - 1 as
+  // RPI_MAX_JOBS defines the number of worker parameter sets and we must have one
+  // free for the foreground to fill in.
+  #define RPI_MAX_JOBS 2
+
+  // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
+  // As it stands there is something mildy broken in VPU deblock - looks mostly OK
+  // but reliably fails some conformance tests (e.g. DBLK_A/B/C_)
+  // With VPU luma & chroma pred it is much the same speed to deblock on the ARM
+//  #define RPI_DEBLOCK_VPU
+
+  #define RPI_VPU_DEBLOCK_CACHED 1
+
+  #if HAVE_NEON
+  #define RPI_HEVC_SAND      1
+  #else
+  // Sand bust on Pi1 currently - reasons unknown
+  #define RPI_HEVC_SAND      0
+  #endif
+
+
+  #define RPI_QPU_EMU_Y      0
+  #define RPI_QPU_EMU_C      0
+
+  #define RPI_TSTATS 0
+#endif
+
 #include "libavutil/buffer.h"
 #include "libavutil/md5.h"
 
@@ -463,6 +504,7 @@ typedef struct HEVCSPS {
     int implicit_rdpcm_enabled_flag;
     int explicit_rdpcm_enabled_flag;
     int intra_smoothing_disabled_flag;
+    int high_precision_offsets_enabled_flag;
     int persistent_rice_adaptation_enabled_flag;
 
     ///< coded frame dimension in various units
@@ -660,6 +702,7 @@ typedef struct CodingUnit {
     uint8_t cu_transquant_bypass_flag;
 } CodingUnit;
 
+#if 0
 typedef struct Mv {
     int16_t x;  ///< horizontal component of motion vector
     int16_t y;  ///< vertical component of motion vector
@@ -670,6 +713,7 @@ typedef struct MvField {
     int8_t ref_idx[2];
     int8_t pred_flag;
 } MvField;
+#endif
 
 typedef struct NeighbourAvailable {
     int cand_bottom_left;
@@ -745,9 +789,23 @@ typedef struct HEVCFrame {
      * A combination of HEVC_FRAME_FLAG_*
      */
     uint8_t flags;
+
+    // Entry no in DPB - can be used as a small unique
+    // frame identifier (within the current thread)
+    uint8_t dpb_no;
 } HEVCFrame;
 
+#ifdef RPI
+typedef struct HEVCLocalContextIntra {
+    TransformUnit tu;
+    NeighbourAvailable na;
+} HEVCLocalContextIntra;
+#endif
+
 typedef struct HEVCLocalContext {
+    TransformUnit tu;  // Moved to start to match HEVCLocalContextIntra (yuk!)
+    NeighbourAvailable na;
+
     uint8_t cabac_state[HEVC_CONTEXTS];
 
     uint8_t stat_coeff[4];
@@ -761,8 +819,6 @@ typedef struct HEVCLocalContext {
     int8_t curr_qp_y;
 
     int qPy_pred;
-
-    TransformUnit tu;
 
     uint8_t ctb_left_flag;
     uint8_t ctb_up_flag;
@@ -779,7 +835,6 @@ typedef struct HEVCLocalContext {
     int ct_depth;
     CodingUnit cu;
     PredictionUnit pu;
-    NeighbourAvailable na;
 
 #define BOUNDARY_LEFT_SLICE     (1 << 0)
 #define BOUNDARY_LEFT_TILE      (1 << 1)
@@ -789,6 +844,207 @@ typedef struct HEVCLocalContext {
      * of the deblocking filter */
     int boundary_flags;
 } HEVCLocalContext;
+
+#ifdef RPI
+
+// The processing is done in chunks
+// Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
+// but allocate more memory and increase the latency before data in the next frame can be processed
+#define RPI_NUM_CHUNKS 4
+#define RPI_CHUNK_SIZE 12
+#define RPI_ROUND_TO_LINES 0
+
+// RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
+#define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*RPI_CHUNK_SIZE)
+
+// Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane, * 2 for bi
+#define RPI_MAX_MV_CMDS_Y   (2*16*1*(RPI_MAX_WIDTH/4))
+#define RPI_MAX_MV_CMDS_C   (2*16*2*(RPI_MAX_WIDTH/4))
+// Each block can have an intra prediction and a transform_add command
+#define RPI_MAX_PRED_CMDS (2*16*3*(RPI_MAX_WIDTH/4))
+// Worst case is 16x16 CTUs
+#define RPI_MAX_DEBLOCK_CMDS (RPI_MAX_WIDTH*4/16)
+
+#define RPI_CMD_LUMA_UNI 0
+#define RPI_CMD_CHROMA_UNI 1
+#define RPI_CMD_LUMA_BI 2
+#define RPI_CMD_CHROMA_BI 3
+#define RPI_CMD_V_BI 4
+
+// Command for inter prediction
+typedef struct HEVCMvCmd {
+    uint8_t cmd;
+    uint8_t block_w;
+    uint8_t block_h;
+    int8_t ref_idx[2];
+    uint16_t dststride;
+    uint16_t srcstride;
+    uint16_t srcstride1;
+    int16_t weight;
+    int16_t offset;
+    int16_t x_off;
+    int16_t y_off;
+    uint8_t *src;
+    uint8_t *src1;
+    uint8_t *dst;
+    Mv mv;
+    Mv mv1;
+} HEVCMvCmd;
+
+
+// Command for intra prediction and transform_add of predictions to coefficients
+enum rpi_pred_cmd_e
+{
+    RPI_PRED_ADD_RESIDUAL,
+    RPI_PRED_ADD_RESIDUAL_U, // = RPI_PRED_TRANSFORM_ADD + c_idx
+    RPI_PRED_ADD_RESIDUAL_V, // = RPI_PRED_TRANSFORM_ADD + c_idx
+    RPI_PRED_ADD_RESIDUAL_C, // Merged U+V
+    RPI_PRED_ADD_DC,
+    RPI_PRED_ADD_DC_U,       // Both U & V are effectively C
+    RPI_PRED_ADD_DC_V,
+    RPI_PRED_INTRA,
+    RPI_PRED_I_PCM,
+    RPI_PRED_CMD_MAX
+};
+
+typedef struct HEVCPredCmd {
+    uint8_t type;
+    uint8_t size;  // log2 "size" used by all variants
+    uint8_t na;    // i_pred - but left here as they pack well
+    uint8_t c_idx; // i_pred
+    union {
+        struct {  // TRANSFORM_ADD
+            uint8_t * dst;
+            const int16_t * buf;
+            uint16_t stride;  // Should be good enough for all pic fmts we use
+            int16_t dc;
+        } ta;
+        struct {
+            uint8_t * dst;
+            uint32_t stride;
+            int dc;
+        } dc;
+        struct {  // INTRA
+            uint16_t x;
+            uint16_t y;
+            enum IntraPredMode mode;
+        } i_pred;
+        struct {  // I_PCM
+            uint16_t x;
+            uint16_t y;
+            const void * src;
+            uint32_t src_len;
+        } i_pcm;
+    };
+} HEVCPredCmd;
+
+#endif
+
+#ifdef RPI
+#include <semaphore.h>
+
+union qpu_mc_pred_cmd_s;
+struct qpu_mc_pred_y_p_s;
+struct qpu_mc_src_s;
+
+typedef struct HEVCRpiInterPredQ
+{
+    union qpu_mc_pred_cmd_u *qpu_mc_base;
+    union qpu_mc_pred_cmd_u *qpu_mc_curr;
+    struct qpu_mc_src_s *last_l0;
+    struct qpu_mc_src_s *last_l1;
+    unsigned int load;
+    uint32_t code_setup;
+    uint32_t code_sync;
+    uint32_t code_exit;
+} HEVCRpiInterPredQ;
+
+typedef struct HEVCRpiInterPredEnv
+{
+    HEVCRpiInterPredQ * q;
+    unsigned int n;        // Number of Qs
+    unsigned int n_grp;    // Number of Q in a group
+    unsigned int curr;     // Current Q number (0..n-1)
+    int used;              // 0 if nothing in any Q, 1 otherwise
+    int used_grp;          // 0 if nothing in any Q in the current group
+    unsigned int max_fill;
+    unsigned int min_gap;
+    GPU_MEM_PTR_T gptr;
+} HEVCRpiInterPredEnv;
+
+typedef struct HEVCRpiIntraPredEnv {
+    unsigned int n;        // Number of commands
+    HEVCPredCmd * cmds;
+} HEVCRpiIntraPredEnv;
+
+typedef struct HEVCRpiCeoffEnv {
+    unsigned int n;
+    uint16_t * buf;
+} HEVCRpiCoeffEnv;
+
+typedef struct HEVCRpiCeoffsEnv {
+    HEVCRpiCoeffEnv s[4];
+    GPU_MEM_PTR_T gptr;
+    void * mptr;
+} HEVCRpiCoeffsEnv;
+
+typedef struct HEVCRpiDeblkBlk {
+    uint16_t x_ctb;
+    uint16_t y_ctb;
+} HEVCRpiDeblkBlk;
+
+typedef struct HEVCRpiDeblkEnv {
+    unsigned int n;
+    HEVCRpiDeblkBlk * blks;
+} HEVCRpiDeblkEnv;
+
+typedef struct HEVCRPiFrameProgressWait {
+    int req;
+    struct HEVCRPiFrameProgressWait * next;
+    sem_t sem;
+} HEVCRPiFrameProgressWait;
+
+typedef struct HEVCRPiFrameProgressState {
+    struct HEVCRPiFrameProgressWait * first;
+    struct HEVCRPiFrameProgressWait * last;
+    pthread_mutex_t lock;
+} HEVCRPiFrameProgressState;
+
+typedef struct HEVCRpiJob {
+    volatile int terminate;
+    int pending;
+    sem_t sem_in;       // set by main
+    sem_t sem_out;      // set by worker
+    HEVCRpiInterPredEnv chroma_ip;
+    HEVCRpiInterPredEnv luma_ip;
+    int16_t progress[32];  // index by dpb_no
+    HEVCRpiIntraPredEnv intra;
+    HEVCRpiCoeffsEnv coeffs;
+    HEVCRpiDeblkEnv deblk;
+    HEVCRPiFrameProgressWait progress_wait;
+} HEVCRpiJob;
+
+#if RPI_TSTATS
+typedef struct HEVCRpiStats {
+    int y_pred1_y8_merge;
+    int y_pred1_xy;
+    int y_pred1_x0;
+    int y_pred1_y0;
+    int y_pred1_x0y0;
+    int y_pred1_wle8;
+    int y_pred1_wgt8;
+    int y_pred1_hle16;
+    int y_pred1_hgt16;
+    int y_pred2_xy;
+    int y_pred2_x0;
+    int y_pred2_y0;
+    int y_pred2_x0y0;
+    int y_pred2_hle16;
+    int y_pred2_hgt16;
+} HEVCRpiStats;
+#endif
+
+#endif
 
 typedef struct HEVCContext {
     const AVClass *c;  // needed by private avoptions
@@ -804,6 +1060,69 @@ typedef struct HEVCContext {
 
     int                 width;
     int                 height;
+
+    int used_for_ref;  // rpi
+#ifdef RPI
+    int enable_rpi;
+    unsigned int pass0_job; // Pass0 does coefficient decode
+    unsigned int pass1_job; // Pass1 does pixel processing
+    int ctu_count; // Number of CTUs done in pass0 so far
+    int max_ctu_count; // Number of CTUs when we trigger a round of processing
+
+    HEVCRpiJob * jb0;
+    HEVCRpiJob * jb1;
+    HEVCRpiJob jobs[RPI_MAX_JOBS];
+#if RPI_TSTATS
+    HEVCRpiStats tstats;
+#endif
+#if RPI_INTER
+    struct qpu_mc_pred_y_p_s * last_y8_p;
+    struct qpu_mc_src_s * last_y8_l1;
+
+    // Function pointers
+#if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
+    const uint8_t * qpu_dummy_frame_emu;
+#endif
+#if !RPI_QPU_EMU_Y || !RPI_QPU_EMU_C
+    uint32_t qpu_dummy_frame_qpu;  // Not a frame - just a bit of memory
+#endif
+    HEVCRpiQpu qpu;
+#endif
+
+    pthread_t worker_thread;
+
+#ifdef RPI_DEBLOCK_VPU
+#define RPI_DEBLOCK_VPU_Q_COUNT 2
+    int enable_rpi_deblock;
+
+    int uv_setup_width;
+    int uv_setup_height;
+    int setup_width; // Number of 16x16 blocks across the image
+    int setup_height; // Number of 16x16 blocks down the image
+
+    struct dblk_vpu_q_s
+    {
+        GPU_MEM_PTR_T deblock_vpu_gmem;
+
+        uint8_t (*y_setup_arm)[2][2][2][4];
+        uint8_t (*y_setup_vc)[2][2][2][4];
+
+        uint8_t (*uv_setup_arm)[2][2][2][4];  // Half of this is unused [][][1][], but easier for the VPU as it allows us to store with zeros and addresses are aligned
+        uint8_t (*uv_setup_vc)[2][2][2][4];
+
+        int (*vpu_cmds_arm)[6]; // r0-r5 for each command
+        int vpu_cmds_vc;
+
+        vpu_qpu_wait_h cmd_id;
+    } dvq_ents[RPI_DEBLOCK_VPU_Q_COUNT];
+
+    struct dblk_vpu_q_s * dvq;
+    unsigned int dvq_n;
+
+#endif
+    HEVCLocalContextIntra HEVClcIntra;
+    HEVCRPiFrameProgressState progress_states[2];
+#endif
 
     uint8_t *cabac_state;
 
@@ -1053,6 +1372,10 @@ void ff_hevc_hls_mvd_coding(HEVCContext *s, int x0, int y0, int log2_cb_size);
 
 int ff_hevc_encode_nal_vps(HEVCVPS *vps, unsigned int id,
                            uint8_t *buf, int buf_size);
+#if RPI_INTER
+extern void rpi_flush_ref_frame_progress(HEVCContext * const s, ThreadFrame * const f, const unsigned int n);
+#endif
+
 
 /**
  * Reset SEI values that are stored on the Context.
@@ -1071,5 +1394,90 @@ extern const uint8_t ff_hevc_diag_scan4x4_x[16];
 extern const uint8_t ff_hevc_diag_scan4x4_y[16];
 extern const uint8_t ff_hevc_diag_scan8x8_x[64];
 extern const uint8_t ff_hevc_diag_scan8x8_y[64];
+
+#ifdef RPI
+int16_t * rpi_alloc_coeff_buf(HEVCContext * const s, const int buf_no, const int n);
+
+// arm/hevc_misc_neon.S
+// Neon coeff zap fn
+#if HAVE_NEON
+extern void rpi_zap_coeff_vals_neon(int16_t * dst, unsigned int l2ts_m2);
+#endif
+
+void ff_hevc_rpi_progress_wait_field(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int val, const int field);
+
+void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, const int field);
+
+// All of these expect that s->threads_type == FF_THREAD_FRAME
+
+static inline void ff_hevc_progress_wait_mv(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int y)
+{
+    if (s->enable_rpi)
+        ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
+    else
+        ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
+}
+
+static inline void ff_hevc_progress_signal_mv(HEVCContext * const s, const int y)
+{
+    if (s->enable_rpi && s->used_for_ref)
+        ff_hevc_rpi_progress_signal_field(s, y, 1);
+}
+
+static inline void ff_hevc_progress_wait_recon(HEVCContext * const s, HEVCRpiJob * const jb,
+                                     const HEVCFrame * const ref, const int y)
+{
+    if (s->enable_rpi)
+        ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 0);
+    else
+        ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
+}
+
+static inline void ff_hevc_progress_signal_recon(HEVCContext * const s, const int y)
+{
+    if (s->used_for_ref)
+    {
+        if (s->enable_rpi)
+            ff_hevc_rpi_progress_signal_field(s, y, 0);
+        else
+            ff_thread_report_progress(&s->ref->tf, y, 0);
+    }
+}
+
+static inline void ff_hevc_progress_signal_all_done(HEVCContext * const s)
+{
+    if (s->enable_rpi)
+    {
+        ff_hevc_rpi_progress_signal_field(s, INT_MAX, 0);
+        ff_hevc_rpi_progress_signal_field(s, INT_MAX, 1);
+    }
+    else
+        ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
+}
+
+#else
+
+// Use #define as that allows us to discard "jb" which won't exist in non-RPI world
+#define ff_hevc_progress_wait_mv(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
+#define ff_hevc_progress_wait_recon(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
+#define ff_hevc_progress_signal_mv(s, y)
+#define ff_hevc_progress_signal_recon(s, y) ff_thread_report_progress(&s->ref->tf, y, 0)
+#define ff_hevc_progress_signal_all_done(s) ff_thread_report_progress(&s->ref->tf, INT_MAX, 0)
+
+#endif
+
+// Set all done - signal nothing (used in missing refs)
+// Works for both rpi & non-rpi
+static inline void ff_hevc_progress_set_all_done(HEVCFrame * const ref)
+{
+    if (ref->tf.progress != NULL)
+    {
+        int * const p = (int *)&ref->tf.progress->data;
+        p[0] = INT_MAX;
+        p[1] = INT_MAX;
+    }
+}
 
 #endif /* AVCODEC_HEVC_H */

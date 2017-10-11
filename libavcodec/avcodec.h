@@ -410,6 +410,8 @@ enum AVCodecID {
     AV_CODEC_ID_SHEERVIDEO,
     AV_CODEC_ID_YLC,
 
+    AV_CODEC_ID_H264_MVC,
+
     /* various PCM "codecs" */
     AV_CODEC_ID_FIRST_AUDIO = 0x10000,     ///< A dummy id pointing at the start of audio codecs
     AV_CODEC_ID_PCM_S16LE = 0x10000,
@@ -3205,6 +3207,9 @@ typedef struct AVCodecContext {
 #define FF_PROFILE_H264_HIGH_444_PREDICTIVE  244
 #define FF_PROFILE_H264_HIGH_444_INTRA       (244|FF_PROFILE_H264_INTRA)
 #define FF_PROFILE_H264_CAVLC_444            44
+#define FF_PROFILE_H264_MULTIVIEW_HIGH       118
+#define FF_PROFILE_H264_STEREO_HIGH          128
+#define FF_PROFILE_H264_MULTIVIEW_HIGH_DEPTH 138
 
 #define FF_PROFILE_VC1_SIMPLE   0
 #define FF_PROFILE_VC1_MAIN     1
@@ -3514,6 +3519,13 @@ typedef struct AVCodecContext {
 #if FF_API_ASS_TIMING
 #define FF_SUB_TEXT_FMT_ASS_WITH_TIMINGS 1
 #endif
+
+    /**
+     * Opaque pointer for use by replacement get_buffer2 code
+     *
+     * @author jc (08/02/2016)
+     */
+    void * get_buffer_context;
 
 } AVCodecContext;
 

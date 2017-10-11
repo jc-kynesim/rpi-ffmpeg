@@ -23,7 +23,7 @@
 
 #include "libavutil/avassert.h"
 #include "libavutil/pixdesc.h"
-
+#include "libavutil/rpi_sand_fns.h"
 #include "internal.h"
 #include "thread.h"
 #include "hevc.h"
@@ -205,7 +205,8 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
             HEVCFrame *frame = &s->DPB[min_idx];
             AVFrame *dst = out;
             AVFrame *src = frame->frame;
-            const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(src->format);
+            const int fmt = src->format;
+            const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
             int pixel_shift = !!(desc->comp[0].depth > 8);
 
             ret = av_frame_ref(out, src);
@@ -216,12 +217,29 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
             if (ret < 0)
                 return ret;
 
-            for (i = 0; i < 3; i++) {
-                int hshift = (i > 0) ? desc->log2_chroma_w : 0;
-                int vshift = (i > 0) ? desc->log2_chroma_h : 0;
-                int off = ((frame->window.left_offset >> hshift) << pixel_shift) +
-                          (frame->window.top_offset   >> vshift) * dst->linesize[i];
-                dst->data[i] += off;
+            if (av_rpi_is_sand_format(fmt))
+            {
+                // Sand cannot be windowed by offset so add side data if we have an offset
+                const HEVCWindow * const window = &frame->window;
+                if (window->left_offset + window->right_offset + window->top_offset + window->bottom_offset != 0)
+                {
+                    AVFrameSideData *const sd = av_frame_new_side_data(dst, AV_FRAME_DATA_SAND_INFO, sizeof(AVPanScan));
+                    AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
+                    si->left_offset = window->left_offset;
+                    si->top_offset = window->top_offset;
+                    si->pic_width = s->ps.sps->width;
+                    si->pic_height = s->ps.sps->height;
+                }
+            }
+            else
+            {
+                for (i = 0; i < 3; i++) {
+                    int hshift = (i > 0) ? desc->log2_chroma_w : 0;
+                    int vshift = (i > 0) ? desc->log2_chroma_h : 0;
+                    int off = ((frame->window.left_offset >> hshift) << pixel_shift) +
+                              (frame->window.top_offset   >> vshift) * dst->linesize[i];
+                    dst->data[i] += off;
+                }
             }
             av_log(s->avctx, AV_LOG_DEBUG,
                    "Output frame with POC %d.\n", frame->poc);
@@ -426,8 +444,7 @@ static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
     frame->sequence = s->seq_decode;
     frame->flags    = 0;
 
-    if (s->threads_type == FF_THREAD_FRAME)
-        ff_thread_report_progress(&frame->tf, INT_MAX, 0);
+    ff_hevc_progress_set_all_done(frame);
 
     return frame;
 }

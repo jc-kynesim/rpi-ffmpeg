@@ -120,7 +120,20 @@ enum AVFrameSideDataType {
      * The GOP timecode in 25 bit timecode format. Data format is 64-bit integer.
      * This is set on the first frame of a GOP that has a temporal reference of 0.
      */
-    AV_FRAME_DATA_GOP_TIMECODE
+    AV_FRAME_DATA_GOP_TIMECODE,
+
+    /**
+     * The data represents the AVSphericalMapping structure defined in
+     * libavutil/spherical.h.
+     */
+    AV_FRAME_DATA_SPHERICAL,
+
+    /**
+     * Extra data required to deal with a cropped Sand frame
+     * AVFrame holds the cropped size, but we cannot simply offset the start
+     * address to get the picture as we can for planar formats
+     */
+    AV_FRAME_DATA_SAND_INFO,
 };
 
 enum AVActiveFormatDescription {
@@ -133,6 +146,13 @@ enum AVActiveFormatDescription {
     AV_AFD_SP_4_3       = 15,
 };
 
+typedef struct AVFrameDataSandInfo
+{
+    unsigned int left_offset;
+    unsigned int top_offset;
+    unsigned int pic_width;
+    unsigned int pic_height;
+} AVFrameDataSandInfo;
 
 /**
  * Structure to hold side data for an AVFrame.

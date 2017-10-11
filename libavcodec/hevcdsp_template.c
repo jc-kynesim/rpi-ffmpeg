@@ -26,6 +26,7 @@
 #include "bit_depth_template.c"
 #include "hevcdsp.h"
 
+#include "rpi_shader_template.h"
 
 static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
@@ -42,8 +43,32 @@ static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height
     }
 }
 
-static av_always_inline void FUNC(transquant_bypass)(uint8_t *_dst, int16_t *coeffs,
-                                                     ptrdiff_t stride, int size)
+#if RPI_HEVC_SAND
+static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
+                          GetBitContext *gb, int pcm_bit_depth)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++)
+            dst[x*2] = get_bits(gb, pcm_bit_depth) << (BIT_DEPTH - pcm_bit_depth);
+        dst += stride;
+    }
+
+    dst = (pixel *)_dst + 1;
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++)
+            dst[x*2] = get_bits(gb, pcm_bit_depth) << (BIT_DEPTH - pcm_bit_depth);
+        dst += stride;
+    }
+}
+#endif
+
+static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *coeffs,
+                                                ptrdiff_t stride, int size)
 {
     int x, y;
     pixel *dst = (pixel *)_dst;
@@ -59,29 +84,254 @@ static av_always_inline void FUNC(transquant_bypass)(uint8_t *_dst, int16_t *coe
     }
 }
 
-static void FUNC(transform_add4x4)(uint8_t *_dst, int16_t *coeffs,
+static av_always_inline void FUNC(add_residual_dc)(uint8_t *_dst, ptrdiff_t stride, const int dc, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size; x++) {
+            dst[x] = av_clip_pixel(dst[x] + dc);
+        }
+        dst += stride;
+    }
+}
+
+
+#if RPI_HEVC_SAND
+static av_always_inline void FUNC(add_residual_u)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, const int dc_v, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + *res);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + dc_v);
+            res++;
+        }
+        dst += stride;
+    }
+}
+
+static av_always_inline void FUNC(add_residual_v)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, const int dc_u, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + dc_u);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + *res);
+            res++;
+        }
+        dst += stride;
+    }
+}
+
+static av_always_inline void FUNC(add_residual_c)(uint8_t *_dst, const int16_t *res,
+                                                ptrdiff_t stride, unsigned int size)
+{
+    unsigned int x, y;
+    pixel *dst = (pixel *)_dst;
+    const int16_t * ru = res;
+    const int16_t * rv = res + size * size;
+
+//    rpi_sand_dump16("ARC In Pred", _dst, stride, 0, 0, 0, size, size, 1);
+//    rpi_sand_dump16("ARC In RU", ru, size * 2, 0, 0, 0, size, size, 0);
+//    rpi_sand_dump16("ARC In RV", rv, size * 2, 0, 0, 0, size, size, 0);
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x + 0] = av_clip_pixel(dst[x + 0] + *ru++);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + *rv++);
+        }
+        dst += stride;
+    }
+
+//    rpi_sand_dump16("ARC Out", _dst, stride * 2, 0, 0, 0, size, size, 1);
+}
+
+
+static av_always_inline void FUNC(add_residual_dc_c)(uint8_t *_dst, ptrdiff_t stride, const int32_t dc, int size)
+{
+    int x, y;
+    pixel *dst = (pixel *)_dst;
+    const int dc_v = dc >> 16;
+    const int dc_u = (dc << 16) >> 16;
+
+    stride /= sizeof(pixel);
+
+    for (y = 0; y < size; y++) {
+        for (x = 0; x < size * 2; x += 2) {
+            dst[x] = av_clip_pixel(dst[x] + dc_u);
+            dst[x + 1] = av_clip_pixel(dst[x + 1] + dc_v);
+        }
+        dst += stride;
+    }
+}
+
+
+#endif
+
+static void FUNC(add_residual4x4)(uint8_t *_dst, int16_t *coeffs,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual)(_dst, coeffs, stride, 4);
+}
+
+static void FUNC(add_residual8x8)(uint8_t *_dst, int16_t *coeffs,
                                        ptrdiff_t stride)
 {
-    FUNC(transquant_bypass)(_dst, coeffs, stride, 4);
+    FUNC(add_residual)(_dst, coeffs, stride, 8);
 }
 
-static void FUNC(transform_add8x8)(uint8_t *_dst, int16_t *coeffs,
-                                       ptrdiff_t stride)
-{
-    FUNC(transquant_bypass)(_dst, coeffs, stride, 8);
-}
-
-static void FUNC(transform_add16x16)(uint8_t *_dst, int16_t *coeffs,
+static void FUNC(add_residual16x16)(uint8_t *_dst, int16_t *coeffs,
                                          ptrdiff_t stride)
 {
-    FUNC(transquant_bypass)(_dst, coeffs, stride, 16);
+    FUNC(add_residual)(_dst, coeffs, stride, 16);
 }
 
-static void FUNC(transform_add32x32)(uint8_t *_dst, int16_t *coeffs,
+static void FUNC(add_residual32x32)(uint8_t *_dst, int16_t *coeffs,
                                          ptrdiff_t stride)
 {
-    FUNC(transquant_bypass)(_dst, coeffs, stride, 32);
+    FUNC(add_residual)(_dst, coeffs, stride, 32);
 }
+
+static void FUNC(add_residual4x4_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 4);
+}
+
+static void FUNC(add_residual8x8_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 8);
+}
+
+static void FUNC(add_residual16x16_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 16);
+}
+
+static void FUNC(add_residual32x32_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
+{
+    FUNC(add_residual_dc)(_dst, stride, dc, 32);
+}
+
+#if RPI_HEVC_SAND
+// -- U -- (plaited)
+
+static void FUNC(add_residual4x4_u)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride, int dc_u)
+{
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 4);
+}
+
+static void FUNC(add_residual8x8_u)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride, int dc_u)
+{
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 8);
+}
+
+static void FUNC(add_residual16x16_u)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride, int dc_u)
+{
+    FUNC(add_residual_u)(_dst, res, stride, dc_u, 16);
+}
+
+static void FUNC(add_residual32x32_u)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride, int dc_u)
+{
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
+}
+
+// -- V -- (plaited)
+
+static void FUNC(add_residual4x4_v)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride, int dc_v)
+{
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 4);
+}
+
+static void FUNC(add_residual8x8_v)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride, int dc_v)
+{
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 8);
+}
+
+static void FUNC(add_residual16x16_v)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride, int dc_v)
+{
+    FUNC(add_residual_v)(_dst, res, stride, dc_v, 16);
+}
+
+static void FUNC(add_residual32x32_v)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride, int dc_v)
+{
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
+}
+
+// -- C -- (plaited - both U & V)
+
+static void FUNC(add_residual4x4_c)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_c)(_dst, res, stride, 4);
+}
+
+static void FUNC(add_residual8x8_c)(uint8_t *_dst, const int16_t * res,
+                                  ptrdiff_t stride)
+{
+    FUNC(add_residual_c)(_dst, res, stride, 8);
+}
+
+static void FUNC(add_residual16x16_c)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride)
+{
+    FUNC(add_residual_c)(_dst, res, stride, 16);
+}
+
+static void FUNC(add_residual32x32_c)(uint8_t *_dst, const int16_t * res,
+                                    ptrdiff_t stride)
+{
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
+}
+
+static void FUNC(add_residual4x4_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 4);
+}
+
+static void FUNC(add_residual8x8_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 8);
+}
+
+static void FUNC(add_residual16x16_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    FUNC(add_residual_dc_c)(_dst, stride, dc, 16);
+}
+
+static void FUNC(add_residual32x32_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_t dc)
+{
+    // Should never occur for 420, which is all that sand supports
+    av_assert0(0);
+}
+
+#endif
 
 
 static void FUNC(transform_rdpcm)(int16_t *_coeffs, int16_t log2_size, int mode)
@@ -106,6 +356,7 @@ static void FUNC(transform_rdpcm)(int16_t *_coeffs, int16_t log2_size, int mode)
     }
 }
 
+#if 0
 static void FUNC(transform_skip)(int16_t *_coeffs, int16_t log2_size)
 {
     int shift  = 15 - BIT_DEPTH - log2_size;
@@ -131,6 +382,7 @@ static void FUNC(transform_skip)(int16_t *_coeffs, int16_t log2_size)
         }
     }
 }
+#endif
 
 #define SET(dst, x)   (dst) = (x)
 #define SCALE(dst, x) (dst) = av_clip_int16(((x) + add) >> shift)
@@ -152,7 +404,7 @@ static void FUNC(transform_skip)(int16_t *_coeffs, int16_t log2_size)
         assign(dst[3 * step], 55 * c0 + 29 * c2 - c3);                  \
     } while (0)
 
-static void FUNC(transform_4x4_luma)(int16_t *coeffs)
+static void FUNC(idct_4x4_luma)(int16_t *coeffs)
 {
     int i;
     int shift    = 7;
@@ -358,6 +610,32 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
     }
 }
 
+
+#if BIT_DEPTH == 10
+#if RPI_HEVC_SAND
+// We need a 32 bit variation for the _c restores so hijack bit depth 10
+#undef pixel
+#undef BIT_DEPTH
+#define pixel uint32_t
+#define BIT_DEPTH 32
+#endif
+// All 16 bit variations are the same
+#define sao_edge_restore_0_10 sao_edge_restore_0_9
+#define sao_edge_restore_1_10 sao_edge_restore_1_9
+#define sao_edge_restore_0_11 sao_edge_restore_0_9
+#define sao_edge_restore_1_11 sao_edge_restore_1_9
+#define sao_edge_restore_0_12 sao_edge_restore_0_9
+#define sao_edge_restore_1_12 sao_edge_restore_1_9
+#define sao_edge_restore_0_13 sao_edge_restore_0_9
+#define sao_edge_restore_1_13 sao_edge_restore_1_9
+#define sao_edge_restore_0_14 sao_edge_restore_0_9
+#define sao_edge_restore_1_14 sao_edge_restore_1_9
+#define sao_edge_restore_0_15 sao_edge_restore_0_9
+#define sao_edge_restore_1_15 sao_edge_restore_1_9
+#define sao_edge_restore_0_16 sao_edge_restore_0_9
+#define sao_edge_restore_1_16 sao_edge_restore_1_9
+#endif
+#if BIT_DEPTH <= 9 || BIT_DEPTH == 32
 static void FUNC(sao_edge_restore_0)(uint8_t *_dst, uint8_t *_src,
                                     ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
                                     int *borders, int _width, int _height,
@@ -367,7 +645,6 @@ static void FUNC(sao_edge_restore_0)(uint8_t *_dst, uint8_t *_src,
     int x, y;
     pixel *dst = (pixel *)_dst;
     pixel *src = (pixel *)_src;
-    int16_t *sao_offset_val = sao->offset_val[c_idx];
     int sao_eo_class    = sao->eo_class[c_idx];
     int init_x = 0, width = _width, height = _height;
 
@@ -376,33 +653,29 @@ static void FUNC(sao_edge_restore_0)(uint8_t *_dst, uint8_t *_src,
 
     if (sao_eo_class != SAO_EO_VERT) {
         if (borders[0]) {
-            int offset_val = sao_offset_val[0];
             for (y = 0; y < height; y++) {
-                dst[y * stride_dst] = av_clip_pixel(src[y * stride_src] + offset_val);
+                dst[y * stride_dst] = src[y * stride_src];
             }
             init_x = 1;
         }
         if (borders[2]) {
-            int offset_val = sao_offset_val[0];
             int offset     = width - 1;
             for (x = 0; x < height; x++) {
-                dst[x * stride_dst + offset] = av_clip_pixel(src[x * stride_src + offset] + offset_val);
+                dst[x * stride_dst + offset] = src[x * stride_src + offset];
             }
             width--;
         }
     }
     if (sao_eo_class != SAO_EO_HORIZ) {
         if (borders[1]) {
-            int offset_val = sao_offset_val[0];
             for (x = init_x; x < width; x++)
-                dst[x] = av_clip_pixel(src[x] + offset_val);
+                dst[x] = src[x];
         }
         if (borders[3]) {
-            int offset_val   = sao_offset_val[0];
-            int y_stride_dst = stride_dst * (height - 1);
-            int y_stride_src = stride_src * (height - 1);
+            ptrdiff_t y_stride_dst = stride_dst * (height - 1);
+            ptrdiff_t y_stride_src = stride_src * (height - 1);
             for (x = init_x; x < width; x++)
-                dst[x + y_stride_dst] = av_clip_pixel(src[x + y_stride_src] + offset_val);
+                dst[x + y_stride_dst] = src[x + y_stride_src];
             height--;
         }
     }
@@ -417,7 +690,6 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
     int x, y;
     pixel *dst = (pixel *)_dst;
     pixel *src = (pixel *)_src;
-    int16_t *sao_offset_val = sao->offset_val[c_idx];
     int sao_eo_class    = sao->eo_class[c_idx];
     int init_x = 0, init_y = 0, width = _width, height = _height;
 
@@ -426,34 +698,30 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
     if (sao_eo_class != SAO_EO_VERT) {
         if (borders[0]) {
-            int offset_val = sao_offset_val[0];
             for (y = 0; y < height; y++) {
-                dst[y * stride_dst] = av_clip_pixel(src[y * stride_src] + offset_val);
+                dst[y * stride_dst] = src[y * stride_src];
             }
             init_x = 1;
         }
         if (borders[2]) {
-            int offset_val = sao_offset_val[0];
             int offset     = width - 1;
             for (x = 0; x < height; x++) {
-                dst[x * stride_dst + offset] = av_clip_pixel(src[x * stride_src + offset] + offset_val);
+                dst[x * stride_dst + offset] = src[x * stride_src + offset];
             }
             width--;
         }
     }
     if (sao_eo_class != SAO_EO_HORIZ) {
         if (borders[1]) {
-            int offset_val = sao_offset_val[0];
             for (x = init_x; x < width; x++)
-                dst[x] = av_clip_pixel(src[x] + offset_val);
+                dst[x] = src[x];
             init_y = 1;
         }
         if (borders[3]) {
-            int offset_val   = sao_offset_val[0];
-            int y_stride_dst = stride_dst * (height - 1);
-            int y_stride_src = stride_src * (height - 1);
+            ptrdiff_t y_stride_dst = stride_dst * (height - 1);
+            ptrdiff_t y_stride_src = stride_src * (height - 1);
             for (x = init_x; x < width; x++)
-                dst[x + y_stride_dst] = av_clip_pixel(src[x + y_stride_src] + offset_val);
+                dst[x + y_stride_dst] = src[x + y_stride_src];
             height--;
         }
     }
@@ -493,6 +761,121 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
     }
 }
+#endif
+#if BIT_DEPTH == 32
+#undef BIT_DEPTH
+#undef pixel
+#define BIT_DEPTH 10
+#define pixel uint16_t
+#endif
+
+// --- Plaited chroma versions
+
+#if RPI_HEVC_SAND
+
+static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
+                                  ptrdiff_t stride_dst, ptrdiff_t stride_src,
+                                  const int16_t *sao_offset_val_u, int sao_left_class_u,
+                                  const int16_t *sao_offset_val_v, int sao_left_class_v,
+                                  int width, int height)
+{
+    pixel *dst = (pixel *)_dst;
+    pixel *src = (pixel *)_src;
+    int offset_table_u[32] = { 0 };
+    int offset_table_v[32] = { 0 };
+    int k, y, x;
+    int shift  = BIT_DEPTH - 5;
+
+    stride_dst /= sizeof(pixel);
+    stride_src /= sizeof(pixel);
+    width *= 2;
+
+    for (k = 0; k < 4; k++)
+    {
+        offset_table_u[(k + sao_left_class_u) & 31] = sao_offset_val_u[k + 1];
+        offset_table_v[(k + sao_left_class_v) & 31] = sao_offset_val_v[k + 1];
+    }
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x += 2)
+        {
+//            printf("dst=%p, src=%p, x=%d, shift=%d\n", dst, src, x, shift);
+//            printf("offsets=%x,%x\n", src[x + 0], src[x + 1]);
+            // *** & 31 shouldn't be wanted but just now we generate broken input that
+            // crashes us in 10-bit world
+            dst[x + 0] = av_clip_pixel(src[x + 0] + offset_table_u[(src[x + 0] >> shift) & 31]);
+            dst[x + 1] = av_clip_pixel(src[x + 1] + offset_table_v[(src[x + 1] >> shift) & 31]);
+        }
+        dst += stride_dst;
+        src += stride_src;
+    }
+}
+
+static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_t stride_dst,
+                                  const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v,
+                                  int eo, int width, int height) {
+
+    static const uint8_t edge_idx[] = { 1, 2, 0, 3, 4 };
+    static const int8_t pos[4][2][2] = {
+        { { -1,  0 }, {  1, 0 } }, // horizontal
+        { {  0, -1 }, {  0, 1 } }, // vertical
+        { { -1, -1 }, {  1, 1 } }, // 45 degree
+        { {  1, -1 }, { -1, 1 } }, // 135 degree
+    };
+    pixel *dst = (pixel *)_dst;
+    pixel *src = (pixel *)_src;
+    int a_stride, b_stride;
+    int x, y;
+    ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
+
+    stride_dst /= sizeof(pixel);
+    width *= 2;
+
+    av_assert0(width <= 64);
+
+    a_stride = pos[eo][0][0] * 2 + pos[eo][0][1] * stride_src;
+    b_stride = pos[eo][1][0] * 2 + pos[eo][1][1] * stride_src;
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x += 2) {
+            int diff0u = CMP(src[x], src[x + a_stride]);
+            int diff1u = CMP(src[x], src[x + b_stride]);
+            int offset_valu        = edge_idx[2 + diff0u + diff1u];
+            int diff0v = CMP(src[x+1], src[x+1 + a_stride]);
+            int diff1v = CMP(src[x+1], src[x+1 + b_stride]);
+            int offset_valv        = edge_idx[2 + diff0v + diff1v];
+            dst[x] = av_clip_pixel(src[x] + sao_offset_val_u[offset_valu]);
+            dst[x+1] = av_clip_pixel(src[x+1] + sao_offset_val_v[offset_valv]);
+        }
+        src += stride_src;
+        dst += stride_dst;
+    }
+}
+
+// Do once
+#if BIT_DEPTH == 8
+// Any old 2 byte 'normal' restore will work for these
+#define sao_edge_restore_c_0_8  sao_edge_restore_0_16
+#define sao_edge_restore_c_1_8  sao_edge_restore_1_16
+// We need 32 bit for 9 bit+
+#define sao_edge_restore_c_0_9  sao_edge_restore_0_32
+#define sao_edge_restore_c_1_9  sao_edge_restore_1_32
+#define sao_edge_restore_c_0_10 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_10 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_11 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_11 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_12 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_12 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_13 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_13 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_14 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_14 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_15 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_15 sao_edge_restore_1_32
+#define sao_edge_restore_c_0_16 sao_edge_restore_0_32
+#define sao_edge_restore_c_1_16 sao_edge_restore_1_32
+#endif
+
+#endif  // RPI_HEVC_SAND
+
 
 #undef CMP
 
@@ -1694,3 +2077,217 @@ static void FUNC(hevc_v_loop_filter_luma)(uint8_t *pix, ptrdiff_t stride,
 #undef TQ1
 #undef TQ2
 #undef TQ3
+
+#if RPI_HEVC_SAND
+
+// line zero
+#define P3 pix_l[0 * xstride]
+#define P2 pix_l[1 * xstride]
+#define P1 pix_l[2 * xstride]
+#define P0 pix_l[3 * xstride]
+#define Q0 pix_r[0 * xstride]
+#define Q1 pix_r[1 * xstride]
+#define Q2 pix_r[2 * xstride]
+#define Q3 pix_r[3 * xstride]
+
+// line three. used only for deblocking decision
+#define TP3 pix_l[0 * xstride + 3 * ystride]
+#define TP2 pix_l[1 * xstride + 3 * ystride]
+#define TP1 pix_l[2 * xstride + 3 * ystride]
+#define TP0 pix_l[3 * xstride + 3 * ystride]
+#define TQ0 pix_r[0 * xstride + 3 * ystride]
+#define TQ1 pix_r[1 * xstride + 3 * ystride]
+#define TQ2 pix_r[2 * xstride + 3 * ystride]
+#define TQ3 pix_r[3 * xstride + 3 * ystride]
+
+// This is identical to hevc_loop_filter_luma except that the P/Q
+// components are on separate pointers
+static void FUNC(hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
+                                 unsigned int _stride, unsigned int beta, const int32_t _tc[2],
+                                 const uint8_t _no_p[2], const uint8_t _no_q[2],
+                                 uint8_t * _pix_l)
+{
+    int d, j;
+    pixel *pix_l        = (pixel *)_pix_l;
+    pixel *pix_r        = (pixel *)_pix_r;
+    const ptrdiff_t xstride = 1;
+    const ptrdiff_t ystride = _stride / sizeof(pixel);
+
+    beta <<= BIT_DEPTH - 8;
+
+    for (j = 0; j < 2; j++) {
+        const int dp0  = abs(P2  - 2 * P1  + P0);
+        const int dq0  = abs(Q2  - 2 * Q1  + Q0);
+        const int dp3  = abs(TP2 - 2 * TP1 + TP0);
+        const int dq3  = abs(TQ2 - 2 * TQ1 + TQ0);
+        const int d0   = dp0 + dq0;
+        const int d3   = dp3 + dq3;
+        const int tc   = _tc[j]   << (BIT_DEPTH - 8);
+        const int no_p = _no_p[j];
+        const int no_q = _no_q[j];
+
+        if (d0 + d3 >= beta) {
+            pix_l += 4 * ystride;
+            pix_r += 4 * ystride;
+            continue;
+        } else {
+            const int beta_3 = beta >> 3;
+            const int beta_2 = beta >> 2;
+            const int tc25   = ((tc * 5 + 1) >> 1);
+
+            if (abs(P3  -  P0) + abs(Q3  -  Q0) < beta_3 && abs(P0  -  Q0) < tc25 &&
+                abs(TP3 - TP0) + abs(TQ3 - TQ0) < beta_3 && abs(TP0 - TQ0) < tc25 &&
+                                      (d0 << 1) < beta_2 &&      (d3 << 1) < beta_2) {
+                // strong filtering
+                const int tc2 = tc << 1;
+                for (d = 0; d < 4; d++) {
+                    const int p3 = P3;
+                    const int p2 = P2;
+                    const int p1 = P1;
+                    const int p0 = P0;
+                    const int q0 = Q0;
+                    const int q1 = Q1;
+                    const int q2 = Q2;
+                    const int q3 = Q3;
+                    if (!no_p) {
+                        P0 = p0 + av_clip(((p2 + 2 * p1 + 2 * p0 + 2 * q0 + q1 + 4) >> 3) - p0, -tc2, tc2);
+                        P1 = p1 + av_clip(((p2 + p1 + p0 + q0 + 2) >> 2) - p1, -tc2, tc2);
+                        P2 = p2 + av_clip(((2 * p3 + 3 * p2 + p1 + p0 + q0 + 4) >> 3) - p2, -tc2, tc2);
+                    }
+                    if (!no_q) {
+                        Q0 = q0 + av_clip(((p1 + 2 * p0 + 2 * q0 + 2 * q1 + q2 + 4) >> 3) - q0, -tc2, tc2);
+                        Q1 = q1 + av_clip(((p0 + q0 + q1 + q2 + 2) >> 2) - q1, -tc2, tc2);
+                        Q2 = q2 + av_clip(((2 * q3 + 3 * q2 + q1 + q0 + p0 + 4) >> 3) - q2, -tc2, tc2);
+                    }
+                    pix_l += ystride;
+                    pix_r += ystride;
+                }
+            } else { // normal filtering
+                int nd_p = 1;
+                int nd_q = 1;
+                const int tc_2 = tc >> 1;
+                if (dp0 + dp3 < ((beta + (beta >> 1)) >> 3))
+                    nd_p = 2;
+                if (dq0 + dq3 < ((beta + (beta >> 1)) >> 3))
+                    nd_q = 2;
+
+                for (d = 0; d < 4; d++) {
+                    const int p2 = P2;
+                    const int p1 = P1;
+                    const int p0 = P0;
+                    const int q0 = Q0;
+                    const int q1 = Q1;
+                    const int q2 = Q2;
+                    int delta0   = (9 * (q0 - p0) - 3 * (q1 - p1) + 8) >> 4;
+                    if (abs(delta0) < 10 * tc) {
+                        delta0 = av_clip(delta0, -tc, tc);
+                        if (!no_p)
+                            P0 = av_clip_pixel(p0 + delta0);
+                        if (!no_q)
+                            Q0 = av_clip_pixel(q0 - delta0);
+                        if (!no_p && nd_p > 1) {
+                            const int deltap1 = av_clip((((p2 + p0 + 1) >> 1) - p1 + delta0) >> 1, -tc_2, tc_2);
+                            P1 = av_clip_pixel(p1 + deltap1);
+                        }
+                        if (!no_q && nd_q > 1) {
+                            const int deltaq1 = av_clip((((q2 + q0 + 1) >> 1) - q1 - delta0) >> 1, -tc_2, tc_2);
+                            Q1 = av_clip_pixel(q1 + deltaq1);
+                        }
+                    }
+                    pix_l += ystride;
+                    pix_r += ystride;
+                }
+            }
+        }
+    }
+}
+
+#undef TP3
+#undef TP2
+#undef TP1
+#undef TP0
+#undef TQ0
+#undef TQ1
+#undef TQ2
+#undef TQ3
+
+#undef P3
+#undef P2
+#undef P1
+#undef P0
+#undef Q0
+#undef Q1
+#undef Q2
+#undef Q3
+
+#define P1 pix_l[0 * xstride]
+#define P0 pix_l[1 * xstride]
+#define Q0 pix_r[0 * xstride]
+#define Q1 pix_r[1 * xstride]
+
+static void FUNC(hevc_loop_filter_uv2)(uint8_t *_pix_l, ptrdiff_t _xstride,
+                                          ptrdiff_t _ystride, const int32_t *_tc,
+                                          const uint8_t *_no_p, const uint8_t *_no_q, uint8_t *_pix_r)
+{
+    int d, j, no_p, no_q;
+    pixel *pix_l        = (pixel *)_pix_l;
+    pixel *pix_r        = (pixel *)_pix_r;
+    ptrdiff_t xstride = _xstride / sizeof(pixel);
+    ptrdiff_t ystride = _ystride / sizeof(pixel);
+
+    for (j = 0; j < 2; j++) {
+        const int tc = _tc[j] << (BIT_DEPTH - 8);
+        if (tc <= 0) {
+            pix_l += 4 * ystride;
+            pix_r += 4 * ystride;
+            continue;
+        }
+        no_p = _no_p[j];
+        no_q = _no_q[j];
+
+        for (d = 0; d < 4; d++) {
+            int delta0;
+            const int p1 = P1;
+            const int p0 = P0;
+            const int q0 = Q0;
+            const int q1 = Q1;
+            delta0 = av_clip((((q0 - p0) * 4) + p1 - q1 + 4) >> 3, -tc, tc);
+            if (!no_p)
+                P0 = av_clip_pixel(p0 + delta0);
+            if (!no_q)
+                Q0 = av_clip_pixel(q0 - delta0);
+            pix_l += ystride;
+            pix_r += ystride;
+        }
+    }
+}
+
+static void FUNC(hevc_h_loop_filter_uv)(uint8_t * pix, unsigned int stride, uint32_t tc4,
+                                 unsigned int no_f)
+{
+    uint8_t no_p[2] = {no_f & 1, no_f & 2};
+    uint8_t no_q[2] = {no_f & 4, no_f & 8};
+    int32_t tc[4] = {tc4 & 0xff, (tc4 >> 8) & 0xff, (tc4 >> 16) & 0xff, tc4 >> 24};
+    FUNC(hevc_loop_filter_chroma)(pix, stride, sizeof(pixel) * 2, tc, no_p, no_q);
+    FUNC(hevc_loop_filter_chroma)(pix + sizeof(pixel), stride, sizeof(pixel) * 2, tc + 2, no_p, no_q);
+}
+
+static void FUNC(hevc_v_loop_filter_uv2)(uint8_t * src_r, unsigned int stride, uint32_t tc4,
+                                 uint8_t * src_l,
+                                 unsigned int no_f)
+{
+    uint8_t no_p[2] = {no_f & 1, no_f & 2};
+    uint8_t no_q[2] = {no_f & 4, no_f & 8};
+    int32_t tc[4] = {tc4 & 0xff, (tc4 >> 8) & 0xff, (tc4 >> 16) & 0xff, tc4 >> 24};
+    FUNC(hevc_loop_filter_uv2)(src_l, sizeof(pixel) * 2, stride, tc, no_p, no_q, src_r);
+    FUNC(hevc_loop_filter_uv2)(src_l + sizeof(pixel), sizeof(pixel) * 2, stride, tc + 2, no_p, no_q, src_r + sizeof(pixel));
+}
+
+#undef P1
+#undef P0
+#undef Q0
+#undef Q1
+
+
+#endif
+

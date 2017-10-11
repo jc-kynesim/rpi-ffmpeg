@@ -20,12 +20,109 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+//#define DISABLE_INTRA
+
 #include "libavutil/pixdesc.h"
 
 #include "bit_depth_template.c"
 #include "hevcpred.h"
 
+#ifdef RPI
+#include "libavutil/rpi_sand_fns.h"
+#endif
+
+#define DUMP_PRED 0
+
 #define POS(x, y) src[(x) + stride * (y)]
+
+// REPEAT_INCLUDE defined at EOF
+#if defined(RPI) && !defined(INCLUDED_ONCE)
+typedef uint8_t (* c8_dst_ptr_t)[2];
+typedef const uint8_t (* c8_src_ptr_t)[2];
+typedef uint16_t (* c16_dst_ptr_t)[2];
+typedef const uint16_t (* c16_src_ptr_t)[2];
+
+// *** On ARM make these NEON registers
+typedef struct pixel4_16 {
+    uint16_t x[4];
+} pixel4_16;
+typedef struct pixel4_32 {
+    uint32_t x[4];
+} pixel4_32;
+static inline pixel4_16 PIXEL_SPLAT_X4_16(const uint16_t x)
+{
+    pixel4_16 t = {{x, x, x, x}};
+    return t;
+}
+static inline pixel4_32 PIXEL_SPLAT_X4_32(const uint32_t x)
+{
+    pixel4_32 t = {{x, x, x, x}};
+    return t;
+}
+#endif
+
+#if PRED_C
+// For chroma we double pixel size so we copy pairs
+#undef pixel
+#undef pixel2
+#undef pixel4
+#undef dctcoef
+#undef INIT_CLIP
+#undef no_rnd_avg_pixel4
+#undef rnd_avg_pixel4
+#undef AV_RN2P
+#undef AV_RN4P
+#undef AV_RN4PA
+#undef AV_WN2P
+#undef AV_WN4P
+#undef AV_WN4PA
+#undef CLIP
+#undef FUNC
+#undef FUNCC
+#undef av_clip_pixel
+#undef PIXEL_SPLAT_X4
+
+#if BIT_DEPTH == 8
+#define pixel uint16_t
+#define pixel4 pixel4_16
+#define PIXEL_SPLAT_X4 PIXEL_SPLAT_X4_16
+#define cpel uint8_t
+#define c_src_ptr_t  c8_src_ptr_t
+#define c_dst_ptr_t  c8_dst_ptr_t
+#else
+#define pixel uint32_t
+#define pixel4 pixel4_32
+#define PIXEL_SPLAT_X4 PIXEL_SPLAT_X4_32
+#define cpel uint16_t
+#define c_src_ptr_t c16_dst_ptr_t
+#define c_dst_ptr_t c16_dst_ptr_t
+#endif
+#define AV_RN4P(p) (*(pixel4*)(p))
+#define AV_WN4P(p,x) (*(pixel4*)(p) = (x))
+#define FUNC(a) FUNC2(a, BIT_DEPTH, _c)
+#endif
+
+
+// Get PW prior to horrid PRED_C trickery
+#if BIT_DEPTH == 8
+#define PW 1
+#else
+#define PW 2
+#endif
+
+
+#if DUMP_PRED && !defined(INCLUDE_ONCE)
+static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const unsigned int size)
+{
+    for (unsigned int y = 0; y != size; y++, data += stride * 2) {
+        for (unsigned int x = 0; x != size; x++) {
+            printf("%4d", data[x * 2]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+#endif
 
 static av_always_inline void FUNC(intra_pred)(HEVCContext *s, int x0, int y0,
                                               int log2_size, int c_idx)
@@ -69,8 +166,11 @@ do {                                  \
                 AV_WN4P(&ptr[i], a);                                           \
             else                                                               \
                 a = PIXEL_SPLAT_X4(ptr[i + 3])
-
+#ifdef RPI
+    HEVCLocalContextIntra *lc = (s->enable_rpi) ? &s->HEVClcIntra : (HEVCLocalContextIntra *)s->HEVClc ;
+#else
     HEVCLocalContext *lc = s->HEVClc;
+#endif
     int i;
     int hshift = s->ps.sps->hshift[c_idx];
     int vshift = s->ps.sps->vshift[c_idx];
@@ -79,15 +179,23 @@ do {                                  \
     int size_in_tbs_h  = size_in_luma_h >> s->ps.sps->log2_min_tb_size;
     int size_in_luma_v = size << vshift;
     int size_in_tbs_v  = size_in_luma_v >> s->ps.sps->log2_min_tb_size;
-    int x = x0 >> hshift;
-    int y = y0 >> vshift;
+    const int x = x0 >> hshift;
+    const int y = y0 >> vshift;
     int x_tb = (x0 >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask;
     int y_tb = (y0 >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask;
 
     int cur_tb_addr = MIN_TB_ADDR_ZS(x_tb, y_tb);
 
-    ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
+    const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
+#if defined(RPI)
+    pixel *const src = !av_rpi_is_sand_frame(s->frame) ?
+            (pixel*)s->frame->data[c_idx] + x + y * stride :
+        c_idx == 0 ?
+            (pixel *)av_rpi_sand_frame_pos_y(s->frame, x, y) :
+            (pixel *)av_rpi_sand_frame_pos_c(s->frame, x, y);
+#else
     pixel *src = (pixel*)s->frame->data[c_idx] + x + y * stride;
+#endif
 
     int min_pu_width = s->ps.sps->min_pu_width;
 
@@ -95,14 +203,20 @@ do {                                  \
                               lc->tu.intra_pred_mode;
     pixel4 a;
     pixel  left_array[2 * MAX_TB_SIZE + 1];
+#if !PRED_C
     pixel  filtered_left_array[2 * MAX_TB_SIZE + 1];
+#endif
     pixel  top_array[2 * MAX_TB_SIZE + 1];
+#if !PRED_C
     pixel  filtered_top_array[2 * MAX_TB_SIZE + 1];
+#endif
 
     pixel  *left          = left_array + 1;
     pixel  *top           = top_array  + 1;
+#if !PRED_C
     pixel  *filtered_left = filtered_left_array + 1;
     pixel  *filtered_top  = filtered_top_array  + 1;
+#endif
     int cand_bottom_left = lc->na.cand_bottom_left && cur_tb_addr > MIN_TB_ADDR_ZS( x_tb - 1, (y_tb + size_in_tbs_v) & s->ps.sps->tb_mask);
     int cand_left        = lc->na.cand_left;
     int cand_up_left     = lc->na.cand_up_left;
@@ -113,6 +227,27 @@ do {                                  \
                            (y0 + size_in_luma_v)) >> vshift;
     int top_right_size   = (FFMIN(x0 + 2 * size_in_luma_h, s->ps.sps->width) -
                            (x0 + size_in_luma_h)) >> hshift;
+
+    pixel * src_l = src - 1;
+    pixel * src_u = src - stride;
+    pixel * src_ur = src_u + size;
+
+#ifdef DISABLE_INTRA
+    return;
+#endif
+
+#if defined(RPI)
+    if (av_rpi_is_sand_frame(s->frame)) {
+        // N.B. stride is in pixels (not bytes) or in the case of chroma pixel-pairs
+        const AVFrame * const frame = s->frame;
+        const unsigned int mask = stride - 1; // For chroma pixel=uint16 so stride_c is stride_y / 2
+        const unsigned int stripe_adj = (av_rpi_sand_frame_stride2(frame) - 1) * stride;
+        if ((x & mask) == 0)
+            src_l -= stripe_adj;
+        if (((x + size) & mask) == 0)
+            src_ur += stripe_adj;
+    }
+#endif
 
     if (s->ps.pps->constrained_intra_pred_flag == 1) {
         int size_in_luma_pu_v = PU(size_in_luma_v);
@@ -163,23 +298,24 @@ do {                                  \
         top[-1] = 128;
     }
     if (cand_up_left) {
-        left[-1] = POS(-1, -1);
+        left[-1] = src_l[-stride];
         top[-1]  = left[-1];
     }
     if (cand_up)
-        memcpy(top, src - stride, size * sizeof(pixel));
+        // Always good - even with sand
+        memcpy(top, src_u, size * sizeof(pixel));
     if (cand_up_right) {
-        memcpy(top + size, src - stride + size, size * sizeof(pixel));
-        EXTEND(top + size + top_right_size, POS(size + top_right_size - 1, -1),
+        memcpy(top + size, src_ur, top_right_size * sizeof(pixel));
+        EXTEND(top + size + top_right_size, top[size + top_right_size - 1],
                size - top_right_size);
     }
     if (cand_left)
         for (i = 0; i < size; i++)
-            left[i] = POS(-1, i);
+            left[i] = src_l[stride * i];
     if (cand_bottom_left) {
         for (i = size; i < size + bottom_left_size; i++)
-            left[i] = POS(-1, i);
-        EXTEND(left + size + bottom_left_size, POS(-1, size + bottom_left_size - 1),
+            left[i] = src_l[stride * i];
+        EXTEND(left + size + bottom_left_size, left[size + bottom_left_size - 1],
                size - bottom_left_size);
     }
 
@@ -268,7 +404,11 @@ do {                                  \
             cand_up_left = 1;
             cand_left    = 1;
         } else { // No samples available
+#if PRED_C
+            left[-1] = (1 << (BIT_DEPTH - 1)) | (1 << (BIT_DEPTH - 1 + PW * 8));
+#else
             left[-1] = (1 << (BIT_DEPTH - 1));
+#endif
             EXTEND(top,  left[-1], 2 * size);
             EXTEND(left, left[-1], 2 * size);
         }
@@ -287,6 +427,9 @@ do {                                  \
     top[-1] = left[-1];
 
     // Filtering process
+    // Sand can only apply to chroma_format_idc == 1 so we don't need to
+    // worry about chroma smoothing for that case
+#if !PRED_C
     if (!s->ps.sps->intra_smoothing_disabled_flag && (c_idx == 0  || s->ps.sps->chroma_format_idc == 3)) {
         if (mode != INTRA_DC && size != 4){
             int intra_hor_ver_dist_thresh[] = { 7, 1, 0 };
@@ -342,6 +485,30 @@ do {                                  \
                                            mode);
         break;
     }
+#else
+    switch (mode) {
+    case INTRA_PLANAR:
+        s->hpc.pred_planar_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                          (uint8_t *)left, stride);
+        break;
+    case INTRA_DC:
+        s->hpc.pred_dc_c((uint8_t *)src, (uint8_t *)top,
+                       (uint8_t *)left, stride, log2_size, c_idx);
+        break;
+    default:
+        s->hpc.pred_angular_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                           (uint8_t *)left, stride, c_idx,
+                                           mode);
+        break;
+    }
+
+#if DUMP_PRED
+    printf("U pred @ %d, %d: mode=%d\n", x, y, mode);
+    dump_pred_uv((uint8_t *)src, stride, 1 << log2_size);
+    printf("V pred @ %d, %d: mode=%d\n", x, y, mode);
+    dump_pred_uv((uint8_t *)src + 1, stride, 1 << log2_size);
+#endif
+#endif
 }
 
 #define INTRA_PRED(size)                                                            \
@@ -357,6 +524,7 @@ INTRA_PRED(5)
 
 #undef INTRA_PRED
 
+#if !PRED_C
 static av_always_inline void FUNC(pred_planar)(uint8_t *_src, const uint8_t *_top,
                                   const uint8_t *_left, ptrdiff_t stride,
                                   int trafo_size)
@@ -371,6 +539,29 @@ static av_always_inline void FUNC(pred_planar)(uint8_t *_src, const uint8_t *_to
             POS(x, y) = ((size - 1 - x) * left[y] + (x + 1) * top[size]  +
                          (size - 1 - y) * top[x]  + (y + 1) * left[size] + size) >> (trafo_size + 1);
 }
+#else
+static av_always_inline void FUNC(pred_planar)(uint8_t * _src, const uint8_t * _top,
+                                  const uint8_t * _left, ptrdiff_t stride,
+                                  int trafo_size)
+{
+    int x, y;
+    int size = 1 << trafo_size;
+    c_dst_ptr_t src = (c_dst_ptr_t)_src;
+    const c_src_ptr_t top = (c_src_ptr_t)_top;
+    const c_src_ptr_t left = (c_src_ptr_t)_left;
+
+    for (y = 0; y < size; y++, src += stride)
+    {
+        for (x = 0; x < size; x++)
+        {
+            src[x][0] = ((size - 1 - x) * left[y][0] + (x + 1) * top[size][0]  +
+                         (size - 1 - y) * top[x][0]  + (y + 1) * left[size][0] + size) >> (trafo_size + 1);
+            src[x][1] = ((size - 1 - x) * left[y][1] + (x + 1) * top[size][1]  +
+                         (size - 1 - y) * top[x][1]  + (y + 1) * left[size][1] + size) >> (trafo_size + 1);
+        }
+    }
+}
+#endif
 
 #define PRED_PLANAR(size)\
 static void FUNC(pred_planar_ ## size)(uint8_t *src, const uint8_t *top,        \
@@ -386,6 +577,7 @@ PRED_PLANAR(3)
 
 #undef PRED_PLANAR
 
+#if !PRED_C
 static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
                           const uint8_t *_left,
                           ptrdiff_t stride, int log2_size, int c_idx)
@@ -416,7 +608,53 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
             POS(0, y) = (left[y] + 3 * dc + 2) >> 2;
     }
 }
+#else
+static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
+                          const uint8_t *_left,
+                          ptrdiff_t stride, int log2_size, int c_idx)
+{
+    unsigned int i, j;
+    const unsigned int size = (1 << log2_size);
+    c_dst_ptr_t src = (c_dst_ptr_t)_src;
+    const c_src_ptr_t top = (c_src_ptr_t)_top;
+    const c_src_ptr_t left = (c_src_ptr_t)_left;
+    unsigned int dc0 = size;
+    unsigned int dc1 = size;
 
+    for (i = 0; i < size; i++)
+    {
+        dc0 += left[i][0] + top[i][0];
+        dc1 += left[i][1] + top[i][1];
+    }
+
+    dc0 >>= log2_size + 1;
+    dc1 >>= log2_size + 1;
+
+    for (i = 0; i < size; i++, src += stride)
+    {
+        for (j = 0; j < size; ++j)
+        {
+            src[j][0] = dc0;
+            src[j][1] = dc1;
+
+        }
+    }
+}
+#endif
+
+#ifndef ANGLE_CONSTS
+#define ANGLE_CONSTS
+static const int intra_pred_angle[] = {
+     32,  26,  21,  17, 13,  9,  5, 2, 0, -2, -5, -9, -13, -17, -21, -26, -32,
+    -26, -21, -17, -13, -9, -5, -2, 0, 2,  5,  9, 13,  17,  21,  26,  32
+};
+static const int inv_angle[] = {
+    -4096, -1638, -910, -630, -482, -390, -315, -256, -315, -390, -482,
+    -630, -910, -1638, -4096
+};
+#endif
+
+#if !PRED_C
 static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
                                                 const uint8_t *_top,
                                                 const uint8_t *_left,
@@ -427,15 +665,6 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
     pixel *src        = (pixel *)_src;
     const pixel *top  = (const pixel *)_top;
     const pixel *left = (const pixel *)_left;
-
-    static const int intra_pred_angle[] = {
-         32,  26,  21,  17, 13,  9,  5, 2, 0, -2, -5, -9, -13, -17, -21, -26, -32,
-        -26, -21, -17, -13, -9, -5, -2, 0, 2,  5,  9, 13,  17,  21,  26,  32
-    };
-    static const int inv_angle[] = {
-        -4096, -1638, -910, -630, -482, -390, -315, -256, -315, -390, -482,
-        -630, -910, -1638, -4096
-    };
 
     int angle = intra_pred_angle[mode - 2];
     pixel ref_array[3 * MAX_TB_SIZE + 4];
@@ -509,6 +738,83 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
         }
     }
 }
+#else
+static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
+                                                const uint8_t *_top,
+                                                const uint8_t *_left,
+                                                ptrdiff_t stride, int c_idx,
+                                                int mode, int size)
+{
+    int x, y;
+    c_dst_ptr_t src  = (c_dst_ptr_t)_src;
+    c_src_ptr_t top  = (c_src_ptr_t)_top;
+    c_src_ptr_t left = (c_src_ptr_t)_left;
+
+    const int angle = intra_pred_angle[mode - 2];
+    cpel ref_array[3 * MAX_TB_SIZE + 4][2];
+    c_dst_ptr_t ref_tmp = ref_array + size;
+    c_src_ptr_t ref;
+    const int last = (size * angle) >> 5;
+
+    if (mode >= 18) {
+        ref = top - 1;
+        if (angle < 0 && last < -1) {
+            memcpy(ref_tmp, top - 1, (size + 1) * 2 * PW);
+            for (x = last; x <= -1; x++)
+            {
+                ref_tmp[x][0] = left[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][0];
+                ref_tmp[x][1] = left[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][1];
+            }
+            ref = (c_src_ptr_t)ref_tmp;
+        }
+
+        for (y = 0; y < size; y++, src += stride) {
+            const int idx  = ((y + 1) * angle) >> 5;
+            const int fact = ((y + 1) * angle) & 31;
+            if (fact) {
+                for (x = 0; x < size; ++x) {
+                    src[x][0] = ((32 - fact) * ref[x + idx + 1][0] +
+                                       fact  * ref[x + idx + 2][0] + 16) >> 5;
+                    src[x][1] = ((32 - fact) * ref[x + idx + 1][1] +
+                                       fact  * ref[x + idx + 2][1] + 16) >> 5;
+                }
+            } else {
+                memcpy(src, ref + idx + 1, size * 2 * PW);
+            }
+        }
+    } else {
+        ref = left - 1;
+        if (angle < 0 && last < -1) {
+            memcpy(ref_tmp, left - 1, (size + 1) * 2 * PW);
+            for (x = last; x <= -1; x++)
+            {
+                ref_tmp[x][0] = top[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][0];
+                ref_tmp[x][1] = top[-1 + ((x * inv_angle[mode - 11] + 128) >> 8)][1];
+            }
+            ref = (c_src_ptr_t)ref_tmp;
+        }
+
+        for (x = 0; x < size; x++, src++) {
+            const int idx  = ((x + 1) * angle) >> 5;
+            const int fact = ((x + 1) * angle) & 31;
+            if (fact) {
+                for (y = 0; y < size; y++) {
+                    src[y * stride][0] = ((32 - fact) * ref[y + idx + 1][0] +
+                                       fact  * ref[y + idx + 2][0] + 16) >> 5;
+                    src[y * stride][1] = ((32 - fact) * ref[y + idx + 1][1] +
+                                       fact  * ref[y + idx + 2][1] + 16) >> 5;
+                }
+            } else {
+                for (y = 0; y < size; y++)
+                {
+                    src[y * stride][0] = ref[y + idx + 1][0];
+                    src[y * stride][1] = ref[y + idx + 1][1];
+                }
+            }
+        }
+    }
+}
+#endif
 
 static void FUNC(pred_angular_0)(uint8_t *src, const uint8_t *top,
                                  const uint8_t *left,
@@ -538,6 +844,10 @@ static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
     FUNC(pred_angular)(src, top, left, stride, c_idx, mode, 1 << 5);
 }
 
+#undef cpel
+#undef c_src_ptr_t
+#undef c_dst_ptr_t
+
 #undef EXTEND_LEFT_CIP
 #undef EXTEND_RIGHT_CIP
 #undef EXTEND_UP_CIP
@@ -549,3 +859,9 @@ static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
 #undef EXTEND
 #undef MIN_TB_ADDR_ZS
 #undef POS
+#undef PW
+
+#ifndef INCLUDED_ONCE
+#define INCLUDED_ONCE
+#endif
+
