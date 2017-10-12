@@ -356,7 +356,6 @@ static void FUNC(transform_rdpcm)(int16_t *_coeffs, int16_t log2_size, int mode)
     }
 }
 
-#if 0
 static void FUNC(transform_skip)(int16_t *_coeffs, int16_t log2_size)
 {
     int shift  = 15 - BIT_DEPTH - log2_size;
@@ -382,7 +381,6 @@ static void FUNC(transform_skip)(int16_t *_coeffs, int16_t log2_size)
         }
     }
 }
-#endif
 
 #define SET(dst, x)   (dst) = (x)
 #define SCALE(dst, x) (dst) = av_clip_int16(((x) + add) >> shift)

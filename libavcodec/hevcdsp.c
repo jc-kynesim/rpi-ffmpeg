@@ -346,17 +346,18 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
 
 #define HEVC_DSP(depth)                                                     \
     hevcdsp->put_pcm                = FUNC(put_pcm, depth);                 \
-    hevcdsp->transform_add[0]        = FUNC(add_residual4x4, depth);         \
-    hevcdsp->transform_add[1]        = FUNC(add_residual8x8, depth);         \
-    hevcdsp->transform_add[2]        = FUNC(add_residual16x16, depth);       \
-    hevcdsp->transform_add[3]        = FUNC(add_residual32x32, depth);       \
-    hevcdsp->add_residual_dc[0]     = FUNC(add_residual4x4_dc, depth);         \
-    hevcdsp->add_residual_dc[1]     = FUNC(add_residual8x8_dc, depth);         \
-    hevcdsp->add_residual_dc[2]     = FUNC(add_residual16x16_dc, depth);       \
-    hevcdsp->add_residual_dc[3]     = FUNC(add_residual32x32_dc, depth);       \
+    hevcdsp->transform_add[0]       = FUNC(add_residual4x4, depth);         \
+    hevcdsp->transform_add[1]       = FUNC(add_residual8x8, depth);         \
+    hevcdsp->transform_add[2]       = FUNC(add_residual16x16, depth);       \
+    hevcdsp->transform_add[3]       = FUNC(add_residual32x32, depth);       \
+    hevcdsp->add_residual_dc[0]     = FUNC(add_residual4x4_dc, depth);      \
+    hevcdsp->add_residual_dc[1]     = FUNC(add_residual8x8_dc, depth);      \
+    hevcdsp->add_residual_dc[2]     = FUNC(add_residual16x16_dc, depth);    \
+    hevcdsp->add_residual_dc[3]     = FUNC(add_residual32x32_dc, depth);    \
     SLICED_ADD_RESIDUAL(depth);                                             \
     hevcdsp->transform_rdpcm        = FUNC(transform_rdpcm, depth);         \
-    hevcdsp->idct_4x4_luma          = FUNC(idct_4x4_luma, depth);      \
+    hevcdsp->transform_skip         = FUNC(transform_skip, depth);          \
+    hevcdsp->idct_4x4_luma          = FUNC(idct_4x4_luma, depth);           \
     hevcdsp->idct[0]                = FUNC(idct_4x4, depth);                \
     hevcdsp->idct[1]                = FUNC(idct_8x8, depth);                \
     hevcdsp->idct[2]                = FUNC(idct_16x16, depth);              \
