@@ -25,6 +25,7 @@
 #ifndef AVCODEC_HEVCDSP_H
 #define AVCODEC_HEVCDSP_H
 
+#include "rpi_opts.h"
 #include "get_bits.h"
 
 #define MAX_PB_SIZE 64
@@ -55,10 +56,8 @@ typedef struct MvField {
 
 #ifdef RPI
 #define SAO_FILTER_N 6
-#define RPI_HEVC_SAND 1
 #else
 #define SAO_FILTER_N 5
-#define RPI_HEVC_SAND 0
 #endif
 
 

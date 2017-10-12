@@ -5,6 +5,7 @@ NAME = avcodec
 HEADERS = avcodec.h                                                     \
           avdct.h                                                       \
           avfft.h                                                       \
+          rpi_opts.h                                                    \
           rpi_qpu.h                                                     \
           rpi_shader.h                                                  \
           rpi_shader_cmd.h                                              \
