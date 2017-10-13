@@ -58,6 +58,8 @@
 
 #define MRG_MAX_NUM_CANDS     5
 
+#define HEVC_MAX_CTB_SIZE (1 << HEVC_MAX_LOG2_CTB_SIZE)  // 64
+
 #define L0 0
 #define L1 1
 
@@ -501,47 +503,27 @@ typedef struct HEVCLocalContext {
 // The processing is done in chunks
 // Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
 // but allocate more memory and increase the latency before data in the next frame can be processed
-#define RPI_NUM_CHUNKS 4
-#define RPI_CHUNK_SIZE 12
+//#define RPI_NUM_CHUNKS 4
+//#define RPI_CHUNK_SIZE 12
 #define RPI_ROUND_TO_LINES 0
 
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
-#define RPI_MAX_WIDTH (RPI_NUM_CHUNKS*64*RPI_CHUNK_SIZE)
+// Various buffer sizes depend on this so do not over allocate
+#define RPI_MAX_WIDTH 2048
 
-// Worst case is for 4:4:4 4x4 blocks with 64 high coding tree blocks, so 16 MV cmds per 4 pixels across for each colour plane, * 2 for bi
-#define RPI_MAX_MV_CMDS_Y   (2*16*1*(RPI_MAX_WIDTH/4))
-#define RPI_MAX_MV_CMDS_C   (2*16*2*(RPI_MAX_WIDTH/4))
-// Each block can have an intra prediction and a transform_add command
-#define RPI_MAX_PRED_CMDS (2*16*3*(RPI_MAX_WIDTH/4))
+// Each block can have an intra prediction and an add_residual command
+// noof-cmds(2) * max-ctu height(64) / min-transform(4) * planes(3) * MAX_WIDTH
+#if RPI_HEVC_SAND
+// Sand only has 2 planes (Y/C)
+#define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*2*(RPI_MAX_WIDTH/4))
+#else
+#define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*3*(RPI_MAX_WIDTH/4))
+#endif
+
+#ifdef RPI_DEBLOCK_VPU
 // Worst case is 16x16 CTUs
 #define RPI_MAX_DEBLOCK_CMDS (RPI_MAX_WIDTH*4/16)
-
-#define RPI_CMD_LUMA_UNI 0
-#define RPI_CMD_CHROMA_UNI 1
-#define RPI_CMD_LUMA_BI 2
-#define RPI_CMD_CHROMA_BI 3
-#define RPI_CMD_V_BI 4
-
-// Command for inter prediction
-typedef struct HEVCMvCmd {
-    uint8_t cmd;
-    uint8_t block_w;
-    uint8_t block_h;
-    int8_t ref_idx[2];
-    uint16_t dststride;
-    uint16_t srcstride;
-    uint16_t srcstride1;
-    int16_t weight;
-    int16_t offset;
-    int16_t x_off;
-    int16_t y_off;
-    uint8_t *src;
-    uint8_t *src1;
-    uint8_t *dst;
-    Mv mv;
-    Mv mv1;
-} HEVCMvCmd;
-
+#endif
 
 // Command for intra prediction and transform_add of predictions to coefficients
 enum rpi_pred_cmd_e
@@ -627,12 +609,12 @@ typedef struct HEVCRpiIntraPredEnv {
     HEVCPredCmd * cmds;
 } HEVCRpiIntraPredEnv;
 
-typedef struct HEVCRpiCeoffEnv {
+typedef struct HEVCRpiCoeffEnv {
     unsigned int n;
-    uint16_t * buf;
+    int16_t * buf;
 } HEVCRpiCoeffEnv;
 
-typedef struct HEVCRpiCeoffsEnv {
+typedef struct HEVCRpiCoeffsEnv {
     HEVCRpiCoeffEnv s[4];
     GPU_MEM_PTR_T gptr;
     void * mptr;
@@ -659,7 +641,6 @@ typedef struct RpiBlk
 } RpiBlk;
 
 typedef struct HEVCRpiJob {
-//    char passes_done;
     int ctu_ts_first;
     int ctu_ts_last;
     RpiBlk bounds;  // Bounding box of job
@@ -694,10 +675,6 @@ typedef struct HEVCRpiPassQueue
 
 typedef struct HEVCRpiJobCtl
 {
-//    unsigned int pending;
-//    unsigned int in_use;    // In use count
-//    unsigned int next_job;  // Next job no % RPI_MAX_JOBS
-//    unsigned int next_submit;
     sem_t sem_out;
 
     pthread_mutex_t in_lock;
@@ -754,7 +731,6 @@ typedef struct HEVCContext {
 #ifdef RPI
     char offload_recon;
     char enable_rpi;
-    unsigned int pass0_job; // Pass0 does coefficient decode
     int max_ctu_count; // Number of CTUs when we trigger a round of processing
 
     HEVCRpiJobCtl * jbc;

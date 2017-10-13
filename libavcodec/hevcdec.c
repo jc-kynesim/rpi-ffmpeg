@@ -79,14 +79,14 @@ static void rpi_begin(const HEVCContext * const s, HEVCRpiJob * const jb, const 
 #define MC_DUMMY_X (-32)
 #define MC_DUMMY_Y (-32)
 
-// UV still has min 4x4 pred
+// UV & Y both have min 4x4 pred (no 2x2 chroma)
 // Allow for even spread +1 for setup, +1 for rounding
 // As we have load sharing this can (in theory) be exceeded so we have to
 // check after each CTU, but it is a good base size
 
 // Worst case (all 4x4) commands per CTU
-#define QPU_Y_CMD_PER_CTU_MAX (8 * 8)
-#define QPU_C_CMD_PER_CTU_MAX (4 * 4)
+#define QPU_Y_CMD_PER_CTU_MAX (16 * 16)
+#define QPU_C_CMD_PER_CTU_MAX (8 * 8)
 
 #define QPU_C_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 + 2 * QPU_N_MAX)
 #define QPU_Y_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4))     + 2 * QPU_N_MAX)
@@ -512,7 +512,7 @@ static int worker_pic_alloc_all(HEVCContext * const s, const unsigned int coeff_
 {
     unsigned int i;
 
-    // Free coeff stuff - allocation not the same for all buffers
+    // Coeff stuff - allocation not the same for all buffers
     for(i = 0; i < RPI_MAX_JOBS; i++)
     {
         HEVCRpiCoeffsEnv * const cf = &s->jbc->jobs[i].coeffs;
@@ -527,9 +527,9 @@ static int worker_pic_alloc_all(HEVCContext * const s, const unsigned int coeff_
         cf->s[2].buf = (int16_t *)cf->gptr.arm;
         cf->s[3].buf = cf->s[2].buf + coeff_count;
 
-        // Must be 64 byte aligned for our zero apping code so over-allocate &
+        // Must be 64 byte aligned for our zero zapping code so over-allocate &
         // round
-        if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0] + 63))) == NULL)
+        if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0]) + 63)) == NULL)
             goto fail;
         cf->s[0].buf = (void *)(((intptr_t)cf->mptr + 63) & ~63);
     }
@@ -618,7 +618,7 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 
 #ifdef RPI
     const int coefs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
-    const int coefs_per_luma = 64*64*RPI_CHUNK_SIZE*RPI_NUM_CHUNKS;
+    const int coefs_per_luma = HEVC_MAX_CTB_SIZE * RPI_MAX_WIDTH;
     const int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
     const int coefs_per_row = coefs_per_luma + coefs_per_chroma;
 
@@ -2629,9 +2629,11 @@ static void rpi_inter_pred_sync(HEVCRpiInterPredEnv * const ipe)
 {
     for (unsigned int i = 0; i != ipe->n; ++i) {
         HEVCRpiInterPredQ * const q = ipe->q + i;
+        const unsigned int qfill = (char *)q->qpu_mc_curr - (char *)q->qpu_mc_base;
+
         q->qpu_mc_curr->data[-1] = q->code_sync;
         q->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(q->qpu_mc_curr->data + 1);
-        q->load = 0;
+        q->load = (qfill >> 7); // Have a mild preference for emptier Qs to balance memory usage
     }
 }
 
@@ -3144,7 +3146,6 @@ static void hls_prediction_unit(const HEVCContext * const s, HEVCLocalContext * 
     &s->frame->data[c_idx][((y) >> s->ps.sps->vshift[c_idx]) * s->frame->linesize[c_idx] + \
                            (((x) >> s->ps.sps->hshift[c_idx]) << s->ps.sps->pixel_shift)]
 #ifdef RPI
-    // ********* Move to lc
     HEVCRpiJob * const jb = lc->jb0;
 #endif
 
@@ -4469,15 +4470,17 @@ static int fill_job(HEVCContext * const s, HEVCLocalContext *const lc, unsigned 
             ff_hevc_progress_signal_mv(s, y_ctb + ctb_size - 1);
         }
 
-        // *** None of the 1st 3 tests for q_full should succeed in the current world...
+        // * None of the 1st 3 tests for q_full should succeed in the current world...
         q_full = ((ctb_addr_ts - jb->ctu_ts_first) >= s->max_ctu_count);
         if (rpi_inter_pred_next_ctu(&jb->luma_ip) != 0)
             q_full = 1;
         if (rpi_inter_pred_next_ctu(&jb->chroma_ip) != 0)
             q_full = 1;
         if (q_full) {
-            // *** This will cause us pain - deal with it better / at all?
-            av_log(s, AV_LOG_ERROR,  "%s: Q full before EoL\n", __func__);
+            // * This is very annoying (and slow) to cope with in WPP so
+            //   we treat it as an error there (no known stream tiggers this
+            //   with the current buffer sizes).  Non-wpp should cope fine.
+            av_log(s, AV_LOG_WARNING,  "%s: Q full before EoL\n", __func__);
         }
 
         if (q_full ||
@@ -4521,6 +4524,8 @@ static inline unsigned int line_ts_width(const HEVCContext * const s, unsigned i
     return s->ps.pps->column_width[s->ps.pps->col_idxX[rs % s->ps.sps->ctb_width]];
 }
 
+// Move local context parameters from an aux bit thread back to the main
+// thread at the end of a slice as processing is going to continue there.
 static void movlc(HEVCLocalContext *const dst_lc, HEVCLocalContext *const src_lc, const int is_dep)
 {
     if (src_lc == dst_lc) {
@@ -4528,13 +4533,9 @@ static void movlc(HEVCLocalContext *const dst_lc, HEVCLocalContext *const src_lc
     }
 
     // Move the job
-    // This seems a very unsafe thing to do - and it is
-    // However it is OK because:
-    //  If used_for_ref  then src_lc will contain the next job to submit so
-    //                   this puts it where it needs to be
-    //  If !used_for ref then this is "wrong" but submit will do all passes
-    //                   correctly and it will be reset to the right value
-    //                   with the next call to pass0_ready
+    // We will still have an active job if the final line terminates early
+    // Dest should always be null by now
+    av_assert1(dst_lc->jb0 == NULL);
     dst_lc->jb0 = src_lc->jb0;
     src_lc->jb0 = NULL;
 
@@ -5929,8 +5930,9 @@ static int rpi_job_ctl_init(HEVCContext * const s)
         jb->intra.n = 0;
         jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS);
 
-        // ** Sizeof the union structure might be overkill but at the moment it
-        //    is correct (it certainly isn't going to be too small)
+        // * Sizeof the union structure might be overkill but at the moment it
+        //   is correct (it certainly isn't going to be too small)
+        // *** really should add per ctu sync words to be accurate
 
         rpi_inter_pred_alloc(&jb->chroma_ip,
                              QPU_N_MAX, QPU_N_GRP,

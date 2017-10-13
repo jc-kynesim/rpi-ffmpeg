@@ -29,7 +29,7 @@
 
 #ifdef RPI
 // Move video buffers to GPU memory
-#define RPI_GPU_BUFFERS
+//#define RPI_GPU_BUFFERS
 #endif
 
 #include "libavutil/atomic.h"
