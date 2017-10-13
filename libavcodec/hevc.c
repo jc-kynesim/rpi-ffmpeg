@@ -359,7 +359,7 @@ static int worker_pic_alloc_all(HEVCContext * const s, const unsigned int coeff_
 
         // Must be 64 byte aligned for our zero apping code so over-allocate &
         // round
-        if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0] + 63))) == NULL)
+        if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0]) + 63)) == NULL)
             goto fail;
         cf->s[0].buf = (void *)(((intptr_t)cf->mptr + 63) & ~63);
     }
