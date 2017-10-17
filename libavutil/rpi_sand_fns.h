@@ -1,5 +1,6 @@
 #ifndef AVUTIL_RPI_SAND_FNS
 #define AVUTIL_RPI_SAND_FNS
+#ifdef RPI
 
 #include "libavutil/frame.h"
 
@@ -123,5 +124,6 @@ static inline uint8_t * av_rpi_sand_frame_pos_c(const AVFrame * const frame, con
     return frame->data[1] + av_rpi_sand_frame_off_c(frame, x, y);
 }
 
+#endif
 #endif
 
