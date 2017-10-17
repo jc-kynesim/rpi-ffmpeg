@@ -216,7 +216,7 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
                 ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
             if (ret < 0)
                 return ret;
-
+#ifdef RPI
             if (av_rpi_is_sand_format(fmt))
             {
                 // Sand cannot be windowed by offset so add side data if we have an offset
@@ -232,6 +232,7 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
                 }
             }
             else
+#endif
             {
                 for (i = 0; i < 3; i++) {
                     int hshift = (i > 0) ? desc->log2_chroma_w : 0;

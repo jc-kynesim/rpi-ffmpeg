@@ -49,6 +49,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
+#ifdef RPI
 static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame)
 {
@@ -112,6 +113,7 @@ static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
                           frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0, y0 / 2, width, height / 2);
     return 0;
 }
+#endif
 
 
 static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
@@ -123,11 +125,13 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
     if (ret < 0)
         return ret;
 
+#ifdef RPI
     if (av_rpi_is_sand_frame(frame)) {
         ret = av_rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) : raw_sand16_as_yuv420(avctx, pkt, frame);
         *got_packet = (ret == 0);
         return ret;
     }
+#endif
 
     if ((ret = ff_alloc_packet2(avctx, pkt, ret, ret)) < 0)
         return ret;
