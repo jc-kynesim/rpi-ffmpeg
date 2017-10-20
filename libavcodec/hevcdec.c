@@ -1061,7 +1061,7 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 static int set_sps(HEVCContext *s, const HEVCSPS *sps,
                    enum AVPixelFormat pix_fmt)
 {
-    int ret, i;
+    int ret;
 
     pic_arrays_free(s);
     s->ps.sps = NULL;
@@ -1077,7 +1077,6 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps,
     export_stream_params(s->avctx, &s->ps, sps);
 
     s->avctx->pix_fmt = pix_fmt;
->>>>>>> n3.4
 
     ff_hevc_pred_init(&s->hpc,     sps->bit_depth);
     ff_hevc_dsp_init (&s->hevcdsp, sps->bit_depth);
@@ -5074,10 +5073,10 @@ static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         y_ctb = (ctb_addr_rs / s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
         hls_decode_neighbour(s, lc, x_ctb, y_ctb, ctb_addr_ts);
 
-        err = ff_hevc_cabac_init(s, ctb_addr_ts);
+        err = ff_hevc_cabac_init(s, lc, ctb_addr_ts);
         if (err < 0) {
             s->tab_slice_address[ctb_addr_rs] = -1;
-            return ret;
+            return err;
         }
 
         hls_sao_param(s, lc, x_ctb >> s->ps.sps->log2_ctb_size, y_ctb >> s->ps.sps->log2_ctb_size);
