@@ -25,6 +25,7 @@
 #include "imgutils.h"
 #include "mem.h"
 #include "samplefmt.h"
+#include "rpi_sand_fns.h"
 
 
 static AVFrameSideData *frame_new_side_data(AVFrame *frame,
@@ -832,6 +833,12 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
         (frame->crop_left + frame->crop_right) >= frame->width ||
         (frame->crop_top + frame->crop_bottom) >= frame->height)
         return AVERROR(ERANGE);
+
+#ifdef RPI
+    // Sand cannot be cropped - do not try
+    if (av_rpi_is_sand_format(frame->format))
+        return 0;
+#endif
 
     desc = av_pix_fmt_desc_get(frame->format);
     if (!desc)

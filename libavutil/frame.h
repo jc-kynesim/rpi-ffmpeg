@@ -141,13 +141,6 @@ enum AVFrameSideDataType {
      * metadata key entry "name".
      */
     AV_FRAME_DATA_ICC_PROFILE,
-
-    /**
-     * Extra data required to deal with a cropped Sand frame
-     * AVFrame holds the cropped size, but we cannot simply offset the start
-     * address to get the picture as we can for planar formats
-     */
-    AV_FRAME_DATA_SAND_INFO,
 };
 
 enum AVActiveFormatDescription {
@@ -160,13 +153,6 @@ enum AVActiveFormatDescription {
     AV_AFD_SP_4_3       = 15,
 };
 
-typedef struct AVFrameDataSandInfo
-{
-    unsigned int left_offset;
-    unsigned int top_offset;
-    unsigned int pic_width;
-    unsigned int pic_height;
-} AVFrameDataSandInfo;
 
 /**
  * Structure to hold side data for an AVFrame.
@@ -827,6 +813,16 @@ int av_frame_apply_cropping(AVFrame *frame, int flags);
  * @return a string identifying the side data type
  */
 const char *av_frame_side_data_name(enum AVFrameSideDataType type);
+
+
+static inline int av_frame_cropped_width(const AVFrame * const frame)
+{
+    return frame->width - (frame->crop_left + frame->crop_right);
+}
+static inline int av_frame_cropped_height(const AVFrame * const frame)
+{
+    return frame->height - (frame->crop_top + frame->crop_bottom);
+}
 
 /**
  * @}

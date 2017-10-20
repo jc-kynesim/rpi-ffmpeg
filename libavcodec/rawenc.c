@@ -55,23 +55,14 @@ FF_ENABLE_DEPRECATION_WARNINGS
 static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame)
 {
-    const AVFrameSideData *const sd = av_frame_get_side_data(frame, AV_FRAME_DATA_SAND_INFO);
-    int size;
-    int width = frame->width;
-    int height = frame->height;
-    int x0 = 0;
-    int y0 = 0;
+    const int width = av_frame_cropped_width(frame);
+    const int height = av_frame_cropped_height(frame);
+    const int x0 = frame->crop_left;
+    const int y0 = frame->crop_top;
+    const int size = width * height * 3 / 2;
     uint8_t * dst;
     int ret;
 
-    if (sd != NULL) {
-        const AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
-
-        x0 = si->left_offset;
-        y0 = si->top_offset;
-    }
-
-    size = width * height * 3 / 2;
     if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
         return ret;
 
@@ -87,23 +78,14 @@ static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame)
 {
-    const AVFrameSideData *const sd = av_frame_get_side_data(frame, AV_FRAME_DATA_SAND_INFO);
-    int size;
-    int width = frame->width;
-    int height = frame->height;
-    int x0 = 0;
-    int y0 = 0;
+    const int width = av_frame_cropped_width(frame);
+    const int height = av_frame_cropped_height(frame);
+    const int x0 = frame->crop_left;
+    const int y0 = frame->crop_top;
+    const int size = width * height * 3;
     uint8_t * dst;
     int ret;
 
-    if (sd != NULL) {
-        const AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
-
-        x0 = si->left_offset;
-        y0 = si->top_offset;
-    }
-
-    size = width * height * 3;
     if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
         return ret;
 

@@ -207,16 +207,6 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
 
         if (nb_output) {
             HEVCFrame *frame = &s->DPB[min_idx];
-#if 0
-<<<<<<< HEAD
-            AVFrame *dst = out;
-            AVFrame *src = frame->frame;
-            const int fmt = src->format;
-            const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
-            int pixel_shift = !!(desc->comp[0].depth > 8);
-=======
->>>>>>> n3.4
-#endif
             if (frame->frame->format == AV_PIX_FMT_VIDEOTOOLBOX && frame->frame->buf[0]->size == 1)
                 return 0;
 
@@ -227,38 +217,6 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
                 ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
             if (ret < 0)
                 return ret;
-#if 0
-<<<<<<< HEAD
-#ifdef RPI
-            if (av_rpi_is_sand_format(fmt))
-            {
-                // Sand cannot be windowed by offset so add side data if we have an offset
-                const HEVCWindow * const window = &frame->window;
-                if (window->left_offset + window->right_offset + window->top_offset + window->bottom_offset != 0)
-                {
-                    AVFrameSideData *const sd = av_frame_new_side_data(dst, AV_FRAME_DATA_SAND_INFO, sizeof(AVPanScan));
-                    AVFrameDataSandInfo *const si = (AVFrameDataSandInfo *)sd->data;
-                    si->left_offset = window->left_offset;
-                    si->top_offset = window->top_offset;
-                    si->pic_width = s->ps.sps->width;
-                    si->pic_height = s->ps.sps->height;
-                }
-            }
-            else
-#endif
-            {
-                for (i = 0; i < 3; i++) {
-                    int hshift = (i > 0) ? desc->log2_chroma_w : 0;
-                    int vshift = (i > 0) ? desc->log2_chroma_h : 0;
-                    int off = ((frame->window.left_offset >> hshift) << pixel_shift) +
-                              (frame->window.top_offset   >> vshift) * dst->linesize[i];
-                    dst->data[i] += off;
-                }
-            }
-=======
-
->>>>>>> n3.4
-#endif
             av_log(s->avctx, AV_LOG_DEBUG,
                    "Output frame with POC %d.\n", frame->poc);
             return 1;
