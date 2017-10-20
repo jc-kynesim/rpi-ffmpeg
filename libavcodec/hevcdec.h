@@ -352,6 +352,14 @@ typedef struct HEVCLocalContext {
     struct HEVCContext * context;  // ??? make const ???
     unsigned int lc_n; // lc list el no
 
+    // Job wait links
+    struct HEVCLocalContext * jw_next;
+    struct HEVCLocalContext * jw_prev;
+    struct HEVCLocalContext * ljw_next;
+    struct HEVCLocalContext * ljw_prev;
+    struct HEVCRpiJob * volatile jw_job;
+    sem_t jw_sem;
+
     // ?? Wrap in structure ??
     sem_t bt_sem_in;
     sem_t * bt_psem_out;
@@ -366,6 +374,7 @@ typedef struct HEVCLocalContext {
     char unit_done;  // Set once we have dealt with this slice
 //    char max_done;
     char bt_is_tile;
+    char last_progress_good;
 #endif
     char wpp_init;   // WPP/Tile bitstream init has happened
 
@@ -414,13 +423,6 @@ typedef struct HEVCLocalContext {
 // RPI_EXTRA_BIT_THREADS+1 threads actually doing the processing
 //#define RPI_EXTRA_BIT_THREADS 0
 #define RPI_EXTRA_BIT_THREADS 2
-
-// The processing is done in chunks
-// Increasing RPI_NUM_CHUNKS will reduce time spent activating QPUs and cache flushing,
-// but allocate more memory and increase the latency before data in the next frame can be processed
-//#define RPI_NUM_CHUNKS 4
-//#define RPI_CHUNK_SIZE 12
-#define RPI_ROUND_TO_LINES 0
 
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
 // Various buffer sizes depend on this so do not over allocate
@@ -509,11 +511,11 @@ typedef struct HEVCRpiInterPredQ
 typedef struct HEVCRpiInterPredEnv
 {
     HEVCRpiInterPredQ * q;
-    unsigned int n;        // Number of Qs
-    unsigned int n_grp;    // Number of Q in a group
-    unsigned int curr;     // Current Q number (0..n-1)
-    int used;              // 0 if nothing in any Q, 1 otherwise
-    int used_grp;          // 0 if nothing in any Q in the current group
+    uint8_t n;                  // Number of Qs
+    uint8_t n_grp;              // Number of Q in a group
+    uint8_t curr;               // Current Q number (0..n-1)
+    uint8_t used;               // 0 if nothing in any Q, 1 otherwise
+    uint8_t used_grp;           // 0 if nothing in any Q in the current group
     unsigned int max_fill;
     unsigned int min_gap;
     GPU_MEM_PTR_T gptr;
@@ -556,6 +558,11 @@ typedef struct RpiBlk
 } RpiBlk;
 
 typedef struct HEVCRpiJob {
+    struct HEVCRpiJob * next;  // Free chain
+    struct HEVCRpiJobCtl * jbc_local;
+    const HEVCSPS * sps;       // sps used to set up this job
+
+    int waited;
     int ctu_ts_first;
     int ctu_ts_last;
     RpiBlk bounds;  // Bounding box of job
@@ -585,12 +592,22 @@ typedef struct HEVCRpiPassQueue
     struct HEVCContext * context; // Context pointer as we get to pass a single "void * this" to the thread
     HEVCRpiWorkerFn * worker;
     pthread_t thread;
-    int pass_n;  // Pass number - debug
+    uint8_t pass_n;  // Pass number - debug
+    uint8_t started;
 } HEVCRpiPassQueue;
+
+
+struct HEVCRpiJobGlobal;
 
 typedef struct HEVCRpiJobCtl
 {
     sem_t sem_out;
+
+    HEVCRpiJob * volatile jb1;  // The job associated with this frame if unallocated - NULL if allocated
+    struct HEVCRpiJobGlobal * jbg;
+
+    HEVCLocalContext * lcw_head;
+    HEVCLocalContext * lcw_tail;
 
     pthread_mutex_t in_lock;
     int offload_in;
@@ -598,9 +615,18 @@ typedef struct HEVCRpiJobCtl
     int offload_out;
 
     HEVCRpiJob *offloadq[RPI_MAX_JOBS];
-
-    HEVCRpiJob jobs[RPI_MAX_JOBS];
 } HEVCRpiJobCtl;
+
+
+typedef struct HEVCRpiJobGlobal
+{
+    intptr_t ref_count;
+    pthread_mutex_t lock;
+    HEVCRpiJob * free1;
+    HEVCLocalContext * wait_head;
+    HEVCLocalContext * wait_tail;
+
+} HEVCRpiJobGlobal;
 
 #define RPI_BIT_THREADS (RPI_EXTRA_BIT_THREADS + 1)
 

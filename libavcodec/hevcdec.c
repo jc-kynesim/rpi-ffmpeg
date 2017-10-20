@@ -174,7 +174,8 @@ static const int * const inter_pred_exit_y10_qpu[12] = {
 
 typedef struct ipe_chan_info_s
 {
-    const unsigned int n;
+    const uint8_t bit_depth;
+    const uint8_t n;
     const int * const * setup_fns;
     const int * const * sync_fns;
     const int * const * exit_fns;
@@ -188,16 +189,16 @@ typedef struct ipe_init_info_s
 
 static const ipe_init_info_t ipe_init_infos[9] = {  // Alloc for bit depths of 8-16
    {  // 8
-      .luma =   {QPU_MC_PRED_N_Y8, inter_pred_setup_y_qpu, inter_pred_sync_qpu, inter_pred_exit_y_qpu},
-      .chroma = {QPU_MC_PRED_N_C8, inter_pred_setup_c_qpu, inter_pred_sync_qpu, inter_pred_exit_c_qpu}
+      .luma =   {8, QPU_MC_PRED_N_Y8, inter_pred_setup_y_qpu, inter_pred_sync_qpu, inter_pred_exit_y_qpu},
+      .chroma = {8, QPU_MC_PRED_N_C8, inter_pred_setup_c_qpu, inter_pred_sync_qpu, inter_pred_exit_c_qpu}
    },
    {  // 9
       .luma =   {0},
       .chroma = {0}
    },
    {  // 10
-      .luma =   {QPU_MC_PRED_N_Y10, inter_pred_setup_y10_qpu, inter_pred_sync10_qpu, inter_pred_exit_y10_qpu},
-      .chroma = {QPU_MC_PRED_N_C10, inter_pred_setup_c10_qpu, inter_pred_sync10_qpu, inter_pred_exit_c10_qpu}
+      .luma =   {10, QPU_MC_PRED_N_Y10, inter_pred_setup_y10_qpu, inter_pred_sync10_qpu, inter_pred_exit_y10_qpu},
+      .chroma = {10, QPU_MC_PRED_N_C10, inter_pred_setup_c10_qpu, inter_pred_sync10_qpu, inter_pred_exit_c10_qpu}
    }
 
 };
@@ -221,17 +222,9 @@ static void set_ipe_from_ici(HEVCRpiInterPredEnv * const ipe, const ipe_chan_inf
 
 static void rpi_hevc_qpu_set_fns(HEVCContext * const s, const unsigned int bit_depth)
 {
-    const ipe_init_info_t * const iii = ipe_init_infos + bit_depth - 8;
-
     av_assert0(bit_depth >= 8 && bit_depth <= 16);
 
     rpi_hevc_qpu_init_fn(&s->qpu, bit_depth);
-
-    for (unsigned int i = 0; i != RPI_MAX_JOBS; ++i) {
-        HEVCRpiJob *const jb = s->jbc->jobs + i;
-        set_ipe_from_ici(&jb->chroma_ip, &iii->chroma);
-        set_ipe_from_ici(&jb->luma_ip,   &iii->luma);
-    }
 }
 
 
@@ -276,6 +269,7 @@ static void pass_queue_init(HEVCRpiPassQueue * const pq, HEVCContext * const s, 
     pq->worker = worker;
     pq->psem_out = psem_out;
     pq->pass_n = n;
+    pq->started = 0;
     sem_init(&pq->sem_in, 0, 0);
 }
 
@@ -320,39 +314,224 @@ static void dump_jbc(const HEVCRpiJobCtl *const jbc, const char * const func)
 }
 #endif
 
+
+static HEVCRpiJob * job_alloc(HEVCRpiJobCtl * const jbc, HEVCLocalContext * const lc)
+{
+    HEVCRpiJob * jb;
+    HEVCRpiJobGlobal * const jbg = jbc->jbg;
+
+    pthread_mutex_lock(&jbg->lock);
+    // Check local 1st
+    if ((jb = jbc->jb1) != NULL)
+    {
+        // Only 1 - very easy :-)
+        // ?? Can we do this with atomic_exch outside the global lock
+        jbc->jb1 = NULL;
+    }
+    else
+    {
+        // Now look for global free chain
+        if ((jb = jbg->free1) != NULL)
+        {
+            // Found one - unlink it
+            jbg->free1 = jb->next;
+            jb->next = NULL;
+        }
+        else
+        {
+            // Out of places to look - wait for one to become free - add to Qs
+
+            // Global
+            if (jbg->wait_tail == NULL || jbg->wait_tail->last_progress_good || !lc->last_progress_good)
+            {
+                // Add to end as we had to wait last time or wait Q empty
+                if ((lc->jw_prev = jbg->wait_tail) == NULL)
+                    jbg->wait_head = lc;
+                else
+                    lc->jw_prev->jw_next = lc;
+                lc->jw_next = NULL;
+                jbg->wait_tail = lc;
+            }
+            else
+            {
+                // Skip over els which had good progress
+                // We know that the Q isn't empty and there is at least one !last_progess_good el in it
+                HEVCLocalContext *p = jbg->wait_head;
+
+                if (!p->last_progress_good)
+                {
+                    jbg->wait_head = lc;
+                    lc->jw_prev = NULL;
+                }
+                else
+                {
+                    do {
+                        p = p->jw_next;
+                    } while (p->last_progress_good);
+
+                    lc->jw_prev = p->jw_prev;
+                    lc->jw_prev->jw_next = lc;
+                }
+
+                p->jw_prev = lc;
+                lc->jw_next = p;
+            }
+
+            // Local
+            if ((lc->ljw_prev = jbc->lcw_tail) == NULL)
+                jbc->lcw_head = lc;
+            else
+                lc->ljw_prev->ljw_next = lc;
+            lc->ljw_next = NULL;
+            jbc->lcw_tail = lc;
+        }
+    }
+
+    pthread_mutex_unlock(&jbg->lock);
+
+    if (jb == NULL)  // Need to wait
+    {
+        rpi_sem_wait(&lc->jw_sem);
+        jb = lc->jw_job;  // Set by free code
+    }
+
+    return jb;
+}
+
+
+static void job_free(HEVCRpiJobCtl * const jbc0, HEVCRpiJob * const jb)
+{
+    HEVCRpiJobGlobal * const jbg = jbc0->jbg;  // This jbc only used to find jbg so we can get the lock
+    HEVCRpiJobCtl * jbc = jb->jbc_local;
+    HEVCLocalContext * lc = NULL;
+
+    pthread_mutex_lock(&jbg->lock);
+
+    if (jbc != NULL)
+    {
+        av_assert1(jbc->jb1 == NULL);
+
+        // Release to Local if nothing waiting there
+        if ((lc = jbc->lcw_head) == NULL)
+        {
+            jbc->jb1 = jb;
+        }
+    }
+    else
+    {
+        // Release to global if nothing waiting there
+        if ((lc = jbg->wait_head) == NULL)
+        {
+            jb->next = jbg->free1;
+            jbg->free1 = jb;
+        }
+        else
+        {
+            // ? seems somehow mildy ugly...
+            jbc = lc->context->jbc;
+        }
+    }
+
+    if (lc != NULL)
+    {
+        // Something was waiting
+
+        // Unlink
+        // Global
+        if (lc->jw_next == NULL)
+            jbg->wait_tail = lc->jw_prev;
+        else
+            lc->jw_next->jw_prev = lc->jw_prev;
+
+        if (lc->jw_prev == NULL)
+            jbg->wait_head = lc->jw_next;
+        else
+            lc->jw_prev->jw_next = lc->jw_next;
+
+        // Local
+        if (lc->ljw_next == NULL)
+            jbc->lcw_tail = lc->ljw_prev;
+        else
+            lc->ljw_next->ljw_prev = lc->ljw_prev;
+
+        if (lc->ljw_prev == NULL)
+            jbc->lcw_head = lc->ljw_next;
+        else
+            lc->ljw_prev->ljw_next = lc->ljw_next;
+
+        // Prod
+        lc->jw_job = jb;
+        sem_post(&lc->jw_sem);
+    }
+
+    pthread_mutex_unlock(&jbg->lock);
+}
+
+static void job_lc_kill(HEVCLocalContext * const lc)
+{
+    sem_destroy(&lc->jw_sem);
+}
+
+static void job_lc_init(HEVCLocalContext * const lc)
+{
+    lc->jw_next = NULL;
+    lc->jw_prev = NULL;
+    lc->ljw_next = NULL;
+    lc->ljw_prev = NULL;
+    lc->jw_job = NULL;
+    sem_init(&lc->jw_sem,  0, 0);
+}
+
+static int progress_good(const HEVCContext *const s, const HEVCRpiJob * const jb)
+{
+    if (jb->waited)
+        return 0;
+    for (unsigned int i = 0; i != FF_ARRAY_ELEMS(jb->progress); ++i)
+    {
+        if (jb->progress[i] >= 0 && s->DPB[i].tf.progress != NULL &&
+                ((volatile int *)(s->DPB[i].tf.progress->data))[0] < jb->progress[i])
+            return 0;
+    }
+    return 1;
+}
+
 // Submit job if it is full (indicated by having ctu_ts_last set >= 0)
 static inline void worker_submit_job(HEVCContext *const s, HEVCLocalContext * const lc)
 {
     HEVCRpiJobCtl *const jbc = s->jbc;
+    HEVCRpiJob * const jb = lc->jb0;
 
-    av_assert0(lc->jb0 != NULL);
+    av_assert1(jb != NULL);
 
-    if (lc->jb0->ctu_ts_last < 0) {
+    if (jb->ctu_ts_last < 0) {
         return;
     }
+
+    lc->last_progress_good = progress_good(s, jb);
+    lc->jb0 = NULL;
 
     if (s->offload_recon)
     {
         pthread_mutex_lock(&jbc->in_lock);
-        jbc->offloadq[jbc->offload_in] = lc->jb0;
+        jbc->offloadq[jbc->offload_in] = jb;
         jbc->offload_in = utmod(jbc->offload_in + 1, RPI_MAX_JOBS);
         pthread_mutex_unlock(&jbc->in_lock);
 
-        pass_queue_submit_job(s->passq + 0);
+        pass_queue_submit_job(s->passq + 0);  // Consumes job eventually
     }
     else
     {
-        pass_queue_do_all(s, lc->jb0);
+        pass_queue_do_all(s, jb);  // Consumes job before return
     }
-    lc->jb0 = NULL;
 }
+
 
 // Call worker_pass0_ready to wait until the s->pass0_job slot becomes
 // available to receive the next job.
 //
-// This is safe to call in a context where worker_submit might be called but
-// bot safe if another worker-ready might be called
-
+// Now safe against multiple callers - needed for tiles
+// "normal" and WPP will only call here one at a time
+//
 // Preferably max jobs > bit_threads + passes but this is a minimum for
 // the non-offload logic to work
 #if RPI_MAX_JOBS < RPI_BIT_THREADS
@@ -366,18 +545,15 @@ static inline void worker_pass0_ready(const HEVCContext * const s, HEVCLocalCont
         return;
     }
 
+
     if (s->offload_recon)
     {
-        rpi_sem_wait(&jbc->sem_out);
-
-        pthread_mutex_lock(&jbc->out_lock);
-        lc->jb0 = jbc->offloadq[jbc->offload_out];
-        jbc->offload_out = utmod(jbc->offload_out + 1, RPI_MAX_JOBS); // Move onto the next slot
-        pthread_mutex_unlock(&jbc->out_lock);
+        rpi_sem_wait(&jbc->sem_out);  // This sem will stop this frame grabbing too much
+        lc->jb0 = job_alloc(jbc, lc);
     }
     else
     {
-        lc->jb0 = jbc->offloadq[utmod(jbc->offload_out + lc->lc_n, RPI_MAX_JOBS)];
+        lc->jb0 = job_alloc(jbc, lc);
     }
 
     rpi_begin(s, lc->jb0, lc->ts);
@@ -395,18 +571,12 @@ static void worker_free(const HEVCContext * const s, HEVCLocalContext * const lc
 
     lc->jb0 = NULL;
 
-    // If no offload then that is it - we never actually allocated anything
-    if (!s->offload_recon) {
-        return;
-    }
+    job_free(jbc, jb);
 
-    // Put job back - has to be at the "out" end of the Q
-    pthread_mutex_lock(&jbc->out_lock);
-    jbc->offload_out = jbc->offload_out == 0 ? RPI_MAX_JOBS - 1 : jbc->offload_out - 1;
-    jbc->offloadq[jbc->offload_out] = jb;
-    pthread_mutex_unlock(&jbc->out_lock);
-    // And signal that we have done so
-    sem_post(&jbc->sem_out);
+    // If offload then poke sem_out too
+    if (s->offload_recon) {
+        sem_post(&jbc->sem_out);
+    }
 }
 
 
@@ -419,7 +589,7 @@ static void worker_wait(const HEVCContext * const s, HEVCLocalContext * const lc
     int i = 0;
 
     // We shouldn't reach here with an unsubmitted job
-    av_assert0(lc->jb0 == NULL);
+    av_assert1(lc->jb0 == NULL);
 
     // If no offload then there can't be anything to wait for
     if (!s->offload_recon) {
@@ -437,6 +607,7 @@ static void worker_wait(const HEVCContext * const s, HEVCLocalContext * const lc
     }
 
     // As the Q is the same length as the number of buffers out = in means all returned
+    // ?????? probably not in the new world
     jbc->offload_out = jbc->offload_in;
 }
 
@@ -466,7 +637,10 @@ static void pass_queues_start_all(HEVCContext *const s)
     HEVCRpiPassQueue * const pqs = s->passq;
 
     for (i = 0; i != RPI_PASSES; ++i)
+    {
         av_assert0(pthread_create(&pqs[i].thread, NULL, pass_worker, pqs + i) == 0);
+        pqs[i].started = 1;
+    }
 }
 
 static void pass_queues_term_all(HEVCContext *const s)
@@ -477,9 +651,17 @@ static void pass_queues_term_all(HEVCContext *const s)
     for (i = 0; i != RPI_PASSES; ++i)
         pqs[i].terminate = 1;
     for (i = 0; i != RPI_PASSES; ++i)
-        sem_post(&pqs[i].sem_in);
+    {
+        if (pqs[i].started)
+            sem_post(&pqs[i].sem_in);
+    }
     for (i = 0; i != RPI_PASSES; ++i)
-        pthread_join(pqs[i].thread, NULL);
+    {
+        if (pqs[i].started) {
+            pthread_join(pqs[i].thread, NULL);
+            pqs[i].started = 0;
+        }
+    }
 }
 
 static void pass_queues_kill_all(HEVCContext *const s)
@@ -492,53 +674,37 @@ static void pass_queues_kill_all(HEVCContext *const s)
 }
 
 
-static void worker_pic_free_all(HEVCContext * const s)
+static void worker_pic_free_one(HEVCRpiJob * const jb)
 {
-    unsigned int i;
-
     // Free coeff stuff - allocation not the same for all buffers
-    for(i = 0; i < RPI_MAX_JOBS; i++)
-    {
-        HEVCRpiCoeffsEnv * const cf = &s->jbc->jobs[i].coeffs;
+    HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
 
-        if (cf->s[0].buf != NULL)
-            av_freep(&cf->mptr);
-        if (cf->s[2].buf != NULL)
-            gpu_free(&cf->gptr);
-        memset(cf, 0, sizeof(*cf));
-    }
+    if (cf->s[0].buf != NULL)
+        av_freep(&cf->mptr);
+    if (cf->s[2].buf != NULL)
+        gpu_free(&cf->gptr);
+    memset(cf, 0, sizeof(*cf));
 }
 
-static int worker_pic_alloc_all(HEVCContext * const s, const unsigned int coeff_count)
+static int worker_pic_alloc_one(HEVCRpiJob * const jb, const unsigned int coeff_count)
 {
-    unsigned int i;
+    HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
 
-    // Coeff stuff - allocation not the same for all buffers
-    for(i = 0; i < RPI_MAX_JOBS; i++)
-    {
-        HEVCRpiCoeffsEnv * const cf = &s->jbc->jobs[i].coeffs;
+    if (gpu_malloc_cached((coeff_count + 32*32) * sizeof(cf->s[2].buf[0]), &cf->gptr) != 0)
+        goto fail;
+    cf->s[2].buf = (int16_t *)cf->gptr.arm;
+    cf->s[3].buf = cf->s[2].buf + coeff_count;
 
-//        av_assert0(cf->s[0].n == 0 && cf->s[0].buf == NULL);
-//        av_assert0(cf->s[1].n == 0 && cf->s[1].buf == NULL);
-//        av_assert0(cf->s[2].n == 0 && cf->s[2].buf == NULL);
-//        av_assert0(cf->s[3].n == 0 && cf->s[3].buf == NULL);
-
-        if (gpu_malloc_cached((coeff_count + 32*32) * sizeof(cf->s[2].buf[0]), &cf->gptr) != 0)
-            goto fail;
-        cf->s[2].buf = (int16_t *)cf->gptr.arm;
-        cf->s[3].buf = cf->s[2].buf + coeff_count;
-
-        // Must be 64 byte aligned for our zero zapping code so over-allocate &
-        // round
-        if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0]) + 63)) == NULL)
-            goto fail;
-        cf->s[0].buf = (void *)(((intptr_t)cf->mptr + 63) & ~63);
-    }
+    // Must be 64 byte aligned for our zero zapping code so over-allocate &
+    // round
+    if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0]) + 63)) == NULL)
+        goto fail;
+    cf->s[0].buf = (void *)(((intptr_t)cf->mptr + 63) & ~63);
     return 0;
 
 fail:
-    av_log(s, AV_LOG_ERROR, "%s: Allocation failed\n", __func__);
-    worker_pic_free_all(s);
+    av_log(NULL, AV_LOG_ERROR, "%s: Allocation failed\n", __func__);
+    worker_pic_free_one(jb);
     return -1;
 }
 
@@ -564,10 +730,6 @@ static void worker_pic_reset(HEVCRpiCoeffsEnv * const cf)
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCContext *s)
 {
-#ifdef RPI
-    worker_pic_free_all(s);
-#endif
-
 #ifdef RPI_DEBLOCK_VPU
     {
         int i;
@@ -620,19 +782,9 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 #ifdef RPI
     const int coefs_in_ctb = (1 << sps->log2_ctb_size) * (1 << sps->log2_ctb_size);
     const int coefs_per_luma = HEVC_MAX_CTB_SIZE * RPI_MAX_WIDTH;
-    const int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
-    const int coefs_per_row = coefs_per_luma + coefs_per_chroma;
 
     av_assert0(sps);
     s->max_ctu_count = coefs_per_luma / coefs_in_ctb;
-#if RPI_ROUND_TO_LINES
-    // Round down to an integral quantity of lines
-    if (s->max_ctu_count > sps->ctb_width)
-        s->max_ctu_count -= s->max_ctu_count % sps->ctb_width;
-#endif
-
-    if (worker_pic_alloc_all(s, coefs_per_row) != 0)
-        goto fail;
 #endif
 #ifdef RPI_DEBLOCK_VPU
     {
@@ -2493,6 +2645,7 @@ void ff_hevc_rpi_progress_wait_field(const HEVCContext * const s, HEVCRpiJob * c
             HEVCRPiFrameProgressWait * const pwait = &jb->progress_wait;
 
             av_assert1(pwait->req == -1 && pwait->next == NULL);
+            jb->waited = 1;  // Remember that we had to wait for later scheduling
 
             pwait->req = val;
             pwait->next = NULL;
@@ -2691,6 +2844,7 @@ static int rpi_inter_pred_next_ctu(HEVCRpiInterPredEnv * const ipe)
 static void rpi_inter_pred_reset(HEVCRpiInterPredEnv * const ipe)
 {
     unsigned int i;
+
     ipe->curr = 0;
     ipe->used = 0;
     ipe->used_grp = 0;
@@ -3878,6 +4032,10 @@ static void rpi_execute_dblk_cmds(HEVCContext * const s, HEVCRpiJob * const jb)
     if (s->threads_type == FF_THREAD_FRAME && x_end && y0 > 0) {
         ff_hevc_progress_signal_recon(s, y_end ? INT_MAX : y0 - 1);
     }
+
+    // Job done now
+    // ? Move outside this fn
+    job_free(s->jbc, jb);
 }
 
 #if 0
@@ -4003,14 +4161,32 @@ static void rpi_begin(const HEVCContext * const s, HEVCRpiJob * const jb, const 
     unsigned int i;
     HEVCRpiInterPredEnv *const cipe = &jb->chroma_ip;
     HEVCRpiInterPredEnv *const yipe = &jb->luma_ip;
+    const HEVCSPS * const sps = s->ps.sps;
 
-    const uint16_t pic_width_y   = s->ps.sps->width;
-    const uint16_t pic_height_y  = s->ps.sps->height;
+    const uint16_t pic_width_y   = sps->width;
+    const uint16_t pic_height_y  = sps->height;
 
-    const uint16_t pic_width_c   = s->ps.sps->width >> s->ps.sps->hshift[1];
-    const uint16_t pic_height_c  = s->ps.sps->height >> s->ps.sps->vshift[1];
+    const uint16_t pic_width_c   = sps->width >> sps->hshift[1];
+    const uint16_t pic_height_c  = sps->height >> sps->vshift[1];
 
-//    jb->passes_done = 0;
+    // We expect the pointer to change if we use another sps
+    if (sps != jb->sps)
+    {
+        worker_pic_free_one(jb);
+
+        set_ipe_from_ici(cipe, &ipe_init_infos[s->ps.sps->bit_depth - 8].chroma);
+        set_ipe_from_ici(yipe, &ipe_init_infos[s->ps.sps->bit_depth - 8].luma);
+
+        {
+            const int coefs_per_luma = HEVC_MAX_CTB_SIZE * RPI_MAX_WIDTH;
+            const int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
+            worker_pic_alloc_one(jb, coefs_per_luma + coefs_per_chroma);
+        }
+
+        jb->sps = sps;
+    }
+
+    jb->waited = 0;
     jb->ctu_ts_first = ctu_ts_first;
     jb->ctu_ts_last = -1;
 
@@ -4687,7 +4863,6 @@ static int rpi_run_one_line(HEVCContext *const s, HEVCLocalContext * const lc, c
             }
             else if (is_tile)
             {
-//                printf("%s[%d]: Try sub: ts=%d, last_ts=%d\n", __func__, lc->lc_n, lc->ts, lc->jb0->ctu_ts_last);
                 worker_submit_job(s, lc);
             }
         }
@@ -4830,6 +5005,7 @@ static int bit_threads_start(HEVCContext * const s)
         }
 
         bt_lc_init(s, s->HEVClcList[i], i);
+        job_lc_init(s->HEVClcList[i]);
     }
 
     // Link the sems in a circle
@@ -4865,6 +5041,7 @@ static int bit_threads_kill(HEVCContext * const s)
         pthread_join(s->bit_threads[i], NULL);
 
         sem_destroy(&lc->bt_sem_in);
+        job_lc_kill(lc);
     }
     return 0;
 }
@@ -5929,74 +6106,137 @@ static void rpi_free_inter_pred(HEVCRpiInterPredEnv * const ipe)
     gpu_free(&ipe->gptr);
 }
 
-static int rpi_job_ctl_init(HEVCContext * const s)
+static HEVCRpiJob * job_new(void)
+{
+    HEVCRpiJob * const jb = av_mallocz(sizeof(HEVCRpiJob));
+
+    // **** Offload init?
+
+    ff_hevc_rpi_progress_init_wait(&jb->progress_wait);
+
+    jb->intra.n = 0;
+    jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS);
+
+    // * Sizeof the union structure might be overkill but at the moment it
+    //   is correct (it certainly isn't going to be too small)
+    // *** really should add per ctu sync words to be accurate
+
+    rpi_inter_pred_alloc(&jb->chroma_ip,
+                         QPU_N_MAX, QPU_N_GRP,
+                         QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t),
+                         QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t));
+    rpi_inter_pred_alloc(&jb->luma_ip,
+                         QPU_N_MAX,  QPU_N_GRP,
+                         QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
+                         QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
+
+    return jb;
+}
+
+static void job_delete(HEVCRpiJob * const jb)
+{
+    worker_pic_free_one(jb);
+    ff_hevc_rpi_progress_kill_wait(&jb->progress_wait);
+    av_freep(&jb->intra.cmds);
+    rpi_free_inter_pred(&jb->chroma_ip);
+    rpi_free_inter_pred(&jb->luma_ip);
+}
+
+static void jbg_delete(HEVCRpiJobGlobal * const jbg)
+{
+    HEVCRpiJob * jb;
+
+    if (jbg == NULL)
+        return;
+
+    jb = jbg->free1;
+    while (jb != NULL)
+    {
+        HEVCRpiJob * const jb2 = jb;
+        jb = jb2->next;
+        job_delete(jb2);
+    }
+
+    pthread_mutex_destroy(&jbg->lock);
+    av_free(jbg);
+}
+
+static HEVCRpiJobGlobal * jbg_new(unsigned int job_count)
+{
+    HEVCRpiJobGlobal * const jbg = av_mallocz(sizeof(HEVCRpiJobGlobal));
+    if (jbg == NULL)
+        return NULL;
+
+    pthread_mutex_init(&jbg->lock, NULL);
+
+    while (job_count-- != 0)
+    {
+        HEVCRpiJob * const jb = job_new();
+        if (jb == NULL)
+            goto fail;
+
+        jb->next = jbg->free1;
+        jbg->free1 = jb;
+    }
+
+    return jbg;
+
+fail:
+    jbg_delete(jbg);
+    return NULL;
+}
+
+static void rpi_job_ctl_delete(HEVCRpiJobCtl * const jbc)
+{
+    HEVCRpiJobGlobal * jbg;
+
+    if (jbc == NULL)
+        return;
+
+    jbg = jbc->jbg;
+
+    if (jbc->jb1 != NULL)
+        job_delete(jbc->jb1);
+
+    pthread_mutex_destroy(&jbc->in_lock);
+    pthread_mutex_destroy(&jbc->out_lock);
+    sem_destroy(&jbc->sem_out);
+    av_free(jbc);
+
+    // Deref the global job context
+    if (jbg != NULL && atomic_fetch_add(&jbg->ref_count, -1) == 1)
+        jbg_delete(jbg);
+}
+
+static HEVCRpiJobCtl * rpi_job_ctl_new(HEVCRpiJobGlobal *const jbg)
 {
     HEVCRpiJobCtl * const jbc = av_mallocz(sizeof(HEVCRpiJobCtl));
 
     if (jbc == NULL)
-        return -1;
+        return NULL;
+
+    jbc->jbg = jbg;
+    atomic_fetch_add(&jbg->ref_count, 1);
 
     sem_init(&jbc->sem_out, 0, RPI_MAX_JOBS);
     pthread_mutex_init(&jbc->in_lock, NULL);
     pthread_mutex_init(&jbc->out_lock, NULL);
 
-    for (unsigned int job = 0; job < RPI_MAX_JOBS; job++) {
-        HEVCRpiJob * const jb = jbc->jobs + job;
+    if ((jbc->jb1 = job_new()) == NULL)
+        goto fail;
+    jbc->jb1->jbc_local = jbc;
 
-        jbc->offloadq[job] = jb;
-        ff_hevc_rpi_progress_init_wait(&jb->progress_wait);
+    return jbc;
 
-        jb->intra.n = 0;
-        jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS);
-
-        // * Sizeof the union structure might be overkill but at the moment it
-        //   is correct (it certainly isn't going to be too small)
-        // *** really should add per ctu sync words to be accurate
-
-        rpi_inter_pred_alloc(&jb->chroma_ip,
-                             QPU_N_MAX, QPU_N_GRP,
-                             QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t),
-                             QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t));
-        rpi_inter_pred_alloc(&jb->luma_ip,
-                             QPU_N_MAX,  QPU_N_GRP,
-                             QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
-                             QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
-    }
-
-    s->jbc = jbc;
-    return 0;
+fail:
+    rpi_job_ctl_delete(jbc);
+    return NULL;
 }
 
-static int rpi_job_ctl_kill(HEVCContext * const s)
-{
-    HEVCRpiJobCtl * jbc = s->jbc;
-
-    if (jbc == NULL)
-        return 0;
-    s->jbc = NULL;
-
-    for(unsigned int i = 0; i < RPI_MAX_JOBS; i++)
-    {
-        HEVCRpiJob * const jb = jbc->jobs + i;
-
-        ff_hevc_rpi_progress_kill_wait(&jb->progress_wait);
-        av_freep(&jb->intra.cmds);
-        rpi_free_inter_pred(&jb->chroma_ip);
-        rpi_free_inter_pred(&jb->luma_ip);
-    }
-
-    pthread_mutex_destroy(&jbc->in_lock);
-    pthread_mutex_destroy(&jbc->out_lock);
-    sem_destroy(&jbc->sem_out);
-    av_freep(&jbc);
-    return 0;
-}
 
 
 static av_cold void hevc_init_worker(HEVCContext * const s)
 {
-    rpi_job_ctl_init(s);
-
 #if RPI_PASSES == 2
     pass_queue_init(s->passq + 1, s, worker_core2, &s->jbc->sem_out, 1);
 #elif RPI_PASSES == 3
@@ -6016,7 +6256,8 @@ static av_cold void hevc_exit_worker(HEVCContext *s)
 
     pass_queues_kill_all(s);
 
-    rpi_job_ctl_kill(s);
+    rpi_job_ctl_delete(s->jbc);
+    s->jbc = NULL;
 }
 
 #endif
@@ -6036,12 +6277,13 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 #if RPI_EXTRA_BIT_THREADS
     bit_threads_kill(s);
 #endif
+
     hevc_exit_worker(s);
     vpu_qpu_term();
     for (i = 0; i != 2; ++i) {
         ff_hevc_rpi_progress_kill_state(s->progress_states + i);
     }
-
+    job_lc_kill(s->HEVClc);
     av_rpi_zc_uninit(avctx);
 #endif
 
@@ -6124,11 +6366,11 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     s->enable_rpi = 0;
     bt_lc_init(s, s->HEVClc, 0);
+    job_lc_init(s->HEVClc);
 
     for (i = 0; i != 2; ++i) {
         ff_hevc_rpi_progress_init_state(s->progress_states + i);
     }
-    hevc_init_worker(s);
 #endif
 
     s->cabac_state = av_malloc(HEVC_CONTEXTS);
@@ -6163,6 +6405,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     return 0;
 
 fail:
+    av_log(s, AV_LOG_ERROR, "%s: Failed\n", __func__);
     hevc_decode_free(avctx);
     return AVERROR(ENOMEM);
 }
@@ -6246,6 +6489,14 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     s->sei.content_light        = s0->sei.content_light;
     s->sei.alternative_transfer = s0->sei.alternative_transfer;
 
+#ifdef RPI
+    if (s->jbc == NULL)
+    {
+        av_assert0((s->jbc = rpi_job_ctl_new(s0->jbc->jbg)) != NULL);
+        hevc_init_worker(s);
+    }
+#endif
+
     return 0;
 }
 
@@ -6256,9 +6507,30 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     avctx->internal->allocate_progress = 1;
 
+#ifdef RPI
+    {
+        HEVCRpiJobGlobal * const jbg = jbg_new(FFMAX(avctx->thread_count * 3, 5));
+        if (jbg == NULL)
+        {
+            av_log(s, AV_LOG_ERROR, "%s: Job global init failed\n", __func__);
+            return -1;
+        }
+
+        if ((s->jbc = rpi_job_ctl_new(jbg)) == NULL)
+        {
+            av_log(s, AV_LOG_ERROR, "%s: Job ctl init failed\n", __func__);
+            return -1;
+        }
+    }
+#endif
+
     ret = hevc_init_context(avctx);
     if (ret < 0)
         return ret;
+
+#ifdef RPI
+    hevc_init_worker(s);
+#endif
 
     s->enable_parallel_tiles = 0;
     s->sei.picture_timing.picture_struct = 0;
