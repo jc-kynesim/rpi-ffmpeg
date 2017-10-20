@@ -411,6 +411,8 @@ int i = 0;
 
     hevcdsp->hevc_deblocking_boundary_strengths = hevc_deblocking_boundary_strengths;
 
+    if (ARCH_PPC)
+        ff_hevc_dsp_init_ppc(hevcdsp, bit_depth);
     if (ARCH_X86)
         ff_hevc_dsp_init_x86(hevcdsp, bit_depth);
     if (ARCH_ARM)

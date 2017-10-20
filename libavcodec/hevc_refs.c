@@ -109,8 +109,8 @@ static HEVCFrame *alloc_frame(HEVCContext *s)
         for (j = 0; j < frame->ctb_count; j++)
             frame->rpl_tab[j] = (RefPicListTab *)frame->rpl_buf->data;
 
-        frame->frame->top_field_first  = s->picture_struct == AV_PICTURE_STRUCTURE_TOP_FIELD;
-        frame->frame->interlaced_frame = (s->picture_struct == AV_PICTURE_STRUCTURE_TOP_FIELD) || (s->picture_struct == AV_PICTURE_STRUCTURE_BOTTOM_FIELD);
+        frame->frame->top_field_first  = s->sei.picture_timing.picture_struct == AV_PICTURE_STRUCTURE_TOP_FIELD;
+        frame->frame->interlaced_frame = (s->sei.picture_timing.picture_struct == AV_PICTURE_STRUCTURE_TOP_FIELD) || (s->sei.picture_timing.picture_struct == AV_PICTURE_STRUCTURE_BOTTOM_FIELD);
 
         if (s->avctx->hwaccel) {
             const AVHWAccel *hwaccel = s->avctx->hwaccel;
@@ -163,7 +163,10 @@ int ff_hevc_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
 
     ref->poc      = poc;
     ref->sequence = s->seq_decode;
-    ref->window   = s->ps.sps->output_window;
+    ref->frame->crop_left   = s->ps.sps->output_window.left_offset;
+    ref->frame->crop_right  = s->ps.sps->output_window.right_offset;
+    ref->frame->crop_top    = s->ps.sps->output_window.top_offset;
+    ref->frame->crop_bottom = s->ps.sps->output_window.bottom_offset;
 
     return 0;
 }
@@ -204,19 +207,28 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
 
         if (nb_output) {
             HEVCFrame *frame = &s->DPB[min_idx];
+#if 0
+<<<<<<< HEAD
             AVFrame *dst = out;
             AVFrame *src = frame->frame;
             const int fmt = src->format;
             const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
             int pixel_shift = !!(desc->comp[0].depth > 8);
+=======
+>>>>>>> n3.4
+#endif
+            if (frame->frame->format == AV_PIX_FMT_VIDEOTOOLBOX && frame->frame->buf[0]->size == 1)
+                return 0;
 
-            ret = av_frame_ref(out, src);
+            ret = av_frame_ref(out, frame->frame);
             if (frame->flags & HEVC_FRAME_FLAG_BUMPING)
                 ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT | HEVC_FRAME_FLAG_BUMPING);
             else
                 ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
             if (ret < 0)
                 return ret;
+#if 0
+<<<<<<< HEAD
 #ifdef RPI
             if (av_rpi_is_sand_format(fmt))
             {
@@ -243,6 +255,10 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
                     dst->data[i] += off;
                 }
             }
+=======
+
+>>>>>>> n3.4
+#endif
             av_log(s->avctx, AV_LOG_DEBUG,
                    "Output frame with POC %d.\n", frame->poc);
             return 1;
@@ -532,29 +548,6 @@ fail:
         ff_hevc_unref_frame(s, &s->DPB[i], 0);
 
     return ret;
-}
-
-int ff_hevc_compute_poc(HEVCContext *s, int poc_lsb)
-{
-    int max_poc_lsb  = 1 << s->ps.sps->log2_max_poc_lsb;
-    int prev_poc_lsb = s->pocTid0 % max_poc_lsb;
-    int prev_poc_msb = s->pocTid0 - prev_poc_lsb;
-    int poc_msb;
-
-    if (poc_lsb < prev_poc_lsb && prev_poc_lsb - poc_lsb >= max_poc_lsb / 2)
-        poc_msb = prev_poc_msb + max_poc_lsb;
-    else if (poc_lsb > prev_poc_lsb && poc_lsb - prev_poc_lsb > max_poc_lsb / 2)
-        poc_msb = prev_poc_msb - max_poc_lsb;
-    else
-        poc_msb = prev_poc_msb;
-
-    // For BLA picture types, POCmsb is set to 0.
-    if (s->nal_unit_type == HEVC_NAL_BLA_W_LP   ||
-        s->nal_unit_type == HEVC_NAL_BLA_W_RADL ||
-        s->nal_unit_type == HEVC_NAL_BLA_N_LP)
-        poc_msb = 0;
-
-    return poc_msb + poc_lsb;
 }
 
 int ff_hevc_frame_nb_refs(HEVCContext *s)

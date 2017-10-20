@@ -96,7 +96,7 @@ static const uint32_t cabac_by22_inv_range[256] = {
 /**
  * number of bin by SyntaxElement.
  */
-av_unused static const int8_t num_bins_in_se[] = {
+static const int8_t num_bins_in_se[] = {
      1, // sao_merge_flag
      1, // sao_type_idx
      0, // sao_eo_class
@@ -732,17 +732,17 @@ static void load_states(const HEVCContext * const s, HEVCLocalContext * const lc
     memcpy(lc->cabac_state, s->cabac_state, HEVC_CONTEXTS);
 }
 
-static void cabac_reinit(HEVCLocalContext *lc)
+static int cabac_reinit(HEVCLocalContext *lc)
 {
-    skip_bytes(&lc->cc, 0);
+    return skip_bytes(&lc->cc, 0) == NULL ? AVERROR_INVALIDDATA : 0;
 }
 
-static void cabac_init_decoder(HEVCLocalContext * const lc)
+static int cabac_init_decoder(HEVCLocalContext * const lc)
 {
     GetBitContext * const gb = &lc->gb;
     skip_bits(gb, 1);
     align_get_bits(gb);
-    ff_init_cabac_decoder(&lc->cc,
+    return ff_init_cabac_decoder(&lc->cc,
                           gb->buffer + get_bits_count(gb) / 8,
                           (get_bits_left(gb) + 7) / 8);
 }
@@ -771,10 +771,12 @@ static void cabac_init_state(const HEVCContext * const s, HEVCLocalContext * con
         lc->stat_coeff[i] = 0;
 }
 
-void ff_hevc_cabac_init(const HEVCContext * const s, HEVCLocalContext *const lc, int ctb_addr_ts)
+int ff_hevc_cabac_init(const HEVCContext * const s, HEVCLocalContext *const lc, int ctb_addr_ts)
 {
     if (ctb_addr_ts == s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs]) {
-        cabac_init_decoder(lc);
+        int ret = cabac_init_decoder(lc);
+        if (ret < 0)
+            return ret;
         if (s->sh.dependent_slice_segment_flag == 0 ||
             (s->ps.pps->tiles_enabled_flag &&
              s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[ctb_addr_ts - 1]))
@@ -793,10 +795,13 @@ void ff_hevc_cabac_init(const HEVCContext * const s, HEVCLocalContext *const lc,
         if (s->ps.pps->tiles_enabled_flag &&
             s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[ctb_addr_ts - 1]) {
             if (!lc->wpp_init) {
+                int ret;
                 if (s->threads_number == 1)
-                    cabac_reinit(lc);
+                    ret = cabac_reinit(lc);
                 else
-                    cabac_init_decoder(lc);
+                    ret = cabac_init_decoder(lc);
+                if (ret < 0)
+                    return ret;
             }
             lc->wpp_init = 0;
 
@@ -806,14 +811,17 @@ void ff_hevc_cabac_init(const HEVCContext * const s, HEVCLocalContext *const lc,
             if (ctb_addr_ts % s->ps.sps->ctb_width == 0) {  // ** Tiles + WPP bust
                 // If wpp_init is set then we have been set up in the correct pos
                 if (!lc->wpp_init) {
+                    int ret;
                     // * Strong argument for putting the read terminate & align
                     //   at the end of the previous block (where it logically
                     //   resides) rather than here
                     get_cabac_terminate(&lc->cc);
                     if (s->threads_number == 1)
-                        cabac_reinit(lc);
+                        ret = cabac_reinit(lc);
                     else
-                        cabac_init_decoder(lc);
+                        ret = cabac_init_decoder(lc);
+                    if (ret < 0)
+                        return ret;
                 }
                 lc->wpp_init = 0;
 
@@ -824,6 +832,7 @@ void ff_hevc_cabac_init(const HEVCContext * const s, HEVCLocalContext *const lc,
             }
         }
     }
+    return 0;
 }
 
 #define GET_CABAC_LC(ctx) get_cabac(&lc->cc, lc->cabac_state + (ctx))
