@@ -60,6 +60,9 @@
 
 #define HEVC_MAX_CTB_SIZE (1 << HEVC_MAX_LOG2_CTB_SIZE)  // 64
 
+// Size of DPB array
+#define HEVC_DPB_ELS            32
+
 #define L0 0
 #define L1 1
 
@@ -572,7 +575,7 @@ typedef struct HEVCRpiJob {
 
     HEVCRpiInterPredEnv chroma_ip;
     HEVCRpiInterPredEnv luma_ip;
-    int16_t progress[32];  // index by dpb_no
+    int16_t progress_req[HEVC_DPB_ELS]; // index by dpb_no
     HEVCRpiIntraPredEnv intra;
     HEVCRpiCoeffsEnv coeffs;
     HEVCRPiFrameProgressWait progress_wait;
@@ -611,8 +614,6 @@ typedef struct HEVCRpiJobCtl
 
     pthread_mutex_t in_lock;
     int offload_in;
-    pthread_mutex_t out_lock;
-    int offload_out;
 
     HEVCRpiJob *offloadq[RPI_MAX_JOBS];
 } HEVCRpiJobCtl;
@@ -622,8 +623,9 @@ typedef struct HEVCRpiJobGlobal
 {
     intptr_t ref_count;
     pthread_mutex_t lock;
-    HEVCRpiJob * free1;
-    HEVCLocalContext * wait_head;
+    HEVCRpiJob * free1;                 // Singly linked list of free jobs
+    HEVCLocalContext * wait_head;       // Double linked list of lcs waiting for a job
+    HEVCLocalContext * wait_good;  // Last good tail
     HEVCLocalContext * wait_tail;
 
 } HEVCRpiJobGlobal;
@@ -650,6 +652,9 @@ typedef struct HEVCRpiStats {
 } HEVCRpiStats;
 #endif
 
+// 2 and 3 are the currently valid numbers
+// AT the moment 3 seems fractionally faster
+//#define RPI_PASSES 2
 #define RPI_PASSES 3
 #endif
 
@@ -749,7 +754,7 @@ typedef struct HEVCContext {
     enum HEVCNALUnitType nal_unit_type;
     int temporal_id;  ///< temporal_id_plus1 - 1
     HEVCFrame *ref;
-    HEVCFrame DPB[32];
+    HEVCFrame DPB[HEVC_DPB_ELS];
     int poc;
     int pocTid0;
     int slice_idx; ///< number of the slice being currently decoded
