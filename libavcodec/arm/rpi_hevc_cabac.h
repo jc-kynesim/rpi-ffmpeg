@@ -100,10 +100,10 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "ite        eq                                          \n\t"
          "usateq     %[st]         , #2          , %[i]          \n\t"
          "movne      %[st]         , #0                          \n\t"
-
-         "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
          "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
          "and        %[tmp]        , %[range]    , #0xC0         \n\t"
+
+         "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
          "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
          "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]    \n\t"
          "sub        %[range]      , %[range]    , %[tmp]        \n\t"
@@ -111,20 +111,18 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "cmp        %[low]        , %[range], lsl #17           \n\t"
          "ittt       ge                                          \n\t"
          "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-         "mvnge      %[bit]        , %[bit]                      \n\t"
          "movge      %[range]      , %[tmp]                      \n\t"
-
-         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
-         "and        %[bit]        , %[bit]      , #1            \n\t"
-         "orr        %[rv]         , %[bit]      , %[rv], lsl #1 \n\t"
+         "mvnge      %[bit]        , %[bit]                      \n\t"
 
          "clz        %[tmp]        , %[range]                    \n\t"
          "sub        %[tmp]        , #23                         \n\t"
-
+         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
+         "and        %[bit]        , %[bit]      , #1            \n\t"
+         "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
          "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
+         "orr        %[rv]         , %[bit]      , %[rv], lsl #1 \n\t"
          "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
 
-         "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
 // There is a small speed gain from combining both conditions, using a single
 // branch and then working out what that meant later
          "lsls       %[tmp]        , %[low]      , #16           \n\t"
@@ -138,22 +136,21 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
 
 // Do reload
          "ldrh       %[tmp]        , [%[bptr]]   , #2            \n\t"
+         "rbit       %[bit]        , %[low]                      \n\t"
          "movw       %[r_b]        , #0xFFFF                     \n\t"
+         "clz        %[bit]        , %[bit]                      \n\t"
          "rev        %[tmp]        , %[tmp]                      \n\t"
+         "sub        %[bit]        , %[bit]      , #16           \n\t"
+         "cmp        %[n]          , %[i]                        \n\t"
          "rsb        %[tmp]        , %[r_b]      , %[tmp], lsr #15 \n\t"
 
-         "rbit       %[r_b]        , %[low]                      \n\t"
-         "clz        %[r_b]        , %[r_b]                      \n\t"
-         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
-
 #if CONFIG_THUMB
-         "lsl        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
+         "lsl        %[tmp]        , %[tmp]      , %[bit]        \n\t"
          "add        %[low]        , %[low]      , %[tmp]        \n\t"
 #else
-         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
+         "add        %[low]        , %[low]      , %[tmp], lsl %[bit] \n\t"
 #endif
 
-         "cmp        %[n]          , %[i]                        \n\t"
          "bne        1b                                          \n\t"
          "2:                                                     \n\t"
          :    [bit]"=&r"(bit),
@@ -168,7 +165,7 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
           :  [state0]"r"(state0),
                   [n]"r"(n),
         [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
-               [byte]"M"(offsetof(CABACContext, bytestream)),
+               [byte]"J"(offsetof(CABACContext, bytestream)),
             [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
          : "memory", "cc"
     );
