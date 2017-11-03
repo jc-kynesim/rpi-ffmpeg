@@ -1,5 +1,3 @@
-#ifdef RPI
-
 #include "hevc.h"
 #include "hevcdec.h"
 #include "libavutil/rpi_sand_fns.h"
@@ -61,6 +59,4 @@ static inline int wweight(int32_t x)
 #undef PW
 #define PW 2
 #include "rpi_shader_template_fn.h"
-
-#endif
 

@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config.h"
 #include "libavutil/attributes.h"
 #include "libavutil/arm/cpu.h"
 #include "libavcodec/hevcdsp.h"
@@ -35,7 +36,7 @@ void ff_hevc_h_loop_filter_luma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int _b
 void ff_hevc_v_loop_filter_chroma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_h_loop_filter_chroma_neon_10(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 void ff_hevc_v_loop_filter_luma2_neon_8(uint8_t * _pix_r,
                              unsigned int _stride, unsigned int beta, const int32_t tc[2],
                              const uint8_t no_p[2], const uint8_t no_q[2],
@@ -454,7 +455,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->hevc_v_loop_filter_chroma_c = ff_hevc_v_loop_filter_chroma_neon;
         c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon;
         c->hevc_h_loop_filter_chroma_c = ff_hevc_h_loop_filter_chroma_neon;
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
         c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_8;
         c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_8;
         c->hevc_v_loop_filter_uv2      = ff_hevc_v_loop_filter_uv2_neon_8;
@@ -599,7 +600,7 @@ av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->hevc_v_loop_filter_chroma_c = ff_hevc_v_loop_filter_chroma_neon_10;
         c->hevc_h_loop_filter_chroma   = ff_hevc_h_loop_filter_chroma_neon_10;
         c->hevc_h_loop_filter_chroma_c = ff_hevc_h_loop_filter_chroma_neon_10;
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
         c->hevc_v_loop_filter_luma2    = ff_hevc_v_loop_filter_luma2_neon_10;
         c->hevc_h_loop_filter_uv       = ff_hevc_h_loop_filter_uv_neon_10;
         c->hevc_v_loop_filter_uv2      = ff_hevc_v_loop_filter_uv2_neon_10;

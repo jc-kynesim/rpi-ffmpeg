@@ -695,12 +695,12 @@ void ff_hevc_rpi_progress_wait_field(const HEVCContext * const s, HEVCRpiJob * c
 {
     if (ref->tf.progress != NULL && ((int *)ref->tf.progress->data)[field] < val) {
         HEVCContext *const fs = ref->tf.owner[field]->priv_data;
-        HEVCRPiFrameProgressState * const pstate = fs->progress_states + field;
+        HEVCRpiFrameProgressState * const pstate = fs->progress_states + field;
         sem_t * sem = NULL;
 
         av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
         if (((volatile int *)ref->tf.progress->data)[field] < val) {
-            HEVCRPiFrameProgressWait * const pwait = &jb->progress_wait;
+            HEVCRpiFrameProgressWait * const pwait = &jb->progress_wait;
 
             av_assert1(pwait->req == -1 && pwait->next == NULL);
             jb->waited = 1;  // Remember that we had to wait for later scheduling
@@ -724,14 +724,14 @@ void ff_hevc_rpi_progress_wait_field(const HEVCContext * const s, HEVCRpiJob * c
 
 void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, const int field)
 {
-    HEVCRPiFrameProgressState *const pstate = s->progress_states + field;
+    HEVCRpiFrameProgressState *const pstate = s->progress_states + field;
 
     ((int *)s->ref->tf.progress->data)[field] = val;
 
     av_assert0(pthread_mutex_lock(&pstate->lock) == 0);
     {
-        HEVCRPiFrameProgressWait ** ppwait = &pstate->first;
-        HEVCRPiFrameProgressWait * pwait;
+        HEVCRpiFrameProgressWait ** ppwait = &pstate->first;
+        HEVCRpiFrameProgressWait * pwait;
 
         while ((pwait = *ppwait) != NULL) {
             if (pwait->req > val)
@@ -751,27 +751,27 @@ void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, con
     pthread_mutex_unlock(&pstate->lock);
 }
 
-static void ff_hevc_rpi_progress_init_state(HEVCRPiFrameProgressState * const pstate)
+static void ff_hevc_rpi_progress_init_state(HEVCRpiFrameProgressState * const pstate)
 {
     pstate->first = NULL;
     pstate->last = NULL;
     pthread_mutex_init(&pstate->lock, NULL);
 }
 
-static void ff_hevc_rpi_progress_init_wait(HEVCRPiFrameProgressWait * const pwait)
+static void ff_hevc_rpi_progress_init_wait(HEVCRpiFrameProgressWait * const pwait)
 {
     pwait->req = -1;
     pwait->next = NULL;
     sem_init(&pwait->sem, 0, 0);
 }
 
-static void ff_hevc_rpi_progress_kill_state(HEVCRPiFrameProgressState * const pstate)
+static void ff_hevc_rpi_progress_kill_state(HEVCRpiFrameProgressState * const pstate)
 {
     av_assert1(pstate->first == NULL);
     pthread_mutex_destroy(&pstate->lock);
 }
 
-static void ff_hevc_rpi_progress_kill_wait(HEVCRPiFrameProgressWait * const pwait)
+static void ff_hevc_rpi_progress_kill_wait(HEVCRpiFrameProgressWait * const pwait)
 {
     sem_destroy(&pwait->sem);
 }
@@ -859,11 +859,11 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
             const unsigned int total_size =- cmd_size + y_size + uv_size;
             int p_vc;
             uint8_t * p_arm;
- #if RPI_VPU_DEBLOCK_CACHED
+#if RPI_VPU_DEBLOCK_CACHED
             gpu_malloc_cached(total_size, &dvq->deblock_vpu_gmem);
- #else
+#else
             gpu_malloc_uncached(total_size, &dvq->deblock_vpu_gmem);
- #endif
+#endif
             p_vc = dvq->deblock_vpu_gmem.vc;
             p_arm = dvq->deblock_vpu_gmem.arm;
 
@@ -6292,6 +6292,8 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     s->sei.alternative_transfer = s0->sei.alternative_transfer;
 
 #if CONFIG_HEVC_RPI_DECODER
+    // * We do this here as it allows us to easily locate our parents
+    //   global job pool, but there really should be a less nasty way
     if (s->jbc == NULL)
     {
         av_assert0((s->jbc = rpi_job_ctl_new(s0->jbc->jbg)) != NULL);

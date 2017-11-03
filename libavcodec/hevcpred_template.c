@@ -20,14 +20,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-//#define DISABLE_INTRA
-
+#include "config.h"
 #include "libavutil/pixdesc.h"
 
 #include "bit_depth_template.c"
 #include "hevcpred.h"
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 #include "libavutil/rpi_sand_fns.h"
 #endif
 
@@ -36,7 +35,7 @@
 #define POS(x, y) src[(x) + stride * (y)]
 
 // REPEAT_INCLUDE defined at EOF
-#if defined(RPI) && !defined(INCLUDED_ONCE)
+#if CONFIG_HEVC_RPI_DECODER && !defined(INCLUDED_ONCE)
 typedef uint8_t (* c8_dst_ptr_t)[2];
 typedef const uint8_t (* c8_src_ptr_t)[2];
 typedef uint16_t (* c16_dst_ptr_t)[2];
@@ -182,7 +181,7 @@ do {                                  \
     int cur_tb_addr = MIN_TB_ADDR_ZS(x_tb, y_tb);
 
     const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
-#if defined(RPI)
+#if CONFIG_HEVC_RPI_DECODER
     pixel *const src = !av_rpi_is_sand_frame(s->frame) ?
             (pixel*)s->frame->data[c_idx] + x + y * stride :
         c_idx == 0 ?
@@ -227,11 +226,7 @@ do {                                  \
     pixel * src_u = src - stride;
     pixel * src_ur = src_u + size;
 
-#ifdef DISABLE_INTRA
-    return;
-#endif
-
-#if defined(RPI)
+#if CONFIG_HEVC_RPI_DECODER
     if (av_rpi_is_sand_frame(s->frame)) {
         // N.B. stride is in pixels (not bytes) or in the case of chroma pixel-pairs
         const AVFrame * const frame = s->frame;

@@ -25,6 +25,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "config.h"
 
 struct HEVCContext;
 struct HEVCLocalContext;
@@ -39,7 +40,7 @@ typedef struct HEVCPredContext {
     void (*pred_angular[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
                             int c_idx, int mode);
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
     void (*intra_pred_c[4])(const struct HEVCContext * const s, struct HEVCLocalContext * const lc, int x0, int y0, int c_idx);
 
     void (*pred_planar_c[4])(uint8_t *src, const uint8_t *top,

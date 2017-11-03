@@ -4,14 +4,6 @@ DESC = FFmpeg codec library
 HEADERS = avcodec.h                                                     \
           avdct.h                                                       \
           avfft.h                                                       \
-          rpi_qpu.h                                                     \
-          rpi_shader.h                                                  \
-          rpi_shader_cmd.h                                              \
-          rpi_shader_template.h                                         \
-          rpi_shader_template_fn.h                                      \
-          rpi_mailbox.h                                                 \
-          rpi_hevc_transform8.h                                         \
-          rpi_hevc_transform10.h                                        \
           rpi_zc.h                                                      \
           d3d11va.h                                                     \
           dirac.h                                                       \
@@ -57,10 +49,6 @@ OBJS = allcodecs.o                                                      \
        resample.o                                                       \
        resample2.o                                                      \
        utils.o                                                          \
-       rpi_qpu.o                                                        \
-       rpi_shader.o                                                     \
-       rpi_shader_template.o                                            \
-       rpi_mailbox.o                                                    \
        rpi_zc.o                                                         \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
@@ -365,6 +353,10 @@ OBJS-$(CONFIG_HAP_ENCODER)             += hapenc.o hap.o
 OBJS-$(CONFIG_HEVC_DECODER)            += hevcdec.o hevc_mvs.o \
                                           hevc_cabac.o hevc_refs.o hevcpred.o    \
                                           hevcdsp.o hevc_filter.o hevc_data.o
+OBJS-$(CONFIG_HEVC_RPI_DECODER)        += rpi_qpu.o                                                        \
+       rpi_shader.o                                                     \
+       rpi_shader_template.o                                            \
+       rpi_mailbox.o
 OBJS-$(CONFIG_HEVC_CUVID_DECODER)      += cuvid.o
 OBJS-$(CONFIG_HEVC_MEDIACODEC_DECODER) += mediacodecdec.o
 OBJS-$(CONFIG_HEVC_NVENC_ENCODER)      += nvenc_hevc.o

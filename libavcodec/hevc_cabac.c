@@ -31,7 +31,7 @@
 #include "hevc.h"
 #include "hevcdec.h"
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 #include "libavutil/rpi_sand_fns.h"
 #endif
 
@@ -1515,7 +1515,7 @@ static inline int next_subset(HEVCLocalContext * const lc, int i, const int c_id
     return i;
 }
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 static void rpi_add_residual(const HEVCContext *const s, HEVCRpiJob * const jb,
     const unsigned int log2_trafo_size, const unsigned int c_idx,
     const unsigned int x0, const unsigned int y0, const int16_t * const coeffs)
@@ -1577,15 +1577,6 @@ static void rpi_add_residual(const HEVCContext *const s, HEVCRpiJob * const jb,
     else if (!is_sliced || c_idx == 0) {
         s->hevcdsp.add_residual[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
     }
-#if CONFIG_HEVC_RPI_DECODER
-    // * These should probably never happen
-    else if (c_idx == 1) {
-        s->hevcdsp.add_residual_u[log2_trafo_size-2](dst, (int16_t *)coeffs, stride, 0);
-    }
-    else {
-        s->hevcdsp.add_residual_v[log2_trafo_size-2](dst, (int16_t *)coeffs, stride, 0);
-    }
-#endif
 }
 
 
@@ -1665,14 +1656,14 @@ void ff_hevc_hls_residual_coding(const HEVCContext * const s, HEVCLocalContext *
     const uint8_t *scan_x_cg, *scan_y_cg;
     const xy_off_t * const scan_xy_off = off_xys[scan_idx][log2_trafo_size - 2];
 
-#ifndef RPI
+#if !CONFIG_HEVC_RPI_DECODER
     ptrdiff_t stride = s->frame->linesize[c_idx];
     int hshift = s->ps.sps->hshift[c_idx];
     int vshift = s->ps.sps->vshift[c_idx];
     uint8_t * const dst = &s->frame->data[c_idx][(y0 >> vshift) * stride +
                                           ((x0 >> hshift) << s->ps.sps->pixel_shift)];
-#endif
-#ifdef RPI
+    const int use_vpu = 0;
+#else
     int use_vpu;
     int use_dc = 0;
 #endif
@@ -1898,7 +1889,7 @@ void ff_hevc_hls_residual_coding(const HEVCContext * const s, HEVCLocalContext *
 
     {
         const unsigned int ccount = 1 << (log2_trafo_size * 2);
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
         use_vpu = 0;
         if (s->enable_rpi) {
             const int special = trans_skip_or_bypass || lc->tu.cross_pf;  // These need special processinmg
@@ -2248,16 +2239,12 @@ void ff_hevc_hls_residual_coding(const HEVCContext * const s, HEVCLocalContext *
         } else if (lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2) {
             s->hevcdsp.transform_4x4_luma(coeffs);
         }
-#ifdef RPI
         else if (!use_vpu)
-#else
-        else
-#endif
         {
             int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
             if (max_xy == 0)
             {
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
                 if (use_dc)
                     rpi_add_dc(s, lc->jb0, log2_trafo_size, c_idx, x0, y0, coeffs);
                 else
@@ -2284,11 +2271,9 @@ void ff_hevc_hls_residual_coding(const HEVCContext * const s, HEVCLocalContext *
             coeffs[i] = coeffs[i] + ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
         }
     }
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
     if (!use_dc)
-    {
         rpi_add_residual(s, lc->jb0, log2_trafo_size, c_idx, x0, y0, coeffs);
-    }
 #else
     s->hevcdsp.add_residual[log2_trafo_size-2](dst, coeffs, stride);
 #endif

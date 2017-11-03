@@ -36,10 +36,8 @@
 
 #include "bit_depth_template.c"
 
-#ifdef RPI
-#include "rpi_qpu.h"
-#endif
 #if CONFIG_HEVC_RPI_DECODER
+#include "rpi_qpu.h"
 #include "rpi_zc.h"
 #include "libavutil/rpi_sand_fns.h"
 #else
@@ -393,7 +391,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                            x_ctb, y_ctb);
             if (s->ps.pps->transquant_bypass_enable_flag ||
                 (s->ps.sps->pcm.loop_filter_disable_flag && s->ps.sps->pcm_enabled_flag)) {
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
                 // Can't use the edge buffer here as it may be in use by the foreground
                 DECLARE_ALIGNED(64, uint8_t, dstbuf)
                     [2*MAX_PB_SIZE*MAX_PB_SIZE];
@@ -447,7 +445,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
             int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
             int top_edge = edges[1];
             int bottom_edge = edges[3];
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
             // Can't use the edge buffer here as it may be in use by the foreground
             DECLARE_ALIGNED(64, uint8_t, dstbuf)
                 [2*(MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE)*(MAX_PB_SIZE + 2) + 64];

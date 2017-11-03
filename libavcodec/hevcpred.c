@@ -42,7 +42,7 @@
 #undef BIT_DEPTH
 #undef PRED_C
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 #define PRED_C 1
 #define BIT_DEPTH 8
 #include "hevcpred_template.c"
@@ -100,7 +100,7 @@ void ff_hevc_pred_init(HEVCPredContext *hpc, int bit_depth)
     hpc->pred_angular_c[2] = FUNCC(pred_angular_2, depth); \
     hpc->pred_angular_c[3] = FUNCC(pred_angular_3, depth);
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 #define HEVC_PRED(depth) \
     HEVC_PRED_Y(depth); \
     HEVC_PRED_C(depth);

@@ -83,10 +83,23 @@
 // Max jobs per frame thread. Actual usage will be limited by the size
 // of the global job pool
 // ?? Limits
-#define RPI_MAX_JOBS       8
+#define RPI_MAX_JOBS            8
+
+// This is the number of _extra_ bit threads - we will have
+// RPI_EXTRA_BIT_THREADS+1 threads actually doing the processing
+//
+// 0 is legitimate and will disable our WPP processing
+//#define RPI_EXTRA_BIT_THREADS 0
+#define RPI_EXTRA_BIT_THREADS   2
+
+// Number of separate threads/passes in worker
+// 2 and 3 are the currently valid numbers
+// At the moment 3 seems fractionally faster
+//#define RPI_PASSES 2
+#define RPI_PASSES              3
 
 // Print out various usage stats
-#define RPI_TSTATS         0
+#define RPI_TSTATS              0
 
 // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
 // As it stands there is something mildy broken in VPU deblock - looks mostly OK
@@ -95,11 +108,13 @@
 //
 // * Whilst most of the code still exists it will have rotted by now
 //  #define RPI_DEBLOCK_VPU
+//  #define RPI_VPU_DEBLOCK_CACHED 1
 
-#define RPI_VPU_DEBLOCK_CACHED 1
-
-#define RPI_QPU_EMU_Y      0
-#define RPI_QPU_EMU_C      0
+// Use ARM emulation of QPU pred
+// These are for debug only as the emulation makes only limited
+// effort to be fast
+#define RPI_QPU_EMU_Y           0
+#define RPI_QPU_EMU_C           0
 #endif
 
 /**
@@ -366,7 +381,7 @@ typedef struct HEVCFrame {
     uint8_t dpb_no;
 } HEVCFrame;
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 typedef struct HEVCLocalContextIntra {
     TransformUnit tu;
     NeighbourAvailable na;
@@ -377,7 +392,7 @@ typedef struct HEVCLocalContext {
     TransformUnit tu;  // Moved to start to match HEVCLocalContextIntra (yuk!)
     NeighbourAvailable na;
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
     // Vars that allow us to locate everything from just an lc
     struct HEVCContext * context;  // ??? make const ???
     unsigned int lc_n; // lc list el no
@@ -447,12 +462,7 @@ typedef struct HEVCLocalContext {
     int boundary_flags;
 } HEVCLocalContext;
 
-#ifdef RPI
-
-// This is the number of _extra_ bit threads - the we will have
-// RPI_EXTRA_BIT_THREADS+1 threads actually doing the processing
-//#define RPI_EXTRA_BIT_THREADS 0
-#define RPI_EXTRA_BIT_THREADS 2
+#if CONFIG_HEVC_RPI_DECODER
 
 // RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
 // Various buffer sizes depend on this so do not over allocate
@@ -518,10 +528,6 @@ typedef struct HEVCPredCmd {
     };
 } HEVCPredCmd;
 
-#endif
-
-#ifdef RPI
-
 union qpu_mc_pred_cmd_s;
 struct qpu_mc_pred_y_p_s;
 struct qpu_mc_src_s;
@@ -567,17 +573,17 @@ typedef struct HEVCRpiCoeffsEnv {
     void * mptr;
 } HEVCRpiCoeffsEnv;
 
-typedef struct HEVCRPiFrameProgressWait {
+typedef struct HEVCRpiFrameProgressWait {
     int req;
-    struct HEVCRPiFrameProgressWait * next;
+    struct HEVCRpiFrameProgressWait * next;
     sem_t sem;
-} HEVCRPiFrameProgressWait;
+} HEVCRpiFrameProgressWait;
 
-typedef struct HEVCRPiFrameProgressState {
-    struct HEVCRPiFrameProgressWait * first;
-    struct HEVCRPiFrameProgressWait * last;
+typedef struct HEVCRpiFrameProgressState {
+    struct HEVCRpiFrameProgressWait * first;
+    struct HEVCRpiFrameProgressWait * last;
     pthread_mutex_t lock;
-} HEVCRPiFrameProgressState;
+} HEVCRpiFrameProgressState;
 
 typedef struct RpiBlk
 {
@@ -605,7 +611,7 @@ typedef struct HEVCRpiJob {
     int16_t progress_req[HEVC_DPB_ELS]; // index by dpb_no
     HEVCRpiIntraPredEnv intra;
     HEVCRpiCoeffsEnv coeffs;
-    HEVCRPiFrameProgressWait progress_wait;
+    HEVCRpiFrameProgressWait progress_wait;
 } HEVCRpiJob;
 
 struct HEVCContext;
@@ -679,10 +685,6 @@ typedef struct HEVCRpiStats {
 } HEVCRpiStats;
 #endif
 
-// 2 and 3 are the currently valid numbers
-// AT the moment 3 seems fractionally faster
-//#define RPI_PASSES 2
-#define RPI_PASSES 3
 #endif
 
 typedef struct HEVCContext {
@@ -701,17 +703,11 @@ typedef struct HEVCContext {
     int                 height;
 
     char used_for_ref;  // rpi
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
     char offload_recon;
     char enable_rpi;
 
     HEVCRpiJobCtl * jbc;
-
-    HEVCRpiPassQueue passq[RPI_PASSES];
-#if RPI_TSTATS
-    HEVCRpiStats tstats;
-#endif
-#if CONFIG_HEVC_RPI_DECODER
 
     // Function pointers
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
@@ -721,7 +717,8 @@ typedef struct HEVCContext {
     uint32_t qpu_dummy_frame_qpu;  // Not a frame - just a bit of memory
 #endif
     HEVCRpiQpu qpu;
-#endif
+
+    HEVCRpiFrameProgressState progress_states[2];
 
 #ifdef RPI_DEBLOCK_VPU
 #define RPI_DEBLOCK_VPU_Q_COUNT 2
@@ -750,11 +747,8 @@ typedef struct HEVCContext {
 
     struct dblk_vpu_q_s * dvq;
     unsigned int dvq_n;
-
 #endif
-    HEVCLocalContextIntra HEVClcIntra;
-    HEVCRPiFrameProgressState progress_states[2];
-#endif
+#endif  // RPI
 
     uint8_t *cabac_state;
 
@@ -845,13 +839,20 @@ typedef struct HEVCContext {
 
     HEVCSEIContext sei;
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
+    // Put structures that allocate non-trivial storage at the end
+    // These are mostly used indirectly so position in the structure doesn't matter
+    HEVCLocalContextIntra HEVClcIntra;
+    HEVCRpiPassQueue passq[RPI_PASSES];
 #if RPI_EXTRA_BIT_THREADS > 0
     int bt_started;
     // This simply contains thread descriptors - task setup is held elsewhere
     pthread_t bit_threads[RPI_EXTRA_BIT_THREADS];
 #endif
+#if RPI_TSTATS
+    HEVCRpiStats tstats;
 #endif
+#endif  // RPI
 } HEVCContext;
 
 /**
@@ -909,41 +910,6 @@ int ff_hevc_cbf_cb_cr_decode(HEVCLocalContext * const lc, const int trafo_depth)
 int ff_hevc_cbf_luma_decode(HEVCLocalContext * const lc, const int trafo_depth);
 int ff_hevc_log2_res_scale_abs(HEVCLocalContext * const lc, const int idx);
 int ff_hevc_res_scale_sign_flag(HEVCLocalContext *const lc, const int idx);
-#if 0
-void ff_hevc_save_states(HEVCContext *s, int ctb_addr_ts);
-int ff_hevc_cabac_init(HEVCContext *s, int ctb_addr_ts);
-int ff_hevc_sao_merge_flag_decode(HEVCContext *s);
-int ff_hevc_sao_type_idx_decode(HEVCContext *s);
-int ff_hevc_sao_band_position_decode(HEVCContext *s);
-int ff_hevc_sao_offset_abs_decode(HEVCContext *s);
-int ff_hevc_sao_offset_sign_decode(HEVCContext *s);
-int ff_hevc_sao_eo_class_decode(HEVCContext *s);
-int ff_hevc_end_of_slice_flag_decode(HEVCContext *s);
-int ff_hevc_cu_transquant_bypass_flag_decode(HEVCContext *s);
-int ff_hevc_skip_flag_decode(HEVCContext *s, int x0, int y0,
-                             int x_cb, int y_cb);
-int ff_hevc_pred_mode_decode(HEVCContext *s);
-int ff_hevc_split_coding_unit_flag_decode(HEVCContext *s, int ct_depth,
-                                          int x0, int y0);
-int ff_hevc_part_mode_decode(HEVCContext *s, int log2_cb_size);
-int ff_hevc_pcm_flag_decode(HEVCContext *s);
-int ff_hevc_prev_intra_luma_pred_flag_decode(HEVCContext *s);
-int ff_hevc_mpm_idx_decode(HEVCContext *s);
-int ff_hevc_rem_intra_luma_pred_mode_decode(HEVCContext *s);
-int ff_hevc_intra_chroma_pred_mode_decode(HEVCContext *s);
-int ff_hevc_merge_idx_decode(HEVCContext *s);
-int ff_hevc_merge_flag_decode(HEVCContext *s);
-int ff_hevc_inter_pred_idc_decode(HEVCContext *s, int nPbW, int nPbH);
-int ff_hevc_ref_idx_lx_decode(HEVCContext *s, int num_ref_idx_lx);
-int ff_hevc_mvp_lx_flag_decode(HEVCContext *s);
-int ff_hevc_no_residual_syntax_flag_decode(HEVCContext *s);
-int ff_hevc_split_transform_flag_decode(HEVCContext *s, int log2_trafo_size);
-int ff_hevc_cbf_cb_cr_decode(HEVCContext *s, int trafo_depth);
-int ff_hevc_cbf_luma_decode(HEVCContext *s, int trafo_depth);
-int ff_hevc_log2_res_scale_abs(HEVCContext *s, int idx);
-int ff_hevc_res_scale_sign_flag(HEVCContext *s, int idx);
->>>>>>> n3.4
-#endif
 
 /**
  * Get the number of candidate references for the current frame.
@@ -992,7 +958,7 @@ extern const uint8_t ff_hevc_qpel_extra_before[4];
 extern const uint8_t ff_hevc_qpel_extra_after[4];
 extern const uint8_t ff_hevc_qpel_extra[4];
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
 int16_t * rpi_alloc_coeff_buf(HEVCRpiJob * const jb, const int buf_no, const int n);
 
 // arm/hevc_misc_neon.S

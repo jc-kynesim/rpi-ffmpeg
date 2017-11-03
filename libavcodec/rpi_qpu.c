@@ -1,4 +1,3 @@
-#ifdef RPI
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -938,4 +937,3 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
   return 0;
 }
 
-#endif // RPI
