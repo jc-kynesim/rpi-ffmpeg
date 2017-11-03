@@ -32,10 +32,8 @@ def testone(fileroot, srcname, es_file, md5_file):
     flog = open(os.path.join(tmp_root, name + ".log"), "wt")
 
     # Unaligned needed for cropping conformance
-    args = [ffmpeg_exec, "-flags", "unaligned", "-vcodec", "hevc", "-i", os.path.join(fileroot, es_file), "-f", "md5", dec_file]
-    print args
     rstr = subprocess.call(
-        args,
+        [ffmpeg_exec, "-flags", "unaligned", "-vcodec", "hevc", "-i", os.path.join(fileroot, es_file), "-f", "md5", dec_file],
         stdout=flog, stderr=subprocess.STDOUT)
 
     try:

@@ -704,7 +704,6 @@ typedef struct HEVCContext {
 #ifdef RPI
     char offload_recon;
     char enable_rpi;
-    int max_ctu_count; // Number of CTUs when we trigger a round of processing
 
     HEVCRpiJobCtl * jbc;
 
