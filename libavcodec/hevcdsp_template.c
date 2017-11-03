@@ -43,7 +43,7 @@ static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height
     }
 }
 
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
 {
@@ -100,7 +100,7 @@ static av_always_inline void FUNC(add_residual_dc)(uint8_t *_dst, ptrdiff_t stri
 }
 
 
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 static av_always_inline void FUNC(add_residual_u)(uint8_t *_dst, const int16_t *res,
                                                 ptrdiff_t stride, const int dc_v, int size)
 {
@@ -228,7 +228,7 @@ static void FUNC(add_residual32x32_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
     FUNC(add_residual_dc)(_dst, stride, dc, 32);
 }
 
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 // -- U -- (plaited)
 
 static void FUNC(add_residual4x4_u)(uint8_t *_dst, const int16_t * res,
@@ -606,7 +606,7 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
 
 
 #if BIT_DEPTH == 10
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 // We need a 32 bit variation for the _c restores so hijack bit depth 10
 #undef pixel
 #undef BIT_DEPTH
@@ -765,7 +765,7 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
 // --- Plaited chroma versions
 
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 
 static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
@@ -2074,7 +2074,7 @@ static void FUNC(hevc_v_loop_filter_luma)(uint8_t *pix, ptrdiff_t stride,
 #undef TQ2
 #undef TQ3
 
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 
 // line zero
 #define P3 pix_l[0 * xstride]

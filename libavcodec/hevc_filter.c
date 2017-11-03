@@ -39,7 +39,7 @@
 #ifdef RPI
 #include "rpi_qpu.h"
 #endif
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 #include "rpi_zc.h"
 #include "libavutil/rpi_sand_fns.h"
 #else
@@ -135,7 +135,7 @@ static int get_qPy(const HEVCContext * const s, const int xC, const int yC)
 
 static inline unsigned int pixel_shift(const HEVCContext * const s, const unsigned int c_idx)
 {
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     return c_idx != 0 && av_rpi_is_sand_frame(s->frame) ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
 #else
     return s->ps.sps->pixel_shift;
@@ -297,7 +297,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
     uint8_t right_tile_edge  = 0;
     uint8_t up_tile_edge     = 0;
     uint8_t bottom_tile_edge = 0;
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     const int sliced = av_rpi_is_sand_frame(s->frame);
     const int plane_count = sliced ? 2 : (s->ps.sps->chroma_format_idc ? 3 : 1);
 #else
@@ -356,7 +356,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
         ptrdiff_t stride_dst;
         uint8_t *dst;
 
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
         const unsigned int sh = s->ps.sps->pixel_shift + (sliced && c_idx != 0);
         const int wants_lr = sao->type_idx[c_idx] == SAO_EDGE && sao->eo_class[c_idx] != 1 /* Vertical */;
         uint8_t * const src = !sliced ?
@@ -403,7 +403,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                 dst = dstbuf;
                 stride_dst = 2*MAX_PB_SIZE;
                 copy_CTB(dst, src, width << sh, height, stride_dst, stride_src);
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
                 if (sliced && c_idx != 0)
                 {
                     s->hevcdsp.sao_band_filter_c[tab](src, dst, stride_src, stride_dst,
@@ -421,7 +421,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                 restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
                                    x, y, width, height, c_idx);
             } else {
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
                 if (sliced && c_idx != 0)
                 {
 //                    printf("x,y=%d,%d data[1]=%p, src=%p\n", x0, y0, s->frame->data[1], src);
@@ -533,7 +533,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
 
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
                            x_ctb, y_ctb);
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
             if (sliced && c_idx != 0)
             {
                 // Class always the same for both U & V (which is just as well :-))
@@ -686,7 +686,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                     no_q[0] = get_pcm(s, x, y);
                     no_q[1] = get_pcm(s, x, y + 4);
                 }
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
                 if (av_rpi_is_sand_frame(s->frame)) {
 
                     // This copes properly with no_p/no_q
@@ -745,7 +745,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
                 src =
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
                     av_rpi_is_sand_frame(s->frame) ?
                         av_rpi_sand_frame_pos_y(s->frame, x, y) :
 #endif
@@ -780,7 +780,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
     }
 
     if (s->ps.sps->chroma_format_idc) {
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
         if (av_rpi_is_sand_frame(s->frame)) {
             const int v = 2;
             const int h = 2;
@@ -887,7 +887,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                         c_tc[0] = (bs0 == 2) ? chroma_tc(s, qp0, chroma, tc_offset) : 0;
                         c_tc[1] = (bs1 == 2) ? chroma_tc(s, qp1, chroma, tc_offset) : 0;
                         src =
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
                             av_rpi_is_sand_frame(s->frame) ?
                                 av_rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
 #endif
@@ -939,7 +939,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                         c_tc[0]   = bs0 == 2 ? chroma_tc(s, qp0, chroma, tc_offset)     : 0;
                         c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
                         src =
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
                             av_rpi_is_sand_frame(s->frame) ?
                                 av_rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
 #endif

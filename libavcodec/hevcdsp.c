@@ -307,7 +307,7 @@ void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 0, put_hevc_qpel_bi_w_v, depth);          \
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 1, put_hevc_qpel_bi_w_hv, depth)
 
-#if !RPI_HEVC_SAND
+#if !CONFIG_HEVC_RPI_DECODER
 #define SLICED_LOOP_FILTERS(depth)
 #define SLICED_ADD_RESIDUAL(depth)
 #define SLICED_SAO(depth)

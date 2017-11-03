@@ -16,12 +16,14 @@ RPI_KEEPS=""
  --disable-stripping\
  --disable-thumb\
  --enable-mmal\
+ --enable-rpi\
  --extra-cflags="-g $RPI_KEEPS $RPI_DEFS $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFS $RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS -Wl,-rpath=/opt/vc/lib,-rpath-link=$RPI_OPT_VC/lib,-rpath=/lib,-rpath=/usr/lib,-rpath-link=$RPI_TOOLROOT/lib,-rpath-link=$RPI_TOOLROOT/lib"\
  --extra-libs="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm"\
  --cross-prefix=$RPI_TOOLROOT/bin/arm-linux-gnueabihf-
 
+# --enable-decoder=hevc_rpi\
 # --enable-extra-warnings\
 # --arch=armv71\
 # --enable-shared\

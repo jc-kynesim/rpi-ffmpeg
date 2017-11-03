@@ -23,10 +23,9 @@
 #ifndef AVCODEC_HEVCDEC_H
 #define AVCODEC_HEVCDEC_H
 
+#include "config.h"
+
 #include <stdatomic.h>
-#ifdef RPI
-#include <semaphore.h>
-#endif
 
 #include "libavutil/buffer.h"
 
@@ -74,6 +73,34 @@
 #define QPEL_EXTRA        7
 
 #define EDGE_EMU_BUFFER_STRIDE 80
+
+#if !CONFIG_HEVC_RPI_DECODER
+#define RPI_TSTATS         0
+#else
+#include <semaphore.h>
+#include "rpi_qpu.h"
+
+// Max jobs per frame thread. Actual usage will be limited by the size
+// of the global job pool
+// ?? Limits
+#define RPI_MAX_JOBS       8
+
+// Print out various usage stats
+#define RPI_TSTATS         0
+
+// Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
+// As it stands there is something mildy broken in VPU deblock - looks mostly OK
+// but reliably fails some conformance tests (e.g. DBLK_A/B/C_)
+// With VPU luma & chroma pred it is much the same speed to deblock on the ARM
+//
+// * Whilst most of the code still exists it will have rotted by now
+//  #define RPI_DEBLOCK_VPU
+
+#define RPI_VPU_DEBLOCK_CACHED 1
+
+#define RPI_QPU_EMU_Y      0
+#define RPI_QPU_EMU_C      0
+#endif
 
 /**
  * Value of the luma sample at position (x, y) in the 2D array tab.
@@ -433,7 +460,7 @@ typedef struct HEVCLocalContext {
 
 // Each block can have an intra prediction and an add_residual command
 // noof-cmds(2) * max-ctu height(64) / min-transform(4) * planes(3) * MAX_WIDTH
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
 // Sand only has 2 planes (Y/C)
 #define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*2*(RPI_MAX_WIDTH/4))
 #else
@@ -591,7 +618,7 @@ typedef struct HEVCRpiPassQueue
     volatile int terminate;
     sem_t sem_in;
     sem_t * psem_out;
-    void * job_n; // cas takes void * so we need to store as such (but really int)
+    unsigned int job_n;
     struct HEVCContext * context; // Context pointer as we get to pass a single "void * this" to the thread
     HEVCRpiWorkerFn * worker;
     pthread_t thread;
@@ -685,7 +712,7 @@ typedef struct HEVCContext {
 #if RPI_TSTATS
     HEVCRpiStats tstats;
 #endif
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
 
     // Function pointers
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C

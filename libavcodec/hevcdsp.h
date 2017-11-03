@@ -53,7 +53,11 @@ typedef struct MvField {
     int8_t pred_flag;
 } MvField;
 
-#ifdef RPI
+// This controls how many sao dsp functions there are
+// N=5 has width = 8, 16, 32, 48, 64
+// N=6 adds a function for width=24 (in fn array el 5 so existing code should
+// still work)
+#if CONFIG_HEVC_RPI_DECODER
 #define SAO_FILTER_N 6
 #else
 #define SAO_FILTER_N 5
@@ -66,7 +70,7 @@ typedef struct HEVCDSPContext {
 
     void (*add_residual[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
     void (*add_residual_dc[4])(uint8_t *dst, ptrdiff_t stride, int dc);
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     void (*add_residual_u[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride, int dc_v);
     void (*add_residual_v[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride, int dc_u);
 
@@ -88,7 +92,7 @@ typedef struct HEVCDSPContext {
 
     void (*sao_band_filter[SAO_FILTER_N])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     void (*sao_band_filter_c[SAO_FILTER_N])(uint8_t *_dst, const uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                const int16_t *sao_offset_val_u, int sao_left_class_u,
                                const int16_t *sao_offset_val_v, int sao_left_class_v,
@@ -98,7 +102,7 @@ typedef struct HEVCDSPContext {
     /* implicit stride_src parameter has value of 2 * MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE */
     void (*sao_edge_filter[SAO_FILTER_N])(uint8_t *_dst /* align 16 */, uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
                                int16_t *sao_offset_val, int sao_eo_class, int width, int height);
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     void (*sao_edge_filter_c[SAO_FILTER_N])(uint8_t *_dst /* align 16 */, const uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
                                const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v, int sao_eo_class, int width, int height);
 #endif
@@ -106,7 +110,7 @@ typedef struct HEVCDSPContext {
     void (*sao_edge_restore[2])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                 struct SAOParams *sao, int *borders, int _width, int _height, int c_idx,
                                 uint8_t *vert_edge, uint8_t *horiz_edge, uint8_t *diag_edge);
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     void (*sao_edge_restore_c[2])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                 struct SAOParams *sao, int *borders, int _width, int _height, int c_idx,
                                 uint8_t *vert_edge, uint8_t *horiz_edge, uint8_t *diag_edge);

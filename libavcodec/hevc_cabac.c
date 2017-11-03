@@ -1577,7 +1577,7 @@ static void rpi_add_residual(const HEVCContext *const s, HEVCRpiJob * const jb,
     else if (!is_sliced || c_idx == 0) {
         s->hevcdsp.add_residual[log2_trafo_size-2](dst, (int16_t *)coeffs, stride);
     }
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     // * These should probably never happen
     else if (c_idx == 1) {
         s->hevcdsp.add_residual_u[log2_trafo_size-2](dst, (int16_t *)coeffs, stride, 0);

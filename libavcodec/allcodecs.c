@@ -225,6 +225,7 @@ static void register_all(void)
     REGISTER_DECODER(HEVC,              hevc);
     REGISTER_DECODER(HEVC_QSV,          hevc_qsv);
     REGISTER_DECODER(HEVC_RKMPP,        hevc_rkmpp);
+    REGISTER_DECODER(HEVC_RPI,          hevc_rpi);
     REGISTER_DECODER(HEVC_V4L2M2M,      hevc_v4l2m2m);
     REGISTER_DECODER(HNM4_VIDEO,        hnm4_video);
     REGISTER_DECODER(HQ_HQA,            hq_hqa);

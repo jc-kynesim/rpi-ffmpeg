@@ -43,16 +43,13 @@
 #include "hevcdec.h"
 #include "profiles.h"
 
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
   #include "rpi_qpu.h"
   #include "rpi_shader.h"
   #include "rpi_shader_cmd.h"
   #include "rpi_shader_template.h"
   #include "rpi_zc.h"
   #include "libavutil/rpi_sand_fns.h"
-
-  // Define RPI_CACHE_UNIF_MVS to write motion vector uniform stream to cached memory
-  #define RPI_CACHE_UNIF_MVS  1
 
   #include "pthread.h"
   #include "libavutil/atomic.h"
@@ -73,7 +70,7 @@ static av_always_inline av_const unsigned av_mod_uintp2_c(unsigned a, unsigned p
 const uint8_t ff_hevc_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
 
 
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
 
 static void rpi_begin(const HEVCContext * const s, HEVCRpiJob * const jb, const unsigned int ctu_ts_first);
 
@@ -227,44 +224,24 @@ static void rpi_hevc_qpu_set_fns(HEVCContext * const s, const unsigned int bit_d
     rpi_hevc_qpu_init_fn(&s->qpu, bit_depth);
 }
 
-
-#endif
-
-
-#ifdef RPI
-
-// If we only have one worker then we could just do this
-// But if we have multiple threads then they might start "at the same time"
-// and we need to share out the work carefully
-//
-// returns pq->job_n++
-static uintptr_t pass_queue_inc_job_n(HEVCRpiPassQueue * const pq, const uintptr_t mod_n)
+// Unsigned Trivial MOD
+static inline unsigned int utmod(const unsigned int x, const unsigned int n)
 {
-#if 1
-    // Single thread processing
-    uintptr_t x1;
-    void * const x2 = pq->job_n;
-    if ((x1 = (uintptr_t)x2 + 1) >= mod_n)
-        x1 = 0;
-    pq->job_n = (void *)x1;
-#else
-    void * x0;
-    uintptr_t x1;
-    void * x2 = pq->job_n;
-    do
-    {
-        if ((x1 = (uintptr_t)x2 + 1) >= mod_n)
-            x1 = 0;
-        x0 = x2;
-    } while ((x2 = avpriv_atomic_ptr_cas(&pq->job_n, x0, (void *)x1)) == x0);
-#endif
-    return (uintptr_t)x2;
+    return x >= n ? x - n : x;
+}
+
+// returns pq->job_n++
+static inline unsigned int pass_queue_inc_job_n(HEVCRpiPassQueue * const pq)
+{
+    unsigned int const x2 = pq->job_n;
+    pq->job_n = utmod(x2 + 1, RPI_MAX_JOBS);
+    return x2;
 }
 
 static void pass_queue_init(HEVCRpiPassQueue * const pq, HEVCContext * const s, HEVCRpiWorkerFn * const worker, sem_t * const psem_out, const int n)
 {
     pq->terminate = 0;
-    pq->job_n = (void *)0;
+    pq->job_n = 0;
     pq->context = s;
     pq->worker = worker;
     pq->psem_out = psem_out;
@@ -288,12 +265,6 @@ static inline void rpi_sem_wait(sem_t * const sem)
 static void pass_queue_submit_job(HEVCRpiPassQueue * const pq)
 {
     sem_post(&pq->sem_in);
-}
-
-// Unsigned Trivial MOD
-static inline unsigned int utmod(const unsigned int x, const unsigned int n)
-{
-    return x >= n ? x - n : x;
 }
 
 static inline void pass_queue_do_all(HEVCContext * const s, HEVCRpiJob * const jb)
@@ -618,7 +589,7 @@ static void * pass_worker(void *arg)
         if (pq->terminate)
             break;
 
-        pq->worker(s, s->jbc->offloadq[pass_queue_inc_job_n(pq, RPI_MAX_JOBS)]);
+        pq->worker(s, s->jbc->offloadq[pass_queue_inc_job_n(pq)]);
         // * should really set jb->passes_done here
 
         sem_post(pq->psem_out);
@@ -1124,7 +1095,7 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
     switch (sps->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
         // Currently geometry calc is stuffed for big sizes
         if (sps->width < 2048 && sps->height <= 1088) {
             *fmt++ = AV_PIX_FMT_SAND128;
@@ -1148,7 +1119,7 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #endif
         break;
     case AV_PIX_FMT_YUV420P10:
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
         // Currently geometry calc is stuffed for big sizes
         if (sps->width < 2048 && sps->height <= 1088) {
             *fmt++ = AV_PIX_FMT_SAND64_10;
@@ -2184,7 +2155,7 @@ static int pcm_extract(const HEVCContext * const s, const uint8_t * pcm, const i
     if (ret < 0)
         return ret;
 
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
     if (av_rpi_is_sand_frame(s->frame)) {
         s->hevcdsp.put_pcm(av_rpi_sand_frame_pos_y(s->frame, x0, y0),
                            s->frame->linesize[0],
@@ -2780,7 +2751,7 @@ static void hevc_luma_mv_mvp_mode(const HEVCContext * const s, HEVCLocalContext 
 }
 
 
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
 
 static HEVCRpiInterPredQ *
 rpi_nxt_pred(HEVCRpiInterPredEnv * const ipe, const unsigned int load_val, const uint32_t fn)
@@ -2860,11 +2831,7 @@ static void rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
     ipe->n_grp = n_grp;
     ipe->min_gap = min_gap;
 
-#if RPI_CACHE_UNIF_MVS
     gpu_malloc_cached(total_size, &ipe->gptr);
-#else
-    gpu_malloc_uncached(total_size, &ipe->gptr);
-#endif
 }
 
 
@@ -3386,7 +3353,7 @@ static void hls_prediction_unit(const HEVCContext * const s, HEVCLocalContext * 
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
         if (s->enable_rpi) {
             rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 0,
               s->sh.luma_weight_l0[current_mv.ref_idx[0]], s->sh.luma_offset_l0[current_mv.ref_idx[0]],
@@ -3401,7 +3368,7 @@ static void hls_prediction_unit(const HEVCContext * const s, HEVCLocalContext * 
         }
 
         if (s->ps.sps->chroma_format_idc) {
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
             if (s->enable_rpi) {
                 rpi_pred_c(s, jb, 0, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 0,
                   s->sh.chroma_weight_l0[current_mv.ref_idx[0]], s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
@@ -3422,7 +3389,7 @@ static void hls_prediction_unit(const HEVCContext * const s, HEVCLocalContext * 
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
         if (s->enable_rpi) {
             rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 1,
               s->sh.luma_weight_l1[current_mv.ref_idx[1]], s->sh.luma_offset_l1[current_mv.ref_idx[1]],
@@ -3437,7 +3404,7 @@ static void hls_prediction_unit(const HEVCContext * const s, HEVCLocalContext * 
         }
 
         if (s->ps.sps->chroma_format_idc) {
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
             if (s->enable_rpi) {
                 rpi_pred_c(s, jb, 1, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 1,
                   s->sh.chroma_weight_l1[current_mv.ref_idx[1]], s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
@@ -3459,7 +3426,7 @@ static void hls_prediction_unit(const HEVCContext * const s, HEVCLocalContext * 
         int nPbW_c = nPbW >> s->ps.sps->hshift[1];
         int nPbH_c = nPbH >> s->ps.sps->vshift[1];
 
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
         if (s->enable_rpi) {
             rpi_pred_y_b(s, jb, x0, y0, nPbW, nPbH, &current_mv, ref0->frame, ref1->frame);
         } else
@@ -3471,7 +3438,7 @@ static void hls_prediction_unit(const HEVCContext * const s, HEVCLocalContext * 
         }
 
         if (s->ps.sps->chroma_format_idc) {
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
           if (s->enable_rpi) {
               rpi_pred_c_b(s, jb, x0_c, y0_c, nPbW_c, nPbH_c,
                            &current_mv,
@@ -4061,7 +4028,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s, HEVCRpiJob * const jb)
             case RPI_PRED_ADD_DC:
                 s->hevcdsp.add_residual_dc[cmd->size - 2](cmd->dc.dst, cmd->dc.stride, cmd->dc.dc);
                 break;
-#if RPI_HEVC_SAND
+#if CONFIG_HEVC_RPI_DECODER
             case RPI_PRED_ADD_RESIDUAL_U:
                 s->hevcdsp.add_residual_u[cmd->size - 2](cmd->ta.dst, (int16_t *)cmd->ta.buf, cmd->ta.stride, cmd->ta.dc);
                 break;
@@ -4097,7 +4064,7 @@ static void rpi_execute_pred_cmds(HEVCContext * const s, HEVCRpiJob * const jb)
 // Set initial uniform job values & zero ctu_count
 static void rpi_begin(const HEVCContext * const s, HEVCRpiJob * const jb, const unsigned int ctu_ts_first)
 {
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
     unsigned int i;
     HEVCRpiInterPredEnv *const cipe = &jb->chroma_ip;
     HEVCRpiInterPredEnv *const yipe = &jb->luma_ip;
@@ -4191,7 +4158,7 @@ static void rpi_begin(const HEVCContext * const s, HEVCRpiJob * const jb, const 
 #endif
 
 
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
 #if !RPI_QPU_EMU_Y || !RPI_QPU_EMU_C
 static unsigned int mc_terminate_add_qpu(const HEVCContext * const s,
                                      const vpu_qpu_job_h vqj,
@@ -4238,7 +4205,6 @@ static unsigned int mc_terminate_add_qpu(const HEVCContext * const s,
         mail[i][1] = yp->code_setup;
     }
 
-#if RPI_CACHE_UNIF_MVS
     // We don't need invalidate here as the uniforms aren't changed by the QPU
     // and leaving them in ARM cache avoids (pointless) pre-reads when writing
     // new values which seems to give us a small performance advantage
@@ -4249,7 +4215,6 @@ static unsigned int mc_terminate_add_qpu(const HEVCContext * const s,
     rpi_cache_flush_add_gm_blocks(rfe, &ipe->gptr, RPI_CACHE_FLUSH_MODE_WRITEBACK,
                                   (uint8_t *)ipe->q[0].qpu_mc_base - ipe->gptr.arm, max_block,
                                   ipe->n, ipe->max_fill + ipe->min_gap);
-#endif
     vpu_qpu_job_add_qpu(vqj, ipe->n, (uint32_t *)mail);
 
     return 1;
@@ -6259,7 +6224,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     if (vpu_qpu_init() != 0)
         goto fail;
 
-#if RPI_INTER
+#if CONFIG_HEVC_RPI_DECODER
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
     {
         static const uint32_t dframe[1] = {0x80808080};
@@ -6525,7 +6490,7 @@ AVCodec ff_hevc_decoder = {
     // Debugging is often easier without threads getting in the way
                             0,
 #warning H265 threading turned off
-#elif defined(RPI)
+#elif CONFIG_HEVC_RPI_DECODER
     // We only have decent optimisation for frame - so only admit to that
                              AV_CODEC_CAP_FRAME_THREADS,
 #else
@@ -6534,3 +6499,41 @@ AVCodec ff_hevc_decoder = {
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_EXPORTS_CROPPING,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };
+
+#if CONFIG_HEVC_RPI_DECODER
+
+static const AVClass hevc_rpi_decoder_class = {
+    .class_name = "HEVC RPI decoder",
+    .item_name  = av_default_item_name,
+    .option     = options,
+    .version    = LIBAVUTIL_VERSION_INT,
+};
+
+// *** Not actually used yet
+AVCodec ff_hevc_rpi_decoder = {
+    .name                  = "hevc_rpi",
+    .long_name             = NULL_IF_CONFIG_SMALL("HEVC (rpi)"),
+    .type                  = AVMEDIA_TYPE_VIDEO,
+    .id                    = AV_CODEC_ID_HEVC,
+    .priv_data_size        = sizeof(HEVCContext),
+    .priv_class            = &hevc_rpi_decoder_class,
+    .init                  = hevc_decode_init,
+    .close                 = hevc_decode_free,
+    .decode                = hevc_decode_frame,
+    .flush                 = hevc_decode_flush,
+    .update_thread_context = hevc_update_thread_context,
+    .init_thread_copy      = hevc_init_thread_copy,
+    .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
+#if 0
+    // Debugging is often easier without threads getting in the way
+                            0,
+#warning H265 threading turned off
+#else
+    // We only have decent optimisation for frame - so only admit to that
+                             AV_CODEC_CAP_FRAME_THREADS,
+#endif
+    .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_EXPORTS_CROPPING,
+    .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
+};
+#endif
+
