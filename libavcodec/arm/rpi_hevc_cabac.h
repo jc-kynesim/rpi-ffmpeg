@@ -303,45 +303,48 @@ static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
     return rv << 1;
 }
 
-#if 0
-
-// ***** Slower than the C  :-(
 #define get_cabac_by22_flush get_cabac_by22_flush_arm
-static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigned int n, const uint32_t val)
+static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigned int n, uint32_t val)
 {
-    uint32_t m, tmp;
-    __asm__ (
-    "add    %[bits], %[bits], %[n]   \n\t"
-    "ldr    %[m], [%[ptr], %[bits], lsr #3]  \n\t"
-
-    "rsb    %[tmp], %[n], #32        \n\t"
-    "lsr    %[tmp], %[val], %[tmp]   \n\t"
-    "mul    %[tmp], %[range], %[tmp] \n\t"
-
-    "rev    %[m], %[m]               \n\t"
-
-    "lsl    %[tmp], %[tmp], #23      \n\t"
-    "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-    "and    %[tmp], %[bits], #7         \n\t"
-    "lsl    %[m], %[m], %[tmp]          \n\t"
-
-    "orr    %[low], %[low], %[m], lsr #9      \n\t"
+    uint32_t bits, ptr, tmp1, tmp2;
+    __asm__ volatile (
+        "ldrh    %[bits], [%[c], %[bits_off]]      \n\t"
+        "ldr     %[ptr], [%[c], %[ptr_off]]        \n\t"
+        "rsb     %[tmp1], %[n], #32                \n\t"
+        "add     %[bits], %[bits], %[n]            \n\t"
+        "ldrh    %[tmp2], [%[c], %[range_off]]     \n\t"
+        "lsr     %[tmp1], %[val], %[tmp1]          \n\t"
+        "ldr     %[val], [%[c], %[low_off]]        \n\t"
+        "ldr     %[ptr], [%[ptr], %[bits], lsr #3] \n\t"
+        "mul     %[tmp1], %[tmp2], %[tmp1]         \n\t"
+        "and     %[tmp2], %[bits], #7              \n\t"
+        "strh    %[bits], [%[c], %[bits_off]]      \n\t"
+        "rev     %[ptr], %[ptr]                    \n\t"
+        "lsl     %[tmp1], %[tmp1], #23             \n\t"
+        "rsb     %[val], %[tmp1], %[val], lsl %[n] \n\t"
+        "lsl     %[ptr], %[ptr], %[tmp2]           \n\t"
+        "orr     %[val], %[val], %[ptr], lsr #9    \n\t"
+        "str     %[val], [%[c], %[low_off]]        \n\t"
         :  // Outputs
-             [m]"=&r"(m),
-           [tmp]"=&r"(tmp),
-          [bits]"+r"(c->by22.bits),
-           [low]"+r"(c->low)
+            [val]"+r"(val),
+           [bits]"=&r"(bits),
+            [ptr]"=&r"(ptr),
+           [tmp1]"=&r"(tmp1),
+           [tmp2]"=&r"(tmp2)
         :  // Inputs
-               [n]"r"(n),
-             [val]"r"(val),
-             [inv]"r"(c->range),
-           [range]"r"(c->by22.range),
-             [ptr]"r"(c->bytestream)
+                   [c]"r"(c),
+                   [n]"r"(n),
+            [bits_off]"J"(offsetof(CABACContext, by22.bits)),
+             [ptr_off]"J"(offsetof(CABACContext, bytestream)),
+           [range_off]"J"(offsetof(CABACContext, by22.range)),
+             [low_off]"J"(offsetof(CABACContext, low))
         :  // Clobbers
+           "memory"
     );
 }
 
+
+#if 0
 
 // Works but slower than C
 #define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode_by22_arm(c, r)
