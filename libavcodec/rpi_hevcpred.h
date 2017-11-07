@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_HEVCPRED_H
-#define AVCODEC_HEVCPRED_H
+#ifndef AVCODEC_RPI_HEVCPRED_H
+#define AVCODEC_RPI_HEVCPRED_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -56,4 +56,4 @@ typedef struct HEVCPredContext {
 void ff_hevc_pred_init(HEVCPredContext *hpc, int bit_depth);
 void ff_hevc_pred_init_mips(HEVCPredContext *hpc, int bit_depth);
 
-#endif /* AVCODEC_HEVCPRED_H */
+#endif /* AVCODEC_RPI_HEVCPRED_H */

@@ -24,7 +24,7 @@
 #include "libavutil/pixdesc.h"
 
 #include "bit_depth_template.c"
-#include "hevcpred.h"
+#include "rpi_hevcpred.h"
 
 #if CONFIG_HEVC_RPI_DECODER
 #include "libavutil/rpi_sand_fns.h"

@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_HEVCDEC_H
-#define AVCODEC_HEVCDEC_H
+#ifndef AVCODEC_RPI_HEVCDEC_H
+#define AVCODEC_RPI_HEVCDEC_H
 
 #include "config.h"
 
@@ -33,12 +33,12 @@
 #include "bswapdsp.h"
 #include "cabac.h"
 #include "get_bits.h"
-#include "hevcpred.h"
+#include "rpi_hevcpred.h"
 #include "h2645_parse.h"
 #include "hevc.h"
-#include "hevc_ps.h"
-#include "hevc_sei.h"
-#include "hevcdsp.h"
+#include "rpi_hevc_ps.h"
+#include "rpi_hevc_sei.h"
+#include "rpi_hevcdsp.h"
 #include "internal.h"
 #include "thread.h"
 #include "videodsp.h"
@@ -1049,4 +1049,4 @@ static inline void ff_hevc_progress_set_all_done(HEVCFrame * const ref)
     }
 }
 
-#endif /* AVCODEC_HEVCDEC_H */
+#endif /* AVCODEC_RPI_HEVCDEC_H */

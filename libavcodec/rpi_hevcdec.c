@@ -38,9 +38,9 @@
 #include "cabac_functions.h"
 #include "golomb.h"
 #include "hevc.h"
-#include "hevc_data.h"
-#include "hevc_parse.h"
-#include "hevcdec.h"
+#include "rpi_hevc_data.h"
+#include "rpi_hevc_parse.h"
+#include "rpi_hevcdec.h"
 #include "profiles.h"
 
 #if CONFIG_HEVC_RPI_DECODER

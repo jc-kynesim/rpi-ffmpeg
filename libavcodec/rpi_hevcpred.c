@@ -20,44 +20,44 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "hevcdec.h"
+#include "rpi_hevcdec.h"
 
-#include "hevcpred.h"
+#include "rpi_hevcpred.h"
 
 #define PRED_C 0
 #define BIT_DEPTH 8
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 9
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 10
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 12
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 #undef PRED_C
 
 #if CONFIG_HEVC_RPI_DECODER
 #define PRED_C 1
 #define BIT_DEPTH 8
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 9
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 10
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 12
-#include "hevcpred_template.c"
+#include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 #undef PRED_C
 #endif

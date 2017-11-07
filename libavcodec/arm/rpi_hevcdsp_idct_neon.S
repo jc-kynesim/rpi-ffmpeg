@@ -371,9 +371,9 @@ tr16:
 .word 0x00190009  // 25, d2[2] = 9
 
 #define BIT_DEPTH 8
-#include "hevc_idct_fn_neon.S"
+#include "rpi_hevc_idct_fn_neon.S"
 
 #undef BIT_DEPTH
 #define BIT_DEPTH 10
-#include "hevc_idct_fn_neon.S"
+#include "rpi_hevc_idct_fn_neon.S"
 

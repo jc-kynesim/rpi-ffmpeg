@@ -18,8 +18,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_HEVC_PS_H
-#define AVCODEC_HEVC_PS_H
+#ifndef AVCODEC_RPI_HEVC_PS_H
+#define AVCODEC_RPI_HEVC_PS_H
 
 #include <stdint.h>
 
@@ -434,4 +434,4 @@ int ff_hevc_encode_nal_vps(HEVCVPS *vps, unsigned int id,
  */
 int ff_hevc_compute_poc(const HEVCSPS *sps, int pocTid0, int poc_lsb, int nal_unit_type);
 
-#endif /* AVCODEC_HEVC_PS_H */
+#endif /* AVCODEC_RPI_HEVC_PS_H */

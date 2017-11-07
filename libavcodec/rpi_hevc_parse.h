@@ -21,16 +21,16 @@
  * H.265 parser code
  */
 
-#ifndef AVCODEC_HEVC_PARSE_H
-#define AVCODEC_HEVC_PARSE_H
+#ifndef AVCODEC_RPI_HEVC_PARSE_H
+#define AVCODEC_RPI_HEVC_PARSE_H
 
 #include <stdint.h>
 
-#include "hevc_ps.h"
-#include "hevc_sei.h"
+#include "rpi_hevc_ps.h"
+#include "rpi_hevc_sei.h"
 
 int ff_hevc_decode_extradata(const uint8_t *data, int size, HEVCParamSets *ps,
                              HEVCSEIContext *sei, int *is_nalff, int *nal_length_size,
                              int err_recognition, int apply_defdispwin, void *logctx);
 
-#endif /* AVCODEC_HEVC_PARSE_H */
+#endif /* AVCODEC_RPI_HEVC_PARSE_H */

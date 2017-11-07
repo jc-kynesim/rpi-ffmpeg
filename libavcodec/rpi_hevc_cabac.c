@@ -27,9 +27,9 @@
 #include "libavutil/common.h"
 
 #include "cabac_functions.h"
-#include "hevc_data.h"
+#include "rpi_hevc_data.h"
 #include "hevc.h"
-#include "hevcdec.h"
+#include "rpi_hevcdec.h"
 
 #if CONFIG_HEVC_RPI_DECODER
 #include "libavutil/rpi_sand_fns.h"

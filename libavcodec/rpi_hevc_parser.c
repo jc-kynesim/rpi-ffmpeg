@@ -24,8 +24,8 @@
 
 #include "golomb.h"
 #include "hevc.h"
-#include "hevc_ps.h"
-#include "hevc_sei.h"
+#include "rpi_hevc_ps.h"
+#include "rpi_hevc_sei.h"
 #include "h2645_parse.h"
 #include "internal.h"
 #include "parser.h"

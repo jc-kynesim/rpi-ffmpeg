@@ -23,8 +23,8 @@
  */
 
 #include "golomb.h"
-#include "hevc_ps.h"
-#include "hevc_sei.h"
+#include "rpi_hevc_ps.h"
+#include "rpi_hevc_sei.h"
 
 static int decode_nal_sei_decoded_picture_hash(HEVCSEIPictureHash *s, GetBitContext *gb)
 {

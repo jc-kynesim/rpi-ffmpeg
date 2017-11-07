@@ -32,7 +32,7 @@
 #include "libavutil/internal.h"
 
 #include "cabac_functions.h"
-#include "hevcdec.h"
+#include "rpi_hevcdec.h"
 
 #include "bit_depth_template.c"
 

@@ -21,7 +21,7 @@
 #include "libavutil/attributes.h"
 #include "libavutil/arm/cpu.h"
 #include "libavcodec/hevcdsp.h"
-#include "hevcdsp_arm.h"
+#include "rpi_hevcdsp_arm.h"
 
 av_cold void ff_hevcdsp_init_arm(HEVCDSPContext *c, const int bit_depth)
 {

@@ -22,7 +22,7 @@
 #include "libavutil/attributes.h"
 #include "libavutil/arm/cpu.h"
 #include "libavcodec/hevcdsp.h"
-#include "hevcdsp_arm.h"
+#include "rpi_hevcdsp_arm.h"
 #include "libavcodec/avcodec.h"
 #include "libavcodec/bit_depth_template.c"
 

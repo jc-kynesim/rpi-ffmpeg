@@ -18,8 +18,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_HEVC_SEI_H
-#define AVCODEC_HEVC_SEI_H
+#ifndef AVCODEC_RPI_HEVC_SEI_H
+#define AVCODEC_RPI_HEVC_SEI_H
 
 #include <stdint.h>
 
@@ -132,4 +132,4 @@ int ff_hevc_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
  */
 void ff_hevc_reset_sei(HEVCSEIContext *s);
 
-#endif /* AVCODEC_HEVC_SEI_H */
+#endif /* AVCODEC_RPI_HEVC_SEI_H */

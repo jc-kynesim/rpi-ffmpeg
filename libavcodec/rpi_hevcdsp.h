@@ -22,8 +22,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_HEVCDSP_H
-#define AVCODEC_HEVCDSP_H
+#ifndef AVCODEC_RPI_HEVCDSP_H
+#define AVCODEC_RPI_HEVCDSP_H
 
 #include "hevc.h"
 #include "get_bits.h"
@@ -194,4 +194,4 @@ void ff_hevc_dsp_init_ppc(HEVCDSPContext *c, const int bit_depth);
 void ff_hevc_dsp_init_x86(HEVCDSPContext *c, const int bit_depth);
 void ff_hevcdsp_init_arm(HEVCDSPContext *c, const int bit_depth);
 void ff_hevc_dsp_init_mips(HEVCDSPContext *c, const int bit_depth);
-#endif /* AVCODEC_HEVCDSP_H */
+#endif /* AVCODEC_RPI_HEVCDSP_H */
