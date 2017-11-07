@@ -908,8 +908,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             int a = ((yc>>3) & 1) << 1;
                             int b = (xc>>3) & 1;
                             setup = s->dvq->uv_setup_arm[num16];
-                            setup[0][b][0][a] = c_tc[0];
-                            setup[0][b][0][a + 1] = c_tc[1];
+                            setup[0][b][chroma-1][a] = c_tc[0];
+                            setup[0][b][chroma-1][a + 1] = c_tc[1];
                         } else
 #endif
                             s->hevcdsp.hevc_v_loop_filter_chroma(src,
@@ -960,8 +960,8 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             int a = ((xc>>3) & 1) << 1;
                             int b = (yc>>3) & 1;
                             setup = s->dvq->uv_setup_arm[num16];
-                            setup[1][b][0][a] = c_tc[0];
-                            setup[1][b][0][a + 1] = c_tc[1];
+                            setup[1][b][chroma-1][a] = c_tc[0];
+                            setup[1][b][chroma-1][a + 1] = c_tc[1];
                         } else
 #endif
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
@@ -1133,13 +1133,16 @@ static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int f
 {
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
     rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-      0, start, s->ps.sps->width, end - start, 0, s->ps.sps->vshift[1], flush_luma, flush_chroma);
+      0, start, s->ps.sps->width, end - start, s->ps.sps->vshift[1], flush_luma, flush_chroma);
     rpi_cache_flush_finish(rfe);
 }
 
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
 static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 {
+  int num16high = (ctb_size+15)>>4;  // May go over bottom of the image, but setup will be zero for these so should have no effect.
+  // TODO check that image allocation is large enough for this to be okay as well.
+  
   // Flush image, 4 lines above to bottom of ctb stripe
   ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
   // TODO flush buffer of beta/tc setup when it becomes cached
@@ -1149,23 +1152,23 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   s->dvq->vpu_cmds_arm[0][1] = s->frame->linesize[0];
   s->dvq->vpu_cmds_arm[0][2] = s->setup_width;
   s->dvq->vpu_cmds_arm[0][3] = (int) ( s->dvq->y_setup_vc + s->setup_width * (y>>4) );
-  s->dvq->vpu_cmds_arm[0][4] = ctb_size>>4;
+  s->dvq->vpu_cmds_arm[0][4] = num16high;
   s->dvq->vpu_cmds_arm[0][5] = 2;
 
   s->dvq->vpu_cmds_arm[1][0] = get_vc_address_u(s->frame) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
   s->dvq->vpu_cmds_arm[1][1] = s->frame->linesize[1];
   s->dvq->vpu_cmds_arm[1][2] = s->uv_setup_width;
   s->dvq->vpu_cmds_arm[1][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
-  s->dvq->vpu_cmds_arm[1][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
+  s->dvq->vpu_cmds_arm[1][4] = (num16high + 1) >> s->ps.sps->vshift[1];
   s->dvq->vpu_cmds_arm[1][5] = 3;
 
   s->dvq->vpu_cmds_arm[2][0] = get_vc_address_v(s->frame) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
   s->dvq->vpu_cmds_arm[2][1] = s->frame->linesize[2];
   s->dvq->vpu_cmds_arm[2][2] = s->uv_setup_width;
   s->dvq->vpu_cmds_arm[2][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
-  s->dvq->vpu_cmds_arm[2][4] = (ctb_size>>4)>> s->ps.sps->vshift[1];
+  s->dvq->vpu_cmds_arm[2][4] = (num16high + 1) >> s->ps.sps->vshift[1];
   s->dvq->vpu_cmds_arm[2][5] = 4;
-
+  
   // Call VPU
   {
       const vpu_qpu_job_h vqj = vpu_qpu_job_new();
@@ -1190,7 +1193,6 @@ void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const i
         deblocking_filter_CTB(s, x, y);
 
 #ifdef RPI_DEBLOCK_VPU
-#error Deblock VPU thoroughly rotted
     if (s->enable_rpi_deblock && x_end)
     {
       int y_at_end = y >= s->ps.sps->height - ctb_size;
@@ -1198,7 +1200,6 @@ void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const i
       int y_start = y&~63;
       if (y_at_end) height = s->ps.sps->height - y_start;
       if ((((y+ctb_size)&63)==0) || y_at_end) {
-        done_deblock = 1;
         rpi_deblock(s, y_start, height);
       }
     }

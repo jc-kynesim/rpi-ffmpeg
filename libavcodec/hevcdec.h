@@ -102,13 +102,10 @@
 #define RPI_TSTATS              0
 
 // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-// As it stands there is something mildy broken in VPU deblock - looks mostly OK
-// but reliably fails some conformance tests (e.g. DBLK_A/B/C_)
-// With VPU luma & chroma pred it is much the same speed to deblock on the ARM
-//
-// * Whilst most of the code still exists it will have rotted by now
-//  #define RPI_DEBLOCK_VPU
-//  #define RPI_VPU_DEBLOCK_CACHED 1
+// (currently slower than deblocking on the ARM)
+// #define RPI_DEBLOCK_VPU
+
+#define RPI_VPU_DEBLOCK_CACHED 0
 
 // Use ARM emulation of QPU pred
 // These are for debug only as the emulation makes only limited
@@ -721,7 +718,16 @@ typedef struct HEVCContext {
     HEVCRpiFrameProgressState progress_states[2];
 
 #ifdef RPI_DEBLOCK_VPU
-#define RPI_DEBLOCK_VPU_Q_COUNT 2
+// With the new scheme of rpi_execute_dblk_cmds 
+// it looks like ff_hevc_hls_filter is no longer called in raster order.
+// This causes trouble if RPI_DEBLOCK_VPU_Q_COUNT > 1 because we prepare setup
+// data for more than one row at a time before triggering the deblocker for one row.
+// This means that the deblock of the final row can use the wrong setup buffer.
+// 
+// Also concerned that the thread progress and waiting for job completion is
+// not done correctly with RPI_DEBLOCK_VPU at the end of the frame, or for small CTU sizes.
+#define RPI_DEBLOCK_VPU_Q_COUNT 1
+
     int enable_rpi_deblock;
 
     int uv_setup_width;
@@ -736,7 +742,7 @@ typedef struct HEVCContext {
         uint8_t (*y_setup_arm)[2][2][2][4];
         uint8_t (*y_setup_vc)[2][2][2][4];
 
-        uint8_t (*uv_setup_arm)[2][2][2][4];  // Half of this is unused [][][1][], but easier for the VPU as it allows us to store with zeros and addresses are aligned
+        uint8_t (*uv_setup_arm)[2][2][2][4];
         uint8_t (*uv_setup_vc)[2][2][2][4];
 
         int (*vpu_cmds_arm)[6]; // r0-r5 for each command
