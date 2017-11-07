@@ -784,19 +784,26 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 #ifdef RPI_DEBLOCK_VPU
     {
         int i;
-        s->enable_rpi_deblock = !sps->sao_enabled;
+        int sao_unsupported = sps->log2_ctb_size<6 || (sps->pcm.loop_filter_disable_flag && sps->pcm_enabled_flag);
+        s->enable_rpi_deblock = (sps->bit_depth == 8);
+        if (sps->sao_enabled && sao_unsupported)
+            s->enable_rpi_deblock = 0;
+        // TODO should we ignore if ctb size is not >=32?  SAO may go wrong in this case?
         s->setup_width = (sps->width+15) / 16;
         s->setup_height = (sps->height+15) / 16;
         s->uv_setup_width = ( (sps->width >> sps->hshift[1]) + 15) / 16;
         s->uv_setup_height = ( (sps->height >> sps->vshift[1]) + 15) / 16;
-
+        
         for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i)
         {
             struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
-            const unsigned int cmd_size = (sizeof(*dvq->vpu_cmds_arm) * 3 + 15) & ~15;
+            // may need 3 commands for deblock, and with ctu size of 64, plus ending 64, as many as 8 16 high rows for each of u and v
+            const unsigned int cmd_size = (sizeof(*dvq->vpu_cmds_arm) * (3+8*2) + 15) & ~15;
             const unsigned int y_size = (sizeof(*dvq->y_setup_arm) * s->setup_width * s->setup_height + 15) & ~15;
             const unsigned int uv_size = (sizeof(*dvq->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
-            const unsigned int total_size =- cmd_size + y_size + uv_size;
+            const unsigned int sao_line_buf_size = ((sps->width >> sps->hshift[1])+15) & ~15;
+            const unsigned int sao_setup_size = (sizeof(uint32_t) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
+            const unsigned int total_size = cmd_size + y_size + uv_size + sao_line_buf_size * 2 + sao_setup_size * 2;
             int p_vc;
             uint8_t * p_arm;
  #if RPI_VPU_DEBLOCK_CACHED
@@ -825,6 +832,33 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
 
             dvq->uv_setup_arm = (void*)p_arm;
             dvq->uv_setup_vc = (void*)p_vc;
+            
+            p_arm += uv_size;
+            p_vc += uv_size;
+
+            dvq->u_sao_line_arm = (void*)p_arm;
+            dvq->u_sao_line_vc = (void*)p_vc;
+            
+            p_arm += sao_line_buf_size;
+            p_vc += sao_line_buf_size;
+
+            dvq->v_sao_line_arm = (void*)p_arm;
+            dvq->v_sao_line_vc = (void*)p_vc;
+            
+            p_arm += sao_line_buf_size;
+            p_vc += sao_line_buf_size;
+            
+            dvq->u_sao_setup_arm = (void*)p_arm;
+            dvq->u_sao_setup_vc = (void*)p_vc;
+            
+            p_arm += sao_setup_size;
+            p_vc += sao_setup_size;
+            
+            dvq->v_sao_setup_arm = (void*)p_arm;
+            dvq->v_sao_setup_vc = (void*)p_vc;
+            
+            p_arm += sao_setup_size;
+            p_vc += sao_setup_size;
         }
 
         s->dvq_n = 0;

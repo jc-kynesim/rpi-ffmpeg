@@ -724,6 +724,16 @@ typedef struct HEVCContext {
 
         uint8_t (*uv_setup_arm)[2][2][2][4];
         uint8_t (*uv_setup_vc)[2][2][2][4];
+        
+        uint8_t *u_sao_line_arm;
+        uint8_t *u_sao_line_vc;
+        uint8_t *v_sao_line_arm;
+        uint8_t *v_sao_line_vc;
+        
+        uint32_t *u_sao_setup_arm;
+        uint32_t *u_sao_setup_vc;
+        uint32_t *v_sao_setup_arm;
+        uint32_t *v_sao_setup_vc;
 
         int (*vpu_cmds_arm)[6]; // r0-r5 for each command
         int vpu_cmds_vc;

@@ -40,9 +40,13 @@
   // free for the foreground to fill in.
   #define RPI_MAX_JOBS 8
 
-  // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs 
+  // Define RPI_DEBLOCK_VPU to perform chroma SAO and deblocking on the VPUs 
   // (currently slower than deblocking on the ARM)
-  // #define RPI_DEBLOCK_VPU
+  //#define RPI_DEBLOCK_VPU
+  
+  // Define RPI_DEBLOCK_LUMA_VPU to perform luma deblocking on the VPUs
+  // Not tested.
+  // #define RPI_DEBLOCK_LUMA_VPU
 
   #define RPI_VPU_DEBLOCK_CACHED 0
 

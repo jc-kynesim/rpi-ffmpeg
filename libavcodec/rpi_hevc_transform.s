@@ -97,6 +97,8 @@ hevc_trans_16x16:
   beq hevc_uv_deblock_16x16_with_clear
   cmp r5,5
   beq hevc_run_command_list
+  cmp r5,6
+  beq sao_process_row
 
   push r6-r15, lr # TODO cut down number of used registers
   mov r14,r3 # coeffs32
@@ -925,3 +927,294 @@ loop_cmds:
   bgt loop_cmds
 
   pop r6-r7, pc
+
+  
+# SAO FILTER
+#
+# Non-Sand format at the moment.
+#
+# Works in units of 16x16 blocks
+#
+# r0 = recPicture
+# r1 = image stride
+# r2 = upper context
+# r3 pointer to current block (0,16,32,48)
+# r6 sao data [typeidx(2) spare(4) eoclass(2) spare(3) leftclass(5) saooffsetval(16)] for typeidx=BAND (eoclass unused)
+#             [typeidx(2) spare(4) eoclass(2) flags(8) saooffsetval(16)] for typeidx=EDGE
+# sao values packed 4 bits each, LSBits for offset[4].
+#
+# Flag values mark which parts of the boundary to restore
+#
+# r8, counter of 16x16 blocks to process
+# r10 type
+# r11 pointer to sao data
+# r12 width left
+# r13 pos of bottom row * 64
+# r14 64
+# r15 upper limit for loop
+.set Vbottomrightcontext, 32
+.set Vk, 48
+.set Voffset, 49
+.set VsaoOffsetVal, 50
+.set Vdiff0, 51
+.set Vdiff1, 52
+.set Vband, 53
+.set Vzeros, 54
+.set Vtemp, 55
+
+.set LeftFlag, 16
+.set TopFlag, 17
+.set RightFlag, 18
+.set BottomFlag, 19
+
+.set TopLeftFlag, 20
+.set TopRightFlag, 21
+.set BottomLeftFlag, 22
+.set BottomRightFlag, 23
+
+.set EoClass0, 24
+.set EoClass1, 25
+.set LeftClass, 16
+
+# src(r0), stride(r1), upper context(r2), sao_data(r3), h_w (r4)
+#
+# h_w stores height of row in top 16 bits, and width in bottom 16 bits
+# this allows the correct determination of the corners to be made for restoring the edges
+sao_process_row:
+  push r6-r15, lr
+  mov r11, r3 
+  mov r12, 0xffff
+  and r12, r12, r4 # Width
+  lsr r13, r4, 16 # Height
+  sub r13, r13, 1 # last row
+  min r13, r13, 15
+  lsl r13, r13, 6 # last row * 64
+  add r8, r12, 15
+  lsr r8, r8, 4 # Number of 16x16 blocks to process
+  vmov HX(Vzeros,0),0
+  
+  # Prepare by loading the first block
+  vldb H(15,32), (r2)
+  addscale16 r6, r0, r1
+  vldb H(16++,32), (r0 += r1) REP 16
+  vldb H(32,32), (r6)
+  
+  # We have no need to store horizontal context as we always do an entire 16 high row each time.
+  
+  # However, we may need diagonals and right pixels so fetch the block data one ahead
+  
+sao_block_loop:
+  # Load data into H(16,16) -> transform into H(16,48)
+
+  # Shift context (corresponding to recPicture)
+  vmov H(15,0), H(15,16)
+  vmov V(16,15), V(16,31)
+  vmov H(32,0), H(32,16)
+  
+  # Shift prefetched block into current block
+  vmov H(15,16), H(15,32)
+  vmov H(16++,16), H(16++,32) REP 16
+  vmov H(32,16), H(32,32)
+  
+  # Load upper context
+  vldb H(15,32), 16(r2)
+  # Load next block
+  addscale16 r6, r0, r1
+  vldb H(16++,32), 16(r0 += r1) REP 16  # TODO prefetch to avoid stalls
+  # Load bottom right data
+  vldb H(32,32), 16(r6)
+
+  # Load data: 
+  ld r6, (r11)
+  
+  # Move the offset values into the VRF
+  vmov HX(VsaoOffsetVal,0), r6
+  
+  # Process and save block
+  bl sao_block
+  
+  # Save upper context
+  vstb H(31,16),(r2)
+  
+  # Update loop variables
+  add r2, 16
+  add r0, 16
+  add r11, 4
+  sub r12, 16
+  sub r8,1
+  cmp r8,0
+  bgt sao_block_loop
+  pop r6-r15, pc
+  
+
+sao_block:
+  lsr r10, r6, 30 # Top 2 bits are class
+  cmp r10,2
+  beq sao_edge
+  cmp r10,1
+  beq sao_band
+  # sao_copy has nothing to do
+  b lr
+    
+sao_band:
+  asr r6,LeftClass # only bottom 5 bits are used
+  
+  vmov HX(Vtemp,0), 4 
+
+  # Set up loop to process a single 16x16 block
+  mov r3, 0
+  mov r14,64
+  addscale16 r15,r3,r14
+sao_band_loop:
+  vmov H(16,48)+r3, H(16,16)+r3  # Set up default values
+  vasr HX(Vband,0),H(16,16)+r3,3
+  # bandIdx = bandTable[band]
+  # bandTable[(k+leftClass)&31] = k+1 . [0<=k<4]
+  # (k+leftClass)&31 = band
+  # (k+leftClass) = band (mod 32)
+  # k = band - leftClass (mod 32)
+  vsub HX(Vk,0), HX(Vband,0), r6
+  vand HX(Vk,0), HX(Vk,0), 31 SETF
+  # WARNING the assembler seems to ignore SETF if we use an immediate instead of HX(Vtemp,0)
+  vsub -, HX(Vk,0), HX(Vtemp,0) SETF  # Flags are N if k in legal range
+  vshl HX(Vk,0), HX(Vk,0), 2 # Amount to shift
+  vshl HX(Voffset,0),HX(VsaoOffsetVal,0), HX(Vk,0)
+  vasr HX(Voffset,0),HX(Voffset,0),12
+  vadds H(16,48)+r3, H(16,16)+r3, HX(Voffset,0) IFN
+  addcmpblt r3,r14,r15,sao_band_loop
+  subscale16 r3,r15,r14 # Put r3 back again
+  
+  # Store processed block
+  vstb H(16++,48), (r0 += r1) REP 16
+  b lr
+  
+  
+sao_copy:
+
+# We pass in r3,r4,r5 as the three locations to be examined
+sao_edge:
+  # Extract eoclass
+  btst r6, EoClass1
+  bne class_23
+  btst r6, EoClass0
+  bne class_1
+class_0:
+  mov r4, 16-1+(16-0)*64 # -1,0
+  mov r5, 16+1+(16-0)*64  # 1,0
+  b got_class
+class_1:
+  mov r4, 16+(16-1)*64 # 0,-1
+  mov r5, 16+(16+1)*64    # 0,1
+  b got_class
+class_23:
+  btst r6, EoClass0
+  bne class_3
+class_2:
+  mov r4, 16-1+(16-1)*64 # -1,-1
+  mov r5, 16+1+(16+1)*64 # 1,1
+  b got_class
+class_3:
+  mov r4, 16+1+(16-1)*64 # 1,-1
+  mov r5, 16-1+(16+1)*64 # -1,1
+got_class:
+
+  # Set up loop to process a single 16x16 block
+  mov r3, 0
+  mov r14,64
+  addscale16 r15,r3,r14
+sao_edge_loop:  
+  vmov H(16,48)+r3, H(16,16)+r3 # Default values are unchanged
+  vsub HX(Vdiff0,0),H(16,16)+r3,H(0,0)+r4
+  vsgn HX(Vk,0),HX(Vdiff0,0),HX(Vzeros,0) CLRA SACC
+  vsub HX(Vdiff1,0),H(16,16)+r3,H(0,0)+r5
+  vsgn HX(Vk,0),HX(Vdiff1,0),HX(Vzeros,0) SACC SETF
+  vadd HX(Vk,0),HX(Vk,0),HX(Vzeros,0) SETF  # Not sure why the flags are not already set correctly, but this instruction seems necessary
+  # Now we have a value of:
+  # -2 -> 1 -> 0 shift
+  # -1 -> 2 -> 1 shift
+  # 0 -> 0
+  # 1 -> 3 -> 2 shift
+  # 2 -> 4 -> 3 shift
+  # So add 1, then another 1 if negative
+  vadd HX(Vk,0), HX(Vk,0), 1
+  vadd HX(Vk,0), HX(Vk,0), 1 IFN
+  ##vadd H(16,48)+r3,HX(Vk,0), 0
+  
+  vshl HX(Vk,0), HX(Vk,0), 2 # Amount to shift
+  vshl HX(Voffset,0),HX(VsaoOffsetVal,0), HX(Vk,0)
+  vasr HX(Voffset,0),HX(Voffset,0),12
+  #vmov H(16,48)+r3,0
+  #vmov H(16,48)+r3,1 IFZ
+  #vmov H(16,48)+r3,4 IFNZ
+  
+  vadds H(16,48)+r3, H(16,16)+r3, HX(Voffset,0) IFNZ
+  
+  add r4,r14
+  add r5,r14
+  addcmpblt r3,r14,r15,sao_edge_loop
+  
+  mov r4, 0x7ffe  # Repair all but corners (done afterwards)
+  #vbitplanes -, r4 SETF
+  .half 0xf408
+  .half 0xe038
+  .half 0x03c4
+  
+  # Check if we need to repair some edges
+  mov r5, r13 # Offset to reach bottom edge
+  sub r3, r12 , 1 
+  min r3, r3, 15 # Offset for right edge
+  btst r6, TopFlag # Set if at the top edge, so ne means we need to restore, eq means not
+  beq done_top
+  vmov H(16,48), H(16,16) IFNZ
+done_top:
+  btst r6, BottomFlag
+  beq done_bottom
+  vmov H(16,48)+r5, H(16,16)+r5 IFNZ
+done_bottom:
+  btst r6, LeftFlag
+  beq done_left
+  vmov V(16,48), V(16,16) IFNZ
+done_left:
+  btst r6, RightFlag
+  beq done_right
+  vmov V(16,48)+r3, V(16,16)+r3 IFNZ
+done_right:
+
+  # Now repair the left corners
+  mov r4, 1
+  #vbitplanes -, r4 SETF
+  .half 0xf408
+  .half 0xe038
+  .half 0x03c4
+
+  btst r6, TopLeftFlag
+  beq done_topleft
+  vmov H(16,48), H(16,16) IFNZ
+done_topleft:
+  btst r6, BottomLeftFlag
+  beq done_bottomleft
+  vmov H(16,48)+r5, H(16,16)+r5 IFNZ
+done_bottomleft:
+
+  # And the right corners
+  # Prepare flags with nonzero marking right edge
+  mov r4, 1
+  lsl r4,r4,r3 # offset to reach right edge
+  #vbitplanes -, r4 SETF
+  .half 0xf408
+  .half 0xe038
+  .half 0x03c4
+  
+  btst r6, TopRightFlag
+  beq done_topright
+  vmov H(16,48), H(16,16) IFNZ
+done_topright:
+  btst r6, BottomRightFlag
+  beq done_bottomright
+  
+  vmov H(16,48)+r5, H(16,16)+r5 IFNZ
+done_bottomright:
+
+  # Store processed block
+  vstb H(16++,48), (r0 += r1) REP 16
+  b lr
