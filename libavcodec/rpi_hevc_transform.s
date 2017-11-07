@@ -767,6 +767,7 @@ uv_process_row:
   vldb H(setup_input,0), (r4)  # We may wish to prefetch these
   cmp r14,1
   bne uv_skip0
+  vadd H(setup_input,0),H(setup_input,4),0 # Rotate by 4 to access V strengths
   vstb H(zeros,0),(r4)
 uv_skip0:
   bl uv_vert_filter
@@ -782,6 +783,7 @@ uv_deblock_loop:
   vldb H(setup_input,0), (r4)
   cmp r14,1
   bne uv_skip1
+  vadd H(setup_input,0),H(setup_input,4),0 # Rotate by 4 to access V strengths
   vstb H(zeros,0),(r4)
 uv_skip1:
   bl uv_vert_filter
@@ -792,6 +794,7 @@ uv_skip1:
   vldb H(setup_input,0), -16(r4)
   cmp r14,1
   bne uv_skip3
+  vadd H(setup_input,0),H(setup_input,4),0 # Rotate by 4 to access V strengths
   vstb H(zeros,0),-16(r4)
 uv_skip3:
   bl uv_horz_filter
@@ -820,6 +823,7 @@ uv_start_deblock_loop:
   vldb H(setup_input,0), -16(r4)
   cmp r14,1
   bne uv_skip2
+  vadd H(setup_input,0),H(setup_input,4),0 # Rotate by 4 to access V strengths
   vstb H(zeros,0),-16(r4)
 uv_skip2:
   bl uv_horz_filter

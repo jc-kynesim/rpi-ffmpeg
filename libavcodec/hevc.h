@@ -40,17 +40,14 @@
   // free for the foreground to fill in.
   #define RPI_MAX_JOBS 8
 
-  // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-  // As it stands there is something mildy broken in VPU deblock - looks mostly OK
-  // but reliably fails some conformance tests (e.g. DBLK_A/B/C_)
-  // With VPU luma & chroma pred it is much the same speed to deblock on the ARM
-  //
-  // * Whilst most of the code still exists it will have rotted by now
-//  #define RPI_DEBLOCK_VPU
+  // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs 
+  // (currently slower than deblocking on the ARM)
+  // #define RPI_DEBLOCK_VPU
 
-  #define RPI_VPU_DEBLOCK_CACHED 1
+  #define RPI_VPU_DEBLOCK_CACHED 0
 
-  #if HAVE_NEON
+  // RPI_DEBLOCK_VPU does not currently support Sand Format
+  #if HAVE_NEON && !RPI_DEBLOCK_VPU
   #define RPI_HEVC_SAND      1
   #else
   // Sand bust on Pi1 currently - reasons unknown
