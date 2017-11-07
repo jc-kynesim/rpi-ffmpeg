@@ -47,7 +47,7 @@
   #define RPI_VPU_DEBLOCK_CACHED 0
 
   // RPI_DEBLOCK_VPU does not currently support Sand Format
-  #if HAVE_NEON && !RPI_DEBLOCK_VPU
+  #if HAVE_NEON && !defined(RPI_DEBLOCK_VPU)
   #define RPI_HEVC_SAND      1
   #else
   // Sand bust on Pi1 currently - reasons unknown
