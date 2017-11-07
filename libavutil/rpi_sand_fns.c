@@ -1,5 +1,4 @@
 #include "config.h"
-#ifdef RPI
 #include <stdint.h>
 #include <string.h>
 #include "rpi_sand_fns.h"
@@ -94,6 +93,4 @@ void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const
         }
     }
 }
-
-#endif  // RPI
 

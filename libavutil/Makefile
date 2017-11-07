@@ -62,8 +62,6 @@ HEADERS = adler32.h                                                     \
           rational.h                                                    \
           replaygain.h                                                  \
           ripemd.h                                                      \
-          rpi_sand_fns.h                                                \
-          rpi_sand_fn_pw.h                                              \
           samplefmt.h                                                   \
           sha.h                                                         \
           sha512.h                                                      \
@@ -142,7 +140,6 @@ OBJS = adler32.o                                                        \
        reverse.o                                                        \
        rc4.o                                                            \
        ripemd.o                                                         \
-       rpi_sand_fns.o                                                   \
        samplefmt.o                                                      \
        sha.o                                                            \
        sha512.o                                                         \
@@ -168,6 +165,7 @@ OBJS-$(CONFIG_QSV)                   += hwcontext_qsv.o
 OBJS-$(CONFIG_LIBDRM)                   += hwcontext_drm.o
 OBJS-$(CONFIG_LZO)                      += lzo.o
 OBJS-$(CONFIG_OPENCL)                   += opencl.o opencl_internal.o
+OBJS-$(CONFIG_RPI)                      += rpi_sand_fns.o
 OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o
 OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o
 OBJS-$(CONFIG_VDPAU)                    += hwcontext_vdpau.o

@@ -167,7 +167,7 @@ typedef struct HEVCDSPContext {
     void (*hevc_v_loop_filter_chroma_c)(uint8_t *pix, ptrdiff_t stride,
                                         int32_t *tc, uint8_t *no_p,
                                         uint8_t *no_q);
-#ifdef RPI
+#if CONFIG_HEVC_RPI_DECODER
     void (*hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
                                  unsigned int _stride, unsigned int beta, const int32_t tc[2],
                                  const uint8_t no_p[2], const uint8_t no_q[2],

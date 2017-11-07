@@ -24,6 +24,7 @@
  * Raw Video Encoder
  */
 
+#include "config.h"
 #include "avcodec.h"
 #include "raw.h"
 #include "internal.h"
@@ -32,7 +33,9 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/avassert.h"
+#if CONFIG_RPI
 #include "libavutil/rpi_sand_fns.h"
+#endif
 
 static av_cold int raw_encode_init(AVCodecContext *avctx)
 {
@@ -51,7 +54,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
-#ifdef RPI
+#if CONFIG_RPI
 static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame)
 {
@@ -109,7 +112,7 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
     if (ret < 0)
         return ret;
 
-#ifdef RPI
+#if CONFIG_RPI
     if (av_rpi_is_sand_frame(frame)) {
         ret = av_rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) : raw_sand16_as_yuv420(avctx, pkt, frame);
         *got_packet = (ret == 0);

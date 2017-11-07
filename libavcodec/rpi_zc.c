@@ -1,5 +1,3 @@
-#include "config.h"
-#ifdef RPI
 #include "libavcodec/avcodec.h"
 #include "rpi_qpu.h"
 #include "rpi_mailbox.h"
@@ -740,6 +738,4 @@ void av_rpi_zc_uninit(struct AVCodecContext * const s)
         }
     }
 }
-
-#endif  // RPI
 

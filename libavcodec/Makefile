@@ -49,7 +49,6 @@ OBJS = allcodecs.o                                                      \
        resample.o                                                       \
        resample2.o                                                      \
        utils.o                                                          \
-       rpi_zc.o                                                         \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 
@@ -125,6 +124,7 @@ OBJS-$(CONFIG_QSVDEC)                  += qsvdec.o
 OBJS-$(CONFIG_QSVENC)                  += qsvenc.o
 OBJS-$(CONFIG_RANGECODER)              += rangecoder.o
 OBJS-$(CONFIG_RDFT)                    += rdft.o
+OBJS-$(CONFIG_RPI)                     += rpi_qpu.o rpi_mailbox.o rpi_zc.o
 OBJS-$(CONFIG_RV34DSP)                 += rv34dsp.o
 OBJS-$(CONFIG_SHARED)                  += log2_tab.o reverse.o
 OBJS-$(CONFIG_SINEWIN)                 += sinewin.o sinewin_fixed.o
@@ -353,10 +353,7 @@ OBJS-$(CONFIG_HAP_ENCODER)             += hapenc.o hap.o
 OBJS-$(CONFIG_HEVC_DECODER)            += hevcdec.o hevc_mvs.o \
                                           hevc_cabac.o hevc_refs.o hevcpred.o    \
                                           hevcdsp.o hevc_filter.o hevc_data.o
-OBJS-$(CONFIG_HEVC_RPI_DECODER)        += rpi_qpu.o                                                        \
-       rpi_shader.o                                                     \
-       rpi_shader_template.o                                            \
-       rpi_mailbox.o
+OBJS-$(CONFIG_HEVC_RPI_DECODER)        += rpi_shader.o rpi_shader_template.o
 OBJS-$(CONFIG_HEVC_CUVID_DECODER)      += cuvid.o
 OBJS-$(CONFIG_HEVC_MEDIACODEC_DECODER) += mediacodecdec.o
 OBJS-$(CONFIG_HEVC_NVENC_ENCODER)      += nvenc_hevc.o
