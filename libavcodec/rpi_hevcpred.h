@@ -53,7 +53,7 @@ typedef struct HEVCPredContext {
 #endif
 } HEVCPredContext;
 
-void ff_hevc_pred_init(HEVCPredContext *hpc, int bit_depth);
-void ff_hevc_pred_init_mips(HEVCPredContext *hpc, int bit_depth);
+void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth);
+void ff_hevc_rpi_pred_init_mips(HEVCPredContext *hpc, int bit_depth);
 
 #endif /* AVCODEC_RPI_HEVCPRED_H */

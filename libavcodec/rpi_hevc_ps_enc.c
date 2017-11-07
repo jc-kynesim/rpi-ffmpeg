@@ -63,7 +63,7 @@ static void write_ptl(PutBitContext *pb, PTL *ptl, int max_num_sub_layers)
     }
 }
 
-int ff_hevc_encode_nal_vps(HEVCVPS *vps, unsigned int id,
+int ff_hevc_rpi_encode_nal_vps(HEVCVPS *vps, unsigned int id,
                            uint8_t *buf, int buf_size)
 {
     PutBitContext pb;

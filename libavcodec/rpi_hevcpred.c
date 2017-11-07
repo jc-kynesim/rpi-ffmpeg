@@ -62,7 +62,7 @@
 #undef PRED_C
 #endif
 
-void ff_hevc_pred_init(HEVCPredContext *hpc, int bit_depth)
+void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth)
 {
 #undef FUNC
 #define FUNC(a, depth) a ## _ ## depth
@@ -125,5 +125,5 @@ void ff_hevc_pred_init(HEVCPredContext *hpc, int bit_depth)
     }
 
     if (ARCH_MIPS)
-        ff_hevc_pred_init_mips(hpc, bit_depth);
+        ff_hevc_rpi_pred_init_mips(hpc, bit_depth);
 }

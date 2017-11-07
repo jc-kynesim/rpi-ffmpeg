@@ -17,7 +17,7 @@
 @   ptrdiff_t stride,     [r2]
 @   int dc_v)             [r3]
 
-function ff_hevc_add_residual_4x4_u_neon_8, export=1
+function ff_hevc_rpi_add_residual_4x4_u_neon_8, export=1
         vld1.8      {d16}, [r0, :64], r2
         vld1.8      {d17}, [r0, :64], r2
         vld1.8      {d18}, [r0, :64], r2
@@ -53,7 +53,7 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 @   int dc_v)             [r3]
 
-function ff_hevc_add_residual_8x8_u_neon_8, export=1
+function ff_hevc_rpi_add_residual_8x8_u_neon_8, export=1
         mov         r12,    #4
         vdup.16     q15, r3
 1:
@@ -84,7 +84,7 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 @   int dc_v)             [r3]
 
-function ff_hevc_add_residual_16x16_u_neon_8, export=1
+function ff_hevc_rpi_add_residual_16x16_u_neon_8, export=1
         mov         r12,    #16
         vdup.16     q15, r3
 1:
@@ -114,7 +114,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function ff_hevc_add_residual_4x4_v_neon_8, export=1
+function ff_hevc_rpi_add_residual_4x4_v_neon_8, export=1
         vld1.8      {d16}, [r0, :64], r2
         vld1.8      {d17}, [r0, :64], r2
         vld1.8      {d18}, [r0, :64], r2
@@ -149,7 +149,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function ff_hevc_add_residual_8x8_v_neon_8, export=1
+function ff_hevc_rpi_add_residual_8x8_v_neon_8, export=1
         mov         r12,    #4
         vdup.16     q15, r3
 1:
@@ -179,7 +179,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function ff_hevc_add_residual_16x16_v_neon_8, export=1
+function ff_hevc_rpi_add_residual_16x16_v_neon_8, export=1
         mov         r12,    #16
         vdup.16     q15, r3
 1:
@@ -209,7 +209,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function ff_hevc_add_residual_4x4_c_neon_8, export=1
+function ff_hevc_rpi_add_residual_4x4_c_neon_8, export=1
         vld1.8      {d16}, [r0, :64], r2
         vld1.8      {d17}, [r0, :64], r2
         vld1.8      {d18}, [r0, :64], r2
@@ -242,7 +242,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function ff_hevc_add_residual_8x8_c_neon_8, export=1
+function ff_hevc_rpi_add_residual_8x8_c_neon_8, export=1
         mov         r12,    #8
         add         r3, r1, #(8*8*2)  @ Offset to V
 1:
@@ -266,7 +266,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function ff_hevc_add_residual_16x16_c_neon_8, export=1
+function ff_hevc_rpi_add_residual_16x16_c_neon_8, export=1
         mov         r12,    #16
         add         r3, r1, #(16*16*2)  @ Offset to V
 1:

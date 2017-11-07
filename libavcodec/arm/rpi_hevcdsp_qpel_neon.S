@@ -333,28 +333,28 @@
         bx lr
 .endm
 
-function ff_hevc_put_qpel_v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_v1_neon_8, export=1
         hevc_put_qpel_vX_neon_8 qpel_filter_1
 endfunc
 
-function ff_hevc_put_qpel_v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_v2_neon_8, export=1
         hevc_put_qpel_vX_neon_8 qpel_filter_2
 endfunc
 
-function ff_hevc_put_qpel_v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_v3_neon_8, export=1
         hevc_put_qpel_vX_neon_8 qpel_filter_3
 endfunc
 
 
-function ff_hevc_put_qpel_uw_v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_v1_neon_8, export=1
         hevc_put_qpel_uw_vX_neon_8 qpel_filter_1
 endfunc
 
-function ff_hevc_put_qpel_uw_v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_v2_neon_8, export=1
         hevc_put_qpel_uw_vX_neon_8 qpel_filter_2
 endfunc
 
-function ff_hevc_put_qpel_uw_v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_v3_neon_8, export=1
         hevc_put_qpel_uw_vX_neon_8 qpel_filter_3
 endfunc
 
@@ -469,28 +469,28 @@ endfunc
         bx lr
 .endm
 
-function ff_hevc_put_qpel_h1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h1_neon_8, export=1
         hevc_put_qpel_hX_neon_8 qpel_filter_1
 endfunc
 
-function ff_hevc_put_qpel_h2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h2_neon_8, export=1
         hevc_put_qpel_hX_neon_8 qpel_filter_2
 endfunc
 
-function ff_hevc_put_qpel_h3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h3_neon_8, export=1
         hevc_put_qpel_hX_neon_8 qpel_filter_3
 endfunc
 
 
-function ff_hevc_put_qpel_uw_h1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h1_neon_8, export=1
         hevc_put_qpel_uw_hX_neon_8 qpel_filter_1
 endfunc
 
-function ff_hevc_put_qpel_uw_h2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h2_neon_8, export=1
         hevc_put_qpel_uw_hX_neon_8 qpel_filter_2
 endfunc
 
-function ff_hevc_put_qpel_uw_h3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h3_neon_8, export=1
         hevc_put_qpel_uw_hX_neon_8 qpel_filter_3
 endfunc
 
@@ -666,76 +666,76 @@ endfunc
 .endm
 
 
-function ff_hevc_put_qpel_h1v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h1v1_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_1 qpel_filter_1_32b
 endfunc
 
-function ff_hevc_put_qpel_h2v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h2v1_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_2 qpel_filter_1_32b
 endfunc
 
-function ff_hevc_put_qpel_h3v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h3v1_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_3 qpel_filter_1_32b
 endfunc
 
-function ff_hevc_put_qpel_h1v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h1v2_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_1 qpel_filter_2_32b
 endfunc
 
-function ff_hevc_put_qpel_h2v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h2v2_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_2 qpel_filter_2_32b
 endfunc
 
-function ff_hevc_put_qpel_h3v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h3v2_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_3 qpel_filter_2_32b
 endfunc
 
-function ff_hevc_put_qpel_h1v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h1v3_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_1 qpel_filter_3_32b
 endfunc
 
-function ff_hevc_put_qpel_h2v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h2v3_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_2 qpel_filter_3_32b
 endfunc
 
-function ff_hevc_put_qpel_h3v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_h3v3_neon_8, export=1
         hevc_put_qpel_hXvY_neon_8 qpel_filter_3 qpel_filter_3_32b
 endfunc
 
 
-function ff_hevc_put_qpel_uw_h1v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h1v1_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_1 qpel_filter_1_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h2v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h2v1_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_2 qpel_filter_1_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h3v1_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h3v1_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_3 qpel_filter_1_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h1v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h1v2_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_1 qpel_filter_2_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h2v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h2v2_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_2 qpel_filter_2_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h3v2_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h3v2_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_3 qpel_filter_2_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h1v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h1v3_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_1 qpel_filter_3_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h2v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h2v3_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_2 qpel_filter_3_32b
 endfunc
 
-function ff_hevc_put_qpel_uw_h3v3_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_h3v3_neon_8, export=1
         hevc_put_qpel_uw_hXvY_neon_8 qpel_filter_3 qpel_filter_3_32b
 endfunc
 
@@ -746,7 +746,7 @@ endfunc
         lsl    r12, #1
 .endm
 
-function ff_hevc_put_pixels_w2_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w2_neon_8, export=1
         init_put_pixels
         vmov.u8      d5, #255
         vshr.u64     d5, #32
@@ -761,7 +761,7 @@ function ff_hevc_put_pixels_w2_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w4_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w4_neon_8, export=1
         init_put_pixels
 0:      subs r3, #2
         vld1.32   {d0[0]}, [r1], r2
@@ -775,7 +775,7 @@ function ff_hevc_put_pixels_w4_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w6_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w6_neon_8, export=1
         init_put_pixels
         vmov.u8      q10, #255
         vshr.u64     d21, #32
@@ -790,7 +790,7 @@ function ff_hevc_put_pixels_w6_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w8_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w8_neon_8, export=1
         init_put_pixels
 0:      subs r3, #2
         vld1.8   {d0}, [r1], r2
@@ -805,7 +805,7 @@ function ff_hevc_put_pixels_w8_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w12_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w12_neon_8, export=1
         init_put_pixels
 0:      subs r3, #2
         vld1.64    {d0}, [r1]
@@ -828,7 +828,7 @@ function ff_hevc_put_pixels_w12_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w16_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w16_neon_8, export=1
         init_put_pixels
 0:      subs r3, #2
         vld1.8   {q0}, [r1], r2
@@ -845,7 +845,7 @@ function ff_hevc_put_pixels_w16_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w24_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w24_neon_8, export=1
         init_put_pixels
 0:      subs r3, #1
         vld1.8   {d0, d1, d2}, [r1], r2
@@ -859,7 +859,7 @@ function ff_hevc_put_pixels_w24_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w32_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w32_neon_8, export=1
         init_put_pixels
 0:      subs r3, #1
         vld1.8 {q0, q1}, [r1], r2
@@ -874,7 +874,7 @@ function ff_hevc_put_pixels_w32_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w48_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w48_neon_8, export=1
         init_put_pixels
 0:      subs r3, #1
         vld1.8    {q0, q1}, [r1]
@@ -894,7 +894,7 @@ function ff_hevc_put_pixels_w48_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_pixels_w64_neon_8, export=1
+function ff_hevc_rpi_put_pixels_w64_neon_8, export=1
         init_put_pixels
 0:      subs r3, #1
         vld1.8    {q0, q1}, [r1]
@@ -916,7 +916,7 @@ function ff_hevc_put_pixels_w64_neon_8, export=1
         bx lr
 endfunc
 
-function ff_hevc_put_qpel_uw_pixels_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_pixels_neon_8, export=1
         push   {r4-r9}
         ldr    r5, [sp, #24] // width
         ldr    r4, [sp, #28] // height
@@ -946,7 +946,7 @@ function ff_hevc_put_qpel_uw_pixels_neon_8, export=1
 endfunc
 
 .macro put_qpel_uw_pixels width, regs, regs2, regs3, regs4
-function ff_hevc_put_qpel_uw_pixels_w\width\()_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_pixels_w\width\()_neon_8, export=1
         ldr    r12, [sp] // height
 1:      subs   r12, #4
         vld1.32     {\regs}  , [r2], r3
@@ -963,7 +963,7 @@ endfunc
 .endm
 
 .macro put_qpel_uw_pixels_m width, regs, regs2, regs3, regs4
-function ff_hevc_put_qpel_uw_pixels_w\width\()_neon_8, export=1
+function ff_hevc_rpi_put_qpel_uw_pixels_w\width\()_neon_8, export=1
         push   {r4-r5}
         ldr    r12, [sp, #8] // height
 1:      subs r12, #2

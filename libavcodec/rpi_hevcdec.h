@@ -719,7 +719,7 @@ typedef struct HEVCContext {
 
 #ifdef RPI_DEBLOCK_VPU
 // With the new scheme of rpi_execute_dblk_cmds 
-// it looks like ff_hevc_hls_filter is no longer called in raster order.
+// it looks like ff_hevc_rpi_hls_filter is no longer called in raster order.
 // This causes trouble if RPI_DEBLOCK_VPU_Q_COUNT > 1 because we prepare setup
 // data for more than one row at a time before triggering the deblocker for one row.
 // This means that the deblock of the final row can use the wrong setup buffer.
@@ -864,105 +864,105 @@ typedef struct HEVCContext {
 /**
  * Mark all frames in DPB as unused for reference.
  */
-void ff_hevc_clear_refs(HEVCContext *s);
+void ff_hevc_rpi_clear_refs(HEVCContext *s);
 
 /**
  * Drop all frames currently in DPB.
  */
-void ff_hevc_flush_dpb(HEVCContext *s);
+void ff_hevc_rpi_flush_dpb(HEVCContext *s);
 
-const RefPicList *ff_hevc_get_ref_list(const HEVCContext * const s, const HEVCFrame * const ref,
+const RefPicList *ff_hevc_rpi_get_ref_list(const HEVCContext * const s, const HEVCFrame * const ref,
                                  int x0, int y0);
 
 /**
  * Construct the reference picture sets for the current frame.
  */
-int ff_hevc_frame_rps(HEVCContext *s);
+int ff_hevc_rpi_frame_rps(HEVCContext *s);
 
 /**
  * Construct the reference picture list(s) for the current slice.
  */
-int ff_hevc_slice_rpl(HEVCContext *s);
+int ff_hevc_rpi_slice_rpl(HEVCContext *s);
 
-void ff_hevc_save_states(HEVCContext *s, const HEVCLocalContext * const lc, int ctb_addr_ts);
-int ff_hevc_cabac_init(const HEVCContext * const s, HEVCLocalContext *const lc, int ctb_addr_ts);
-int ff_hevc_sao_merge_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_sao_type_idx_decode(HEVCLocalContext * const lc);
-int ff_hevc_sao_band_position_decode(HEVCLocalContext * const lc);
-int ff_hevc_sao_offset_abs_decode(const HEVCContext * const s, HEVCLocalContext * const lc);
-int ff_hevc_sao_offset_sign_decode(HEVCLocalContext * const lc);
-int ff_hevc_sao_eo_class_decode(HEVCLocalContext * const lc);
-int ff_hevc_end_of_slice_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_cu_transquant_bypass_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_skip_flag_decode(const HEVCContext * const s, HEVCLocalContext * const lc,
+void ff_hevc_rpi_save_states(HEVCContext *s, const HEVCLocalContext * const lc, int ctb_addr_ts);
+int ff_hevc_rpi_cabac_init(const HEVCContext * const s, HEVCLocalContext *const lc, int ctb_addr_ts);
+int ff_hevc_rpi_sao_merge_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_sao_type_idx_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_sao_band_position_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_sao_offset_abs_decode(const HEVCContext * const s, HEVCLocalContext * const lc);
+int ff_hevc_rpi_sao_offset_sign_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_sao_eo_class_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_end_of_slice_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_cu_transquant_bypass_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_skip_flag_decode(const HEVCContext * const s, HEVCLocalContext * const lc,
                              const int x0, const int y0, const int x_cb, const int y_cb);
-int ff_hevc_pred_mode_decode(HEVCLocalContext * const lc);
-int ff_hevc_split_coding_unit_flag_decode(const HEVCContext * const s, HEVCLocalContext * const lc, const int ct_depth,
+int ff_hevc_rpi_pred_mode_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_split_coding_unit_flag_decode(const HEVCContext * const s, HEVCLocalContext * const lc, const int ct_depth,
                                           const int x0, const int y0);
-int ff_hevc_part_mode_decode(const HEVCContext * const s, HEVCLocalContext * const lc, const int log2_cb_size);
-int ff_hevc_pcm_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_prev_intra_luma_pred_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_mpm_idx_decode(HEVCLocalContext * const lc);
-int ff_hevc_rem_intra_luma_pred_mode_decode(HEVCLocalContext * const lc);
-int ff_hevc_intra_chroma_pred_mode_decode(HEVCLocalContext * const lc);
-int ff_hevc_merge_idx_decode(const HEVCContext * const s, HEVCLocalContext * const lc);
-int ff_hevc_merge_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_inter_pred_idc_decode(HEVCLocalContext * const lc, int nPbW, int nPbH);
-int ff_hevc_ref_idx_lx_decode(HEVCLocalContext * const lc, const int num_ref_idx_lx);
-int ff_hevc_mvp_lx_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_no_residual_syntax_flag_decode(HEVCLocalContext * const lc);
-int ff_hevc_split_transform_flag_decode(HEVCLocalContext * const lc, const int log2_trafo_size);
-int ff_hevc_cbf_cb_cr_decode(HEVCLocalContext * const lc, const int trafo_depth);
-int ff_hevc_cbf_luma_decode(HEVCLocalContext * const lc, const int trafo_depth);
-int ff_hevc_log2_res_scale_abs(HEVCLocalContext * const lc, const int idx);
-int ff_hevc_res_scale_sign_flag(HEVCLocalContext *const lc, const int idx);
+int ff_hevc_rpi_part_mode_decode(const HEVCContext * const s, HEVCLocalContext * const lc, const int log2_cb_size);
+int ff_hevc_rpi_pcm_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_prev_intra_luma_pred_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_mpm_idx_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_rem_intra_luma_pred_mode_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_intra_chroma_pred_mode_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_merge_idx_decode(const HEVCContext * const s, HEVCLocalContext * const lc);
+int ff_hevc_rpi_merge_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_inter_pred_idc_decode(HEVCLocalContext * const lc, int nPbW, int nPbH);
+int ff_hevc_rpi_ref_idx_lx_decode(HEVCLocalContext * const lc, const int num_ref_idx_lx);
+int ff_hevc_rpi_mvp_lx_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_no_residual_syntax_flag_decode(HEVCLocalContext * const lc);
+int ff_hevc_rpi_split_transform_flag_decode(HEVCLocalContext * const lc, const int log2_trafo_size);
+int ff_hevc_rpi_cbf_cb_cr_decode(HEVCLocalContext * const lc, const int trafo_depth);
+int ff_hevc_rpi_cbf_luma_decode(HEVCLocalContext * const lc, const int trafo_depth);
+int ff_hevc_rpi_log2_res_scale_abs(HEVCLocalContext * const lc, const int idx);
+int ff_hevc_rpi_res_scale_sign_flag(HEVCLocalContext *const lc, const int idx);
 
 /**
  * Get the number of candidate references for the current frame.
  */
-int ff_hevc_frame_nb_refs(HEVCContext *s);
+int ff_hevc_rpi_frame_nb_refs(HEVCContext *s);
 
-int ff_hevc_set_new_ref(HEVCContext *s, AVFrame **frame, int poc);
+int ff_hevc_rpi_set_new_ref(HEVCContext *s, AVFrame **frame, int poc);
 
 /**
  * Find next frame in output order and put a reference to it in frame.
  * @return 1 if a frame was output, 0 otherwise
  */
-int ff_hevc_output_frame(HEVCContext *s, AVFrame *frame, int flush);
+int ff_hevc_rpi_output_frame(HEVCContext *s, AVFrame *frame, int flush);
 
-void ff_hevc_bump_frame(HEVCContext *s);
+void ff_hevc_rpi_bump_frame(HEVCContext *s);
 
-void ff_hevc_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags);
+void ff_hevc_rpi_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags);
 
-void ff_hevc_set_neighbour_available(const HEVCContext * const s, HEVCLocalContext * const lc, const int x0, const int y0,
+void ff_hevc_rpi_set_neighbour_available(const HEVCContext * const s, HEVCLocalContext * const lc, const int x0, const int y0,
                                      const int nPbW, const int nPbH);
-void ff_hevc_luma_mv_merge_mode(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0, int nPbW,
+void ff_hevc_rpi_luma_mv_merge_mode(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0, int nPbW,
                                 int nPbH, int log2_cb_size, int part_idx,
                                 int merge_idx, MvField * const mv);
-void ff_hevc_luma_mv_mvp_mode(const HEVCContext * const s, HEVCLocalContext *lc, int x0, int y0, int nPbW,
+void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCContext * const s, HEVCLocalContext *lc, int x0, int y0, int nPbW,
                               int nPbH, int log2_cb_size, int part_idx,
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX);
-void ff_hevc_set_qPy(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size);
-void ff_hevc_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
+void ff_hevc_rpi_set_qPy(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size);
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
                                            int log2_trafo_size);
-int ff_hevc_cu_qp_delta_sign_flag(HEVCLocalContext * const lc);
-int ff_hevc_cu_qp_delta_abs(HEVCLocalContext * const lc);
-int ff_hevc_cu_chroma_qp_offset_flag(HEVCLocalContext * const lc);
-int ff_hevc_cu_chroma_qp_offset_idx(const HEVCContext * const s, HEVCLocalContext * const lc);
-void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const int ctb_size);
-void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size);
-void ff_hevc_hls_residual_coding(const HEVCContext * const s, HEVCLocalContext * const lc,
+int ff_hevc_rpi_cu_qp_delta_sign_flag(HEVCLocalContext * const lc);
+int ff_hevc_rpi_cu_qp_delta_abs(HEVCLocalContext * const lc);
+int ff_hevc_rpi_cu_chroma_qp_offset_flag(HEVCLocalContext * const lc);
+int ff_hevc_rpi_cu_chroma_qp_offset_idx(const HEVCContext * const s, HEVCLocalContext * const lc);
+void ff_hevc_rpi_hls_filter(HEVCContext * const s, const int x, const int y, const int ctb_size);
+void ff_hevc_rpi_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size);
+void ff_hevc_rpi_hls_residual_coding(const HEVCContext * const s, HEVCLocalContext * const lc,
                                 const int x0, const int y0,
                                 const int log2_trafo_size, const enum ScanType scan_idx,
                                 const int c_idx);
 
-void ff_hevc_hls_mvd_coding(HEVCLocalContext * const lc);
+void ff_hevc_rpi_hls_mvd_coding(HEVCLocalContext * const lc);
 
 
-extern const uint8_t ff_hevc_qpel_extra_before[4];
-extern const uint8_t ff_hevc_qpel_extra_after[4];
-extern const uint8_t ff_hevc_qpel_extra[4];
+extern const uint8_t ff_hevc_rpi_qpel_extra_before[4];
+extern const uint8_t ff_hevc_rpi_qpel_extra_after[4];
+extern const uint8_t ff_hevc_rpi_qpel_extra[4];
 
 #if CONFIG_HEVC_RPI_DECODER
 int16_t * rpi_alloc_coeff_buf(HEVCRpiJob * const jb, const int buf_no, const int n);
@@ -980,7 +980,7 @@ void ff_hevc_rpi_progress_signal_field(HEVCContext * const s, const int val, con
 
 // All of these expect that s->threads_type == FF_THREAD_FRAME
 
-static inline void ff_hevc_progress_wait_mv(const HEVCContext * const s, HEVCRpiJob * const jb,
+static inline void ff_hevc_rpi_progress_wait_mv(const HEVCContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int y)
 {
     if (s->enable_rpi)
@@ -989,13 +989,13 @@ static inline void ff_hevc_progress_wait_mv(const HEVCContext * const s, HEVCRpi
         ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
 }
 
-static inline void ff_hevc_progress_signal_mv(HEVCContext * const s, const int y)
+static inline void ff_hevc_rpi_progress_signal_mv(HEVCContext * const s, const int y)
 {
     if (s->enable_rpi && s->used_for_ref)
         ff_hevc_rpi_progress_signal_field(s, y, 1);
 }
 
-static inline void ff_hevc_progress_wait_recon(const HEVCContext * const s, HEVCRpiJob * const jb,
+static inline void ff_hevc_rpi_progress_wait_recon(const HEVCContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int y)
 {
     if (s->enable_rpi)
@@ -1004,7 +1004,7 @@ static inline void ff_hevc_progress_wait_recon(const HEVCContext * const s, HEVC
         ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
 }
 
-static inline void ff_hevc_progress_signal_recon(HEVCContext * const s, const int y)
+static inline void ff_hevc_rpi_progress_signal_recon(HEVCContext * const s, const int y)
 {
     if (s->used_for_ref)
     {
@@ -1015,7 +1015,7 @@ static inline void ff_hevc_progress_signal_recon(HEVCContext * const s, const in
     }
 }
 
-static inline void ff_hevc_progress_signal_all_done(HEVCContext * const s)
+static inline void ff_hevc_rpi_progress_signal_all_done(HEVCContext * const s)
 {
     if (s->enable_rpi)
     {
@@ -1029,17 +1029,17 @@ static inline void ff_hevc_progress_signal_all_done(HEVCContext * const s)
 #else
 
 // Use #define as that allows us to discard "jb" which won't exist in non-RPI world
-#define ff_hevc_progress_wait_mv(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
-#define ff_hevc_progress_wait_recon(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
-#define ff_hevc_progress_signal_mv(s, y)
-#define ff_hevc_progress_signal_recon(s, y) ff_thread_report_progress(&s->ref->tf, y, 0)
-#define ff_hevc_progress_signal_all_done(s) ff_thread_report_progress(&s->ref->tf, INT_MAX, 0)
+#define ff_hevc_rpi_progress_wait_mv(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
+#define ff_hevc_rpi_progress_wait_recon(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
+#define ff_hevc_rpi_progress_signal_mv(s, y)
+#define ff_hevc_rpi_progress_signal_recon(s, y) ff_thread_report_progress(&s->ref->tf, y, 0)
+#define ff_hevc_rpi_progress_signal_all_done(s) ff_thread_report_progress(&s->ref->tf, INT_MAX, 0)
 
 #endif
 
 // Set all done - signal nothing (used in missing refs)
 // Works for both rpi & non-rpi
-static inline void ff_hevc_progress_set_all_done(HEVCFrame * const ref)
+static inline void ff_hevc_rpi_progress_set_all_done(HEVCFrame * const ref)
 {
     if (ref->tf.progress != NULL)
     {

@@ -185,13 +185,13 @@ typedef struct HEVCDSPContext {
                                                const MvField *curr, const MvField *neigh, uint8_t *bs);
 } HEVCDSPContext;
 
-void ff_hevc_dsp_init(HEVCDSPContext *hpc, int bit_depth);
+void ff_hevc_rpi_dsp_init(HEVCDSPContext *hpc, int bit_depth);
 
-extern const int8_t ff_hevc_epel_filters[7][4];
-extern const int8_t ff_hevc_qpel_filters[3][16];
+extern const int8_t ff_hevc_rpi_epel_filters[7][4];
+extern const int8_t ff_hevc_rpi_qpel_filters[3][16];
 
-void ff_hevc_dsp_init_ppc(HEVCDSPContext *c, const int bit_depth);
-void ff_hevc_dsp_init_x86(HEVCDSPContext *c, const int bit_depth);
+void ff_hevc_rpi_dsp_init_ppc(HEVCDSPContext *c, const int bit_depth);
+void ff_hevc_rpi_dsp_init_x86(HEVCDSPContext *c, const int bit_depth);
 void ff_hevcdsp_init_arm(HEVCDSPContext *c, const int bit_depth);
-void ff_hevc_dsp_init_mips(HEVCDSPContext *c, const int bit_depth);
+void ff_hevc_rpi_dsp_init_mips(HEVCDSPContext *c, const int bit_depth);
 #endif /* AVCODEC_RPI_HEVCDSP_H */

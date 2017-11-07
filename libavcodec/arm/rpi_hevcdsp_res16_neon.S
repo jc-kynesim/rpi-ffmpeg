@@ -19,7 +19,7 @@
 @  int16_t *res,      [r1]
 @  ptrdiff_t stride)  [r2]
 
-function JOIN(ff_hevc_add_residual_4x4_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_4x4_neon_, BIT_DEPTH), export=1
         vld1.16     {q10, q11}, [r1]
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vld1.16     {d0}, [r0, :64], r2
@@ -48,7 +48,7 @@ endfunc
 @  ptrdiff_t stride,  [r1]
 @  int dc)            [r2]
 
-function JOIN(ff_hevc_add_residual_4x4_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_4x4_dc_neon_, BIT_DEPTH), export=1
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vdup.i16    q9,  r3
         vld1.16     {d0}, [r0, :64], r1
@@ -79,7 +79,7 @@ endfunc
 @  int16_t *res,      [r1]
 @  ptrdiff_t stride)  [r2]
 
-function JOIN(ff_hevc_add_residual_8x8_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_8x8_neon_, BIT_DEPTH), export=1
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
         vdup.i16    q9,  r3
@@ -118,7 +118,7 @@ endfunc
 @  ptrdiff_t stride,  [r1]
 @  int dc_uv)         [r2]
 
-function JOIN(ff_hevc_add_residual_4x4_dc_c_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_4x4_dc_c_neon_, BIT_DEPTH), export=1
         mov         r12, #1
         vdup.32     q15, r2
         b           9f
@@ -129,7 +129,7 @@ endfunc
 @  ptrdiff_t stride,  [r1]
 @  int dc)            [r2]
 
-function JOIN(ff_hevc_add_residual_8x8_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_8x8_dc_neon_, BIT_DEPTH), export=1
         mov         r12, #2
         vdup.16     q15, r2
 9:
@@ -169,7 +169,7 @@ endfunc
 @  int16_t *res,      [r1]
 @  ptrdiff_t stride)  [r2]
 
-function JOIN(ff_hevc_add_residual_16x16_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_16x16_neon_, BIT_DEPTH), export=1
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
         vdup.i16    q9,  r3
@@ -205,7 +205,7 @@ endfunc
 @  ptrdiff_t stride,  [r1]
 @  int dc_uv)         [r2]
 
-function JOIN(ff_hevc_add_residual_8x8_dc_c_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_8x8_dc_c_neon_, BIT_DEPTH), export=1
         mov         r12, #4
         vdup.32     q15, r2
         b           9f
@@ -216,7 +216,7 @@ endfunc
 @  ptrdiff_t stride,  [r1]
 @  int dc)            [r2]
 
-function JOIN(ff_hevc_add_residual_16x16_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_16x16_dc_neon_, BIT_DEPTH), export=1
         vdup.i16    q15, r2
         mov         r12, #8
 9:
@@ -248,7 +248,7 @@ endfunc
 @  int16_t *res,      [r1]
 @  ptrdiff_t stride)  [r2]
 
-function JOIN(ff_hevc_add_residual_32x32_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_32x32_neon_, BIT_DEPTH), export=1
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
         vdup.i16    q9,  r3
@@ -274,7 +274,7 @@ endfunc
 @  ptrdiff_t stride,  [r1]
 @  int dc_uv)         [r2]
 
-function JOIN(ff_hevc_add_residual_16x16_dc_c_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_16x16_dc_c_neon_, BIT_DEPTH), export=1
         mov         r12, #16
         vdup.32     q15, r2
         b           9f
@@ -285,7 +285,7 @@ endfunc
 @  ptrdiff_t stride,  [r1]
 @  int dc)            [r2]
 
-function JOIN(ff_hevc_add_residual_32x32_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_32x32_dc_neon_, BIT_DEPTH), export=1
         vdup.i16    q15, r2
         mov         r12, #32
 9:
@@ -316,7 +316,7 @@ endfunc
 @   ptrdiff_t stride,     [r2]
 @   int dc)               [r3]
 
-function JOIN(ff_hevc_add_residual_4x4_u_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_4x4_u_neon_, BIT_DEPTH), export=1
         vld1.16     {q10, q11}, [r1, :256]
         vdup.16     q15, r3
         movw        r3,  #(1 << BIT_DEPTH) - 1
@@ -348,7 +348,7 @@ endfunc
 @   ptrdiff_t stride,     [r2]
 @   int dc)               [r3]
 
-function JOIN(ff_hevc_add_residual_8x8_u_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_8x8_u_neon_, BIT_DEPTH), export=1
         vdup.16     q15, r3
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
@@ -377,7 +377,7 @@ endfunc
 @   ptrdiff_t stride,     [r2]
 @   int dc)               [r3]
 
-function JOIN(ff_hevc_add_residual_16x16_u_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_16x16_u_neon_, BIT_DEPTH), export=1
         vdup.16     q15, r3
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
@@ -410,7 +410,7 @@ endfunc
 @   ptrdiff_t stride,     [r2]
 @   int dc)               [r3]
 
-function JOIN(ff_hevc_add_residual_4x4_v_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_4x4_v_neon_, BIT_DEPTH), export=1
         vld1.16     {q10, q11}, [r1, :256]
         vdup.16     q15, r3
         movw        r3,  #(1 << BIT_DEPTH) - 1
@@ -442,7 +442,7 @@ endfunc
 @   ptrdiff_t stride,     [r2]
 @   int dc)               [r3]
 
-function JOIN(ff_hevc_add_residual_8x8_v_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_8x8_v_neon_, BIT_DEPTH), export=1
         vdup.16     q15, r3
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
@@ -471,7 +471,7 @@ endfunc
 @   ptrdiff_t stride,     [r2]
 @   int dc)               [r3]
 
-function JOIN(ff_hevc_add_residual_16x16_v_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_16x16_v_neon_, BIT_DEPTH), export=1
         vdup.16     q15, r3
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
@@ -503,7 +503,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function JOIN(ff_hevc_add_residual_4x4_c_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_4x4_c_neon_, BIT_DEPTH), export=1
         vldm        r1, {q10-q13}
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
@@ -540,7 +540,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function JOIN(ff_hevc_add_residual_8x8_c_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_8x8_c_neon_, BIT_DEPTH), export=1
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
         mov         r12, #4
@@ -576,7 +576,7 @@ endfunc
 @   const int16_t *res,   [r1]
 @   ptrdiff_t stride)     [r2]
 
-function JOIN(ff_hevc_add_residual_16x16_c_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_add_residual_16x16_c_neon_, BIT_DEPTH), export=1
         movw        r3,  #(1 << BIT_DEPTH) - 1
         vmov.i64    q8,  #0
         mov         r12, #16

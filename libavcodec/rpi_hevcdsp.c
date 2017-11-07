@@ -22,7 +22,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "hevcdsp.h"
+#include "rpi_hevcdsp.h"
 
 static const int8_t transform[32][32] = {
     { 64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,
@@ -91,7 +91,7 @@ static const int8_t transform[32][32] = {
       90, -90,  88, -85,  82, -78,  73, -67,  61, -54,  46, -38,  31, -22,  13,  -4 },
 };
 
-DECLARE_ALIGNED(16, const int8_t, ff_hevc_epel_filters[7][4]) = {
+DECLARE_ALIGNED(16, const int8_t, ff_hevc_rpi_epel_filters[7][4]) = {
     { -2, 58, 10, -2},
     { -4, 54, 16, -2},
     { -6, 46, 28, -4},
@@ -101,26 +101,26 @@ DECLARE_ALIGNED(16, const int8_t, ff_hevc_epel_filters[7][4]) = {
     { -2, 10, 58, -2},
 };
 
-DECLARE_ALIGNED(16, const int8_t, ff_hevc_qpel_filters[3][16]) = {
+DECLARE_ALIGNED(16, const int8_t, ff_hevc_rpi_qpel_filters[3][16]) = {
     { -1,  4,-10, 58, 17, -5,  1,  0, -1,  4,-10, 58, 17, -5,  1,  0},
     { -1,  4,-11, 40, 40,-11,  4, -1, -1,  4,-11, 40, 40,-11,  4, -1},
     {  0,  1, -5, 17, 58,-10,  4, -1,  0,  1, -5, 17, 58,-10,  4, -1}
 };
 
 #define BIT_DEPTH 8
-#include "hevcdsp_template.c"
+#include "rpi_hevcdsp_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 9
-#include "hevcdsp_template.c"
+#include "rpi_hevcdsp_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 10
-#include "hevcdsp_template.c"
+#include "rpi_hevcdsp_template.c"
 #undef BIT_DEPTH
 
 #define BIT_DEPTH 12
-#include "hevcdsp_template.c"
+#include "rpi_hevcdsp_template.c"
 #undef BIT_DEPTH
 
 static void hevc_deblocking_boundary_strengths(int pus, int dup, int in_inc, int out_inc,
@@ -237,7 +237,7 @@ static void hevc_deblocking_boundary_strengths(int pus, int dup, int in_inc, int
     }
 }
 
-void ff_hevc_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
+void ff_hevc_rpi_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
 {
 #undef FUNC
 #define FUNC(a, depth) a ## _ ## depth
@@ -412,11 +412,11 @@ int i = 0;
     hevcdsp->hevc_deblocking_boundary_strengths = hevc_deblocking_boundary_strengths;
 
     if (ARCH_PPC)
-        ff_hevc_dsp_init_ppc(hevcdsp, bit_depth);
+        ff_hevc_rpi_dsp_init_ppc(hevcdsp, bit_depth);
     if (ARCH_X86)
-        ff_hevc_dsp_init_x86(hevcdsp, bit_depth);
+        ff_hevc_rpi_dsp_init_x86(hevcdsp, bit_depth);
     if (ARCH_ARM)
         ff_hevcdsp_init_arm(hevcdsp, bit_depth);
     if (ARCH_MIPS)
-        ff_hevc_dsp_init_mips(hevcdsp, bit_depth);
+        ff_hevc_rpi_dsp_init_mips(hevcdsp, bit_depth);
 }

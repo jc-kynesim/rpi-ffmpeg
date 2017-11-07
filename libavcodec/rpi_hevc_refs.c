@@ -29,7 +29,7 @@
 #include "hevc.h"
 #include "rpi_hevcdec.h"
 
-void ff_hevc_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags)
+void ff_hevc_rpi_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags)
 {
     /* frame->frame can be NULL if context init failed */
     if (!frame->frame || !frame->frame->buf[0])
@@ -54,7 +54,7 @@ void ff_hevc_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags)
     }
 }
 
-const RefPicList *ff_hevc_get_ref_list(const HEVCContext * const s, const HEVCFrame * const ref, int x0, int y0)
+const RefPicList *ff_hevc_rpi_get_ref_list(const HEVCContext * const s, const HEVCFrame * const ref, int x0, int y0)
 {
     int x_cb         = x0 >> s->ps.sps->log2_ctb_size;
     int y_cb         = y0 >> s->ps.sps->log2_ctb_size;
@@ -63,20 +63,20 @@ const RefPicList *ff_hevc_get_ref_list(const HEVCContext * const s, const HEVCFr
     return (const RefPicList *)ref->rpl_tab[ctb_addr_ts];
 }
 
-void ff_hevc_clear_refs(HEVCContext *s)
+void ff_hevc_rpi_clear_refs(HEVCContext *s)
 {
     int i;
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++)
-        ff_hevc_unref_frame(s, &s->DPB[i],
+        ff_hevc_rpi_unref_frame(s, &s->DPB[i],
                             HEVC_FRAME_FLAG_SHORT_REF |
                             HEVC_FRAME_FLAG_LONG_REF);
 }
 
-void ff_hevc_flush_dpb(HEVCContext *s)
+void ff_hevc_rpi_flush_dpb(HEVCContext *s)
 {
     int i;
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++)
-        ff_hevc_unref_frame(s, &s->DPB[i], ~0);
+        ff_hevc_rpi_unref_frame(s, &s->DPB[i], ~0);
 }
 
 static HEVCFrame *alloc_frame(HEVCContext *s)
@@ -125,14 +125,14 @@ static HEVCFrame *alloc_frame(HEVCContext *s)
 
         return frame;
 fail:
-        ff_hevc_unref_frame(s, frame, ~0);
+        ff_hevc_rpi_unref_frame(s, frame, ~0);
         return NULL;
     }
     av_log(s->avctx, AV_LOG_ERROR, "Error allocating frame, DPB full.\n");
     return NULL;
 }
 
-int ff_hevc_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
+int ff_hevc_rpi_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
 {
     HEVCFrame *ref;
     int i;
@@ -171,7 +171,7 @@ int ff_hevc_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
     return 0;
 }
 
-int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
+int ff_hevc_rpi_output_frame(HEVCContext *s, AVFrame *out, int flush)
 {
     do {
         int nb_output = 0;
@@ -183,7 +183,7 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
                 HEVCFrame *frame = &s->DPB[i];
                 if (!(frame->flags & HEVC_FRAME_FLAG_BUMPING) && frame->poc != s->poc &&
                         frame->sequence == s->seq_output) {
-                    ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
+                    ff_hevc_rpi_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
                 }
             }
         }
@@ -212,9 +212,9 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
 
             ret = av_frame_ref(out, frame->frame);
             if (frame->flags & HEVC_FRAME_FLAG_BUMPING)
-                ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT | HEVC_FRAME_FLAG_BUMPING);
+                ff_hevc_rpi_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT | HEVC_FRAME_FLAG_BUMPING);
             else
-                ff_hevc_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
+                ff_hevc_rpi_unref_frame(s, frame, HEVC_FRAME_FLAG_OUTPUT);
             if (ret < 0)
                 return ret;
             av_log(s->avctx, AV_LOG_DEBUG,
@@ -231,7 +231,7 @@ int ff_hevc_output_frame(HEVCContext *s, AVFrame *out, int flush)
     return 0;
 }
 
-void ff_hevc_bump_frame(HEVCContext *s)
+void ff_hevc_rpi_bump_frame(HEVCContext *s)
 {
     int dpb = 0;
     int min_poc = INT_MAX;
@@ -289,7 +289,7 @@ static int init_slice_rpl(HEVCContext *s)
     return 0;
 }
 
-int ff_hevc_slice_rpl(HEVCContext *s)
+int ff_hevc_rpi_slice_rpl(HEVCContext *s)
 {
     SliceHeader *sh = &s->sh;
 
@@ -420,7 +420,7 @@ static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
     frame->sequence = s->seq_decode;
     frame->flags    = 0;
 
-    ff_hevc_progress_set_all_done(frame);
+    ff_hevc_rpi_progress_set_all_done(frame);
 
     return frame;
 }
@@ -448,7 +448,7 @@ static int add_candidate_ref(HEVCContext *s, RefPicList *list,
     return 0;
 }
 
-int ff_hevc_frame_rps(HEVCContext *s)
+int ff_hevc_rpi_frame_rps(HEVCContext *s)
 {
     const ShortTermRPS *short_rps = s->sh.short_term_rps;
     const LongTermRPS  *long_rps  = &s->sh.long_term_rps;
@@ -503,12 +503,12 @@ int ff_hevc_frame_rps(HEVCContext *s)
 fail:
     /* release any frames that are now unused */
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++)
-        ff_hevc_unref_frame(s, &s->DPB[i], 0);
+        ff_hevc_rpi_unref_frame(s, &s->DPB[i], 0);
 
     return ret;
 }
 
-int ff_hevc_frame_nb_refs(HEVCContext *s)
+int ff_hevc_rpi_frame_nb_refs(HEVCContext *s)
 {
     int ret = 0;
     int i;

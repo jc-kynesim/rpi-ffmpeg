@@ -5,7 +5,7 @@
 #define DC_ADD    (1 | (1 << (14 - BIT_DEPTH)))
 #define TRN_SHIFT (20 - BIT_DEPTH)
 
-function JOIN(ff_hevc_idct_4x4_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_idct_4x4_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
         add         r1, #DC_ADD
         asr         r1, #DC_SHIFT
@@ -15,7 +15,7 @@ function JOIN(ff_hevc_idct_4x4_dc_neon_, BIT_DEPTH), export=1
         bx lr
 endfunc
 
-function JOIN(ff_hevc_idct_8x8_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_idct_8x8_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
         add         r1, #DC_ADD
         asr         r1, #DC_SHIFT
@@ -31,7 +31,7 @@ function JOIN(ff_hevc_idct_8x8_dc_neon_, BIT_DEPTH), export=1
         bx lr
 endfunc
 
-function JOIN(ff_hevc_idct_16x16_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_idct_16x16_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
         add         r1, #DC_ADD
         asr         r1, #DC_SHIFT
@@ -50,7 +50,7 @@ function JOIN(ff_hevc_idct_16x16_dc_neon_, BIT_DEPTH), export=1
         bx lr
 endfunc
 
-function JOIN(ff_hevc_idct_32x32_dc_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_idct_32x32_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
         add         r1, #DC_ADD
         asr         r1, #DC_SHIFT
@@ -70,7 +70,7 @@ function JOIN(ff_hevc_idct_32x32_dc_neon_, BIT_DEPTH), export=1
 endfunc
 
 
-function JOIN(ff_hevc_transform_4x4_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_transform_4x4_neon_, BIT_DEPTH), export=1
         vpush       {d8-d15}
         vld1.16     {q14, q15}, [r0]  // coeffs
         ldr         r3, =0x00240053 // 36 and 83
@@ -95,7 +95,7 @@ endfunc
 
 
 
-function JOIN(ff_hevc_transform_luma_4x4_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_transform_luma_4x4_neon_, BIT_DEPTH), export=1
         vpush       {d8-d15}
         vld1.16     {q14, q15}, [r0]  // coeffs
         ldr         r3, =0x4a  // 74
@@ -123,7 +123,7 @@ endfunc
 
 
 
-function JOIN(ff_hevc_transform_8x8_neon_, BIT_DEPTH), export=1
+function JOIN(ff_hevc_rpi_transform_8x8_neon_, BIT_DEPTH), export=1
         push   {r4-r8}
         vpush {d8-d15}
         mov    r5, #16

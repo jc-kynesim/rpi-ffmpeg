@@ -40,23 +40,23 @@ static int hevc_decode_nal_units(const uint8_t *buf, int buf_size, HEVCParamSets
         /* ignore everything except parameter sets and VCL NALUs */
         switch (nal->type) {
         case HEVC_NAL_VPS:
-            ret = ff_hevc_decode_nal_vps(&nal->gb, logctx, ps);
+            ret = ff_hevc_rpi_decode_nal_vps(&nal->gb, logctx, ps);
             if (ret < 0)
                 goto done;
             break;
         case HEVC_NAL_SPS:
-            ret = ff_hevc_decode_nal_sps(&nal->gb, logctx, ps, apply_defdispwin);
+            ret = ff_hevc_rpi_decode_nal_sps(&nal->gb, logctx, ps, apply_defdispwin);
             if (ret < 0)
                 goto done;
             break;
         case HEVC_NAL_PPS:
-            ret = ff_hevc_decode_nal_pps(&nal->gb, logctx, ps);
+            ret = ff_hevc_rpi_decode_nal_pps(&nal->gb, logctx, ps);
             if (ret < 0)
                 goto done;
             break;
         case HEVC_NAL_SEI_PREFIX:
         case HEVC_NAL_SEI_SUFFIX:
-            ret = ff_hevc_decode_nal_sei(&nal->gb, logctx, sei, ps, nal->type);
+            ret = ff_hevc_rpi_decode_nal_sei(&nal->gb, logctx, sei, ps, nal->type);
             if (ret < 0)
                 goto done;
             break;
@@ -74,7 +74,7 @@ done:
     return 0;
 }
 
-int ff_hevc_decode_extradata(const uint8_t *data, int size, HEVCParamSets *ps,
+int ff_hevc_rpi_decode_extradata(const uint8_t *data, int size, HEVCParamSets *ps,
                              HEVCSEIContext *sei, int *is_nalff, int *nal_length_size,
                              int err_recognition, int apply_defdispwin, void *logctx)
 {

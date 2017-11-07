@@ -204,7 +204,7 @@ function band_load_c
 endfunc
 
 
-@ ff_hevc_sao_band_64_neon_8 (
+@ ff_hevc_rpi_sao_band_64_neon_8 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -214,7 +214,7 @@ endfunc
 @   int width,                  [sp, #8]
 @   int height)                 [sp, #12]
 
-function ff_hevc_sao_band_64_neon_8, export=1
+function ff_hevc_rpi_sao_band_64_neon_8, export=1
         push      {r4, lr}
         bl        band_load_y
         vmov.u8   q15, #128
@@ -235,7 +235,7 @@ function ff_hevc_sao_band_64_neon_8, export=1
         pop       {r4, pc}
 endfunc
 
-@ ff_hevc_sao_band_32_neon_8 (
+@ ff_hevc_rpi_sao_band_32_neon_8 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -245,7 +245,7 @@ endfunc
 @   int width,                  [sp, #8]
 @   int height)                 [sp, #12]
 
-function ff_hevc_sao_band_32_neon_8, export=1
+function ff_hevc_rpi_sao_band_32_neon_8, export=1
         push      {r4, lr}
         bl        band_load_y
         vmov.u8   q15, #128
@@ -263,7 +263,7 @@ function ff_hevc_sao_band_32_neon_8, export=1
         pop       {r4, pc}
 endfunc
 
-@ ff_hevc_sao_band_16_neon_8 (
+@ ff_hevc_rpi_sao_band_16_neon_8 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -273,7 +273,7 @@ endfunc
 @   int width,                  [sp, #8]
 @   int height)                 [sp, #12]
 
-function ff_hevc_sao_band_16_neon_8, export=1
+function ff_hevc_rpi_sao_band_16_neon_8, export=1
         push      {r4, lr}
         bl        band_load_y
         vmov.u8   q15, #128
@@ -295,7 +295,7 @@ function ff_hevc_sao_band_16_neon_8, export=1
         pop       {r4, pc}
 endfunc
 
-@ ff_hevc_sao_band_8_neon_8 (
+@ ff_hevc_rpi_sao_band_8_neon_8 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -305,7 +305,7 @@ endfunc
 @   int width,                  [sp, #8]
 @   int height)                 [sp, #12]
 
-function ff_hevc_sao_band_8_neon_8, export=1
+function ff_hevc_rpi_sao_band_8_neon_8, export=1
         push      {r4, lr}
         bl        band_load_y
         ldr       lr, [sp, #16]         @ width
@@ -341,7 +341,7 @@ function ff_hevc_sao_band_8_neon_8, export=1
         pop       {r4, pc}
 endfunc
 
-@ ff_hevc_sao_band_c_32_neon_8(
+@ ff_hevc_rpi_sao_band_c_32_neon_8(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -353,7 +353,7 @@ endfunc
 @   int width              sp[16]
 @   int height             sp[20]
 
-function ff_hevc_sao_band_c_32_neon_8, export=1
+function ff_hevc_rpi_sao_band_c_32_neon_8, export=1
         push    {r4, lr}
         bl      band_load_c
 
@@ -381,7 +381,7 @@ function ff_hevc_sao_band_c_32_neon_8, export=1
         pop     {r4, pc}
 endfunc
 
-@ ff_hevc_sao_band_c_16_neon_8(
+@ ff_hevc_rpi_sao_band_c_16_neon_8(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -393,7 +393,7 @@ endfunc
 @   int width              sp[16]
 @   int height             sp[20]
 
-function ff_hevc_sao_band_c_16_neon_8, export=1
+function ff_hevc_rpi_sao_band_c_16_neon_8, export=1
         push    {r4, lr}
         bl      band_load_c
         vmov.i8   q15, #128
@@ -411,7 +411,7 @@ function ff_hevc_sao_band_c_16_neon_8, export=1
         pop     {r4, pc}
 endfunc
 
-@ ff_hevc_sao_band_c_8_neon_8(
+@ ff_hevc_rpi_sao_band_c_8_neon_8(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -423,7 +423,7 @@ endfunc
 @   int width              sp[16]
 @   int height             sp[20]
 
-function ff_hevc_sao_band_c_8_neon_8, export=1
+function ff_hevc_rpi_sao_band_c_8_neon_8, export=1
         push    {r4, lr}
         bl      band_load_c
         ldr       lr, [sp, #16]         @ width
@@ -456,7 +456,7 @@ function ff_hevc_sao_band_c_8_neon_8, export=1
 endfunc
 
 
-@ ff_hevc_sao_band_64_neon_10 (
+@ ff_hevc_rpi_sao_band_64_neon_10 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -487,11 +487,11 @@ endfunc
         pop       {r4, pc}
 .endm
 
-function ff_hevc_sao_band_64_neon_10, export=1
+function ff_hevc_rpi_sao_band_64_neon_10, export=1
         band_64_16 10
 endfunc
 
-@ ff_hevc_sao_band_32_neon_10 (
+@ ff_hevc_rpi_sao_band_32_neon_10 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -519,11 +519,11 @@ endfunc
         pop       {r4, pc}
 .endm
 
-function ff_hevc_sao_band_32_neon_10, export=1
+function ff_hevc_rpi_sao_band_32_neon_10, export=1
         band_32_16 10
 endfunc
 
-@ ff_hevc_sao_band_16_neon_10 (
+@ ff_hevc_rpi_sao_band_16_neon_10 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -551,11 +551,11 @@ endfunc
         pop       {r4, pc}
 .endm
 
-function ff_hevc_sao_band_16_neon_10, export=1
+function ff_hevc_rpi_sao_band_16_neon_10, export=1
         band_16_16 10
 endfunc
 
-@ ff_hevc_sao_band_8_neon_10 (
+@ ff_hevc_rpi_sao_band_8_neon_10 (
 @   uint8_t *_dst,              [r0]
 @   uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,       [r2]
@@ -599,12 +599,12 @@ endfunc
         pop       {r4, pc}
 .endm
 
-function ff_hevc_sao_band_8_neon_10, export=1
+function ff_hevc_rpi_sao_band_8_neon_10, export=1
         band_8_16 10
 endfunc
 
 
-@ ff_hevc_sao_band_c_32_neon_10(
+@ ff_hevc_rpi_sao_band_c_32_neon_10(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -652,12 +652,12 @@ endfunc
         pop       {r4, pc}
 .endm
 
-function ff_hevc_sao_band_c_32_neon_10, export=1
+function ff_hevc_rpi_sao_band_c_32_neon_10, export=1
         band_c_32_16 10
 endfunc
 
 
-@ ff_hevc_sao_band_c_16_neon_10(
+@ ff_hevc_rpi_sao_band_c_16_neon_10(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -692,12 +692,12 @@ endfunc
         pop       {r4, pc}
 .endm
 
-function ff_hevc_sao_band_c_16_neon_10, export=1
+function ff_hevc_rpi_sao_band_c_16_neon_10, export=1
         band_c_16_16 10
 endfunc
 
 
-@ ff_hevc_sao_band_c_8_neon_10(
+@ ff_hevc_rpi_sao_band_c_8_neon_10(
 @   uint8_t * dst          [r0]
 @   uint8_t * src          [r1]
 @   uint32_t dst_stride    [r2]
@@ -743,7 +743,7 @@ endfunc
         pop       {r4, pc}
 .endm
 
-function ff_hevc_sao_band_c_8_neon_10, export=1
+function ff_hevc_rpi_sao_band_c_8_neon_10, export=1
         band_c_8_16 10
 endfunc
 
@@ -1011,7 +1011,7 @@ function edge_16b_body_16
 endfunc
 
 
-@ ff_hevc_sao_edge_[c_]xx_neon(
+@ ff_hevc_rpi_sao_edge_[c_]xx_neon(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1661,7 +1661,7 @@ debug_me:
 35:     edge_4bx4_e3    \body_fn, \pb
 .endm
 
-@ void ff_hevc_sao_edge_8_neon_8(
+@ void ff_hevc_rpi_sao_edge_8_neon_8(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1670,13 +1670,13 @@ debug_me:
 @   int width,                [sp, #4]
 @   int height)               [sp, #8]
 
-function ff_hevc_sao_edge_8_neon_8, export=1
+function ff_hevc_rpi_sao_edge_8_neon_8, export=1
         edge_16b_init   8, 0, 1, 99f
 99:
         edge_8bx2_4bx4_bodies edge_16b_body_8, 1
 endfunc
 
-@ void ff_hevc_sao_edge_16_neon_8(
+@ void ff_hevc_rpi_sao_edge_16_neon_8(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1685,13 +1685,13 @@ endfunc
 @   int width,                [sp, #4]
 @   int height)               [sp, #8]
 
-function ff_hevc_sao_edge_16_neon_8, export=1
+function ff_hevc_rpi_sao_edge_16_neon_8, export=1
         edge_16b_init   8, 0, 0, 99f
 99:
         edge_16b_bodies edge_16b_body_8, 1
 endfunc
 
-@ void ff_hevc_sao_edge_32_neon_8(
+@ void ff_hevc_rpi_sao_edge_32_neon_8(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1700,13 +1700,13 @@ endfunc
 @   int width,                [sp, #4]
 @   int height)               [sp, #8]
 
-function ff_hevc_sao_edge_32_neon_8, export=1
+function ff_hevc_rpi_sao_edge_32_neon_8, export=1
         edge_64b_init   8, 0, 0, 99f
 99:
         edge_32bx2_bodies edge_64b_body_8, 1
 endfunc
 
-@ void ff_hevc_sao_edge_64_neon_8(
+@ void ff_hevc_rpi_sao_edge_64_neon_8(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1715,13 +1715,13 @@ endfunc
 @   int width,                [sp, #4]
 @   int height)               [sp, #8]
 
-function ff_hevc_sao_edge_64_neon_8, export=1
+function ff_hevc_rpi_sao_edge_64_neon_8, export=1
         edge_64b_init   8, 0, 0, 99f
 99:
         edge_64b_bodies edge_64b_body_8, 1
 endfunc
 
-@ ff_hevc_sao_edge_c_8_neon_8(
+@ ff_hevc_rpi_sao_edge_c_8_neon_8(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1731,13 +1731,13 @@ endfunc
 @   int width,                        [sp, #8]
 @   int height)                       [sp, #12]
 
-function ff_hevc_sao_edge_c_8_neon_8, export=1
+function ff_hevc_rpi_sao_edge_c_8_neon_8, export=1
         edge_16b_init   8, 1, 1, 99f
 99:
         edge_16b_8bx2_bodies edge_16b_body_8, 2
 endfunc
 
-@ ff_hevc_sao_edge_c_16_neon_8(
+@ ff_hevc_rpi_sao_edge_c_16_neon_8(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1747,13 +1747,13 @@ endfunc
 @   int width,                        [sp, #8]
 @   int height)                       [sp, #12]
 
-function ff_hevc_sao_edge_c_16_neon_8, export=1
+function ff_hevc_rpi_sao_edge_c_16_neon_8, export=1
         edge_64b_init   8, 1, 0, 99f
 99:
         edge_32bx2_bodies edge_64b_body_8, 2
 endfunc
 
-@ ff_hevc_sao_edge_c_32_neon_8(
+@ ff_hevc_rpi_sao_edge_c_32_neon_8(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1763,13 +1763,13 @@ endfunc
 @   int width,                        [sp, #8]
 @   int height)                       [sp, #12]
 
-function ff_hevc_sao_edge_c_32_neon_8, export=1
+function ff_hevc_rpi_sao_edge_c_32_neon_8, export=1
         edge_64b_init   8, 1, 0, 99f
 99:
         edge_64b_bodies edge_64b_body_8, 2
 endfunc
 
-@ void ff_hevc_sao_edge_8_neon_10(
+@ void ff_hevc_rpi_sao_edge_8_neon_10(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1778,13 +1778,13 @@ endfunc
 @   int width,                [sp, #4]
 @   int height)               [sp, #8]
 
-function ff_hevc_sao_edge_8_neon_10, export=1
+function ff_hevc_rpi_sao_edge_8_neon_10, export=1
         edge_16b_init   10, 0, 1, 99f
 99:
         edge_16b_8bx2_bodies edge_16b_body_16, 2
 endfunc
 
-@ void ff_hevc_sao_edge_16_neon_10(
+@ void ff_hevc_rpi_sao_edge_16_neon_10(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1793,13 +1793,13 @@ endfunc
 @   int width,                [sp, #4]
 @   int height)               [sp, #8]
 
-function ff_hevc_sao_edge_16_neon_10, export=1
+function ff_hevc_rpi_sao_edge_16_neon_10, export=1
         edge_64b_init   10, 0, 0, 99f
 99:
         edge_32bx2_bodies edge_64b_body_16, 2
 endfunc
 
-@ void ff_hevc_sao_edge_64_neon_10(
+@ void ff_hevc_rpi_sao_edge_64_neon_10(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1814,11 +1814,11 @@ endfunc
 @ Calling code will always have src != dst so we don't have to worry
 @ about edge effects
 
-function ff_hevc_sao_edge_64_neon_10, export=1
+function ff_hevc_rpi_sao_edge_64_neon_10, export=1
         edge_64b_init   10, 0, 1, 99f
 endfunc
 
-@ void ff_hevc_sao_edge_32_neon_10(
+@ void ff_hevc_rpi_sao_edge_32_neon_10(
 @   uint8_t *_dst,            [r0]
 @   uint8_t *_src,            [r1]
 @   int  stride_dst,          [r2]
@@ -1827,13 +1827,13 @@ endfunc
 @   int width,                [sp, #4]
 @   int height)               [sp, #8]
 
-function ff_hevc_sao_edge_32_neon_10, export=1
+function ff_hevc_rpi_sao_edge_32_neon_10, export=1
         edge_64b_init   10, 0, 0, 99f
 99:
         edge_64b_bodies edge_64b_body_16, 2
 endfunc
 
-@ ff_hevc_sao_edge_c_8_neon_10(
+@ ff_hevc_rpi_sao_edge_c_8_neon_10(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1843,13 +1843,13 @@ endfunc
 @   int width,                        [sp, #8]
 @   int height)                       [sp, #12]
 
-function ff_hevc_sao_edge_c_8_neon_10, export=1
+function ff_hevc_rpi_sao_edge_c_8_neon_10, export=1
         edge_xxb_init   10, 1, 99f, check_w4=1, setup_16b=1, setup_64b=1
 99:
         edge_32bx2_16b_bodies edge_64b_body_16, edge_16b_body_16, 4
 endfunc
 
-@ ff_hevc_sao_edge_c_32_neon_10(
+@ ff_hevc_rpi_sao_edge_c_32_neon_10(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1859,12 +1859,12 @@ endfunc
 @   int width,                        [sp, #8]
 @   int height)                       [sp, #12]
 
-function ff_hevc_sao_edge_c_32_neon_10, export=1
+function ff_hevc_rpi_sao_edge_c_32_neon_10, export=1
         edge_64b_init   10, 1, 1, 99f
 endfunc
 
 
-@ ff_hevc_sao_edge_c_16_neon_10(
+@ ff_hevc_rpi_sao_edge_c_16_neon_10(
 @   uint8_t *_dst,                    [r0]
 @   const uint8_t *_src,              [r1]
 @   ptrdiff_t stride_dst,             [r2]
@@ -1874,7 +1874,7 @@ endfunc
 @   int width,                        [sp, #8]
 @   int height)                       [sp, #12]
 
-function ff_hevc_sao_edge_c_16_neon_10, export=1
+function ff_hevc_rpi_sao_edge_c_16_neon_10, export=1
         edge_64b_init   10, 1, 0, 99f
 99:
         edge_64b_bodies edge_64b_body_16, 4

@@ -102,7 +102,7 @@
     vqshrn.s32  d6, q7, #6
 .endm
 
-function ff_hevc_put_epel_h_neon_8, export=1
+function ff_hevc_rpi_put_epel_h_neon_8, export=1
         push   {r4-r7}
         mov    r4, MAX_PB_SIZE
         ldr    r7, [sp, #16] // mx
@@ -164,7 +164,7 @@ A       adrl   r12, epel_coeffs
         bx lr
 endfunc
 
-function ff_hevc_put_epel_v_neon_8, export=1
+function ff_hevc_rpi_put_epel_v_neon_8, export=1
         push   {r4-r7}
         mov    r4, MAX_PB_SIZE
         ldr    r7, [sp, #20] // my
@@ -240,7 +240,7 @@ A       adrl   r12, epel_coeffs
         bx lr
 endfunc
 
-function ff_hevc_put_epel_hv_neon_8, export=1
+function ff_hevc_rpi_put_epel_hv_neon_8, export=1
         push   {r4-r7}
         mov    r4, MAX_PB_SIZE
         ldr    r6, [sp, #16] // mx

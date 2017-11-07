@@ -108,7 +108,7 @@ static void remove_vps(HEVCParamSets *s, int id)
     av_buffer_unref(&s->vps_list[id]);
 }
 
-int ff_hevc_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,
                                   ShortTermRPS *rps, const HEVCSPS *sps, int is_slice_header)
 {
     uint8_t rps_predict = 0;
@@ -413,7 +413,7 @@ static int decode_hrd(GetBitContext *gb, int common_inf_present,
     return 0;
 }
 
-int ff_hevc_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
                            HEVCParamSets *ps)
 {
     int i,j;
@@ -784,11 +784,11 @@ static int scaling_list_data(GetBitContext *gb, AVCodecContext *avctx, ScalingLi
                 }
                 for (i = 0; i < coef_num; i++) {
                     if (size_id == 0)
-                        pos = 4 * ff_hevc_diag_scan4x4_y[i] +
-                                  ff_hevc_diag_scan4x4_x[i];
+                        pos = 4 * ff_hevc_rpi_diag_scan4x4_y[i] +
+                                  ff_hevc_rpi_diag_scan4x4_x[i];
                     else
-                        pos = 8 * ff_hevc_diag_scan8x8_y[i] +
-                                  ff_hevc_diag_scan8x8_x[i];
+                        pos = 8 * ff_hevc_rpi_diag_scan8x8_y[i] +
+                                  ff_hevc_rpi_diag_scan8x8_x[i];
 
                     scaling_list_delta_coef = get_se_golomb(gb);
                     next_coef = (next_coef + 256U + scaling_list_delta_coef) % 256;
@@ -873,7 +873,7 @@ static int map_pixel_format(AVCodecContext *avctx, HEVCSPS *sps)
     return 0;
 }
 
-int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
+int ff_hevc_rpi_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
                       int apply_defdispwin, AVBufferRef **vps_list, AVCodecContext *avctx)
 {
     HEVCWindow *ow;
@@ -1077,7 +1077,7 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
         return AVERROR_INVALIDDATA;
     }
     for (i = 0; i < sps->nb_st_rps; i++) {
-        if ((ret = ff_hevc_decode_short_term_rps(gb, avctx, &sps->st_rps[i],
+        if ((ret = ff_hevc_rpi_decode_short_term_rps(gb, avctx, &sps->st_rps[i],
                                                  sps, 0)) < 0)
             return ret;
     }
@@ -1224,7 +1224,7 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
     return 0;
 }
 
-int ff_hevc_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
                            HEVCParamSets *ps, int apply_defdispwin)
 {
     HEVCSPS *sps;
@@ -1250,7 +1250,7 @@ int ff_hevc_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
     }
     memcpy(sps->data, gb->buffer, sps->data_size);
 
-    ret = ff_hevc_parse_sps(sps, gb, &sps_id,
+    ret = ff_hevc_rpi_parse_sps(sps, gb, &sps_id,
                             apply_defdispwin,
                             ps->vps_list, avctx);
     if (ret < 0) {
@@ -1474,7 +1474,7 @@ static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
     return 0;
 }
 
-int ff_hevc_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
                            HEVCParamSets *ps)
 {
     HEVCSPS      *sps = NULL;
@@ -1719,7 +1719,7 @@ err:
     return ret;
 }
 
-int ff_hevc_compute_poc(const HEVCSPS *sps, int pocTid0, int poc_lsb, int nal_unit_type)
+int ff_hevc_rpi_compute_poc(const HEVCSPS *sps, int pocTid0, int poc_lsb, int nal_unit_type)
 {
     int max_poc_lsb  = 1 << sps->log2_max_poc_lsb;
     int prev_poc_lsb = pocTid0 % max_poc_lsb;

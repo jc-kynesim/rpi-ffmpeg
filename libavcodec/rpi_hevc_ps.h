@@ -413,25 +413,25 @@ typedef struct HEVCParamSets {
  * @param vps_list if non-NULL, this function will validate that the SPS refers
  *                 to an existing VPS
  */
-int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
+int ff_hevc_rpi_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
                       int apply_defdispwin, AVBufferRef **vps_list, AVCodecContext *avctx);
 
-int ff_hevc_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
                            HEVCParamSets *ps);
-int ff_hevc_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
                            HEVCParamSets *ps, int apply_defdispwin);
-int ff_hevc_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
                            HEVCParamSets *ps);
 
-int ff_hevc_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,
+int ff_hevc_rpi_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,
                                   ShortTermRPS *rps, const HEVCSPS *sps, int is_slice_header);
 
-int ff_hevc_encode_nal_vps(HEVCVPS *vps, unsigned int id,
+int ff_hevc_rpi_encode_nal_vps(HEVCVPS *vps, unsigned int id,
                            uint8_t *buf, int buf_size);
 
 /**
  * Compute POC of the current frame and return it.
  */
-int ff_hevc_compute_poc(const HEVCSPS *sps, int pocTid0, int poc_lsb, int nal_unit_type);
+int ff_hevc_rpi_compute_poc(const HEVCSPS *sps, int pocTid0, int poc_lsb, int nal_unit_type);
 
 #endif /* AVCODEC_RPI_HEVC_PS_H */

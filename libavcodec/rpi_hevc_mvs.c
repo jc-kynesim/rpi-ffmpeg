@@ -39,7 +39,7 @@ static const uint8_t l0_l1_cand_idx[12][2] = {
     { 3, 2, },
 };
 
-void ff_hevc_set_neighbour_available(const HEVCContext * const s, HEVCLocalContext * const lc, const int x0, const int y0,
+void ff_hevc_rpi_set_neighbour_available(const HEVCContext * const s, HEVCLocalContext * const lc, const int x0, const int y0,
                                      const int nPbW, const int nPbH)
 {
     int x0b = av_mod_uintp2(x0, s->ps.sps->log2_ctb_size);
@@ -209,7 +209,7 @@ static int derive_temporal_colocated_mvs(const HEVCContext * const s, const MvFi
 #define DERIVE_TEMPORAL_COLOCATED_MVS                                   \
     derive_temporal_colocated_mvs(s, temp_col,                          \
                                   refIdxLx, mvLXCol, X, colPic,         \
-                                  ff_hevc_get_ref_list(s, ref, x, y))
+                                  ff_hevc_rpi_get_ref_list(s, ref, x, y))
 
 /*
  * 8.5.3.1.7  temporal luma motion vector prediction
@@ -245,7 +245,7 @@ static int temporal_luma_motion_vector(const HEVCContext * const s, HEVCLocalCon
         x                 &= ~15;
         y                 &= ~15;
         if (s->threads_type == FF_THREAD_FRAME)
-            ff_hevc_progress_wait_mv(s, lc->jb0, ref, y);
+            ff_hevc_rpi_progress_wait_mv(s, lc->jb0, ref, y);
         x_pu               = x >> s->ps.sps->log2_min_pu_size;
         y_pu               = y >> s->ps.sps->log2_min_pu_size;
         temp_col           = TAB_MVF(x_pu, y_pu);
@@ -259,7 +259,7 @@ static int temporal_luma_motion_vector(const HEVCContext * const s, HEVCLocalCon
         x                 &= ~15;
         y                 &= ~15;
         if (s->threads_type == FF_THREAD_FRAME)
-            ff_hevc_progress_wait_mv(s, lc->jb0, ref, y);
+            ff_hevc_rpi_progress_wait_mv(s, lc->jb0, ref, y);
         x_pu               = x >> s->ps.sps->log2_min_pu_size;
         y_pu               = y >> s->ps.sps->log2_min_pu_size;
         temp_col           = TAB_MVF(x_pu, y_pu);
@@ -473,7 +473,7 @@ static void derive_spatial_merge_candidates(const HEVCContext * const s, HEVCLoc
 /*
  * 8.5.3.1.1 Derivation process of luma Mvs for merge mode
  */
-void ff_hevc_luma_mv_merge_mode(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0, int nPbW,
+void ff_hevc_rpi_luma_mv_merge_mode(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0, int nPbW,
                                 int nPbH, int log2_cb_size, int part_idx,
                                 int merge_idx, MvField * const mv)
 {
@@ -492,7 +492,7 @@ void ff_hevc_luma_mv_merge_mode(const HEVCContext * const s, HEVCLocalContext * 
         part_idx      = 0;
     }
 
-    ff_hevc_set_neighbour_available(s, lc, x0, y0, nPbW, nPbH);
+    ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0, nPbW, nPbH);
     derive_spatial_merge_candidates(s, lc, x0, y0, nPbW, nPbH, log2_cb_size,
                                     singleMCLFlag, part_idx,
                                     merge_idx, mergecand_list);
@@ -575,7 +575,7 @@ static int mv_mp_mode_mx_lt(const HEVCContext * const s, const int x, const int 
                      (y ## v) >> s->ps.sps->log2_min_pu_size,      \
                      pred, &mx, ref_idx_curr, ref_idx)
 
-void ff_hevc_luma_mv_mvp_mode(const HEVCContext * const s, HEVCLocalContext *lc, int x0, int y0, int nPbW,
+void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCContext * const s, HEVCLocalContext *lc, int x0, int y0, int nPbW,
                               int nPbH, int log2_cb_size, int part_idx,
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX)

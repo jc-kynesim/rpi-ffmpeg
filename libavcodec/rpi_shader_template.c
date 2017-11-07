@@ -1,5 +1,5 @@
 #include "hevc.h"
-#include "hevcdec.h"
+#include "rpi_hevcdec.h"
 #include "libavutil/rpi_sand_fns.h"
 #include "rpi_shader_cmd.h"
 #include "rpi_shader_template.h"

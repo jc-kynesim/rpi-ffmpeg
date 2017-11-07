@@ -150,7 +150,7 @@ static int hevc_parse_slice_header(AVCodecParserContext *s, H2645NAL *nal,
 
     if (!IS_IDR_NAL(nal)) {
         sh->pic_order_cnt_lsb = get_bits(gb, ps->sps->log2_max_poc_lsb);
-        s->output_picture_number = ctx->poc = ff_hevc_compute_poc(ps->sps, ctx->pocTid0, sh->pic_order_cnt_lsb, nal->type);
+        s->output_picture_number = ctx->poc = ff_hevc_rpi_compute_poc(ps->sps, ctx->pocTid0, sh->pic_order_cnt_lsb, nal->type);
     } else
         s->output_picture_number = ctx->poc = 0;
 
@@ -189,7 +189,7 @@ static int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
     s->key_frame         = 0;
     s->picture_structure = AV_PICTURE_STRUCTURE_UNKNOWN;
 
-    ff_hevc_reset_sei(sei);
+    ff_hevc_rpi_reset_sei(sei);
 
     ret = ff_h2645_packet_split(&ctx->pkt, buf, buf_size, avctx, 0, 0,
                                 AV_CODEC_ID_HEVC, 1);
@@ -202,17 +202,17 @@ static int parse_nal_units(AVCodecParserContext *s, const uint8_t *buf,
 
         switch (nal->type) {
         case HEVC_NAL_VPS:
-            ff_hevc_decode_nal_vps(gb, avctx, ps);
+            ff_hevc_rpi_decode_nal_vps(gb, avctx, ps);
             break;
         case HEVC_NAL_SPS:
-            ff_hevc_decode_nal_sps(gb, avctx, ps, 1);
+            ff_hevc_rpi_decode_nal_sps(gb, avctx, ps, 1);
             break;
         case HEVC_NAL_PPS:
-            ff_hevc_decode_nal_pps(gb, avctx, ps);
+            ff_hevc_rpi_decode_nal_pps(gb, avctx, ps);
             break;
         case HEVC_NAL_SEI_PREFIX:
         case HEVC_NAL_SEI_SUFFIX:
-            ff_hevc_decode_nal_sei(gb, avctx, sei, ps, nal->type);
+            ff_hevc_rpi_decode_nal_sei(gb, avctx, sei, ps, nal->type);
             break;
         case HEVC_NAL_TRAIL_N:
         case HEVC_NAL_TRAIL_R:
@@ -371,12 +371,12 @@ static void hevc_parser_close(AVCodecParserContext *s)
     ctx->ps.sps = NULL;
 
     ff_h2645_packet_uninit(&ctx->pkt);
-    ff_hevc_reset_sei(&ctx->sei);
+    ff_hevc_rpi_reset_sei(&ctx->sei);
 
     av_freep(&ctx->pc.buffer);
 }
 
-AVCodecParser ff_hevc_parser = {
+AVCodecParser ff_hevc_rpi_parser = {
     .codec_ids      = { AV_CODEC_ID_HEVC },
     .priv_data_size = sizeof(HEVCParserContext),
     .parser_parse   = hevc_parse,

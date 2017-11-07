@@ -344,7 +344,7 @@ static int more_rbsp_data(GetBitContext *gb)
     return get_bits_left(gb) > 0 && show_bits(gb, 8) != 0x80;
 }
 
-int ff_hevc_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
+int ff_hevc_rpi_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
                            const HEVCParamSets *ps, int type)
 {
     int ret;
@@ -357,7 +357,7 @@ int ff_hevc_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
     return 1;
 }
 
-void ff_hevc_reset_sei(HEVCSEIContext *s)
+void ff_hevc_rpi_reset_sei(HEVCSEIContext *s)
 {
     s->a53_caption.a53_caption_size = 0;
     av_freep(&s->a53_caption.a53_caption);

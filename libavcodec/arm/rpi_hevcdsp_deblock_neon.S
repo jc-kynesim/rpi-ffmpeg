@@ -480,8 +480,8 @@ function hevc_loop_filter_luma_body
         m_filter_luma 8
 endfunc
 
-@ ff_hevc_v_loop_filter_luma2_neon(src (r0), stride (r1), beta (r2), tc (r3), np_p (sp[0]), no_q (sp[4]), src2 (sp[8]))
-function ff_hevc_v_loop_filter_luma2_neon_8, export=1
+@ ff_hevc_rpi_v_loop_filter_luma2_neon(src (r0), stride (r1), beta (r2), tc (r3), np_p (sp[0]), no_q (sp[4]), src2 (sp[8]))
+function ff_hevc_rpi_v_loop_filter_luma2_neon_8, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}       @ 8 regs = 32 bytes
 
@@ -490,7 +490,7 @@ function ff_hevc_v_loop_filter_luma2_neon_8, export=1
 endfunc
 
 
-@ void ff_hevc_v_loop_filter_luma_neon(
+@ void ff_hevc_rpi_v_loop_filter_luma_neon(
 @   uint8_t *_pix,      [r0]
 @   ptrdiff_t _stride,  [r1]
 @   int _beta,          [r2]
@@ -499,7 +499,7 @@ endfunc
 @   uint8_t *_no_q)     [sp+4]
 
 
-function ff_hevc_v_loop_filter_luma_neon, export=1
+function ff_hevc_rpi_v_loop_filter_luma_neon, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}
 
@@ -661,7 +661,7 @@ endfunc
 @
 @ Src should always be on 8 byte boundry & all in the same slice
 
-function ff_hevc_h_loop_filter_luma_neon, export=1
+function ff_hevc_rpi_h_loop_filter_luma_neon, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}
 
@@ -809,13 +809,13 @@ endfunc
 .endm
 
 
-@ void ff_hevc_h_loop_filter_uv_neon(uint8_t * src_r,        // r0
+@ void ff_hevc_rpi_h_loop_filter_uv_neon(uint8_t * src_r,        // r0
 @                                     unsigned int stride,   // r1
 @                                     uint32_t tc4,          // r2
 @                                     unsigned int no_f);    // r3
 @
 @ no-F = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
-function ff_hevc_h_loop_filter_uv_neon_8, export=1
+function ff_hevc_rpi_h_loop_filter_uv_neon_8, export=1
         sub      r0, r0, r1, lsl #1
         vld2.8   {d16,d17}, [r0], r1
         vld2.8   {d18,d19}, [r0], r1
@@ -855,7 +855,7 @@ function ff_hevc_h_loop_filter_uv_neon_8, export=1
 endfunc
 
 
-@ void ff_hevc_h_loop_filter_uv_neon_10(uint8_t * src_r,     // r0
+@ void ff_hevc_rpi_h_loop_filter_uv_neon_10(uint8_t * src_r,     // r0
 @                                     unsigned int stride,   // r1
 @                                     uint32_t tc4,          // r2
 @                                     unsigned int no_f);    // r3
@@ -905,7 +905,7 @@ endfunc
 .endm
 
 
-@ void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r,       // r0
+@ void ff_hevc_rpi_v_loop_filter_uv2_neon(uint8_t * src_r,       // r0
 @                                     unsigned int stride,   // r1
 @                                     uint32_t tc4,          // r2
 @                                     uint8_t * src_l,       // r3
@@ -913,7 +913,7 @@ endfunc
 @
 @ no_f = b0:no_p[0], b1:no_p[1], b2:no_q[0], b3:no_q[1]
 
-function ff_hevc_v_loop_filter_uv2_neon_8, export=1
+function ff_hevc_rpi_v_loop_filter_uv2_neon_8, export=1
         vld4.8   {d16[0], d17[0], d18[0], d19[0]}, [r3], r1
         vld4.8   {d20[0], d21[0], d22[0], d23[0]}, [r0], r1
         sub      r12, r0, r3
@@ -996,7 +996,7 @@ function ff_hevc_v_loop_filter_uv2_neon_8, export=1
 endfunc
 
 
-@ void ff_hevc_v_loop_filter_uv2_neon(uint8_t * src_r,       // r0
+@ void ff_hevc_rpi_v_loop_filter_uv2_neon(uint8_t * src_r,       // r0
 @                                     unsigned int stride,   // r1
 @                                     uint32_t tc4,          // r2
 @                                     uint8_t * src_l,       // r3
@@ -1087,7 +1087,7 @@ endfunc
 
 
 
-function ff_hevc_v_loop_filter_chroma_neon, export=1
+function ff_hevc_rpi_v_loop_filter_chroma_neon, export=1
         hevc_loop_filter_chroma_start
 
         sub      r0, #2
@@ -1232,14 +1232,14 @@ endfunc
 .endm
 
 
-@ void ff_hevc_h_loop_filter_chroma_neon(
+@ void ff_hevc_rpi_h_loop_filter_chroma_neon(
 @   uint8_t *_pix,     [r0]
 @   ptrdiff_t _stride, [r1]
 @   int *_tc,          [r2]
 @   uint8_t *_no_p,    [r3]
 @   uint8_t *_no_q);   [sp+0]
 
-function ff_hevc_h_loop_filter_chroma_neon, export=1
+function ff_hevc_rpi_h_loop_filter_chroma_neon, export=1
         hevc_loop_filter_chroma_start
         sub      r0, r0, r1, lsl #1
         vld1.8   {d16}, [r0], r1
@@ -1312,11 +1312,11 @@ endfunc
 .endm
 
 
-/* ff_hevc_deblocking_boundary_strengths_neon(int pus, int dup, int in_i
+/* ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, int in_i
  *                                            int *curr_rpl0, int *curr_
  *                                            MvField *curr, MvField *ne
  */
-function ff_hevc_deblocking_boundary_strengths_neon, export=1
+function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         add         ip, sp, #4*4
         push        {a2-a4,v1-v8,lr}
         ldmia       ip, {v5-v7}
@@ -1444,11 +1444,11 @@ function hevc_loop_filter_luma_body_10
         m_filter_luma 10
 endfunc
 
-function ff_hevc_h_loop_filter_luma_neon_10, export=1
+function ff_hevc_rpi_h_loop_filter_luma_neon_10, export=1
         m_filter_h_luma_16 10
 endfunc
 
-function ff_hevc_v_loop_filter_luma2_neon_10, export=1
+function ff_hevc_rpi_v_loop_filter_luma2_neon_10, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}       @ 8 regs = 32 bytes
 
@@ -1456,7 +1456,7 @@ function ff_hevc_v_loop_filter_luma2_neon_10, export=1
         b        v_loop_luma_common_10
 endfunc
 
-function ff_hevc_v_loop_filter_luma_neon_10, export=1
+function ff_hevc_rpi_v_loop_filter_luma_neon_10, export=1
         hevc_loop_filter_luma_start
         push     {r4-r10,lr}
 
@@ -1465,19 +1465,19 @@ v_loop_luma_common_10:
         m_filter_v_luma_common_16 10
 endfunc
 
-function ff_hevc_h_loop_filter_uv_neon_10, export=1
+function ff_hevc_rpi_h_loop_filter_uv_neon_10, export=1
         m_filter_h_uv_16 10
 endfunc
 
-function ff_hevc_v_loop_filter_uv2_neon_10, export=1
+function ff_hevc_rpi_v_loop_filter_uv2_neon_10, export=1
         m_filter_v_uv2_16 10
 endfunc
 
-function ff_hevc_h_loop_filter_chroma_neon_10, export=1
+function ff_hevc_rpi_h_loop_filter_chroma_neon_10, export=1
         m_filter_h_chroma_16 10
 endfunc
 
-function ff_hevc_v_loop_filter_chroma_neon_10, export=1
+function ff_hevc_rpi_v_loop_filter_chroma_neon_10, export=1
         m_filter_v_chroma_16 10
 endfunc
 

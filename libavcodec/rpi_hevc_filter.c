@@ -111,7 +111,7 @@ static inline int get_qPy_pred(const HEVCContext * const s, HEVCLocalContext * c
 
 // * Only called from bitstream decode in foreground
 //   so should be safe
-void ff_hevc_set_qPy(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
+void ff_hevc_rpi_set_qPy(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
 {
     const int qp_y = get_qPy_pred(s, lc, xBase, yBase, log2_cb_size);
 
@@ -975,7 +975,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 }
 
 
-void ff_hevc_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
                                            int log2_trafo_size)
 {
     MvField *tab_mvf     = s->ref->tab_mvf;
@@ -1014,7 +1014,7 @@ void ff_hevc_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLoca
 
     if (boundary_upper) {
         const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
-                              ff_hevc_get_ref_list(s, s->ref, x0, y0 - 1) :
+                              ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
                               rpl;
         MvField *top = curr - min_pu_width;
 
@@ -1075,7 +1075,7 @@ void ff_hevc_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLoca
 
     if (boundary_left) {
         const RefPicList *rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
-                               ff_hevc_get_ref_list(s, s->ref, x0 - 1, y0) :
+                               ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
                                rpl;
         MvField *left = curr - 1;
 
@@ -1127,9 +1127,9 @@ void ff_hevc_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLoca
 #undef CR
 
 #ifdef RPI_DEBLOCK_VPU
-// ff_hevc_flush_buffer_lines
+// ff_hevc_rpi_flush_buffer_lines
 // flushes and invalidates all pixel rows in [start,end-1]
-static void ff_hevc_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
+static void ff_hevc_rpi_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
 {
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
     rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
@@ -1144,7 +1144,7 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
   // TODO check that image allocation is large enough for this to be okay as well.
   
   // Flush image, 4 lines above to bottom of ctb stripe
-  ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
+  ff_hevc_rpi_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
   // TODO flush buffer of beta/tc setup when it becomes cached
 
   // Prepare three commands at once to avoid calling overhead
@@ -1185,7 +1185,7 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 
 #endif
 
-void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const int ctb_size)
+void ff_hevc_rpi_hls_filter(HEVCContext * const s, const int x, const int y, const int ctb_size)
 {
     const int x_end = x >= s->ps.sps->width  - ctb_size;
 
@@ -1218,28 +1218,28 @@ void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const i
     }
 }
 
-void ff_hevc_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size)
+void ff_hevc_rpi_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size)
 {
     // * This can break strict L->R then U->D ordering - mostly it doesn't matter
     // Never called if rpi_enabled so no need for cache flush ops
     const int x_end = x_ctb >= s->ps.sps->width  - ctb_size;
     const int y_end = y_ctb >= s->ps.sps->height - ctb_size;
     if (y_ctb && x_ctb)
-        ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb - ctb_size, ctb_size);
+        ff_hevc_rpi_hls_filter(s, x_ctb - ctb_size, y_ctb - ctb_size, ctb_size);
     if (y_ctb && x_end)
     {
-        ff_hevc_hls_filter(s, x_ctb, y_ctb - ctb_size, ctb_size);
+        ff_hevc_rpi_hls_filter(s, x_ctb, y_ctb - ctb_size, ctb_size);
         // Signal progress - this is safe for SAO
         if (s->threads_type == FF_THREAD_FRAME && y_ctb > ctb_size)
-            ff_hevc_progress_signal_recon(s, y_ctb - ctb_size - 1);
+            ff_hevc_rpi_progress_signal_recon(s, y_ctb - ctb_size - 1);
     }
     if (x_ctb && y_end)
-        ff_hevc_hls_filter(s, x_ctb - ctb_size, y_ctb, ctb_size);
+        ff_hevc_rpi_hls_filter(s, x_ctb - ctb_size, y_ctb, ctb_size);
     if (x_end && y_end)
     {
-        ff_hevc_hls_filter(s, x_ctb, y_ctb, ctb_size);
+        ff_hevc_rpi_hls_filter(s, x_ctb, y_ctb, ctb_size);
         // All done - signal such
         if (s->threads_type == FF_THREAD_FRAME)
-            ff_hevc_progress_signal_recon(s, INT_MAX);
+            ff_hevc_rpi_progress_signal_recon(s, INT_MAX);
     }
 }

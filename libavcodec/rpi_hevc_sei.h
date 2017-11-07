@@ -120,7 +120,7 @@ typedef struct HEVCSEIContext {
 
 struct HEVCParamSets;
 
-int ff_hevc_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
+int ff_hevc_rpi_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
                            const struct HEVCParamSets *ps, int type);
 
 /**
@@ -130,6 +130,6 @@ int ff_hevc_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
  *
  * @param s HEVCContext.
  */
-void ff_hevc_reset_sei(HEVCSEIContext *s);
+void ff_hevc_rpi_reset_sei(HEVCSEIContext *s);
 
 #endif /* AVCODEC_RPI_HEVC_SEI_H */
