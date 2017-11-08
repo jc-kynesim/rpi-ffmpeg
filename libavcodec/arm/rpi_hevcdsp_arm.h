@@ -21,6 +21,6 @@
 
 #include "libavcodec/rpi_hevcdsp.h"
 
-void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth);
+void ff_hevcdsp_rpi_init_neon(HEVCDSPContext *c, const int bit_depth);
 
 #endif /* AVCODEC_ARM_HEVCDSP_ARM_H */

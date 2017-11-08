@@ -443,7 +443,7 @@ static void ff_hevc_rpi_sao_band_c_24_neon_10(uint8_t *_dst, const uint8_t *_src
 #error SAO edge src stride not 160 - value used in .S
 #endif
 
-av_cold void ff_hevcdsp_init_neon(HEVCDSPContext *c, const int bit_depth)
+av_cold void ff_hevcdsp_rpi_init_neon(HEVCDSPContext *c, const int bit_depth)
 {
     if (bit_depth == 8) {
         int x;

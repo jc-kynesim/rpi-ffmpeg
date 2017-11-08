@@ -23,10 +23,10 @@
 #include "libavcodec/rpi_hevcdsp.h"
 #include "rpi_hevcdsp_arm.h"
 
-av_cold void ff_hevcdsp_init_arm(HEVCDSPContext *c, const int bit_depth)
+av_cold void ff_hevcdsp_rpi_init_arm(HEVCDSPContext *c, const int bit_depth)
 {
     int cpu_flags = av_get_cpu_flags();
 
     if (have_neon(cpu_flags))
-        ff_hevcdsp_init_neon(c, bit_depth);
+        ff_hevcdsp_rpi_init_neon(c, bit_depth);
 }

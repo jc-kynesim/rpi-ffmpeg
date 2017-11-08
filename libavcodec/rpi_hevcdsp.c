@@ -416,7 +416,7 @@ int i = 0;
     if (ARCH_X86)
         ff_hevc_rpi_dsp_init_x86(hevcdsp, bit_depth);
     if (ARCH_ARM)
-        ff_hevcdsp_init_arm(hevcdsp, bit_depth);
+        ff_hevcdsp_rpi_init_arm(hevcdsp, bit_depth);
     if (ARCH_MIPS)
         ff_hevc_rpi_dsp_init_mips(hevcdsp, bit_depth);
 }
