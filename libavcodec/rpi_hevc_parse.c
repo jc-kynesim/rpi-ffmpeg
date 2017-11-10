@@ -21,7 +21,7 @@
 #include "hevc.h"
 #include "rpi_hevc_parse.h"
 
-static int hevc_decode_nal_units(const uint8_t *buf, int buf_size, HEVCParamSets *ps,
+static int hevc_decode_nal_units(const uint8_t *buf, int buf_size, HEVCRpiParamSets *ps,
                                  HEVCSEIContext *sei, int is_nalff, int nal_length_size,
                                  int err_recognition, int apply_defdispwin, void *logctx)
 {
@@ -74,7 +74,7 @@ done:
     return 0;
 }
 
-int ff_hevc_rpi_decode_extradata(const uint8_t *data, int size, HEVCParamSets *ps,
+int ff_hevc_rpi_decode_extradata(const uint8_t *data, int size, HEVCRpiParamSets *ps,
                              HEVCSEIContext *sei, int *is_nalff, int *nal_length_size,
                              int err_recognition, int apply_defdispwin, void *logctx)
 {

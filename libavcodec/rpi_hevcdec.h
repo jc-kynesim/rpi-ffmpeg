@@ -112,6 +112,13 @@
 // effort to be fast
 #define RPI_QPU_EMU_Y           0
 #define RPI_QPU_EMU_C           0
+
+// Max width & height we are prepared to consider
+// Sand frame shape calc becomes confused with large frames
+// Some buffer alloc also depends on this
+#define HEVC_RPI_MAX_WIDTH      2048
+#define HEVC_RPI_MAX_HEIGHT     1088
+
 #endif
 
 /**
@@ -461,22 +468,18 @@ typedef struct HEVCRpiLocalContext {
 
 #if CONFIG_HEVC_RPI_DECODER
 
-// RPI_MAX_WIDTH is maximum width in pixels supported by the accelerated code
-// Various buffer sizes depend on this so do not over allocate
-#define RPI_MAX_WIDTH 2048
-
 // Each block can have an intra prediction and an add_residual command
 // noof-cmds(2) * max-ctu height(64) / min-transform(4) * planes(3) * MAX_WIDTH
 #if CONFIG_HEVC_RPI_DECODER
 // Sand only has 2 planes (Y/C)
-#define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*2*(RPI_MAX_WIDTH/4))
+#define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*2*(HEVC_RPI_MAX_WIDTH/4))
 #else
-#define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*3*(RPI_MAX_WIDTH/4))
+#define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*3*(HEVC_RPI_MAX_WIDTH/4))
 #endif
 
 #ifdef RPI_DEBLOCK_VPU
 // Worst case is 16x16 CTUs
-#define RPI_MAX_DEBLOCK_CMDS (RPI_MAX_WIDTH*4/16)
+#define RPI_MAX_DEBLOCK_CMDS (HEVC_RPI_MAX_WIDTH*4/16)
 #endif
 
 // Command for intra prediction and transform_add of predictions to coefficients
@@ -593,7 +596,7 @@ typedef struct RpiBlk
 typedef struct HEVCRpiJob {
     struct HEVCRpiJob * next;  // Free chain
     struct HEVCRpiJobCtl * jbc_local;
-    const HEVCSPS * sps;       // sps used to set up this job
+    const HEVCRpiSPS * sps;       // sps used to set up this job
 
     int waited;
     int ctu_ts_first;
@@ -766,7 +769,7 @@ typedef struct HEVCRpiContext {
     uint8_t *sao_pixel_buffer_h[3];
     uint8_t *sao_pixel_buffer_v[3];
 
-    HEVCParamSets ps;
+    HEVCRpiParamSets ps;
 
     AVBufferPool *tab_mvf_pool;
     AVBufferPool *rpl_tab_pool;
@@ -1047,6 +1050,26 @@ static inline void ff_hevc_rpi_progress_set_all_done(HEVCFrame * const ref)
         p[0] = INT_MAX;
         p[1] = INT_MAX;
     }
+}
+
+#define HEVC_RPI_420_ONLY 1
+
+static inline unsigned int ctx_hshift(const HEVCRpiContext * const s, const int cidx)
+{
+#if HEVC_RPI_420_ONLY
+    return cidx == 0 ? 0 : 1;
+#else
+    return s->ps.sps->hshift[cidx];
+#endif
+}
+
+static inline unsigned int ctx_vshift(const HEVCRpiContext * const s, const int cidx)
+{
+#if HEVC_RPI_420_ONLY
+    return cidx == 0 ? 0 : 1;
+#else
+    return s->ps.sps->hshift[cidx];
+#endif
 }
 
 #endif /* AVCODEC_RPI_HEVCDEC_H */

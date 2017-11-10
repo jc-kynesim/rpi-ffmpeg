@@ -118,10 +118,10 @@ typedef struct HEVCSEIContext {
     HEVCSEIAlternativeTransfer alternative_transfer;
 } HEVCSEIContext;
 
-struct HEVCParamSets;
+struct HEVCRpiParamSets;
 
 int ff_hevc_rpi_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
-                           const struct HEVCParamSets *ps, int type);
+                           const struct HEVCRpiParamSets *ps, int type);
 
 /**
  * Reset SEI values that are stored on the Context.

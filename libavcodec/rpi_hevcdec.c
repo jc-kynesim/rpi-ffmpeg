@@ -86,8 +86,8 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
 #define QPU_Y_CMD_PER_CTU_MAX (16 * 16)
 #define QPU_C_CMD_PER_CTU_MAX (8 * 8)
 
-#define QPU_C_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 + 2 * QPU_N_MAX)
-#define QPU_Y_COMMANDS (((RPI_MAX_WIDTH * 64) / (4 * 4))     + 2 * QPU_N_MAX)
+#define QPU_C_COMMANDS (((HEVC_RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 + 2 * QPU_N_MAX)
+#define QPU_Y_COMMANDS (((HEVC_RPI_MAX_WIDTH * 64) / (4 * 4))     + 2 * QPU_N_MAX)
 
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
@@ -831,7 +831,7 @@ static void pic_arrays_free(HEVCRpiContext *s)
 }
 
 /* allocate arrays that depend on frame dimensions */
-static int pic_arrays_init(HEVCRpiContext *s, const HEVCSPS *sps)
+static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
 {
     int log2_min_cb_size = sps->log2_min_cb_size;
     int width            = sps->width;
@@ -1069,7 +1069,7 @@ static int pred_weight_table(HEVCRpiContext *s, GetBitContext *gb)
 
 static int decode_lt_rps(HEVCRpiContext *s, LongTermRPS *rps, GetBitContext *gb)
 {
-    const HEVCSPS *sps = s->ps.sps;
+    const HEVCRpiSPS *sps = s->ps.sps;
     int max_poc_lsb    = 1 << sps->log2_max_poc_lsb;
     int prev_delta_msb = 0;
     unsigned int nb_sps = 0, nb_sh;
@@ -1125,10 +1125,10 @@ static int decode_lt_rps(HEVCRpiContext *s, LongTermRPS *rps, GetBitContext *gb)
     return 0;
 }
 
-static void export_stream_params(AVCodecContext *avctx, const HEVCParamSets *ps,
-                                 const HEVCSPS *sps)
+static void export_stream_params(AVCodecContext *avctx, const HEVCRpiParamSets *ps,
+                                 const HEVCRpiSPS *sps)
 {
-    const HEVCVPS *vps = (const HEVCVPS*)ps->vps_list[sps->vps_id]->data;
+    const HEVCRpiVPS *vps = (const HEVCRpiVPS*)ps->vps_list[sps->vps_id]->data;
     const HEVCWindow *ow = &sps->output_window;
     unsigned int num = 0, den = 0;
 
@@ -1172,7 +1172,7 @@ static void export_stream_params(AVCodecContext *avctx, const HEVCParamSets *ps,
                   num, den, 1 << 30);
 }
 
-static enum AVPixelFormat get_format(HEVCRpiContext *s, const HEVCSPS *sps)
+static enum AVPixelFormat get_format(HEVCRpiContext *s, const HEVCRpiSPS *sps)
 {
 #define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + \
                      CONFIG_HEVC_D3D11VA_HWACCEL * 2 + \
@@ -1236,7 +1236,7 @@ static enum AVPixelFormat get_format(HEVCRpiContext *s, const HEVCSPS *sps)
     return ff_thread_get_format(s->avctx, pix_fmts);
 }
 
-static int set_sps(HEVCRpiContext *s, const HEVCSPS *sps,
+static int set_sps(HEVCRpiContext *s, const HEVCRpiSPS *sps,
                    enum AVPixelFormat pix_fmt)
 {
     int ret;
@@ -1301,7 +1301,7 @@ static int set_sps(HEVCRpiContext *s, const HEVCSPS *sps,
     }
 
     s->ps.sps = sps;
-    s->ps.vps = (HEVCVPS*) s->ps.vps_list[s->ps.sps->vps_id]->data;
+    s->ps.vps = (HEVCRpiVPS*) s->ps.vps_list[s->ps.sps->vps_id]->data;
 
     return 0;
 
@@ -1335,17 +1335,17 @@ static int hls_slice_header(HEVCRpiContext *s)
         return AVERROR_INVALIDDATA;
     }
     if (!sh->first_slice_in_pic_flag &&
-        s->ps.pps != (HEVCPPS*)s->ps.pps_list[sh->pps_id]->data) {
+        s->ps.pps != (HEVCRpiPPS*)s->ps.pps_list[sh->pps_id]->data) {
         av_log(s->avctx, AV_LOG_ERROR, "PPS changed between slices.\n");
         return AVERROR_INVALIDDATA;
     }
-    s->ps.pps = (HEVCPPS*)s->ps.pps_list[sh->pps_id]->data;
+    s->ps.pps = (HEVCRpiPPS*)s->ps.pps_list[sh->pps_id]->data;
     if (s->nal_unit_type == HEVC_NAL_CRA_NUT && s->last_eos == 1)
         sh->no_output_of_prior_pics_flag = 1;
 
-    if (s->ps.sps != (HEVCSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data) {
-        const HEVCSPS *sps = (HEVCSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data;
-        const HEVCSPS *last_sps = s->ps.sps;
+    if (s->ps.sps != (HEVCRpiSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data) {
+        const HEVCRpiSPS *sps = (HEVCRpiSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data;
+        const HEVCRpiSPS *last_sps = s->ps.sps;
         enum AVPixelFormat pix_fmt;
 
         if (last_sps && IS_IRAP(s) && s->nal_unit_type != HEVC_NAL_CRA_NUT) {
@@ -1858,7 +1858,8 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                               int log2_cb_size, int log2_trafo_size,
                               int blk_idx, int cbf_luma, int *cbf_cb, int *cbf_cr)
 {
-    const int log2_trafo_size_c = log2_trafo_size - s->ps.sps->hshift[1];
+//    const int log2_trafo_size_c = log2_trafo_size - s->ps.sps->hshift[1];
+    const int log2_trafo_size_c = log2_trafo_size - ctx_hshift(s, 1);
     int i;
 
     if (lc->cu.pred_mode == MODE_INTRA) {
@@ -1935,8 +1936,8 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
         if (cbf_luma)
             ff_hevc_rpi_hls_residual_coding(s, lc, x0, y0, log2_trafo_size, scan_idx, 0);
         if (s->ps.sps->chroma_format_idc && (log2_trafo_size > 2 || s->ps.sps->chroma_format_idc == 3)) {
-            int trafo_size_h = 1 << (log2_trafo_size_c + s->ps.sps->hshift[1]);
-            int trafo_size_v = 1 << (log2_trafo_size_c + s->ps.sps->vshift[1]);
+            int trafo_size_h = 1 << (log2_trafo_size_c + ctx_hshift(s, 1));
+            int trafo_size_v = 1 << (log2_trafo_size_c + ctx_vshift(s, 1));
             lc->tu.cross_pf  = (s->ps.pps->cross_component_prediction_enabled_flag && cbf_luma &&
                                 (lc->cu.pred_mode == MODE_INTER ||
                                  (lc->tu.chroma_mode_c ==  4)));
@@ -4009,7 +4010,7 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
     unsigned int i;
     HEVCRpiInterPredEnv *const cipe = &jb->chroma_ip;
     HEVCRpiInterPredEnv *const yipe = &jb->luma_ip;
-    const HEVCSPS * const sps = s->ps.sps;
+    const HEVCRpiSPS * const sps = s->ps.sps;
 
     const uint16_t pic_width_y   = sps->width;
     const uint16_t pic_height_y  = sps->height;
@@ -4026,7 +4027,7 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
         set_ipe_from_ici(yipe, &ipe_init_infos[s->ps.sps->bit_depth - 8].luma);
 
         {
-            const int coefs_per_luma = HEVC_MAX_CTB_SIZE * RPI_MAX_WIDTH;
+            const int coefs_per_luma = HEVC_MAX_CTB_SIZE * HEVC_RPI_MAX_WIDTH;
             const int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
             worker_pic_alloc_one(jb, coefs_per_luma + coefs_per_chroma);
         }
@@ -4921,7 +4922,7 @@ static void wpp_setup_lcs(HEVCRpiContext * const s)
 // Can only process tile single row at once
 static void tile_one_row_setup_lcs(HEVCRpiContext * const s, unsigned int slice_row)
 {
-    const HEVCPPS * const pps = s->ps.pps;
+    const HEVCRpiPPS * const pps = s->ps.pps;
     const unsigned int ts0 = pps->ctb_addr_rs_to_ts[s->sh.slice_segment_addr];
     const unsigned int tile0 = pps->tile_id[ts0];
     const unsigned int col0 = tile0 % pps->num_tile_columns;
@@ -5954,7 +5955,7 @@ static int hevc_decode_extradata(HEVCRpiContext *s, uint8_t *buf, int length, in
     /* export stream parameters from the first SPS */
     for (i = 0; i < FF_ARRAY_ELEMS(s->ps.sps_list); i++) {
         if (first && s->ps.sps_list[i]) {
-            const HEVCSPS *sps = (const HEVCSPS*)s->ps.sps_list[i]->data;
+            const HEVCRpiSPS *sps = (const HEVCRpiSPS*)s->ps.sps_list[i]->data;
             export_stream_params(s->avctx, &s->ps, sps);
             break;
         }

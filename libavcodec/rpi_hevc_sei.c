@@ -124,15 +124,15 @@ static int decode_nal_sei_display_orientation(HEVCSEIDisplayOrientation *s, GetB
     return 0;
 }
 
-static int decode_nal_sei_pic_timing(HEVCSEIContext *s, GetBitContext *gb, const HEVCParamSets *ps,
+static int decode_nal_sei_pic_timing(HEVCSEIContext *s, GetBitContext *gb, const HEVCRpiParamSets *ps,
                                      void *logctx, int size)
 {
     HEVCSEIPictureTiming *h = &s->picture_timing;
-    HEVCSPS *sps;
+    HEVCRpiSPS *sps;
 
     if (!ps->sps_list[s->active_seq_parameter_set_id])
         return(AVERROR(ENOMEM));
-    sps = (HEVCSPS*)ps->sps_list[s->active_seq_parameter_set_id]->data;
+    sps = (HEVCRpiSPS*)ps->sps_list[s->active_seq_parameter_set_id]->data;
 
     if (sps->vui.frame_field_info_present_flag) {
         int pic_struct = get_bits(gb, 4);
@@ -272,7 +272,7 @@ static int decode_nal_sei_alternative_transfer(HEVCSEIAlternativeTransfer *s, Ge
     return 0;
 }
 
-static int decode_nal_sei_prefix(GetBitContext *gb, HEVCSEIContext *s, const HEVCParamSets *ps,
+static int decode_nal_sei_prefix(GetBitContext *gb, HEVCSEIContext *s, const HEVCRpiParamSets *ps,
                                  int type, int size, void *logctx)
 {
     switch (type) {
@@ -315,7 +315,7 @@ static int decode_nal_sei_suffix(GetBitContext *gb, HEVCSEIContext *s,
 }
 
 static int decode_nal_sei_message(GetBitContext *gb, HEVCSEIContext *s,
-                                  const HEVCParamSets *ps, int nal_unit_type,
+                                  const HEVCRpiParamSets *ps, int nal_unit_type,
                                   void *logctx)
 {
     int payload_type = 0;
@@ -345,7 +345,7 @@ static int more_rbsp_data(GetBitContext *gb)
 }
 
 int ff_hevc_rpi_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *s,
-                           const HEVCParamSets *ps, int type)
+                           const HEVCRpiParamSets *ps, int type)
 {
     int ret;
 

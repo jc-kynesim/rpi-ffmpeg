@@ -192,7 +192,7 @@ typedef struct PTL {
     uint8_t sub_layer_level_present_flag[HEVC_MAX_SUB_LAYERS];
 } PTL;
 
-typedef struct HEVCVPS {
+typedef struct HEVCRpiVPS {
     uint8_t vps_temporal_id_nesting_flag;
     int vps_max_layers;
     int vps_max_sub_layers; ///< vps_max_temporal_layers_minus1 + 1
@@ -213,7 +213,7 @@ typedef struct HEVCVPS {
 
     uint8_t data[4096];
     int data_size;
-} HEVCVPS;
+} HEVCRpiVPS;
 
 typedef struct ScalingList {
     /* This is a little wasteful, since sizeID 0 only needs 8 coeffs,
@@ -222,7 +222,7 @@ typedef struct ScalingList {
     uint8_t sl_dc[2][6];
 } ScalingList;
 
-typedef struct HEVCSPS {
+typedef struct HEVCRpiSPS {
     unsigned vps_id;
     int chroma_format_idc;
     uint8_t separate_colour_plane_flag;
@@ -313,9 +313,9 @@ typedef struct HEVCSPS {
 
     uint8_t data[4096];
     int data_size;
-} HEVCSPS;
+} HEVCRpiSPS;
 
-typedef struct HEVCPPS {
+typedef struct HEVCRpiPPS {
     unsigned int sps_id; ///< seq_parameter_set_id
 
     uint8_t sign_data_hiding_flag;
@@ -391,21 +391,21 @@ typedef struct HEVCPPS {
 
     uint8_t data[4096];
     int data_size;
-} HEVCPPS;
+} HEVCRpiPPS;
 
-typedef struct HEVCParamSets {
+typedef struct HEVCRpiParamSets {
     AVBufferRef *vps_list[HEVC_MAX_VPS_COUNT];
     AVBufferRef *sps_list[HEVC_MAX_SPS_COUNT];
     AVBufferRef *pps_list[HEVC_MAX_PPS_COUNT];
 
     /* currently active parameter sets */
-    const HEVCVPS *vps;
-    const HEVCSPS *sps;
-    const HEVCPPS *pps;
-} HEVCParamSets;
+    const HEVCRpiVPS *vps;
+    const HEVCRpiSPS *sps;
+    const HEVCRpiPPS *pps;
+} HEVCRpiParamSets;
 
 /**
- * Parse the SPS from the bitstream into the provided HEVCSPS struct.
+ * Parse the SPS from the bitstream into the provided HEVCRpiSPS struct.
  *
  * @param sps_id the SPS id will be written here
  * @param apply_defdispwin if set 1, the default display window from the VUI
@@ -413,25 +413,25 @@ typedef struct HEVCParamSets {
  * @param vps_list if non-NULL, this function will validate that the SPS refers
  *                 to an existing VPS
  */
-int ff_hevc_rpi_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
+int ff_hevc_rpi_parse_sps(HEVCRpiSPS *sps, GetBitContext *gb, unsigned int *sps_id,
                       int apply_defdispwin, AVBufferRef **vps_list, AVCodecContext *avctx);
 
 int ff_hevc_rpi_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
-                           HEVCParamSets *ps);
+                           HEVCRpiParamSets *ps);
 int ff_hevc_rpi_decode_nal_sps(GetBitContext *gb, AVCodecContext *avctx,
-                           HEVCParamSets *ps, int apply_defdispwin);
+                           HEVCRpiParamSets *ps, int apply_defdispwin);
 int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
-                           HEVCParamSets *ps);
+                           HEVCRpiParamSets *ps);
 
 int ff_hevc_rpi_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,
-                                  ShortTermRPS *rps, const HEVCSPS *sps, int is_slice_header);
+                                  ShortTermRPS *rps, const HEVCRpiSPS *sps, int is_slice_header);
 
-int ff_hevc_rpi_encode_nal_vps(HEVCVPS *vps, unsigned int id,
+int ff_hevc_rpi_encode_nal_vps(HEVCRpiVPS *vps, unsigned int id,
                            uint8_t *buf, int buf_size);
 
 /**
  * Compute POC of the current frame and return it.
  */
-int ff_hevc_rpi_compute_poc(const HEVCSPS *sps, int pocTid0, int poc_lsb, int nal_unit_type);
+int ff_hevc_rpi_compute_poc(const HEVCRpiSPS *sps, int pocTid0, int poc_lsb, int nal_unit_type);
 
 #endif /* AVCODEC_RPI_HEVC_PS_H */
