@@ -29,7 +29,7 @@
 #include "hevc.h"
 #include "rpi_hevcdec.h"
 
-void ff_hevc_rpi_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags)
+void ff_hevc_rpi_unref_frame(HEVCRpiContext *s, HEVCFrame *frame, int flags)
 {
     /* frame->frame can be NULL if context init failed */
     if (!frame->frame || !frame->frame->buf[0])
@@ -54,7 +54,7 @@ void ff_hevc_rpi_unref_frame(HEVCContext *s, HEVCFrame *frame, int flags)
     }
 }
 
-const RefPicList *ff_hevc_rpi_get_ref_list(const HEVCContext * const s, const HEVCFrame * const ref, int x0, int y0)
+const RefPicList *ff_hevc_rpi_get_ref_list(const HEVCRpiContext * const s, const HEVCFrame * const ref, int x0, int y0)
 {
     int x_cb         = x0 >> s->ps.sps->log2_ctb_size;
     int y_cb         = y0 >> s->ps.sps->log2_ctb_size;
@@ -63,7 +63,7 @@ const RefPicList *ff_hevc_rpi_get_ref_list(const HEVCContext * const s, const HE
     return (const RefPicList *)ref->rpl_tab[ctb_addr_ts];
 }
 
-void ff_hevc_rpi_clear_refs(HEVCContext *s)
+void ff_hevc_rpi_clear_refs(HEVCRpiContext *s)
 {
     int i;
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++)
@@ -72,14 +72,14 @@ void ff_hevc_rpi_clear_refs(HEVCContext *s)
                             HEVC_FRAME_FLAG_LONG_REF);
 }
 
-void ff_hevc_rpi_flush_dpb(HEVCContext *s)
+void ff_hevc_rpi_flush_dpb(HEVCRpiContext *s)
 {
     int i;
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++)
         ff_hevc_rpi_unref_frame(s, &s->DPB[i], ~0);
 }
 
-static HEVCFrame *alloc_frame(HEVCContext *s)
+static HEVCFrame *alloc_frame(HEVCRpiContext *s)
 {
     int i, j, ret;
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++) {
@@ -132,7 +132,7 @@ fail:
     return NULL;
 }
 
-int ff_hevc_rpi_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
+int ff_hevc_rpi_set_new_ref(HEVCRpiContext *s, AVFrame **frame, int poc)
 {
     HEVCFrame *ref;
     int i;
@@ -171,7 +171,7 @@ int ff_hevc_rpi_set_new_ref(HEVCContext *s, AVFrame **frame, int poc)
     return 0;
 }
 
-int ff_hevc_rpi_output_frame(HEVCContext *s, AVFrame *out, int flush)
+int ff_hevc_rpi_output_frame(HEVCRpiContext *s, AVFrame *out, int flush)
 {
     do {
         int nb_output = 0;
@@ -231,7 +231,7 @@ int ff_hevc_rpi_output_frame(HEVCContext *s, AVFrame *out, int flush)
     return 0;
 }
 
-void ff_hevc_rpi_bump_frame(HEVCContext *s)
+void ff_hevc_rpi_bump_frame(HEVCRpiContext *s)
 {
     int dpb = 0;
     int min_poc = INT_MAX;
@@ -271,7 +271,7 @@ void ff_hevc_rpi_bump_frame(HEVCContext *s)
     }
 }
 
-static int init_slice_rpl(HEVCContext *s)
+static int init_slice_rpl(HEVCRpiContext *s)
 {
     HEVCFrame *frame = s->ref;
     int ctb_count    = frame->ctb_count;
@@ -289,7 +289,7 @@ static int init_slice_rpl(HEVCContext *s)
     return 0;
 }
 
-int ff_hevc_rpi_slice_rpl(HEVCContext *s)
+int ff_hevc_rpi_slice_rpl(HEVCRpiContext *s)
 {
     SliceHeader *sh = &s->sh;
 
@@ -359,7 +359,7 @@ int ff_hevc_rpi_slice_rpl(HEVCContext *s)
     return 0;
 }
 
-static HEVCFrame *find_ref_idx(HEVCContext *s, int poc)
+static HEVCFrame *find_ref_idx(HEVCRpiContext *s, int poc)
 {
     int i;
     int LtMask = (1 << s->ps.sps->log2_max_poc_lsb) - 1;
@@ -392,7 +392,7 @@ static void mark_ref(HEVCFrame *frame, int flag)
     frame->flags |= flag;
 }
 
-static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
+static HEVCFrame *generate_missing_ref(HEVCRpiContext *s, int poc)
 {
     HEVCFrame *frame;
     int i, x, y;
@@ -426,7 +426,7 @@ static HEVCFrame *generate_missing_ref(HEVCContext *s, int poc)
 }
 
 /* add a reference with the given poc to the list and mark it as used in DPB */
-static int add_candidate_ref(HEVCContext *s, RefPicList *list,
+static int add_candidate_ref(HEVCRpiContext *s, RefPicList *list,
                              int poc, int ref_flag)
 {
     HEVCFrame *ref = find_ref_idx(s, poc);
@@ -448,7 +448,7 @@ static int add_candidate_ref(HEVCContext *s, RefPicList *list,
     return 0;
 }
 
-int ff_hevc_rpi_frame_rps(HEVCContext *s)
+int ff_hevc_rpi_frame_rps(HEVCRpiContext *s)
 {
     const ShortTermRPS *short_rps = s->sh.short_term_rps;
     const LongTermRPS  *long_rps  = &s->sh.long_term_rps;
@@ -508,7 +508,7 @@ fail:
     return ret;
 }
 
-int ff_hevc_rpi_frame_nb_refs(HEVCContext *s)
+int ff_hevc_rpi_frame_nb_refs(HEVCRpiContext *s)
 {
     int ret = 0;
     int i;

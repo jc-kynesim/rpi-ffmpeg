@@ -1,4 +1,4 @@
-#include "rpi_shader.h"
+#include "rpi_hevc_shader.h"
 
 #ifdef _MSC_VER
    #include <stdint.h>
@@ -20,7 +20,7 @@ __declspec(align(8))
 #elif defined(__GNUC__)
 __attribute__((aligned(8)))
 #endif
-unsigned int rpi_shader[] = {
+unsigned int ff_hevc_rpi_shader[] = {
 // ::mc_setup_c_q0
 // ::mc_start
 /* [0x00000000] */ 0x0000000c, 0xe80009e7, // mov  dst, srel(i)

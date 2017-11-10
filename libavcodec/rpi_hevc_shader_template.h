@@ -1,14 +1,14 @@
 #ifndef LIBAVCODEC_RPI_SHADER_TEMPLATE_H
 #define LIBAVCODEC_RPI_SHADER_TEMPLATE_H
 
-struct HEVCContext;
+struct HEVCRpiContext;
 struct HEVCRpiInterPredEnv;
 
-void rpi_shader_c8(struct HEVCContext *const s,
+void ff_hevc_rpi_shader_c8(struct HEVCRpiContext *const s,
                   const struct HEVCRpiInterPredEnv *const ipe_y,
                   const struct HEVCRpiInterPredEnv *const ipe_c);
 
-void rpi_shader_c16(struct HEVCContext *const s,
+void ff_hevc_rpi_shader_c16(struct HEVCRpiContext *const s,
                   const struct HEVCRpiInterPredEnv *const ipe_y,
                   const struct HEVCRpiInterPredEnv *const ipe_c);
 

@@ -14,7 +14,7 @@
 
 #include "rpi_mailbox.h"
 #include "rpi_qpu.h"
-#include "rpi_shader.h"
+#include "rpi_hevc_shader.h"
 #include "rpi_hevc_transform8.h"
 #include "rpi_hevc_transform10.h"
 #include "libavutil/rpi_sand_fns.h"
@@ -304,9 +304,9 @@ static int gpu_init(gpu_env_t ** const gpu) {
 
   // Now copy over the QPU code into GPU memory
   {
-    int num_bytes = (char *)mc_end - (char *)rpi_shader;
+    int num_bytes = (char *)mc_end - (char *)ff_hevc_rpi_shader;
     av_assert0(num_bytes<=QPU_CODE_SIZE*sizeof(unsigned int));
-    memcpy((void*)ptr->qpu_code, rpi_shader, num_bytes);
+    memcpy((void*)ptr->qpu_code, ff_hevc_rpi_shader, num_bytes);
   }
   // And the VPU code
   {
@@ -897,7 +897,7 @@ void vpu_qpu_term()
 
 uint32_t qpu_fn(const int * const mc_fn)
 {
-  return gpu->code_gm_ptr.vc + ((const char *)mc_fn - (const char *)rpi_shader) + offsetof(struct GPU, qpu_code);
+  return gpu->code_gm_ptr.vc + ((const char *)mc_fn - (const char *)ff_hevc_rpi_shader) + offsetof(struct GPU, qpu_code);
 }
 
 

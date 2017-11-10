@@ -39,7 +39,7 @@ static const uint8_t l0_l1_cand_idx[12][2] = {
     { 3, 2, },
 };
 
-void ff_hevc_rpi_set_neighbour_available(const HEVCContext * const s, HEVCLocalContext * const lc, const int x0, const int y0,
+void ff_hevc_rpi_set_neighbour_available(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int x0, const int y0,
                                      const int nPbW, const int nPbH)
 {
     int x0b = av_mod_uintp2(x0, s->ps.sps->log2_ctb_size);
@@ -60,7 +60,7 @@ void ff_hevc_rpi_set_neighbour_available(const HEVCContext * const s, HEVCLocalC
 /*
  * 6.4.1 Derivation process for z-scan order block availability
  */
-static av_always_inline int z_scan_block_avail(const HEVCContext * const s, const int xCurr, const int yCurr,
+static av_always_inline int z_scan_block_avail(const HEVCRpiContext * const s, const int xCurr, const int yCurr,
                               const int xN, const int yN)
 {
 #define MIN_TB_ADDR_ZS(x, y)                                            \
@@ -82,7 +82,7 @@ static av_always_inline int z_scan_block_avail(const HEVCContext * const s, cons
 }
 
 //check if the two luma locations belong to the same motion estimation region
-static av_always_inline int is_diff_mer(const HEVCContext * const s, int xN, int yN, int xP, int yP)
+static av_always_inline int is_diff_mer(const HEVCRpiContext * const s, int xN, int yN, int xP, int yP)
 {
     uint8_t plevel = s->ps.pps->log2_parallel_merge_level;
 
@@ -159,7 +159,7 @@ static int check_mvset(Mv * const mvLXCol, const Mv * const mvCol,
                 refPicList_col, L ## l, temp_col.ref_idx[l])
 
 // derive the motion vectors section 8.5.3.1.8
-static int derive_temporal_colocated_mvs(const HEVCContext * const s, const MvField temp_col,
+static int derive_temporal_colocated_mvs(const HEVCRpiContext * const s, const MvField temp_col,
                                          const int refIdxLx, Mv * const mvLXCol, const int X,
                                          const int colPic, const RefPicList * const refPicList_col)
 {
@@ -214,7 +214,7 @@ static int derive_temporal_colocated_mvs(const HEVCContext * const s, const MvFi
 /*
  * 8.5.3.1.7  temporal luma motion vector prediction
  */
-static int temporal_luma_motion_vector(const HEVCContext * const s, HEVCLocalContext * const lc, const int x0, const int y0,
+static int temporal_luma_motion_vector(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int x0, const int y0,
                                        const int nPbW, const int nPbH, const int refIdxLx,
                                        Mv * const mvLXCol, const int X)
 {
@@ -280,7 +280,7 @@ static int temporal_luma_motion_vector(const HEVCContext * const s, HEVCLocalCon
 /*
  * 8.5.3.1.2  Derivation process for spatial merging candidates
  */
-static void derive_spatial_merge_candidates(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
+static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
                                             int nPbW, int nPbH,
                                             int log2_cb_size,
                                             int singleMCLFlag, int part_idx,
@@ -473,7 +473,7 @@ static void derive_spatial_merge_candidates(const HEVCContext * const s, HEVCLoc
 /*
  * 8.5.3.1.1 Derivation process of luma Mvs for merge mode
  */
-void ff_hevc_rpi_luma_mv_merge_mode(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0, int nPbW,
+void ff_hevc_rpi_luma_mv_merge_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int nPbW,
                                 int nPbH, int log2_cb_size, int part_idx,
                                 int merge_idx, MvField * const mv)
 {
@@ -505,7 +505,7 @@ void ff_hevc_rpi_luma_mv_merge_mode(const HEVCContext * const s, HEVCLocalContex
     *mv = mergecand_list[merge_idx];
 }
 
-static av_always_inline void dist_scale(const HEVCContext * const s, Mv * const mv,
+static av_always_inline void dist_scale(const HEVCRpiContext * const s, Mv * const mv,
                                         int min_pu_width, int x, int y,
                                         int elist, int ref_idx_curr, int ref_idx)
 {
@@ -522,7 +522,7 @@ static av_always_inline void dist_scale(const HEVCContext * const s, Mv * const 
     }
 }
 
-static int mv_mp_mode_mx(const HEVCContext * const s, const int x, const int y, const int pred_flag_index,
+static int mv_mp_mode_mx(const HEVCRpiContext * const s, const int x, const int y, const int pred_flag_index,
                          Mv * const mv, const int ref_idx_curr, const int ref_idx)
 {
     const MvField * const tab_mvf = s->ref->tab_mvf;
@@ -538,7 +538,7 @@ static int mv_mp_mode_mx(const HEVCContext * const s, const int x, const int y, 
     return 0;
 }
 
-static int mv_mp_mode_mx_lt(const HEVCContext * const s, const int x, const int y, const int pred_flag_index,
+static int mv_mp_mode_mx_lt(const HEVCRpiContext * const s, const int x, const int y, const int pred_flag_index,
                             Mv * const mv, const int ref_idx_curr, const int ref_idx)
 {
     MvField *tab_mvf = s->ref->tab_mvf;
@@ -575,7 +575,7 @@ static int mv_mp_mode_mx_lt(const HEVCContext * const s, const int x, const int 
                      (y ## v) >> s->ps.sps->log2_min_pu_size,      \
                      pred, &mx, ref_idx_curr, ref_idx)
 
-void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCContext * const s, HEVCLocalContext *lc, int x0, int y0, int nPbW,
+void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext *lc, int x0, int y0, int nPbW,
                               int nPbH, int log2_cb_size, int part_idx,
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX)

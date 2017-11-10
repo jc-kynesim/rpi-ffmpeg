@@ -123,7 +123,7 @@ static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const 
 }
 #endif
 
-static av_always_inline void FUNC(intra_pred)(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
+static av_always_inline void FUNC(intra_pred)(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
                                               int log2_size, int c_idx)
 {
 #define PU(x) \
@@ -502,7 +502,7 @@ do {                                  \
 }
 
 #define INTRA_PRED(size)                                                            \
-static void FUNC(intra_pred_ ## size)(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0, int c_idx)    \
+static void FUNC(intra_pred_ ## size)(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int c_idx)    \
 {                                                                                   \
     FUNC(intra_pred)(s, lc, x0, y0, size, c_idx);                                       \
 }

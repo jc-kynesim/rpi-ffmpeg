@@ -60,7 +60,7 @@ static const uint8_t betatable[52] = {
     38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64                      // QP 38...51
 };
 
-static int chroma_tc(HEVCContext *s, int qp_y, int c_idx, int tc_offset)
+static int chroma_tc(HEVCRpiContext *s, int qp_y, int c_idx, int tc_offset)
 {
     static const int qp_c[] = {
         29, 30, 31, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37
@@ -89,7 +89,7 @@ static int chroma_tc(HEVCContext *s, int qp_y, int c_idx, int tc_offset)
     return tctable[idxt];
 }
 
-static inline int get_qPy_pred(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
+static inline int get_qPy_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
 {
     int ctb_size_mask        = (1 << s->ps.sps->log2_ctb_size) - 1;
     int MinCuQpDeltaSizeMask = ~((1 << (s->ps.sps->log2_ctb_size -
@@ -111,7 +111,7 @@ static inline int get_qPy_pred(const HEVCContext * const s, HEVCLocalContext * c
 
 // * Only called from bitstream decode in foreground
 //   so should be safe
-void ff_hevc_rpi_set_qPy(const HEVCContext * const s, HEVCLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
+void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
 {
     const int qp_y = get_qPy_pred(s, lc, xBase, yBase, log2_cb_size);
 
@@ -123,7 +123,7 @@ void ff_hevc_rpi_set_qPy(const HEVCContext * const s, HEVCLocalContext * const l
         lc->qp_y = qp_y;
 }
 
-static int get_qPy(const HEVCContext * const s, const int xC, const int yC)
+static int get_qPy(const HEVCRpiContext * const s, const int xC, const int yC)
 {
     const int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
     const int x                 = xC >> log2_min_cb_size;
@@ -131,7 +131,7 @@ static int get_qPy(const HEVCContext * const s, const int xC, const int yC)
     return s->qp_y_tab[x + y * s->ps.sps->min_cb_width];
 }
 
-static inline unsigned int pixel_shift(const HEVCContext * const s, const unsigned int c_idx)
+static inline unsigned int pixel_shift(const HEVCRpiContext * const s, const unsigned int c_idx)
 {
 #if CONFIG_HEVC_RPI_DECODER
     return c_idx != 0 && av_rpi_is_sand_frame(s->frame) ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
@@ -210,7 +210,7 @@ static void copy_vert(uint8_t *dst, const uint8_t *src,
     }
 }
 
-static void copy_CTB_to_hv(const HEVCContext * const s, const uint8_t * const src,
+static void copy_CTB_to_hv(const HEVCRpiContext * const s, const uint8_t * const src,
                            ptrdiff_t stride_src, int x, int y, int width, int height,
                            int c_idx, int x_ctb, int y_ctb)
 {
@@ -231,7 +231,7 @@ static void copy_CTB_to_hv(const HEVCContext * const s, const uint8_t * const sr
 }
 
 // N.B. Src & dst are swapped as this is a restore!
-static void restore_tqb_pixels(const HEVCContext * const s,
+static void restore_tqb_pixels(const HEVCRpiContext * const s,
                                uint8_t *src1, const uint8_t *dst1,
                                ptrdiff_t stride_src, ptrdiff_t stride_dst,
                                int x0, int y0, int width, int height, int c_idx)
@@ -267,7 +267,7 @@ static void restore_tqb_pixels(const HEVCContext * const s,
 
 #define CTB(tab, x, y) ((tab)[(y) * s->ps.sps->ctb_width + (x)])
 
-static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y)
+static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const int y)
 {
 #if SAO_FILTER_N == 5
     static const uint8_t sao_tab[8] = { 0 /* 8 */, 1 /* 16 */, 2 /* 24 */, 2 /* 32 */, 3, 3 /* 48 */, 4, 4 /* 64 */};
@@ -593,7 +593,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
 }
 
 // Returns 2 or 0.
-static int get_pcm(HEVCContext *s, int x, int y)
+static int get_pcm(HEVCRpiContext *s, int x, int y)
 {
     int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
     int x_pu, y_pu;
@@ -614,7 +614,7 @@ static int get_pcm(HEVCContext *s, int x, int y)
                     (tc_offset & -2),                                   \
                     0, MAX_QP + DEFAULT_INTRA_TC_OFFSET)]
 
-static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
+static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
 {
     uint8_t *src;
     int x, y;
@@ -975,7 +975,7 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
 }
 
 
-void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCContext * const s, HEVCLocalContext * const lc, int x0, int y0,
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
                                            int log2_trafo_size)
 {
     MvField *tab_mvf     = s->ref->tab_mvf;
@@ -1129,7 +1129,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCContext * const s, HEVC
 #ifdef RPI_DEBLOCK_VPU
 // ff_hevc_rpi_flush_buffer_lines
 // flushes and invalidates all pixel rows in [start,end-1]
-static void ff_hevc_rpi_flush_buffer_lines(HEVCContext *s, int start, int end, int flush_luma, int flush_chroma)
+static void ff_hevc_rpi_flush_buffer_lines(HEVCRpiContext *s, int start, int end, int flush_luma, int flush_chroma)
 {
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
     rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
@@ -1138,7 +1138,7 @@ static void ff_hevc_rpi_flush_buffer_lines(HEVCContext *s, int start, int end, i
 }
 
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
-static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
+static void rpi_deblock(HEVCRpiContext *s, int y, int ctb_size)
 {
   int num16high = (ctb_size+15)>>4;  // May go over bottom of the image, but setup will be zero for these so should have no effect.
   // TODO check that image allocation is large enough for this to be okay as well.
@@ -1185,7 +1185,7 @@ static void rpi_deblock(HEVCContext *s, int y, int ctb_size)
 
 #endif
 
-void ff_hevc_rpi_hls_filter(HEVCContext * const s, const int x, const int y, const int ctb_size)
+void ff_hevc_rpi_hls_filter(HEVCRpiContext * const s, const int x, const int y, const int ctb_size)
 {
     const int x_end = x >= s->ps.sps->width  - ctb_size;
 
@@ -1218,7 +1218,7 @@ void ff_hevc_rpi_hls_filter(HEVCContext * const s, const int x, const int y, con
     }
 }
 
-void ff_hevc_rpi_hls_filters(HEVCContext *s, int x_ctb, int y_ctb, int ctb_size)
+void ff_hevc_rpi_hls_filters(HEVCRpiContext *s, int x_ctb, int y_ctb, int ctb_size)
 {
     // * This can break strict L->R then U->D ordering - mostly it doesn't matter
     // Never called if rpi_enabled so no need for cache flush ops

@@ -1,8 +1,8 @@
 #include "hevc.h"
 #include "rpi_hevcdec.h"
 #include "libavutil/rpi_sand_fns.h"
-#include "rpi_shader_cmd.h"
-#include "rpi_shader_template.h"
+#include "rpi_hevc_shader_cmd.h"
+#include "rpi_hevc_shader_template.h"
 
 typedef struct shader_track_s
 {
@@ -37,12 +37,12 @@ static inline int32_t ext(int32_t x, unsigned int shl, unsigned int shr)
     return (x << shl) >> shr;
 }
 
-static inline int woff_p(HEVCContext *const s, int32_t x)
+static inline int woff_p(HEVCRpiContext *const s, int32_t x)
 {
     return ext(x, 0, 17 + s->ps.sps->bit_depth - 8);
 }
 
-static inline int woff_b(HEVCContext *const s, int32_t x)
+static inline int woff_b(HEVCRpiContext *const s, int32_t x)
 {
     return ext(x - 0x10000, 0, 16 + s->ps.sps->bit_depth - 8);
 }
@@ -54,9 +54,9 @@ static inline int wweight(int32_t x)
 
 
 #define PW 1
-#include "rpi_shader_template_fn.h"
+#include "rpi_hevc_shader_template_fn.h"
 
 #undef PW
 #define PW 2
-#include "rpi_shader_template_fn.h"
+#include "rpi_hevc_shader_template_fn.h"
 

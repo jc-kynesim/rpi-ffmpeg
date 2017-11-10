@@ -128,7 +128,7 @@ int ff_hevc_rpi_decode_nal_sei(GetBitContext *gb, void *logctx, HEVCSEIContext *
  * e.g. Caption data that was extracted during NAL
  * parsing.
  *
- * @param s HEVCContext.
+ * @param s HEVCRpiContext.
  */
 void ff_hevc_rpi_reset_sei(HEVCSEIContext *s);
 

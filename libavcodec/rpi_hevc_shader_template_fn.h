@@ -203,7 +203,7 @@ void FUNC(rpi_sand_dump)(const char * const name,
 }
 
 
-void FUNC(rpi_shader_c)(HEVCContext *const s,
+void FUNC(ff_hevc_rpi_shader_c)(HEVCRpiContext *const s,
                   const HEVCRpiInterPredEnv *const ipe_y,
                   const HEVCRpiInterPredEnv *const ipe_c)
 {

@@ -26,7 +26,7 @@
 #include "bit_depth_template.c"
 #include "rpi_hevcdsp.h"
 
-#include "rpi_shader_template.h"
+#include "rpi_hevc_shader_template.h"
 
 static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)

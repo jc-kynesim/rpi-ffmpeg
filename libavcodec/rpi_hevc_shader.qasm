@@ -29,7 +29,7 @@
 # QPU counts - depend on block size
 # If we have a 2-byte format & block_size > 8 then can only afford
 # 8 QPUs
-# These numbers must match the numbers in rpi_shader_cmd.h
+# These numbers must match the numbers in ff_hevc_rpi_shader_cmd.h
 
 .set N_QPU_8,                      12
 .set N_QPU_16,                     12
