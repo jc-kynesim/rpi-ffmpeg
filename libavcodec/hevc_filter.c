@@ -860,19 +860,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                            beta, tc, no_p, no_q);
                     }
                     else
-#ifdef RPI_DEBLOCK_LUMA_VPU
-                    if (s->enable_rpi_deblock) {
-                        uint8_t (*setup)[2][2][4];
-                        int num16 = (y>>4)*s->setup_width + (x>>4);
-                        int a = ((y>>3) & 1) << 1;
-                        int b = (x>>3) & 1;
-                        setup = s->dvq->y_setup_arm[num16];
-                        setup[0][b][0][a] = beta;
-                        setup[0][b][0][a + 1] = beta;
-                        setup[0][b][1][a] = tc[0];
-                        setup[0][b][1][a + 1] = tc[1];
-                    } else
-#endif
                     {
                         s->hevcdsp.hevc_v_loop_filter_luma(src,
                                                            s->frame->linesize[LUMA],
@@ -913,19 +900,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                          s->frame->linesize[LUMA],
                                                          beta, tc, no_p, no_q);
                 } else
-#ifdef RPI_DEBLOCK_LUMA_VPU
-                if (s->enable_rpi_deblock) {
-                    uint8_t (*setup)[2][2][4];
-                    int num16 = (y>>4)*s->setup_width + (x>>4);
-                    int a = ((x>>3) & 1) << 1;
-                    int b = (y>>3) & 1;
-                    setup = s->dvq->y_setup_arm[num16];
-                    setup[1][b][0][a] = beta;
-                    setup[1][b][0][a + 1] = beta;
-                    setup[1][b][1][a] = tc[0];
-                    setup[1][b][1][a + 1] = tc[1];
-                } else
-#endif
                     s->hevcdsp.hevc_h_loop_filter_luma(src,
                                                        s->frame->linesize[LUMA],
                                                        beta, tc, no_p, no_q);
@@ -957,6 +931,29 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, cur_tc_offset) | (chroma_tc(s, qp0, 2, cur_tc_offset) << 16)) |
                             ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
 
+#ifdef RPI_DEBLOCK_VPU
+
+                        if (s->enable_rpi_deblock) {
+                            // Vertical filtering [v/h][uv][edge=0..3]
+                            uint8_t (*setup)[2][4];
+                            int xc = x>>s->ps.sps->hshift[1];
+                            int yc = y>>s->ps.sps->vshift[1];
+                            int num8 = (yc>>4)*s->uv_setup_width + (xc>>3);
+                            int a = ((yc>>3) & 1) << 1;
+                            setup = s->dvq->uv_setup_arm[num8];
+                            //printf("xc=%d yc=%d uv_s=%d num8=%d s=%p\n",xc,yc,s->uv_setup_width,num8,setup);
+                            if (bs0==2) {
+                              setup[0][0][a] = chroma_tc(s, qp0, 1, cur_tc_offset);
+                              setup[0][1][a] = chroma_tc(s, qp0, 2, cur_tc_offset);
+                            }
+                            if (bs1==2) {
+                              setup[0][0][a + 1] = chroma_tc(s, qp1, 1, cur_tc_offset);
+                              setup[0][1][a + 1] = chroma_tc(s, qp1, 2, cur_tc_offset);
+                            }
+                            continue;
+                        }
+#endif
+                            
                         if (tc4 == 0)
                             continue;
 
@@ -1000,6 +997,26 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                             ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, tc_offset) | (chroma_tc(s, qp0, 2, tc_offset) << 16)) |
                             ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
                         unsigned int no_f = !demi_x ? 0 : 2 | 8;
+                        
+#ifdef RPI_DEBLOCK_VPU
+                        if (s->enable_rpi_deblock) {
+                            uint8_t (*setup)[2][4]; // [h/v][top/bot][u/v][edge=0..1]
+                            int xc = x>>s->ps.sps->hshift[1];
+                            int yc = y>>s->ps.sps->vshift[1];
+                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>3);
+                            int b = (yc>>3) & 1;
+                            setup = s->dvq->uv_setup_arm[num16];
+                            if (bs0==2) {
+                              setup[1][b][0] = chroma_tc(s, qp0, 1, tc_offset);  // u0
+                              setup[1][b][2] = chroma_tc(s, qp0, 2, tc_offset);  // v0
+                            }
+                            if (bs1==2) {
+                              setup[1][b][1] = chroma_tc(s, qp1, 1, cur_tc_offset); // u1
+                              setup[1][b][3] = chroma_tc(s, qp1, 2, cur_tc_offset); // v1
+                            }
+                            continue;
+                        }
+#endif
 
                         if (tc4 == 0)
                             continue;
@@ -1055,19 +1072,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                                    s->frame->linesize[chroma],
                                                                    c_tc, no_p, no_q);
                         } else
-#ifdef RPI_DEBLOCK_VPU
-                        if (s->enable_rpi_deblock) {
-                            uint8_t (*setup)[2][2][4];
-                            int xc = x>>s->ps.sps->hshift[chroma];
-                            int yc = y>>s->ps.sps->vshift[chroma];
-                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
-                            int a = ((yc>>3) & 1) << 1;
-                            int b = (xc>>3) & 1;
-                            setup = s->dvq->uv_setup_arm[num16];
-                            setup[0][b][chroma-1][a] = c_tc[0];
-                            setup[0][b][chroma-1][a + 1] = c_tc[1];
-                        } else
-#endif
                             s->hevcdsp.hevc_v_loop_filter_chroma(src,
                                                                  s->frame->linesize[chroma],
                                                                  c_tc, no_p, no_q);
@@ -1107,19 +1111,6 @@ static void deblocking_filter_CTB(HEVCContext *s, int x0, int y0)
                                                                    s->frame->linesize[chroma],
                                                                    c_tc, no_p, no_q);
                         } else
-#ifdef RPI_DEBLOCK_VPU
-                        if (s->enable_rpi_deblock) {
-                            uint8_t (*setup)[2][2][4];
-                            int xc = x>>s->ps.sps->hshift[chroma];
-                            int yc = y>>s->ps.sps->vshift[chroma];
-                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
-                            int a = ((xc>>3) & 1) << 1;
-                            int b = (yc>>3) & 1;
-                            setup = s->dvq->uv_setup_arm[num16];
-                            setup[1][b][chroma-1][a] = c_tc[0];
-                            setup[1][b][chroma-1][a + 1] = c_tc[1];
-                        } else
-#endif
                             s->hevcdsp.hevc_h_loop_filter_chroma(src,
                                                                  s->frame->linesize[chroma],
                                                                  c_tc, no_p, no_q);
@@ -1302,42 +1293,30 @@ static void rpi_deblock(HEVCContext *s, int y, int deblock_h, int sao_y, int sao
   int cmd=0;
   // TODO check that image allocation is large enough for this to be okay as well.
   
+  if (!av_rpi_is_sand_frame(s->frame)) {
+      printf("Wrong format, VPU deblock disabled\n");
+      return; // TODO: When might this happen?
+  }
+  
   // Flush image, 4 lines above to bottom of ctb stripe
-  // TODO no need to flush luma
+  // TODO no need to flush luma (similarly, no need to flush chroma later on when rpi_deblock in use)
   ff_hevc_flush_buffer_lines(s, FFMAX(y-4,0), y+deblock_h, 1, 1);
   // TODO flush buffer of beta/tc setup when it becomes cached
 
   // Prepare multiple commands at once to avoid calling overhead
-
-#ifdef RPI_DEBLOCK_LUMA_VPU
-  s->dvq->vpu_cmds_arm[cmd][0] = get_vc_address_y(s->frame) + s->frame->linesize[0] * y;
-  s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[0];
-  s->dvq->vpu_cmds_arm[cmd][2] = s->setup_width;
-  s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->y_setup_vc + s->setup_width * (y>>4) );
-  s->dvq->vpu_cmds_arm[cmd][4] = num16high;
-  s->dvq->vpu_cmds_arm[cmd][5] = 2;
-  cmd++;
-#endif
-
-  s->dvq->vpu_cmds_arm[cmd][0] = get_vc_address_u(s->frame) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
-  s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[1];
-  s->dvq->vpu_cmds_arm[cmd][2] = s->uv_setup_width;
+  s->dvq->vpu_cmds_arm[cmd][0] = (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y >> s->ps.sps->vshift[1]) );
+  s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[3] * 128;
+  s->dvq->vpu_cmds_arm[cmd][2] = s->uv_setup_width;  // number of 8x16 blocks to process
+  //s->dvq->vpu_cmds_arm[cmd][2] = 1;  // number of 8x16 blocks to process
   s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
   s->dvq->vpu_cmds_arm[cmd][4] = num16highchroma;
-  s->dvq->vpu_cmds_arm[cmd][5] = 3;
-  cmd++;
-
-  s->dvq->vpu_cmds_arm[cmd][0] = get_vc_address_v(s->frame) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
-  s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[2];
-  s->dvq->vpu_cmds_arm[cmd][2] = s->uv_setup_width;
-  s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
-  s->dvq->vpu_cmds_arm[cmd][4] = num16highchroma;
-  s->dvq->vpu_cmds_arm[cmd][5] = 4;
+  s->dvq->vpu_cmds_arm[cmd][5] = 7;
   cmd++;
   
   // TODO worried about bottom line of this, presumably bottom pixels won't be available yet?
   
   // Also prepare a SAO command for each 16x16 row of chroma
+  
   if (s->ps.sps->sao_enabled && sao_h > 0) {
       for(int i=0;i<saonum16highchroma;i++) {
           int y0 = (sao_y >> s->ps.sps->vshift[1]) + 16 * i;
@@ -1358,11 +1337,11 @@ static void rpi_deblock(HEVCContext *s, int y, int deblock_h, int sao_y, int sao
           s->dvq->vpu_cmds_arm[cmd][4] = (h2<<16) + w2;
           s->dvq->vpu_cmds_arm[cmd][5] = 6; // SAO command
           cmd++;
-          /*printf("SAO %d %dx%d\n",y0,w2,h2);
+          printf("SAO %d %dx%d\n",y0,w2,h2);
           for(int k=0;k<8;k++){
             printf("%d->%x ",k,s->dvq->u_sao_setup_arm[s->uv_setup_width * (y0>>4) + k]);
           }
-          printf("\n");*/
+          printf("\n");
       }
   }
   
@@ -1391,6 +1370,7 @@ void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const i
         // SAO does not support transquant bypass
         // TODO move this higher
         s->enable_rpi_deblock = 0;
+        printf("Disabling RPI deblock due to transquant bypass\n");
     }
 #endif
 

@@ -719,11 +719,8 @@ typedef struct HEVCContext {
     {
         GPU_MEM_PTR_T deblock_vpu_gmem;
 
-        uint8_t (*y_setup_arm)[2][2][2][4];
-        uint8_t (*y_setup_vc)[2][2][2][4];
-
-        uint8_t (*uv_setup_arm)[2][2][2][4];
-        uint8_t (*uv_setup_vc)[2][2][2][4];
+        uint8_t (*uv_setup_arm)[2][2][4];  // [V=0][U/V][Edge=0..3] or [H=1][top/bottom][u/v][edge=0..1]
+        uint8_t (*uv_setup_vc)[2][2][4];
         
         uint8_t *u_sao_line_arm;
         uint8_t *u_sao_line_vc;

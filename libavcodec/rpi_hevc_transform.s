@@ -89,16 +89,18 @@
 hevc_trans_16x16:
   cmp r5,1
   beq memclear16
-  cmp r5,2
-  beq hevc_deblock_16x16
-  cmp r5,3
-  beq hevc_uv_deblock_16x16
-  cmp r5,4
-  beq hevc_uv_deblock_16x16_with_clear
+  #cmp r5,2
+  #beq hevc_deblock_16x16
+  #cmp r5,3
+  #beq hevc_uv_deblock_16x16
+  #cmp r5,4
+  #beq hevc_uv_deblock_16x16_with_clear
   cmp r5,5
   beq hevc_run_command_list
   cmp r5,6
   beq sao_process_row
+  cmp r5,7
+  beq hevc_uv_deblock_16x16_striped
 
   push r6-r15, lr # TODO cut down number of used registers
   mov r14,r3 # coeffs32
@@ -349,6 +351,7 @@ loop:
 .set tc10, 53
 .set delta0, 54
 .set delta1, 55
+.set setup_old, 56
 .set zeros, 0
 .set setup_input, 1
 .set deltaq1, 2
@@ -724,7 +727,25 @@ normal_filtering:
 filtering_done:
   b lr
 
+# Deblocks an entire row of the image
+# [0] = base address;
+# [1] = pitch in bytes
+# [2] = num 16x16 to process
+# [3] = pointer to setup data
+# [4] = num16highchroma;
+# [5] = 3/4 command number (4 says to clear setup data as well)
 
+# Strengths are stored as:
+# setup[block_idx][0=vert,1=horz][0=first edge, 1=second edge][0=u,1=v][0..3=edge number]
+#
+# We need to:
+#  Adjust r0 and r2 appropriately when reach 128 stride
+#  Convert strengths into right locations
+#     u0u1u2u3v0v1v2v3 -> u0v0u0v0u0v0u0v0 u1v1u1v1u1v1u1v1 for filtering across horizontal edges
+#     u0u1u2u3v0v1v2v3 -> first extract all u edges to filter, then extract all v edges to filter for vertical edges
+# We will processing a pair of 8*16 blocks of samples in each iteration (allowing the same underlying code to work once we extract the strengths appropriately)
+# A single load of setup contains enough information for the whole 16x16 block
+  
 hevc_uv_deblock_16x16:
   push r6-r15, lr
   mov r14,0
@@ -891,7 +912,7 @@ uv_horz_filter:
 do_chroma_filter:
   valtl H(setup,0),H(setup_input,0),H(setup_input,0) # tc*8
   valtl HX(tc,0),H(setup,0),H(setup,0)
-
+do_chroma_filter_with_tc: # Alternative entry point when tc already prepared
   vsub HX(delta,0),HX(Q0,0),HX(P0,0)
   vshl HX(delta,0),HX(delta,0),2 CLRA SACC
   vsub -,HX(P1,0),HX(Q1,0) SACC
@@ -901,6 +922,209 @@ do_chroma_filter:
   vadd HX(P0,0),HX(P0,0),HX(delta,0)
   vsub HX(Q0,0),HX(Q0,0),HX(delta,0)
   b lr
+  
+# This version works in a striped format
+#
+# samples are stored UVUV in stripes 128 bytes wide.
+#
+# Deblocks an entire row of the image
+# [0] = base address;
+# [1] = pitch in bytes to move to next stripe
+# [2] = num 8x16 to process
+# [3] = pointer to setup data
+# [4] = num16highchroma;
+# [5] = 7 command number
+
+# Strengths are stored for each 8x16 as:
+#
+# Vertical filtering (vertical edges)
+#   setup[block_idx][1][0=u,1=v][0..3 edge number]
+#
+# Horizontal filtering (horizontal edges)
+#   setup[block_idx][0][0=first edge, 1=second edge][0=u,1=v][0..1 edge number]
+#
+# Note order is different for horiz and vert
+#
+# We need to:
+#  Adjust r0 and r2 appropriately when reach 128 stride
+#  Convert strengths into right locations
+#     u0u1v0v1u2u3v2v3 -> u0v0u0v0u0v0u0v0 u1v1u1v1u1v1u1v1 for filtering across horizontal edges
+#     u0u1u2u3v0v1v2v3 -> first extract all u edges to filter, then extract all v edges to filter for vertical edges
+# We will process a 8*16 block of U samples interleaved with a 8x16 block of V samples in each iteration
+#
+# Use setup_old to store setup for previous 8x16 (because we do the horiz filters one step behind)
+#
+# Vertical filtering does one pass for top edge, one for middle edge
+# Horiz filtering does one pass for U, then one pass for V
+  
+hevc_uv_deblock_16x16_striped:
+  push r6-r15, lr
+  mov r14, r1 # Save stride between stripes
+  mov r1, 128 # Stride in bytes between rows
+  mov r9,r4   # Save num16 high
+  mov r4,r3
+  mov r13,r2
+  mov r2,r0
+  mov r10,r0
+  subscale4 r0,r1
+  mov r8,63
+  mov r6,-3
+  vmov H(zeros,0),0
+# r0 is location of current block - 4 * stride
+# r1 is stride between rows = 128
+# r2 is location of current block
+# r3 is offset of start of block (actual edges start at H(16,16)+r3 for horizontal and H(16,0)+r3 for vertical
+# r4 is pointer to setup data
+# r5 is for temporary calculations
+# r6 holds -3
+# r7 is how much to add (for r0/r2) to move right (16 in the middle or 16-128+r4 otherwise)
+# r8 holds 63
+# r9 holds the number of 16 high rows to process
+# r10 holds the original img base
+# r11 returns 0 if no filtering was done on the edge
+# r12 saves a copy of r11 so we can disable writeback if nothing done
+# r13 stores num8
+# r14 is stride between tiles
+# r15 counts up to r13 when we reach 8*16 we need to move to the next stripe
+
+uv_process_row_striped:
+  # First iteration does not do horizontal filtering on previous
+  mov r15, 0
+  mov r3,0
+  vldb H(12++,16)+r3,(r0 += r1) REP 4    # Load the current block
+  vldb H(16++,16)+r3,(r2 += r1) REP 16
+  vldb H(setup_input,0), (r4)  # We may wish to prefetch these
+  vstb H(zeros,0),(r4)
+  # Filter the left edge
+  bl uv_vert_filter_striped
+  b uv_start_deblock_loop_striped
+uv_deblock_loop_striped:
+  # Middle iterations do vertical on current block and horizontal on preceding
+  vldb H(12++,16)+r3,(r0 += r1) REP 4  # load the current block
+  vldb H(16++,16)+r3,(r2 += r1) REP 16
+  vldb H(setup_input,0), (r4)
+  # TODO if the setup is entirely zeros, we can skip the following processing!
+  vstb H(zeros,0),(r4)
+  bl uv_vert_filter_striped
+  
+  bl uv_horz_filter_striped
+  mov r12,r11
+  add r3,8*64
+  vadd H(setup_old,0),H(setup_old,4),0 # Shift to bottom edge
+  bl uv_horz_filter_striped
+  sub r3,8*64
+  # Move back to previous location temporarily
+  sub r0,r7
+  sub r2,r7
+  addcmpbeq r12,0,0,uv_skip_save_top_striped
+  vstb H(12++,0)+r3,(r0 += r1) REP 4  # Save the deblocked pixels for the previous block
+uv_skip_save_top_striped:
+  vstb H(16++,0)+r3,(r2 += r1) REP 16
+  add r0,r7
+  add r2,r7
+uv_start_deblock_loop_striped:
+  vadd H(setup_old,0), H(setup_input,8),0 # Save setup for use for horizontal edges
+  # move onto next 16x16 (could do this with circular buffer support instead)
+  add r3,16
+  and r3,r8
+  add r4,16
+  # Perform loop counter operations (may work with an addcmpbgt as well?)
+  add r15,1 # When we reach 8 we need to switch r7
+  mov r7, 16 # Amount to move on
+  and r5,r15,7
+  cmp r5,0
+  bne normal_case
+  add r7,r14,16-128 # move back to left edge, then move on one stripe
+normal_case:
+  add r0,r7
+  add r2,r7
+  cmp r15,r13 # Are there still more blocks to load
+  blt uv_deblock_loop_striped
+
+  # Final iteration needs to just do horizontal filtering
+  bl uv_horz_filter_striped
+  mov r12,r11
+  add r3,8*64
+  vadd H(setup_old,0),H(setup_old,4),0
+  bl uv_horz_filter_striped
+  sub r3,64*8
+  sub r0,r7
+  sub r2,r7
+  addcmpbeq r12,0,0,uv_skip_save_top2_striped
+  vstb H(12++,0)+r3,(r0 += r1) REP 4  # Save the deblocked pixels for the last block
+uv_skip_save_top2_striped:
+  vstb H(16++,0)+r3,(r2 += r1) REP 16
+
+# Now look to see if we should do another row
+  sub r9,1
+  cmp r9,0
+  bgt uv_start_again_striped
+  pop r6-r15, pc
+uv_start_again_striped:
+  # Need to sort out r0,r2 to point to next row down
+  addscale16 r10,r1
+  mov r2,r10
+  subscale4 r0,r2,r1
+  b uv_process_row_striped
+
+
+# At this stage H(16,16)+r3 points to the first pixel of the 16 high edge to be filtered
+# So we can reuse the code we move the parts to be filtered into HX(P0/P1/P2/P3/Q0/Q1/Q2/Q3,0) - we will perform a final saturation step on placing them back into the correct locations
+
+# This routine assumes H(setup_input,0) contains u0u1u2u3v0v1v2v3
+# We first filter the U samples, then the V samples
+uv_vert_filter_striped:
+  push lr
+
+  # U filtering
+  vmov HX(P1,0), V(16,12)+r3
+  vmov HX(P0,0), V(16,14)+r3
+  vmov HX(Q0,0), V(16,16)+r3
+  vmov HX(Q1,0), V(16,18)+r3
+
+  valtl H(setup,0),H(setup_input,0),H(setup_input,0) # tc*8
+  valtl HX(tc,0),H(setup,0),H(setup,0)
+  bl do_chroma_filter_with_tc
+
+  vadds V(16,14)+r3, HX(P0,0), 0
+  vadds V(16,16)+r3, HX(Q0,0), 0
+  
+  # V filtering
+  vmov HX(P1,0), V(16,13)+r3
+  vmov HX(P0,0), V(16,15)+r3
+  vmov HX(Q0,0), V(16,17)+r3
+  vmov HX(Q1,0), V(16,19)+r3
+
+  vadd  H(setup,0),H(setup_input,4),0 # Shift to V samples
+  valtl H(setup,0),H(setup,0),H(setup,0)
+  valtl HX(tc,0),H(setup,0),H(setup,0)
+  bl do_chroma_filter_with_tc
+
+  vadds V(16,15)+r3, HX(P0,0), 0
+  vadds V(16,17)+r3, HX(Q0,0), 0
+
+  pop pc
+
+# Filter edge at H(16,0)+r3
+# weights in setup_old: u0u1v0v1
+uv_horz_filter_striped:
+  push lr
+
+  vmov HX(P1,0), H(14,0)+r3
+  vmov HX(P0,0), H(15,0)+r3
+  vmov HX(Q0,0), H(16,0)+r3
+  vmov HX(Q1,0), H(17,0)+r3
+
+  valtl H(setup,0),H(setup_old,0),H(setup_old,0) # tc*8
+  valtl H(setup,0),H(setup,0),H(setup,0) # u0u0u0u0u1u1u1u1v0v0v0v0v1v1v1v1
+  vadd H(tc,0),H(setup,8),0 # Could remove this if we store u/v in alternate order (issue is only ra port has shifted access)
+  valtl HX(tc,0),H(setup,0),H(tc,0) # u0v0u1v1...
+  bl do_chroma_filter_with_tc
+
+  vadds H(15,0)+r3, HX(P0,0), 0
+  # P3 and Q3 never change so don't bother saving back
+  vadds H(16,0)+r3, HX(Q0,0), 0
+  pop pc
 
 # r0 = list
 # r1 = number
