@@ -402,7 +402,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
             diag_edge[2] |= (edges[2] || edges[3]);
             diag_edge[3] |= (edges[0] || edges[3]);
         }
-        if (c_idx > 0 && s->enable_rpi_deblock) {
+        if (c_idx==1 && s->enable_rpi_deblock) {
             // Need to prepare a 32bit word describing the deblocking for a 16x16 region
             // x,y is luma position
             // x0,y0 is chroma position
@@ -423,23 +423,28 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
             // This depends on availability and direction of filtering.
             
             int typ = sao->type_idx[c_idx];  // BAND=1, EDGE=2
-            uint32_t *setup = (c_idx == 1) ? s->dvq->u_sao_setup_arm : s->dvq->v_sao_setup_arm;
-            int16_t *vals = sao->offset_val[c_idx];
+            uint32_t (*setup)[2] = s->dvq->uv_sao_setup_arm;
+            int16_t *vals = sao->offset_val[1];
             uint32_t packedval = ((vals[1]&15)<<12) +((vals[2]&15)<<8) +((vals[3]&15)<<4) +(vals[4]&15);
+            int16_t *valsv = sao->offset_val[2];
+            uint32_t packedvalv = ((valsv[1]&15)<<12) +((valsv[2]&15)<<8) +((valsv[3]&15)<<4) +(valsv[4]&15);
             uint32_t leftClass;
             uint32_t eoClass;
             int lasti = ((height+15)>>4) - 1; // i ranges from 0 to lasti inclusive
-            int lastj = ((width+15)>>4) - 1; // j ranges from 0 to lastj inclusive
-            setup += s->uv_setup_width * (y0 >> 4) + (x0 >> 4);
+            int lastj = ((width+7)>>3) - 1; // j ranges from 0 to lastj inclusive
+            setup += s->uv_setup_width * (y0 >> 4) + (x0 >> 3);
             switch (typ) {
                 case SAO_BAND:
                     // Pack the values into 4 bits each, also need left class
                     sao->type_idx[c_idx] = SAO_APPLIED;
-                    leftClass = sao->band_position[c_idx];
+                    leftClass = sao->band_position[1];
                     packedval += (1<<30) + (leftClass<<16); // type 1
+                    leftClass = sao->band_position[2];
+                    packedvalv += (leftClass<<16); 
                     for(int i = 0; i <= lasti ; i++) {
                         for(int j = 0; j <= lastj; j++) {
-                            setup[ i * s->uv_setup_width + j ] = packedval;
+                            setup[ i * s->uv_setup_width + j ][0] = packedval;
+                            setup[ i * s->uv_setup_width + j ][1] = packedvalv;
                         }
                     }
                     break;
@@ -462,7 +467,8 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                             if (j==0 && vert_edge[0]) v |= (1<<TOPLEFTFLAG) | (1<<LEFTFLAG) | (1<<BOTTOMLEFTFLAG);
                             if (j==lastj && vert_edge[1]) v |= (1<<TOPRIGHTFLAG) | (1<<RIGHTFLAG) | (1<<BOTTOMRIGHTFLAG);
                             for(int i = 0; i <= lasti ; i++) {
-                              setup[ i * s->uv_setup_width + j ] = v;
+                              setup[ i * s->uv_setup_width + j ][0] = v;
+                              setup[ i * s->uv_setup_width + j ][1] = packedvalv;
                             }
                         }
                     } else if (eoClass == 1) {
@@ -472,7 +478,8 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                             if (i==0 && horiz_edge[0]) v |= (1<<TOPLEFTFLAG) | (1<<TOPFLAG) | (1<<TOPRIGHTFLAG);
                             if (i==lasti && horiz_edge[1]) v |= (1<<BOTTOMLEFTFLAG) | (1<<BOTTOMFLAG) | (1<<BOTTOMRIGHTFLAG);
                             for(int j = 0; j <= lastj; j++) {
-                                setup[ i * s->uv_setup_width + j ] = v;
+                                setup[ i * s->uv_setup_width + j ][0] = v;
+                                setup[ i * s->uv_setup_width + j ][1] = packedvalv;
                             }
                         }
                     } else if (eoClass == 2) {
@@ -498,7 +505,8 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                                 } else {
                                     if (j==lastj) v2 |= vert_edge[1] << BOTTOMRIGHTFLAG;
                                 }
-                                setup[ i * s->uv_setup_width + j ] = v2;
+                                setup[ i * s->uv_setup_width + j ][0] = v2;
+                                setup[ i * s->uv_setup_width + j ][1] = packedvalv;
                             }
                         }
                     } else {
@@ -524,7 +532,8 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                                 } else {
                                     if (j==0) v2 |= vert_edge[0] << BOTTOMLEFTFLAG;
                                 }
-                                setup[ i * s->uv_setup_width + j ] = v2;
+                                setup[ i * s->uv_setup_width + j ][0] = v2;
+                                setup[ i * s->uv_setup_width + j ][1] = packedvalv;
                             }
                         }
                     }
@@ -532,7 +541,8 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                 default:
                     for(int i = 0; i <= lasti ; i++) {
                         for(int j = 0; j <= lastj; j++) {
-                            setup[ i * s->uv_setup_width + j ] = 0;  // May be more efficient to clear after use?
+                            setup[ i * s->uv_setup_width + j ][0] = 0;  // May be more efficient to clear after use?
+                            setup[ i * s->uv_setup_width + j ][1] = 0;  // May be more efficient to clear after use?
                         }
                     }
                     break;
@@ -1323,25 +1333,18 @@ static void rpi_deblock(HEVCContext *s, int y, int deblock_h, int sao_y, int sao
           int h2 = FFMIN(16, (sao_h >> s->ps.sps->vshift[1]) - 16 * i);
           //int h2 = (sao_h >> s->ps.sps->vshift[1]) - 16 * i;
           int w2 = s->ps.sps->width >> s->ps.sps->hshift[1];
-          s->dvq->vpu_cmds_arm[cmd][0] = get_vc_address_u(s->frame) + s->frame->linesize[1] * y0;  // src
-          s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[1];  // stride
-          s->dvq->vpu_cmds_arm[cmd][2] = (int) s->dvq->u_sao_line_vc;    // line buffer
-          s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->u_sao_setup_vc + s->uv_setup_width * (y0>>4) ); // sao_data
+          s->dvq->vpu_cmds_arm[cmd][0] = (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y0 ) );
+          s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[3] * 128;  // stride
+          s->dvq->vpu_cmds_arm[cmd][2] = (int) s->dvq->uv_sao_line_vc;    // line buffer
+          s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->uv_sao_setup_vc + s->uv_setup_width * (y0>>4) ); // sao_data
           s->dvq->vpu_cmds_arm[cmd][4] = (h2<<16) + w2; // h_w
           s->dvq->vpu_cmds_arm[cmd][5] = 6; // SAO command
           cmd++;
-          s->dvq->vpu_cmds_arm[cmd][0] = get_vc_address_v(s->frame) + s->frame->linesize[2] * y0;  // src
-          s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[2];  // stride
-          s->dvq->vpu_cmds_arm[cmd][2] = (int) s->dvq->v_sao_line_vc;    // line buffer
-          s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->v_sao_setup_vc + s->uv_setup_width * (y0>>4) ); // sao_data
-          s->dvq->vpu_cmds_arm[cmd][4] = (h2<<16) + w2;
-          s->dvq->vpu_cmds_arm[cmd][5] = 6; // SAO command
-          cmd++;
-          printf("SAO %d %dx%d\n",y0,w2,h2);
+          /*printf("SAO %d %dx%d\n",y0,w2,h2);
           for(int k=0;k<8;k++){
-            printf("%d->%x ",k,s->dvq->u_sao_setup_arm[s->uv_setup_width * (y0>>4) + k]);
+            printf("%d->%x,%x ",k,s->dvq->uv_sao_setup_arm[s->uv_setup_width * (y0>>4) + k][0], s->dvq->uv_sao_setup_arm[s->uv_setup_width * (y0>>4) + k][1]);
           }
-          printf("\n");
+          printf("\n");*/
       }
   }
   
@@ -1371,6 +1374,10 @@ void ff_hevc_hls_filter(HEVCContext * const s, const int x, const int y, const i
         // TODO move this higher
         s->enable_rpi_deblock = 0;
         printf("Disabling RPI deblock due to transquant bypass\n");
+    }
+    if (s->enable_rpi_deblock && !av_rpi_is_sand_frame(s->frame)) {
+        s->enable_rpi_deblock = 0;
+        printf("Disabling RPI deblock due to wrong image format (probably too large an image)\n");
     }
 #endif
 

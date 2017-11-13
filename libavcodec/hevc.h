@@ -53,7 +53,7 @@
   #if RPI_HEVC_SAND
     // RPI_DEBLOCK_VPU only works with Sand Format
     // Define RPI_DEBLOCK_VPU to perform chroma SAO and deblocking on the VPUs 
-    // #define RPI_DEBLOCK_VPU
+    //#define RPI_DEBLOCK_VPU
   #endif
 
 
