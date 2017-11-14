@@ -133,11 +133,7 @@ static int get_qPy(const HEVCRpiContext * const s, const int xC, const int yC)
 
 static inline unsigned int pixel_shift(const HEVCRpiContext * const s, const unsigned int c_idx)
 {
-#if CONFIG_HEVC_RPI_DECODER
-    return c_idx != 0 && av_rpi_is_sand_frame(s->frame) ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
-#else
-    return s->ps.sps->pixel_shift;
-#endif
+    return c_idx != 0 ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
 }
 
 static void copy_CTB(uint8_t *dst, const uint8_t *src, int width, int height,
@@ -295,7 +291,7 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
     uint8_t right_tile_edge  = 0;
     uint8_t up_tile_edge     = 0;
     uint8_t bottom_tile_edge = 0;
-    const int sliced = av_rpi_is_sand_frame(s->frame);
+    const int sliced = 1;
     const int plane_count = sliced ? 2 : (ctx_cfmt(s) != 0 ? 3 : 1);
 
     edges[0]   = x_ctb == 0;
@@ -673,45 +669,13 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                     no_q[0] = get_pcm(s, x, y);
                     no_q[1] = get_pcm(s, x, y + 4);
                 }
-#if CONFIG_HEVC_RPI_DECODER
-                if (av_rpi_is_sand_frame(s->frame)) {
 
-                    // This copes properly with no_p/no_q
-                    s->hevcdsp.hevc_v_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
-                                                     s->frame->linesize[LUMA],
-                                                     beta, tc, no_p, no_q,
-                                                     av_rpi_sand_frame_pos_y(s->frame, x - 4, y));
-                }
-                else
-#endif
-                {
-                    src = &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
-                    if (pcmf) {
-                        // Standard DSP code is broken if no_p / no_q is set
-                        s->hevcdsp.hevc_v_loop_filter_luma_c(src,
-                                                           s->frame->linesize[LUMA],
-                                                           beta, tc, no_p, no_q);
-                    }
-                    else
-#ifdef RPI_DEBLOCK_VPU
-                    if (s->enable_rpi_deblock) {
-                        uint8_t (*setup)[2][2][4];
-                        int num16 = (y>>4)*s->setup_width + (x>>4);
-                        int a = ((y>>3) & 1) << 1;
-                        int b = (x>>3) & 1;
-                        setup = s->dvq->y_setup_arm[num16];
-                        setup[0][b][0][a] = beta;
-                        setup[0][b][0][a + 1] = beta;
-                        setup[0][b][1][a] = tc[0];
-                        setup[0][b][1][a + 1] = tc[1];
-                    } else
-#endif
-                    {
-                        s->hevcdsp.hevc_v_loop_filter_luma(src,
-                                                           s->frame->linesize[LUMA],
-                                                           beta, tc, no_p, no_q);
-                    }
-                }
+                // This copes properly with no_p/no_q
+                s->hevcdsp.hevc_v_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
+                                                 s->frame->linesize[LUMA],
+                                                 beta, tc, no_p, no_q,
+                                                 av_rpi_sand_frame_pos_y(s->frame, x - 4, y));
+                // *** VPU deblock lost here
             }
         }
 
@@ -731,12 +695,8 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                 beta = betatable[av_clip(qp + beta_offset, 0, MAX_QP)];
                 tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
                 tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                src =
-#if CONFIG_HEVC_RPI_DECODER
-                    av_rpi_is_sand_frame(s->frame) ?
-                        av_rpi_sand_frame_pos_y(s->frame, x, y) :
-#endif
-                        &s->frame->data[LUMA][y * s->frame->linesize[LUMA] + (x << s->ps.sps->pixel_shift)];
+                src = av_rpi_sand_frame_pos_y(s->frame, x, y);
+
                 if (pcmf) {
                     no_p[0] = get_pcm(s, x, y - 1);
                     no_p[1] = get_pcm(s, x + 4, y - 1);

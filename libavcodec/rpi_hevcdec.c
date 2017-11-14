@@ -3476,7 +3476,7 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
                 lc->na.cand_up_left      = (cmd->na >> 2) & 1;
                 lc->na.cand_up           = (cmd->na >> 1) & 1;
                 lc->na.cand_up_right     = (cmd->na >> 0) & 1;
-                if (!av_rpi_is_sand_frame(s->frame) || cmd->c_idx == 0)
+                if (cmd->c_idx == 0)
                     s->hpc.intra_pred[cmd->size - 2](s, lc, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);
                 else
                     s->hpc.intra_pred_c[cmd->size - 2](s, lc, cmd->i_pred.x, cmd->i_pred.y, cmd->c_idx);

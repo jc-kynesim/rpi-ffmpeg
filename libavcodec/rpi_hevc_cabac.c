@@ -796,7 +796,7 @@ int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *
             s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[ctb_addr_ts - 1]) {
             if (!lc->wpp_init) {
                 int ret;
-                if (s->threads_number == 1)
+                if (s->threads_number == 1)  // **** Ummm... can only be 1 in our world but this is a wpp test
                     ret = cabac_reinit(lc);
                 else
                     ret = cabac_init_decoder(lc);
@@ -1582,7 +1582,7 @@ static void rpi_add_dc(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const unsigned int stride = frame->linesize[c_idx];
     const unsigned int x = x0 >> ctx_hshift(s, c_idx);
     const unsigned int y = y0 >> ctx_vshift(s, c_idx);
-    const int is_sliced = av_rpi_is_sand_frame(frame);
+    const int is_sliced = 1;
     uint8_t * const dst = !is_sliced ?
             s->frame->data[c_idx] + y * stride + (x << s->ps.sps->pixel_shift) :
         c_idx == 0 ?
