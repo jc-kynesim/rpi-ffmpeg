@@ -42,7 +42,6 @@
 #undef BIT_DEPTH
 #undef PRED_C
 
-#if CONFIG_HEVC_RPI_DECODER
 #define PRED_C 1
 #define BIT_DEPTH 8
 #include "rpi_hevcpred_template.c"
@@ -60,7 +59,6 @@
 #include "rpi_hevcpred_template.c"
 #undef BIT_DEPTH
 #undef PRED_C
-#endif
 
 void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth)
 {

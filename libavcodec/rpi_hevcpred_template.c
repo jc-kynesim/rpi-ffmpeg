@@ -22,13 +22,12 @@
 
 #include "config.h"
 #include "libavutil/pixdesc.h"
-
+#include "libavutil/rpi_sand_fns.h"
 #include "bit_depth_template.c"
+
+#include "rpi_hevcdec.h"
 #include "rpi_hevcpred.h"
 
-#if CONFIG_HEVC_RPI_DECODER
-#include "libavutil/rpi_sand_fns.h"
-#endif
 
 #define DUMP_PRED 0
 
@@ -124,7 +123,7 @@ static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const 
 #endif
 
 static av_always_inline void FUNC(intra_pred)(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                                              int log2_size, int c_idx)
+                                              int log2_size, int c_idx_arg)
 {
 #define PU(x) \
     ((x) >> s->ps.sps->log2_min_pu_size)
@@ -165,9 +164,11 @@ do {                                  \
                 AV_WN4P(&ptr[i], a);                                           \
             else                                                               \
                 a = PIXEL_SPLAT_X4(ptr[i + 3])
+    // c_idx will alaways be 1 for _c versions and 0 for y
+    const unsigned int c_idx = PRED_C;
     int i;
-    int hshift = s->ps.sps->hshift[c_idx];
-    int vshift = s->ps.sps->vshift[c_idx];
+    const unsigned int hshift = ctx_hshift(s, c_idx);
+    const unsigned int vshift = ctx_vshift(s, c_idx);
     int size = (1 << log2_size);
     int size_in_luma_h = size << hshift;
     int size_in_tbs_h  = size_in_luma_h >> s->ps.sps->log2_min_tb_size;
@@ -181,19 +182,13 @@ do {                                  \
     int cur_tb_addr = MIN_TB_ADDR_ZS(x_tb, y_tb);
 
     const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
-#if CONFIG_HEVC_RPI_DECODER
-    pixel *const src = !av_rpi_is_sand_frame(s->frame) ?
-            (pixel*)s->frame->data[c_idx] + x + y * stride :
-        c_idx == 0 ?
-            (pixel *)av_rpi_sand_frame_pos_y(s->frame, x, y) :
-            (pixel *)av_rpi_sand_frame_pos_c(s->frame, x, y);
-#else
-    pixel *src = (pixel*)s->frame->data[c_idx] + x + y * stride;
-#endif
+    pixel *const src = c_idx == 0 ?
+        (pixel *)av_rpi_sand_frame_pos_y(s->frame, x, y) :
+        (pixel *)av_rpi_sand_frame_pos_c(s->frame, x, y);
 
     int min_pu_width = s->ps.sps->min_pu_width;
 
-    enum IntraPredMode mode = c_idx ? lc->tu.intra_pred_mode_c :
+    const enum IntraPredMode mode = c_idx ? lc->tu.intra_pred_mode_c :
                               lc->tu.intra_pred_mode;
     pixel4 a;
     pixel  left_array[2 * MAX_TB_SIZE + 1];
@@ -226,8 +221,7 @@ do {                                  \
     pixel * src_u = src - stride;
     pixel * src_ur = src_u + size;
 
-#if CONFIG_HEVC_RPI_DECODER
-    if (av_rpi_is_sand_frame(s->frame)) {
+    {
         // N.B. stride is in pixels (not bytes) or in the case of chroma pixel-pairs
         const AVFrame * const frame = s->frame;
         const unsigned int mask = stride - 1; // For chroma pixel=uint16 so stride_c is stride_y / 2
@@ -237,7 +231,6 @@ do {                                  \
         if (((x + size) & mask) == 0)
             src_ur += stripe_adj;
     }
-#endif
 
     if (s->ps.pps->constrained_intra_pred_flag == 1) {
         int size_in_luma_pu_v = PU(size_in_luma_v);
@@ -420,7 +413,7 @@ do {                                  \
     // Sand can only apply to chroma_format_idc == 1 so we don't need to
     // worry about chroma smoothing for that case
 #if !PRED_C
-    if (!s->ps.sps->intra_smoothing_disabled_flag && (c_idx == 0  || s->ps.sps->chroma_format_idc == 3)) {
+    if (!s->ps.sps->intra_smoothing_disabled_flag && (c_idx == 0  || ctx_cfmt(s) == 3)) {
         if (mode != INTRA_DC && size != 4){
             int intra_hor_ver_dist_thresh[] = { 7, 1, 0 };
             int min_dist_vert_hor = FFMIN(FFABS((int)(mode - 26U)),

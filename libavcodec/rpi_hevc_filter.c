@@ -74,7 +74,7 @@ static int chroma_tc(HEVCRpiContext *s, int qp_y, int c_idx, int tc_offset)
         offset = s->ps.pps->cr_qp_offset;
 
     qp_i = av_clip(qp_y + offset, 0, 57);
-    if (s->ps.sps->chroma_format_idc == 1) {
+    if (ctx_cfmt(s) == 1) {
         if (qp_i < 30)
             qp = qp_i;
         else if (qp_i > 43)
@@ -215,8 +215,8 @@ static void copy_CTB_to_hv(const HEVCRpiContext * const s, const uint8_t * const
                            int c_idx, int x_ctb, int y_ctb)
 {
     const unsigned int sh = pixel_shift(s, c_idx);
-    int w = s->ps.sps->width >> s->ps.sps->hshift[c_idx];
-    int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
+    const unsigned int w = s->ps.sps->width >> ctx_hshift(s, c_idx);
+    const unsigned int h = s->ps.sps->height >> ctx_vshift(s, c_idx);
 
     /* copy horizontal edges */
     memcpy(s->sao_pixel_buffer_h[c_idx] + (((2 * y_ctb) * w + x) << sh),
@@ -240,8 +240,8 @@ static void restore_tqb_pixels(const HEVCRpiContext * const s,
             (s->ps.sps->pcm.loop_filter_disable_flag && s->ps.sps->pcm_enabled_flag)) {
         int x, y;
         int min_pu_size  = 1 << s->ps.sps->log2_min_pu_size;
-        int hshift       = s->ps.sps->hshift[c_idx];
-        int vshift       = s->ps.sps->vshift[c_idx];
+        const unsigned int hshift = ctx_hshift(s, c_idx);
+        const unsigned int vshift = ctx_vshift(s, c_idx);
         int x_min        = ((x0         ) >> s->ps.sps->log2_min_pu_size);
         int y_min        = ((y0         ) >> s->ps.sps->log2_min_pu_size);
         int x_max        = ((x0 + width ) >> s->ps.sps->log2_min_pu_size);
@@ -295,12 +295,8 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
     uint8_t right_tile_edge  = 0;
     uint8_t up_tile_edge     = 0;
     uint8_t bottom_tile_edge = 0;
-#if CONFIG_HEVC_RPI_DECODER
     const int sliced = av_rpi_is_sand_frame(s->frame);
-    const int plane_count = sliced ? 2 : (s->ps.sps->chroma_format_idc ? 3 : 1);
-#else
-    const int plane_count = (s->ps.sps->chroma_format_idc ? 3 : 1);
-#endif
+    const int plane_count = sliced ? 2 : (ctx_cfmt(s) != 0 ? 3 : 1);
 
     edges[0]   = x_ctb == 0;
     edges[1]   = y_ctb == 0;
@@ -343,18 +339,19 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
     }
 
     for (c_idx = 0; c_idx < plane_count; c_idx++) {
-        int x0       = x >> s->ps.sps->hshift[c_idx];
-        int y0       = y >> s->ps.sps->vshift[c_idx];
+        const unsigned int vshift = ctx_vshift(s, c_idx);
+        const unsigned int hshift = ctx_hshift(s, c_idx);
+        const int x0 = x >> hshift;
+        const int y0 = y >> vshift;
         ptrdiff_t stride_src = s->frame->linesize[c_idx];
-        int ctb_size_h = (1 << (s->ps.sps->log2_ctb_size)) >> s->ps.sps->hshift[c_idx];
-        int ctb_size_v = (1 << (s->ps.sps->log2_ctb_size)) >> s->ps.sps->vshift[c_idx];
-        int width    = FFMIN(ctb_size_h, (s->ps.sps->width  >> s->ps.sps->hshift[c_idx]) - x0);
-        int height   = FFMIN(ctb_size_v, (s->ps.sps->height >> s->ps.sps->vshift[c_idx]) - y0);
+        int ctb_size_h = (1 << (s->ps.sps->log2_ctb_size)) >> hshift;
+        int ctb_size_v = (1 << (s->ps.sps->log2_ctb_size)) >> vshift;
+        int width    = FFMIN(ctb_size_h, (s->ps.sps->width  >> hshift) - x0);
+        const int height = FFMIN(ctb_size_v, (s->ps.sps->height >> vshift) - y0);
         int tab      = sao_tab[(FFALIGN(width, 8) >> 3) - 1];
         ptrdiff_t stride_dst;
         uint8_t *dst;
 
-#if CONFIG_HEVC_RPI_DECODER
         const unsigned int sh = s->ps.sps->pixel_shift + (sliced && c_idx != 0);
         const int wants_lr = sao->type_idx[c_idx] == SAO_EDGE && sao->eo_class[c_idx] != 1 /* Vertical */;
         uint8_t * const src = !sliced ?
@@ -373,17 +370,9 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                 av_rpi_sand_frame_pos_y(s->frame, x0 + width, y0) :
                 av_rpi_sand_frame_pos_c(s->frame, x0 + width, y0);
 
-
         if (sliced && c_idx > 1) {
             break;
         }
-#else
-        const unsigned int sh = s->ps.sps->pixel_shift;
-        const int wants_lr = sao->type_idx[c_idx] == SAO_EDGE && sao->eo_class[c_idx] != 1 /* Vertical */;
-        uint8_t * const src = &s->frame->data[c_idx][y0 * stride_src + (x0 << s->ps.sps->pixel_shift)];
-        const uint8_t * const src_l = edges[0] || !wants_lr ? NULL : src - (1 << sh);
-        const uint8_t * const src_r = edges[2] || !wants_lr ? NULL : src + (width << sh);
-#endif
 
         switch (sao->type_idx[c_idx]) {
         case SAO_BAND:
@@ -441,8 +430,8 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
             break;
         case SAO_EDGE:
         {
-            int w = s->ps.sps->width >> s->ps.sps->hshift[c_idx];
-            int h = s->ps.sps->height >> s->ps.sps->vshift[c_idx];
+            const int w = s->ps.sps->width >> hshift;
+            const int h = s->ps.sps->height >> vshift;
             int top_edge = edges[1];
             int bottom_edge = edges[3];
 #if CONFIG_HEVC_RPI_DECODER
@@ -618,8 +607,8 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
 {
     uint8_t *src;
     int x, y;
-    int chroma, beta;
-    int32_t c_tc[4], tc[2];
+    int beta;
+    int32_t tc[2];
     uint8_t no_p[2] = { 0 };
     uint8_t no_q[2] = { 0 };
 
@@ -777,199 +766,92 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
         }
     }
 
-    if (s->ps.sps->chroma_format_idc) {
-#if CONFIG_HEVC_RPI_DECODER
-        if (av_rpi_is_sand_frame(s->frame)) {
-            const int v = 2;
-            const int h = 2;
+    if (ctx_cfmt(s) != 0) {
+        const int v = 2;
+        const int h = 2;
 
-            // vertical filtering chroma
-            for (y = y0; y < y_end; y += 8 * v) {
+        // vertical filtering chroma
+        for (y = y0; y < y_end; y += 8 * v) {
 //                const int demi_y = y + 4 * v >= s->ps.sps->height;
-                const int demi_y = 0;
-                for (x = x0 ? x0 : 8 * h; x < x_end; x += 8 * h) {
-                    const int bs0 = s->vertical_bs[(x +  y          * s->bs_width) >> 2];
-                    const int bs1 = s->vertical_bs[(x + (y + 4 * v) * s->bs_width) >> 2];
+            const int demi_y = 0;
+            for (x = x0 ? x0 : 8 * h; x < x_end; x += 8 * h) {
+                const int bs0 = s->vertical_bs[(x +  y          * s->bs_width) >> 2];
+                const int bs1 = s->vertical_bs[(x + (y + 4 * v) * s->bs_width) >> 2];
 
-                    if ((bs0 == 2) || (bs1 == 2)) {
-                        const int qp0 = (get_qPy(s, x - 1, y)         + get_qPy(s, x, y)         + 1) >> 1;
-                        const int qp1 = (get_qPy(s, x - 1, y + 4 * v) + get_qPy(s, x, y + 4 * v) + 1) >> 1;
-                        unsigned int no_f = !demi_y ? 0 : 2 | 8;
+                if ((bs0 == 2) || (bs1 == 2)) {
+                    const int qp0 = (get_qPy(s, x - 1, y)         + get_qPy(s, x, y)         + 1) >> 1;
+                    const int qp1 = (get_qPy(s, x - 1, y + 4 * v) + get_qPy(s, x, y + 4 * v) + 1) >> 1;
+                    unsigned int no_f = !demi_y ? 0 : 2 | 8;
 
-                        // tc_offset here should be set to cur_tc_offset I think
-                        const uint32_t tc4 =
-                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, cur_tc_offset) | (chroma_tc(s, qp0, 2, cur_tc_offset) << 16)) |
-                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
+                    // tc_offset here should be set to cur_tc_offset I think
+                    const uint32_t tc4 =
+                        ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, cur_tc_offset) | (chroma_tc(s, qp0, 2, cur_tc_offset) << 16)) |
+                        ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
 
-                        if (tc4 == 0)
+                    if (tc4 == 0)
+                        continue;
+
+                    if (pcmf) {
+                        no_f =
+                            (get_pcm(s, x - 1, y) ? 1 : 0) |
+                            (get_pcm(s, x - 1, y + 4 * v) ? 2 : 0) |
+                            (get_pcm(s, x, y) ? 4 : 0) |
+                            (get_pcm(s, x, y + 4 * v) ? 8 : 0);
+                        if (no_f == 0xf)
                             continue;
-
-                        if (pcmf) {
-                            no_f =
-                                (get_pcm(s, x - 1, y) ? 1 : 0) |
-                                (get_pcm(s, x - 1, y + 4 * v) ? 2 : 0) |
-                                (get_pcm(s, x, y) ? 4 : 0) |
-                                (get_pcm(s, x, y + 4 * v) ? 8 : 0);
-                            if (no_f == 0xf)
-                                continue;
-                        }
-
-                        s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
-                                                       s->frame->linesize[1],
-                                                       tc4,
-                                                       av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
-                                                       no_f);
                     }
+
+                    s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                                                   s->frame->linesize[1],
+                                                   tc4,
+                                                   av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
+                                                   no_f);
                 }
+            }
 
-                if (y == 0)
-                    continue;
+            if (y == 0)
+                continue;
 
-                // horizontal filtering chroma
-                tc_offset = x0 ? left_tc_offset : cur_tc_offset;
-                x_end2 = x_end;
-                if (x_end != s->ps.sps->width)
-                    x_end2 = x_end - 8 * h;
+            // horizontal filtering chroma
+            tc_offset = x0 ? left_tc_offset : cur_tc_offset;
+            x_end2 = x_end;
+            if (x_end != s->ps.sps->width)
+                x_end2 = x_end - 8 * h;
 
-                for (x = x0 ? x0 - 8 * h: 0; x < x_end2; x += 8 * h) {
+            for (x = x0 ? x0 - 8 * h: 0; x < x_end2; x += 8 * h) {
 //                    const int demi_x = x + 4 * v >= s->ps.sps->width;
-                    const int demi_x = 0;
+                const int demi_x = 0;
 
-                    const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
-                    const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
-                    if ((bs0 == 2) || (bs1 == 2)) {
-                        const int qp0 = bs0 == 2 ? (get_qPy(s, x,         y - 1) + get_qPy(s, x,         y) + 1) >> 1 : 0;
-                        const int qp1 = bs1 == 2 ? (get_qPy(s, x + 4 * h, y - 1) + get_qPy(s, x + 4 * h, y) + 1) >> 1 : 0;
-                        const uint32_t tc4 =
-                            ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, tc_offset) | (chroma_tc(s, qp0, 2, tc_offset) << 16)) |
-                            ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
-                        unsigned int no_f = !demi_x ? 0 : 2 | 8;
+                const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
+                const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
+                if ((bs0 == 2) || (bs1 == 2)) {
+                    const int qp0 = bs0 == 2 ? (get_qPy(s, x,         y - 1) + get_qPy(s, x,         y) + 1) >> 1 : 0;
+                    const int qp1 = bs1 == 2 ? (get_qPy(s, x + 4 * h, y - 1) + get_qPy(s, x + 4 * h, y) + 1) >> 1 : 0;
+                    const uint32_t tc4 =
+                        ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, tc_offset) | (chroma_tc(s, qp0, 2, tc_offset) << 16)) |
+                        ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
+                    unsigned int no_f = !demi_x ? 0 : 2 | 8;
 
-                        if (tc4 == 0)
+                    if (tc4 == 0)
+                        continue;
+
+                    if (pcmf) {
+                        no_f =
+                            (get_pcm(s, x,         y - 1) ? 1 : 0) |
+                            (get_pcm(s, x + 4 * h, y - 1) ? 2 : 0) |
+                            (get_pcm(s, x,         y)     ? 4 : 0) |
+                            (get_pcm(s, x + 4 * h, y)     ? 8 : 0);
+
+                        if (no_f == 0xf)
                             continue;
-
-                        if (pcmf) {
-                            no_f =
-                                (get_pcm(s, x,         y - 1) ? 1 : 0) |
-                                (get_pcm(s, x + 4 * h, y - 1) ? 2 : 0) |
-                                (get_pcm(s, x,         y)     ? 4 : 0) |
-                                (get_pcm(s, x + 4 * h, y)     ? 8 : 0);
-
-                            if (no_f == 0xf)
-                                continue;
-                        }
-
-                        s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
-                                                             s->frame->linesize[1],
-                                                             tc4, no_f);
                     }
+
+                    s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                                                         s->frame->linesize[1],
+                                                         tc4, no_f);
                 }
             }
-        }
-        else
-#endif
-        for (chroma = 1; chroma <= 2; chroma++) {
-            int h = 1 << s->ps.sps->hshift[chroma];
-            int v = 1 << s->ps.sps->vshift[chroma];
-
-            // vertical filtering chroma
-            for (y = y0; y < y_end; y += (8 * v)) {
-                for (x = x0 ? x0 : 8 * h; x < x_end; x += (8 * h)) {
-                    const int bs0 = s->vertical_bs[(x +  y            * s->bs_width) >> 2];
-                    const int bs1 = s->vertical_bs[(x + (y + (4 * v)) * s->bs_width) >> 2];
-
-                    if ((bs0 == 2) || (bs1 == 2)) {
-                        const int qp0 = (get_qPy(s, x - 1, y)           + get_qPy(s, x, y)           + 1) >> 1;
-                        const int qp1 = (get_qPy(s, x - 1, y + (4 * v)) + get_qPy(s, x, y + (4 * v)) + 1) >> 1;
-
-                        c_tc[0] = (bs0 == 2) ? chroma_tc(s, qp0, chroma, tc_offset) : 0;
-                        c_tc[1] = (bs1 == 2) ? chroma_tc(s, qp1, chroma, tc_offset) : 0;
-                        src =
-#if CONFIG_HEVC_RPI_DECODER
-                            av_rpi_is_sand_frame(s->frame) ?
-                                av_rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
-#endif
-                                &s->frame->data[chroma][(y >> s->ps.sps->vshift[chroma]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[chroma]) << s->ps.sps->pixel_shift)];
-                        if (pcmf) {
-                            no_p[0] = get_pcm(s, x - 1, y);
-                            no_p[1] = get_pcm(s, x - 1, y + (4 * v));
-                            no_q[0] = get_pcm(s, x, y);
-                            no_q[1] = get_pcm(s, x, y + (4 * v));
-                            s->hevcdsp.hevc_v_loop_filter_chroma_c(src,
-                                                                   s->frame->linesize[chroma],
-                                                                   c_tc, no_p, no_q);
-                        } else
-#ifdef RPI_DEBLOCK_VPU
-                        if (s->enable_rpi_deblock) {
-                            uint8_t (*setup)[2][2][4];
-                            int xc = x>>s->ps.sps->hshift[chroma];
-                            int yc = y>>s->ps.sps->vshift[chroma];
-                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
-                            int a = ((yc>>3) & 1) << 1;
-                            int b = (xc>>3) & 1;
-                            setup = s->dvq->uv_setup_arm[num16];
-                            setup[0][b][chroma-1][a] = c_tc[0];
-                            setup[0][b][chroma-1][a + 1] = c_tc[1];
-                        } else
-#endif
-                            s->hevcdsp.hevc_v_loop_filter_chroma(src,
-                                                                 s->frame->linesize[chroma],
-                                                                 c_tc, no_p, no_q);
-
-                    }
-                }
-
-                if(!y)
-                    continue;
-
-                // horizontal filtering chroma
-                tc_offset = x0 ? left_tc_offset : cur_tc_offset;
-                x_end2 = x_end;
-                if (x_end != s->ps.sps->width)
-                    x_end2 = x_end - 8 * h;
-                for (x = x0 ? x0 - 8 * h : 0; x < x_end2; x += (8 * h)) {
-                    const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
-                    const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
-                    if ((bs0 == 2) || (bs1 == 2)) {
-                        const int qp0 = bs0 == 2 ? (get_qPy(s, x,           y - 1) + get_qPy(s, x,           y) + 1) >> 1 : 0;
-                        const int qp1 = bs1 == 2 ? (get_qPy(s, x + (4 * h), y - 1) + get_qPy(s, x + (4 * h), y) + 1) >> 1 : 0;
-
-                        c_tc[0]   = bs0 == 2 ? chroma_tc(s, qp0, chroma, tc_offset)     : 0;
-                        c_tc[1]   = bs1 == 2 ? chroma_tc(s, qp1, chroma, cur_tc_offset) : 0;
-                        src =
-#if CONFIG_HEVC_RPI_DECODER
-                            av_rpi_is_sand_frame(s->frame) ?
-                                av_rpi_sand_frame_pos_c(s->frame, x >> s->ps.sps->hshift[chroma], y >> s->ps.sps->vshift[chroma]) :
-#endif
-                                &s->frame->data[chroma][(y >> s->ps.sps->vshift[1]) * s->frame->linesize[chroma] + ((x >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
-                        if (pcmf) {
-                            no_p[0] = get_pcm(s, x,           y - 1);
-                            no_p[1] = get_pcm(s, x + (4 * h), y - 1);
-                            no_q[0] = get_pcm(s, x,           y);
-                            no_q[1] = get_pcm(s, x + (4 * h), y);
-                            s->hevcdsp.hevc_h_loop_filter_chroma_c(src,
-                                                                   s->frame->linesize[chroma],
-                                                                   c_tc, no_p, no_q);
-                        } else
-#ifdef RPI_DEBLOCK_VPU
-                        if (s->enable_rpi_deblock) {
-                            uint8_t (*setup)[2][2][4];
-                            int xc = x>>s->ps.sps->hshift[chroma];
-                            int yc = y>>s->ps.sps->vshift[chroma];
-                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>4);
-                            int a = ((xc>>3) & 1) << 1;
-                            int b = (yc>>3) & 1;
-                            setup = s->dvq->uv_setup_arm[num16];
-                            setup[1][b][chroma-1][a] = c_tc[0];
-                            setup[1][b][chroma-1][a + 1] = c_tc[1];
-                        } else
-#endif
-                            s->hevcdsp.hevc_h_loop_filter_chroma(src,
-                                                                 s->frame->linesize[chroma],
-                                                                 c_tc, no_p, no_q);
-                    }
-                }
-            }
+            // **** VPU deblock code gone from here....
         }
     }
 }
@@ -1133,7 +1015,7 @@ static void ff_hevc_rpi_flush_buffer_lines(HEVCRpiContext *s, int start, int end
 {
     rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
     rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-      0, start, s->ps.sps->width, end - start, s->ps.sps->vshift[1], flush_luma, flush_chroma);
+      0, start, s->ps.sps->width, end - start, ctx_vshift(s, 1), flush_luma, flush_chroma);
     rpi_cache_flush_finish(rfe);
 }
 

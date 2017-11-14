@@ -43,17 +43,15 @@
 #include "rpi_hevcdec.h"
 #include "profiles.h"
 
-#if CONFIG_HEVC_RPI_DECODER
-  #include "rpi_qpu.h"
-  #include "rpi_hevc_shader.h"
-  #include "rpi_hevc_shader_cmd.h"
-  #include "rpi_hevc_shader_template.h"
-  #include "rpi_zc.h"
-  #include "libavutil/rpi_sand_fns.h"
+#include "rpi_qpu.h"
+#include "rpi_hevc_shader.h"
+#include "rpi_hevc_shader_cmd.h"
+#include "rpi_hevc_shader_template.h"
+#include "rpi_zc.h"
+#include "libavutil/rpi_sand_fns.h"
 
-  #include "pthread.h"
-  #include "libavutil/atomic.h"
-#endif
+#include "pthread.h"
+#include "libavutil/atomic.h"
 
 #define DEBUG_DECODE_N 0   // 0 = do all, n = frames idr onwards
 
@@ -847,8 +845,8 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
         s->enable_rpi_deblock = !sps->sao_enabled;
         s->setup_width = (sps->width+15) / 16;
         s->setup_height = (sps->height+15) / 16;
-        s->uv_setup_width = ( (sps->width >> sps->hshift[1]) + 15) / 16;
-        s->uv_setup_height = ( (sps->height >> sps->vshift[1]) + 15) / 16;
+        s->uv_setup_width = ( (sps->width >> ctx_hshift(s, 1)) + 15) / 16;
+        s->uv_setup_height = ( (sps->height >> ctx_vshift(s, 1)) + 15) / 16;
 
         for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i)
         {
@@ -975,7 +973,7 @@ static int pred_weight_table(HEVCRpiContext *s, GetBitContext *gb)
     if (luma_log2_weight_denom < 0 || luma_log2_weight_denom > 7)
         av_log(s->avctx, AV_LOG_ERROR, "luma_log2_weight_denom %d is invalid\n", luma_log2_weight_denom);
     s->sh.luma_log2_weight_denom = av_clip_uintp2(luma_log2_weight_denom, 3);
-    if (s->ps.sps->chroma_format_idc != 0) {
+    if (ctx_cfmt(s) != 0) {
         int delta = get_se_golomb(gb);
         s->sh.chroma_log2_weight_denom = av_clip_uintp2(s->sh.luma_log2_weight_denom + delta, 3);
     }
@@ -987,7 +985,7 @@ static int pred_weight_table(HEVCRpiContext *s, GetBitContext *gb)
             s->sh.luma_offset_l0[i] = 0;
         }
     }
-    if (s->ps.sps->chroma_format_idc != 0) {
+    if (ctx_cfmt(s) != 0) {
         for (i = 0; i < s->sh.nb_refs[L0]; i++)
             chroma_weight_l0_flag[i] = get_bits1(gb);
     } else {
@@ -1029,7 +1027,7 @@ static int pred_weight_table(HEVCRpiContext *s, GetBitContext *gb)
                 s->sh.luma_offset_l1[i] = 0;
             }
         }
-        if (s->ps.sps->chroma_format_idc != 0) {
+        if (ctx_cfmt(s) != 0) {
             for (i = 0; i < s->sh.nb_refs[L1]; i++)
                 chroma_weight_l1_flag[i] = get_bits1(gb);
         } else {
@@ -1190,22 +1188,6 @@ static enum AVPixelFormat get_format(HEVCRpiContext *s, const HEVCRpiSPS *sps)
             *fmt++ = AV_PIX_FMT_SAND128;
         }
 #endif
-#if CONFIG_HEVC_DXVA2_HWACCEL
-        *fmt++ = AV_PIX_FMT_DXVA2_VLD;
-#endif
-#if CONFIG_HEVC_D3D11VA_HWACCEL
-        *fmt++ = AV_PIX_FMT_D3D11VA_VLD;
-        *fmt++ = AV_PIX_FMT_D3D11;
-#endif
-#if CONFIG_HEVC_VAAPI_HWACCEL
-        *fmt++ = AV_PIX_FMT_VAAPI;
-#endif
-#if CONFIG_HEVC_VDPAU_HWACCEL
-        *fmt++ = AV_PIX_FMT_VDPAU;
-#endif
-#if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
-        *fmt++ = AV_PIX_FMT_VIDEOTOOLBOX;
-#endif
         break;
     case AV_PIX_FMT_YUV420P10:
 #if CONFIG_HEVC_RPI_DECODER
@@ -1213,19 +1195,6 @@ static enum AVPixelFormat get_format(HEVCRpiContext *s, const HEVCRpiSPS *sps)
         if (sps->width < 2048 && sps->height <= 1088) {
             *fmt++ = AV_PIX_FMT_SAND64_10;
         }
-#endif
-#if CONFIG_HEVC_DXVA2_HWACCEL
-        *fmt++ = AV_PIX_FMT_DXVA2_VLD;
-#endif
-#if CONFIG_HEVC_D3D11VA_HWACCEL
-        *fmt++ = AV_PIX_FMT_D3D11VA_VLD;
-        *fmt++ = AV_PIX_FMT_D3D11;
-#endif
-#if CONFIG_HEVC_VAAPI_HWACCEL
-        *fmt++ = AV_PIX_FMT_VAAPI;
-#endif
-#if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
-        *fmt++ = AV_PIX_FMT_VIDEOTOOLBOX;
 #endif
         break;
     }
@@ -1259,31 +1228,26 @@ static int set_sps(HEVCRpiContext *s, const HEVCRpiSPS *sps,
     ff_hevc_rpi_pred_init(&s->hpc,     sps->bit_depth);
     ff_hevc_rpi_dsp_init (&s->hevcdsp, sps->bit_depth);
     ff_videodsp_init (&s->vdsp,    sps->bit_depth);
-#if CONFIG_HEVC_RPI_DECODER
+
     // * We don't support cross_component_prediction_enabled_flag but as that
     //   must be 0 unless we have 4:4:4 there is no point testing for it as we
     //   only deal with sand which is never 4:4:4
     //   [support wouldn't be hard]
 
-    s->enable_rpi =
-        ((sps->bit_depth == 8 && pix_fmt == AV_PIX_FMT_SAND128) ||
-         (sps->bit_depth == 10 && pix_fmt == AV_PIX_FMT_SAND64_10));
-
     rpi_hevc_qpu_set_fns(s, sps->bit_depth);
-#endif
 
     av_freep(&s->sao_pixel_buffer_h[0]);
     av_freep(&s->sao_pixel_buffer_v[0]);
 
     if (sps->sao_enabled && !s->avctx->hwaccel) {
-        const unsigned int c_count = (sps->chroma_format_idc != 0) ? 3 : 1;
+        const unsigned int c_count = (ctx_cfmt(s) != 0) ? 3 : 1;
         unsigned int c_idx;
         size_t vsize[3] = {0};
         size_t hsize[3] = {0};
 
         for(c_idx = 0; c_idx < c_count; c_idx++) {
-            int w = sps->width >> sps->hshift[c_idx];
-            int h = sps->height >> sps->vshift[c_idx];
+            int w = sps->width >> ctx_hshift(s, c_idx);
+            int h = sps->height >> ctx_vshift(s, c_idx);
             // ctb height & width are a min of 8 so this must a multiple of 16
             // so no point rounding up!
             hsize[c_idx] = (w * 2 * sps->ctb_height) << sps->pixel_shift;
@@ -1489,7 +1453,7 @@ static int hls_slice_header(HEVCRpiContext *s)
 
         if (s->ps.sps->sao_enabled) {
             sh->slice_sample_adaptive_offset_flag[0] = get_bits1(gb);
-            if (s->ps.sps->chroma_format_idc) {
+            if (ctx_cfmt(s) != 0) {
                 sh->slice_sample_adaptive_offset_flag[1] =
                 sh->slice_sample_adaptive_offset_flag[2] = get_bits1(gb);
             }
@@ -1754,7 +1718,7 @@ static void hls_sao_param(const HEVCRpiContext *s, HEVCRpiLocalContext * const l
         }
     }
 
-    for (c_idx = 0; c_idx < (s->ps.sps->chroma_format_idc ? 3 : 1); c_idx++) {
+    for (c_idx = 0; c_idx < (ctx_cfmt(s) != 0 ? 3 : 1); c_idx++) {
         const unsigned int log2_sao_offset_scale = c_idx == 0 ? s->ps.pps->log2_sao_offset_scale_luma :
                                                  s->ps.pps->log2_sao_offset_scale_chroma;
         int offset_abs[4];
@@ -1821,7 +1785,6 @@ static int hls_cross_component_pred(HEVCRpiLocalContext * const lc, const int id
     return 0;
 }
 
-#if CONFIG_HEVC_RPI_DECODER
 static inline HEVCPredCmd * rpi_new_intra_cmd(HEVCRpiJob * const jb)
 {
     return jb->intra.cmds + jb->intra.n++;
@@ -1829,29 +1792,19 @@ static inline HEVCPredCmd * rpi_new_intra_cmd(HEVCRpiJob * const jb)
 
 static void do_intra_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int log2_trafo_size, int x0, int y0, int c_idx)
 {
-    if (s->enable_rpi) {
-        // If rpi_enabled then sand - U & V done on U call
-        if (c_idx <= 1)
-        {
-            HEVCPredCmd *const cmd = rpi_new_intra_cmd(lc->jb0);
-            cmd->type = RPI_PRED_INTRA;
-            cmd->size = log2_trafo_size;
-            cmd->na = (lc->na.cand_bottom_left<<4) + (lc->na.cand_left<<3) + (lc->na.cand_up_left<<2) + (lc->na.cand_up<<1) + lc->na.cand_up_right;
-            cmd->c_idx = c_idx;
-            cmd->i_pred.x = x0;
-            cmd->i_pred.y = y0;
-            cmd->i_pred.mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
-        }
+    // If rpi_enabled then sand - U & V done on U call
+    if (c_idx <= 1)
+    {
+        HEVCPredCmd *const cmd = rpi_new_intra_cmd(lc->jb0);
+        cmd->type = RPI_PRED_INTRA;
+        cmd->size = log2_trafo_size;
+        cmd->na = (lc->na.cand_bottom_left<<4) + (lc->na.cand_left<<3) + (lc->na.cand_up_left<<2) + (lc->na.cand_up<<1) + lc->na.cand_up_right;
+        cmd->c_idx = c_idx;
+        cmd->i_pred.x = x0;
+        cmd->i_pred.y = y0;
+        cmd->i_pred.mode = c_idx ? lc->tu.intra_pred_mode_c :  lc->tu.intra_pred_mode;
     }
-    else {
-        s->hpc.intra_pred[log2_trafo_size - 2](s, lc, x0, y0, c_idx);
-    }
-
 }
-#else
-#define do_intra_pred(s,lc,log2_trafo_size,x0,y0,c_idx)\
-    s->hpc.intra_pred[log2_trafo_size - 2](s, lc, x0, y0, c_idx)
-#endif
 
 static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
                               int xBase, int yBase, int cb_xBase, int cb_yBase,
@@ -1869,11 +1822,11 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
     }
 
     if (cbf_luma || cbf_cb[0] || cbf_cr[0] ||
-        (s->ps.sps->chroma_format_idc == 2 && (cbf_cb[1] || cbf_cr[1]))) {
+        (ctx_cfmt(s) == 2 && (cbf_cb[1] || cbf_cr[1]))) {
         int scan_idx   = SCAN_DIAG;
         int scan_idx_c = SCAN_DIAG;
         int cbf_chroma = cbf_cb[0] || cbf_cr[0] ||
-                         (s->ps.sps->chroma_format_idc == 2 &&
+                         (ctx_cfmt(s) == 2 &&
                          (cbf_cb[1] || cbf_cr[1]));
 
         if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded) {
@@ -1935,9 +1888,9 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
 
         if (cbf_luma)
             ff_hevc_rpi_hls_residual_coding(s, lc, x0, y0, log2_trafo_size, scan_idx, 0);
-        if (s->ps.sps->chroma_format_idc && (log2_trafo_size > 2 || s->ps.sps->chroma_format_idc == 3)) {
-            int trafo_size_h = 1 << (log2_trafo_size_c + ctx_hshift(s, 1));
-            int trafo_size_v = 1 << (log2_trafo_size_c + ctx_vshift(s, 1));
+        if (ctx_cfmt(s) != 0 && (log2_trafo_size > 2 || ctx_cfmt(s) == 3)) {
+            const int trafo_size_h = 1 << (log2_trafo_size_c + ctx_hshift(s, 1));
+            const int trafo_size_v = 1 << (log2_trafo_size_c + ctx_vshift(s, 1));
             lc->tu.cross_pf  = (s->ps.pps->cross_component_prediction_enabled_flag && cbf_luma &&
                                 (lc->cu.pred_mode == MODE_INTER ||
                                  (lc->tu.chroma_mode_c ==  4)));
@@ -1945,7 +1898,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
             if (lc->tu.cross_pf) {
                 hls_cross_component_pred(lc, 0);
             }
-            for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
+            for (i = 0; i < (ctx_cfmt(s) == 2 ? 2 : 1); i++) {
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 1);
@@ -1956,10 +1909,10 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                 else
                     if (lc->tu.cross_pf) {
                         ptrdiff_t stride = s->frame->linesize[1];
-                        int hshift = s->ps.sps->hshift[1];
-                        int vshift = s->ps.sps->vshift[1];
-                        int16_t *coeffs_y = (int16_t*)lc->edge_emu_buffer;
-                        int16_t *coeffs   = (int16_t*)lc->edge_emu_buffer2;
+                        const int hshift = ctx_hshift(s, 1);
+                        const int vshift = ctx_vshift(s, 1);
+                        int16_t * const coeffs_y = (int16_t*)lc->edge_emu_buffer;
+                        int16_t * const coeffs   = (int16_t*)lc->edge_emu_buffer2;
                         int size = 1 << log2_trafo_size_c;
 
                         uint8_t *dst = &s->frame->data[1][(y0 >> vshift) * stride +
@@ -1974,7 +1927,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
             if (lc->tu.cross_pf) {
                 hls_cross_component_pred(lc, 1);
             }
-            for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
+            for (i = 0; i < (ctx_cfmt(s) == 2 ? 2 : 1); i++) {
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 2);
@@ -1985,11 +1938,11 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                 else
                     if (lc->tu.cross_pf) {
                         ptrdiff_t stride = s->frame->linesize[2];
-                        int hshift = s->ps.sps->hshift[2];
-                        int vshift = s->ps.sps->vshift[2];
+                        const int hshift = ctx_hshift(s, 2);
+                        const int vshift = ctx_vshift(s, 2);
                         int16_t *coeffs_y = (int16_t*)lc->edge_emu_buffer;
                         int16_t *coeffs   = (int16_t*)lc->edge_emu_buffer2;
-                        int size = 1 << log2_trafo_size_c;
+                        const int size = 1 << log2_trafo_size_c;
 
                         uint8_t *dst = &s->frame->data[2][(y0 >> vshift) * stride +
                                                           ((x0 >> hshift) << s->ps.sps->pixel_shift)];
@@ -1999,10 +1952,10 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                         s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
                     }
             }
-        } else if (s->ps.sps->chroma_format_idc && blk_idx == 3) {
+        } else if (ctx_cfmt(s) != 0 && blk_idx == 3) {
             int trafo_size_h = 1 << (log2_trafo_size + 1);
-            int trafo_size_v = 1 << (log2_trafo_size + s->ps.sps->vshift[1]);
-            for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
+            int trafo_size_v = 1 << (log2_trafo_size + ctx_vshift(s, 1));
+            for (i = 0; i < (ctx_cfmt(s) == 2 ? 2 : 1); i++) {
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_rpi_set_neighbour_available(s, lc, xBase, yBase + (i << log2_trafo_size),
                                                     trafo_size_h, trafo_size_v);
@@ -2012,7 +1965,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                     ff_hevc_rpi_hls_residual_coding(s, lc, xBase, yBase + (i << log2_trafo_size),
                                                 log2_trafo_size, scan_idx_c, 1);
             }
-            for (i = 0; i < (s->ps.sps->chroma_format_idc == 2 ? 2 : 1); i++) {
+            for (i = 0; i < (ctx_cfmt(s) == 2 ? 2 : 1); i++) {
                 if (lc->cu.pred_mode == MODE_INTRA) {
                     ff_hevc_rpi_set_neighbour_available(s, lc, xBase, yBase + (i << log2_trafo_size),
                                                 trafo_size_h, trafo_size_v);
@@ -2023,14 +1976,14 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                                 log2_trafo_size, scan_idx_c, 2);
             }
         }
-    } else if (s->ps.sps->chroma_format_idc && lc->cu.pred_mode == MODE_INTRA) {
-        if (log2_trafo_size > 2 || s->ps.sps->chroma_format_idc == 3) {
-            int trafo_size_h = 1 << (log2_trafo_size_c + s->ps.sps->hshift[1]);
-            int trafo_size_v = 1 << (log2_trafo_size_c + s->ps.sps->vshift[1]);
+    } else if (ctx_cfmt(s) != 0 && lc->cu.pred_mode == MODE_INTRA) {
+        if (log2_trafo_size > 2 || ctx_cfmt(s) == 3) {
+            int trafo_size_h = 1 << (log2_trafo_size_c + ctx_hshift(s, 1));
+            int trafo_size_v = 1 << (log2_trafo_size_c + ctx_vshift(s, 1));
             ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0, trafo_size_h, trafo_size_v);
             do_intra_pred(s, lc, log2_trafo_size_c, x0, y0, 1);
             do_intra_pred(s, lc, log2_trafo_size_c, x0, y0, 2);
-            if (s->ps.sps->chroma_format_idc == 2) {
+            if (ctx_cfmt(s) == 2) {
                 ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0 + (1 << log2_trafo_size_c),
                                                 trafo_size_h, trafo_size_v);
                 do_intra_pred(s, lc, log2_trafo_size_c, x0, y0 + (1 << log2_trafo_size_c), 1);
@@ -2038,12 +1991,12 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
             }
         } else if (blk_idx == 3) {
             int trafo_size_h = 1 << (log2_trafo_size + 1);
-            int trafo_size_v = 1 << (log2_trafo_size + s->ps.sps->vshift[1]);
+            int trafo_size_v = 1 << (log2_trafo_size + ctx_vshift(s, 1));
             ff_hevc_rpi_set_neighbour_available(s, lc, xBase, yBase,
                                             trafo_size_h, trafo_size_v);
             do_intra_pred(s, lc, log2_trafo_size, xBase, yBase, 1);
             do_intra_pred(s, lc, log2_trafo_size, xBase, yBase, 2);
-            if (s->ps.sps->chroma_format_idc == 2) {
+            if (ctx_cfmt(s) == 2) {
                 ff_hevc_rpi_set_neighbour_available(s, lc, xBase, yBase + (1 << (log2_trafo_size)),
                                                 trafo_size_h, trafo_size_v);
                 do_intra_pred(s, lc, log2_trafo_size, xBase, yBase + (1 << (log2_trafo_size)), 1);
@@ -2089,7 +2042,7 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
     if (lc->cu.intra_split_flag) {
         if (trafo_depth == 1) {
             lc->tu.intra_pred_mode   = lc->pu.intra_pred_mode[blk_idx];
-            if (s->ps.sps->chroma_format_idc == 3) {
+            if (ctx_cfmt(s) == 3) {
                 lc->tu.intra_pred_mode_c = lc->pu.intra_pred_mode_c[blk_idx];
                 lc->tu.chroma_mode_c     = lc->pu.chroma_mode_c[blk_idx];
             } else {
@@ -2119,17 +2072,17 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                inter_split;
     }
 
-    if (s->ps.sps->chroma_format_idc && (log2_trafo_size > 2 || s->ps.sps->chroma_format_idc == 3)) {
+    if (ctx_cfmt(s) != 0 && (log2_trafo_size > 2 || ctx_cfmt(s) == 3)) {
         if (trafo_depth == 0 || cbf_cb[0]) {
             cbf_cb[0] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            if (s->ps.sps->chroma_format_idc == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
+            if (ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
                 cbf_cb[1] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
             }
         }
 
         if (trafo_depth == 0 || cbf_cr[0]) {
             cbf_cr[0] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            if (s->ps.sps->chroma_format_idc == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
+            if (ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
                 cbf_cr[1] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
             }
         }
@@ -2163,7 +2116,7 @@ do {                                                                            
 
         if (lc->cu.pred_mode == MODE_INTRA || trafo_depth != 0 ||
             cbf_cb[0] || cbf_cr[0] ||
-            (s->ps.sps->chroma_format_idc == 2 && (cbf_cb[1] || cbf_cr[1]))) {
+            (ctx_cfmt(s) == 2 && (cbf_cb[1] || cbf_cr[1]))) {
             cbf_luma = ff_hevc_rpi_cbf_luma_decode(lc, trafo_depth);
         }
 
@@ -2202,41 +2155,16 @@ static int pcm_extract(const HEVCRpiContext * const s, const uint8_t * pcm, cons
     if (ret < 0)
         return ret;
 
-#if CONFIG_HEVC_RPI_DECODER
-    if (av_rpi_is_sand_frame(s->frame)) {
-        s->hevcdsp.put_pcm(av_rpi_sand_frame_pos_y(s->frame, x0, y0),
-                           s->frame->linesize[0],
-                           cb_size, cb_size, &gb, s->ps.sps->pcm.bit_depth);
+    s->hevcdsp.put_pcm(av_rpi_sand_frame_pos_y(s->frame, x0, y0),
+                       s->frame->linesize[0],
+                       cb_size, cb_size, &gb, s->ps.sps->pcm.bit_depth);
 
-        s->hevcdsp.put_pcm_c(av_rpi_sand_frame_pos_c(s->frame, x0 >> s->ps.sps->hshift[1], y0 >> s->ps.sps->vshift[1]),
-                           s->frame->linesize[1],
-                           cb_size >> s->ps.sps->hshift[1],
-                           cb_size >> s->ps.sps->vshift[1],
-                           &gb, s->ps.sps->pcm.bit_depth_chroma);
-    }
-    else
-#endif
-    {
-        const int stride0   = s->frame->linesize[0];
-        uint8_t * const dst0 = &s->frame->data[0][y0 * stride0 + (x0 << s->ps.sps->pixel_shift)];
-        const int   stride1 = s->frame->linesize[1];
-        uint8_t * const dst1 = &s->frame->data[1][(y0 >> s->ps.sps->vshift[1]) * stride1 + ((x0 >> s->ps.sps->hshift[1]) << s->ps.sps->pixel_shift)];
-        const int   stride2 = s->frame->linesize[2];
-        uint8_t * const dst2 = &s->frame->data[2][(y0 >> s->ps.sps->vshift[2]) * stride2 + ((x0 >> s->ps.sps->hshift[2]) << s->ps.sps->pixel_shift)];
+    s->hevcdsp.put_pcm_c(av_rpi_sand_frame_pos_c(s->frame, x0 >> ctx_hshift(s, 1), y0 >> ctx_vshift(s, 1)),
+                       s->frame->linesize[1],
+                       cb_size >> ctx_hshift(s, 1),
+                       cb_size >> ctx_vshift(s, 1),
+                       &gb, s->ps.sps->pcm.bit_depth_chroma);
 
-        s->hevcdsp.put_pcm(dst0, stride0, cb_size, cb_size, &gb, s->ps.sps->pcm.bit_depth);
-        if (s->ps.sps->chroma_format_idc) {
-            s->hevcdsp.put_pcm(dst1, stride1,
-                               cb_size >> s->ps.sps->hshift[1],
-                               cb_size >> s->ps.sps->vshift[1],
-                               &gb, s->ps.sps->pcm.bit_depth_chroma);
-            s->hevcdsp.put_pcm(dst2, stride2,
-                               cb_size >> s->ps.sps->hshift[2],
-                               cb_size >> s->ps.sps->vshift[2],
-                               &gb, s->ps.sps->pcm.bit_depth_chroma);
-        }
-
-    }
     return 0;
 }
 
@@ -2251,17 +2179,16 @@ static int hls_pcm_sample(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
 {
     // Length in bits
     const unsigned int length = xyexp2(s->ps.sps->pcm.bit_depth, log2_cb_size) +
-        xyexp2(s->ps.sps->pcm.bit_depth_chroma, log2_cb_size - s->ps.sps->vshift[1]) +
-        xyexp2(s->ps.sps->pcm.bit_depth_chroma, log2_cb_size - s->ps.sps->vshift[2]);
+        xyexp2(s->ps.sps->pcm.bit_depth_chroma, log2_cb_size - ctx_vshift(s, 1)) +
+        xyexp2(s->ps.sps->pcm.bit_depth_chroma, log2_cb_size - ctx_vshift(s, 2));
 
     const uint8_t * const pcm = skip_bytes(&lc->cc, (length + 7) >> 3);
 
     if (!s->sh.disable_deblocking_filter_flag)
         ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size);
 
-#if CONFIG_HEVC_RPI_DECODER
-    if (s->enable_rpi) {
-        // Copy coeffs
+    // Copy coeffs
+    {
         const int blen = (length + 7) >> 3;
         // Round allocated bytes up to nearest 32 to avoid alignment confusion
         // Allocation is in int16_t s
@@ -2291,347 +2218,8 @@ static int hls_pcm_sample(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
         }
         return 0;
     }
-#endif
-
-    return pcm_extract(s, pcm, length, x0, y0, 1 << log2_cb_size);
 }
 
-/**
- * 8.5.3.2.2.1 Luma sample unidirectional interpolation process
- *
- * @param s HEVC decoding context
- * @param dst target buffer for block data at block position
- * @param dststride stride of the dst buffer
- * @param ref reference picture buffer at origin (0, 0)
- * @param mv motion vector (relative to block position) to get pixel data from
- * @param x_off horizontal position of block from origin (0, 0)
- * @param y_off vertical position of block from origin (0, 0)
- * @param block_w width of block
- * @param block_h height of block
- * @param luma_weight weighting factor applied to the luma prediction
- * @param luma_offset additive offset applied to the luma prediction value
- */
-
-static void luma_mc_uni(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
-                        uint8_t *dst, ptrdiff_t dststride,
-                        AVFrame *ref, const Mv *mv, int x_off, int y_off,
-                        int block_w, int block_h, int luma_weight, int luma_offset)
-{
-    uint8_t *src         = ref->data[0];
-    ptrdiff_t srcstride  = ref->linesize[0];
-    int pic_width        = s->ps.sps->width;
-    int pic_height       = s->ps.sps->height;
-    int mx               = mv->x & 3;
-    int my               = mv->y & 3;
-    int weight_flag      = (s->sh.slice_type == HEVC_SLICE_P && s->ps.pps->weighted_pred_flag) ||
-                           (s->sh.slice_type == HEVC_SLICE_B && s->ps.pps->weighted_bipred_flag);
-    int idx              = ff_hevc_rpi_pel_weight[block_w];
-
-#ifdef DISABLE_MC
-    return;
-#endif
-
-    x_off += mv->x >> 2;
-    y_off += mv->y >> 2;
-    src   += y_off * srcstride + (x_off * (1 << s->ps.sps->pixel_shift));
-
-    if (x_off < QPEL_EXTRA_BEFORE || y_off < QPEL_EXTRA_AFTER ||
-        x_off >= pic_width - block_w - QPEL_EXTRA_AFTER ||
-        y_off >= pic_height - block_h - QPEL_EXTRA_AFTER) {
-        const ptrdiff_t edge_emu_stride = EDGE_EMU_BUFFER_STRIDE << s->ps.sps->pixel_shift;
-        int offset     = QPEL_EXTRA_BEFORE * srcstride       + (QPEL_EXTRA_BEFORE << s->ps.sps->pixel_shift);
-        int buf_offset = QPEL_EXTRA_BEFORE * edge_emu_stride + (QPEL_EXTRA_BEFORE << s->ps.sps->pixel_shift);
-
-        s->vdsp.emulated_edge_mc(lc->edge_emu_buffer, src - offset,
-                                 edge_emu_stride, srcstride,
-                                 block_w + QPEL_EXTRA,
-                                 block_h + QPEL_EXTRA,
-                                 x_off - QPEL_EXTRA_BEFORE, y_off - QPEL_EXTRA_BEFORE,
-                                 pic_width, pic_height);
-        src = lc->edge_emu_buffer + buf_offset;
-        srcstride = edge_emu_stride;
-    }
-
-    if (!weight_flag)
-        s->hevcdsp.put_hevc_qpel_uni[idx][!!my][!!mx](dst, dststride, src, srcstride,
-                                                      block_h, mx, my, block_w);
-    else
-        s->hevcdsp.put_hevc_qpel_uni_w[idx][!!my][!!mx](dst, dststride, src, srcstride,
-                                                        block_h, s->sh.luma_log2_weight_denom,
-                                                        luma_weight, luma_offset, mx, my, block_w);
-}
-
-/**
- * 8.5.3.2.2.1 Luma sample bidirectional interpolation process
- *
- * @param s HEVC decoding context
- * @param dst target buffer for block data at block position
- * @param dststride stride of the dst buffer
- * @param ref0 reference picture0 buffer at origin (0, 0)
- * @param mv0 motion vector0 (relative to block position) to get pixel data from
- * @param x_off horizontal position of block from origin (0, 0)
- * @param y_off vertical position of block from origin (0, 0)
- * @param block_w width of block
- * @param block_h height of block
- * @param ref1 reference picture1 buffer at origin (0, 0)
- * @param mv1 motion vector1 (relative to block position) to get pixel data from
- * @param current_mv current motion vector structure
- */
-static void luma_mc_bi(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, uint8_t *dst, ptrdiff_t dststride,
-                       AVFrame *ref0, const Mv *mv0, int x_off, int y_off,
-                       int block_w, int block_h, AVFrame *ref1, const Mv *mv1, struct MvField *current_mv)
-{
-    ptrdiff_t src0stride  = ref0->linesize[0];
-    ptrdiff_t src1stride  = ref1->linesize[0];
-    int pic_width        = s->ps.sps->width;
-    int pic_height       = s->ps.sps->height;
-    int mx0              = mv0->x & 3;
-    int my0              = mv0->y & 3;
-    int mx1              = mv1->x & 3;
-    int my1              = mv1->y & 3;
-    int weight_flag      = (s->sh.slice_type == HEVC_SLICE_P && s->ps.pps->weighted_pred_flag) ||
-                           (s->sh.slice_type == HEVC_SLICE_B && s->ps.pps->weighted_bipred_flag);
-    int x_off0           = x_off + (mv0->x >> 2);
-    int y_off0           = y_off + (mv0->y >> 2);
-    int x_off1           = x_off + (mv1->x >> 2);
-    int y_off1           = y_off + (mv1->y >> 2);
-    int idx              = ff_hevc_rpi_pel_weight[block_w];
-
-    uint8_t *src0  = ref0->data[0] + y_off0 * src0stride + (int)((unsigned)x_off0 << s->ps.sps->pixel_shift);
-    uint8_t *src1  = ref1->data[0] + y_off1 * src1stride + (int)((unsigned)x_off1 << s->ps.sps->pixel_shift);
-
-#ifdef DISABLE_MC
-    return;
-#endif
-
-    if (x_off0 < QPEL_EXTRA_BEFORE || y_off0 < QPEL_EXTRA_AFTER ||
-        x_off0 >= pic_width - block_w - QPEL_EXTRA_AFTER ||
-        y_off0 >= pic_height - block_h - QPEL_EXTRA_AFTER) {
-        const ptrdiff_t edge_emu_stride = EDGE_EMU_BUFFER_STRIDE << s->ps.sps->pixel_shift;
-        int offset     = QPEL_EXTRA_BEFORE * src0stride       + (QPEL_EXTRA_BEFORE << s->ps.sps->pixel_shift);
-        int buf_offset = QPEL_EXTRA_BEFORE * edge_emu_stride + (QPEL_EXTRA_BEFORE << s->ps.sps->pixel_shift);
-
-        s->vdsp.emulated_edge_mc(lc->edge_emu_buffer, src0 - offset,
-                                 edge_emu_stride, src0stride,
-                                 block_w + QPEL_EXTRA,
-                                 block_h + QPEL_EXTRA,
-                                 x_off0 - QPEL_EXTRA_BEFORE, y_off0 - QPEL_EXTRA_BEFORE,
-                                 pic_width, pic_height);
-        src0 = lc->edge_emu_buffer + buf_offset;
-        src0stride = edge_emu_stride;
-    }
-
-    if (x_off1 < QPEL_EXTRA_BEFORE || y_off1 < QPEL_EXTRA_AFTER ||
-        x_off1 >= pic_width - block_w - QPEL_EXTRA_AFTER ||
-        y_off1 >= pic_height - block_h - QPEL_EXTRA_AFTER) {
-        const ptrdiff_t edge_emu_stride = EDGE_EMU_BUFFER_STRIDE << s->ps.sps->pixel_shift;
-        int offset     = QPEL_EXTRA_BEFORE * src1stride       + (QPEL_EXTRA_BEFORE << s->ps.sps->pixel_shift);
-        int buf_offset = QPEL_EXTRA_BEFORE * edge_emu_stride + (QPEL_EXTRA_BEFORE << s->ps.sps->pixel_shift);
-
-        s->vdsp.emulated_edge_mc(lc->edge_emu_buffer2, src1 - offset,
-                                 edge_emu_stride, src1stride,
-                                 block_w + QPEL_EXTRA,
-                                 block_h + QPEL_EXTRA,
-                                 x_off1 - QPEL_EXTRA_BEFORE, y_off1 - QPEL_EXTRA_BEFORE,
-                                 pic_width, pic_height);
-        src1 = lc->edge_emu_buffer2 + buf_offset;
-        src1stride = edge_emu_stride;
-    }
-
-    s->hevcdsp.put_hevc_qpel[idx][!!my0][!!mx0](lc->tmp, src0, src0stride,
-                                                block_h, mx0, my0, block_w);
-    if (!weight_flag)
-        s->hevcdsp.put_hevc_qpel_bi[idx][!!my1][!!mx1](dst, dststride, src1, src1stride, lc->tmp,
-                                                       block_h, mx1, my1, block_w);
-    else
-        s->hevcdsp.put_hevc_qpel_bi_w[idx][!!my1][!!mx1](dst, dststride, src1, src1stride, lc->tmp,
-                                                         block_h, s->sh.luma_log2_weight_denom,
-                                                         s->sh.luma_weight_l0[current_mv->ref_idx[0]],
-                                                         s->sh.luma_weight_l1[current_mv->ref_idx[1]],
-                                                         s->sh.luma_offset_l0[current_mv->ref_idx[0]],
-                                                         s->sh.luma_offset_l1[current_mv->ref_idx[1]],
-                                                         mx1, my1, block_w);
-
-}
-
-/**
- * 8.5.3.2.2.2 Chroma sample uniprediction interpolation process
- *
- * @param s HEVC decoding context
- * @param dst1 target buffer for block data at block position (U plane)
- * @param dst2 target buffer for block data at block position (V plane)
- * @param dststride stride of the dst1 and dst2 buffers
- * @param ref reference picture buffer at origin (0, 0)
- * @param mv motion vector (relative to block position) to get pixel data from
- * @param x_off horizontal position of block from origin (0, 0)
- * @param y_off vertical position of block from origin (0, 0)
- * @param block_w width of block
- * @param block_h height of block
- * @param chroma_weight weighting factor applied to the chroma prediction
- * @param chroma_offset additive offset applied to the chroma prediction value
- */
-
-static void chroma_mc_uni(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, uint8_t *dst0,
-                          ptrdiff_t dststride, uint8_t *src0, ptrdiff_t srcstride, int reflist,
-                          int x_off, int y_off, int block_w, int block_h, struct MvField *current_mv, int chroma_weight, int chroma_offset)
-{
-    int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
-    int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
-    const Mv *mv         = &current_mv->mv[reflist];
-    int weight_flag      = (s->sh.slice_type == HEVC_SLICE_P && s->ps.pps->weighted_pred_flag) ||
-                           (s->sh.slice_type == HEVC_SLICE_B && s->ps.pps->weighted_bipred_flag);
-    int idx              = ff_hevc_rpi_pel_weight[block_w];
-    int hshift           = s->ps.sps->hshift[1];
-    int vshift           = s->ps.sps->vshift[1];
-    intptr_t mx          = av_mod_uintp2(mv->x, 2 + hshift);
-    intptr_t my          = av_mod_uintp2(mv->y, 2 + vshift);
-    intptr_t _mx         = mx << (1 - hshift);
-    intptr_t _my         = my << (1 - vshift);
-
-#ifdef DISABLE_MC
-    return;
-#endif
-
-    x_off += mv->x >> (2 + hshift);
-    y_off += mv->y >> (2 + vshift);
-    src0  += y_off * srcstride + (x_off * (1 << s->ps.sps->pixel_shift));
-
-    if (x_off < EPEL_EXTRA_BEFORE || y_off < EPEL_EXTRA_AFTER ||
-        x_off >= pic_width - block_w - EPEL_EXTRA_AFTER ||
-        y_off >= pic_height - block_h - EPEL_EXTRA_AFTER) {
-        const int edge_emu_stride = EDGE_EMU_BUFFER_STRIDE << s->ps.sps->pixel_shift;
-        int offset0 = EPEL_EXTRA_BEFORE * (srcstride + (1 << s->ps.sps->pixel_shift));
-        int buf_offset0 = EPEL_EXTRA_BEFORE *
-                          (edge_emu_stride + (1 << s->ps.sps->pixel_shift));
-        s->vdsp.emulated_edge_mc(lc->edge_emu_buffer, src0 - offset0,
-                                 edge_emu_stride, srcstride,
-                                 block_w + EPEL_EXTRA, block_h + EPEL_EXTRA,
-                                 x_off - EPEL_EXTRA_BEFORE,
-                                 y_off - EPEL_EXTRA_BEFORE,
-                                 pic_width, pic_height);
-
-        src0 = lc->edge_emu_buffer + buf_offset0;
-        srcstride = edge_emu_stride;
-    }
-    if (!weight_flag)
-        s->hevcdsp.put_hevc_epel_uni[idx][!!my][!!mx](dst0, dststride, src0, srcstride,
-                                                  block_h, _mx, _my, block_w);
-    else
-        s->hevcdsp.put_hevc_epel_uni_w[idx][!!my][!!mx](dst0, dststride, src0, srcstride,
-                                                        block_h, s->sh.chroma_log2_weight_denom,
-                                                        chroma_weight, chroma_offset, _mx, _my, block_w);
-}
-
-/**
- * 8.5.3.2.2.2 Chroma sample bidirectional interpolation process
- *
- * @param s HEVC decoding context
- * @param dst target buffer for block data at block position
- * @param dststride stride of the dst buffer
- * @param ref0 reference picture0 buffer at origin (0, 0)
- * @param mv0 motion vector0 (relative to block position) to get pixel data from
- * @param x_off horizontal position of block from origin (0, 0)
- * @param y_off vertical position of block from origin (0, 0)
- * @param block_w width of block
- * @param block_h height of block
- * @param ref1 reference picture1 buffer at origin (0, 0)
- * @param mv1 motion vector1 (relative to block position) to get pixel data from
- * @param current_mv current motion vector structure
- * @param cidx chroma component(cb, cr)
- */
-static void chroma_mc_bi(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
-                         uint8_t *dst0, ptrdiff_t dststride, AVFrame *ref0, AVFrame *ref1,
-                         int x_off, int y_off, int block_w, int block_h, struct MvField *current_mv, int cidx)
-{
-    uint8_t *src1        = ref0->data[cidx+1];
-    uint8_t *src2        = ref1->data[cidx+1];
-    ptrdiff_t src1stride = ref0->linesize[cidx+1];
-    ptrdiff_t src2stride = ref1->linesize[cidx+1];
-    int weight_flag      = (s->sh.slice_type == HEVC_SLICE_P && s->ps.pps->weighted_pred_flag) ||
-                           (s->sh.slice_type == HEVC_SLICE_B && s->ps.pps->weighted_bipred_flag);
-    int pic_width        = s->ps.sps->width >> s->ps.sps->hshift[1];
-    int pic_height       = s->ps.sps->height >> s->ps.sps->vshift[1];
-    Mv *mv0              = &current_mv->mv[0];
-    Mv *mv1              = &current_mv->mv[1];
-    int hshift = s->ps.sps->hshift[1];
-    int vshift = s->ps.sps->vshift[1];
-
-#ifdef DISABLE_MC
-    return;
-#endif
-
-    intptr_t mx0 = av_mod_uintp2(mv0->x, 2 + hshift);
-    intptr_t my0 = av_mod_uintp2(mv0->y, 2 + vshift);
-    intptr_t mx1 = av_mod_uintp2(mv1->x, 2 + hshift);
-    intptr_t my1 = av_mod_uintp2(mv1->y, 2 + vshift);
-    intptr_t _mx0 = mx0 << (1 - hshift);
-    intptr_t _my0 = my0 << (1 - vshift);
-    intptr_t _mx1 = mx1 << (1 - hshift);
-    intptr_t _my1 = my1 << (1 - vshift);
-
-    int x_off0 = x_off + (mv0->x >> (2 + hshift));
-    int y_off0 = y_off + (mv0->y >> (2 + vshift));
-    int x_off1 = x_off + (mv1->x >> (2 + hshift));
-    int y_off1 = y_off + (mv1->y >> (2 + vshift));
-    int idx = ff_hevc_rpi_pel_weight[block_w];
-    src1  += y_off0 * src1stride + (int)((unsigned)x_off0 << s->ps.sps->pixel_shift);
-    src2  += y_off1 * src2stride + (int)((unsigned)x_off1 << s->ps.sps->pixel_shift);
-
-    if (x_off0 < EPEL_EXTRA_BEFORE || y_off0 < EPEL_EXTRA_AFTER ||
-        x_off0 >= pic_width - block_w - EPEL_EXTRA_AFTER ||
-        y_off0 >= pic_height - block_h - EPEL_EXTRA_AFTER) {
-        const int edge_emu_stride = EDGE_EMU_BUFFER_STRIDE << s->ps.sps->pixel_shift;
-        int offset1 = EPEL_EXTRA_BEFORE * (src1stride + (1 << s->ps.sps->pixel_shift));
-        int buf_offset1 = EPEL_EXTRA_BEFORE *
-                          (edge_emu_stride + (1 << s->ps.sps->pixel_shift));
-
-        s->vdsp.emulated_edge_mc(lc->edge_emu_buffer, src1 - offset1,
-                                 edge_emu_stride, src1stride,
-                                 block_w + EPEL_EXTRA, block_h + EPEL_EXTRA,
-                                 x_off0 - EPEL_EXTRA_BEFORE,
-                                 y_off0 - EPEL_EXTRA_BEFORE,
-                                 pic_width, pic_height);
-
-        src1 = lc->edge_emu_buffer + buf_offset1;
-        src1stride = edge_emu_stride;
-    }
-
-    if (x_off1 < EPEL_EXTRA_BEFORE || y_off1 < EPEL_EXTRA_AFTER ||
-        x_off1 >= pic_width - block_w - EPEL_EXTRA_AFTER ||
-        y_off1 >= pic_height - block_h - EPEL_EXTRA_AFTER) {
-        const int edge_emu_stride = EDGE_EMU_BUFFER_STRIDE << s->ps.sps->pixel_shift;
-        int offset1 = EPEL_EXTRA_BEFORE * (src2stride + (1 << s->ps.sps->pixel_shift));
-        int buf_offset1 = EPEL_EXTRA_BEFORE *
-                          (edge_emu_stride + (1 << s->ps.sps->pixel_shift));
-
-        s->vdsp.emulated_edge_mc(lc->edge_emu_buffer2, src2 - offset1,
-                                 edge_emu_stride, src2stride,
-                                 block_w + EPEL_EXTRA, block_h + EPEL_EXTRA,
-                                 x_off1 - EPEL_EXTRA_BEFORE,
-                                 y_off1 - EPEL_EXTRA_BEFORE,
-                                 pic_width, pic_height);
-
-        src2 = lc->edge_emu_buffer2 + buf_offset1;
-        src2stride = edge_emu_stride;
-    }
-
-    s->hevcdsp.put_hevc_epel[idx][!!my0][!!mx0](lc->tmp, src1, src1stride,
-                                                block_h, _mx0, _my0, block_w);
-    if (!weight_flag)
-        s->hevcdsp.put_hevc_epel_bi[idx][!!my1][!!mx1](dst0, s->frame->linesize[cidx+1],
-                                                       src2, src2stride, lc->tmp,
-                                                       block_h, _mx1, _my1, block_w);
-    else
-        s->hevcdsp.put_hevc_epel_bi_w[idx][!!my1][!!mx1](dst0, s->frame->linesize[cidx+1],
-                                                         src2, src2stride, lc->tmp,
-                                                         block_h,
-                                                         s->sh.chroma_log2_weight_denom,
-                                                         s->sh.chroma_weight_l0[current_mv->ref_idx[0]][cidx],
-                                                         s->sh.chroma_weight_l1[current_mv->ref_idx[1]][cidx],
-                                                         s->sh.chroma_offset_l0[current_mv->ref_idx[0]][cidx],
-                                                         s->sh.chroma_offset_l1[current_mv->ref_idx[1]][cidx],
-                                                         _mx1, _my1, block_w);
-}
 
 static void hevc_await_progress(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const HEVCFrame * const ref,
                                 const Mv * const mv, const int y0, const int height)
@@ -2639,19 +2227,12 @@ static void hevc_await_progress(const HEVCRpiContext * const s, HEVCRpiLocalCont
     if (s->threads_type == FF_THREAD_FRAME) {
         const int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
 
-#if CONFIG_HEVC_RPI_DECODER
-        if (s->enable_rpi) {
-            // Progress has to be attached to current job as the actual wait
-            // is in worker_core which can't use lc
-            int16_t *const pr = lc->jb0->progress_req + ref->dpb_no;
-            if (*pr < y) {
-                *pr = y;
-            }
+        // Progress has to be attached to current job as the actual wait
+        // is in worker_core which can't use lc
+        int16_t *const pr = lc->jb0->progress_req + ref->dpb_no;
+        if (*pr < y) {
+            *pr = y;
         }
-        else
-#endif
-        // If !RPI then this is a #define and 2nd parameter is thrown away
-        ff_hevc_rpi_progress_wait_recon(s, lc->jb0, ref, y);
     }
 }
 
@@ -3235,12 +2816,7 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
                                 const int nPbW, const int nPbH,
                                 const unsigned int log2_cb_size, const unsigned int partIdx, const unsigned int idx)
 {
-#define POS(c_idx, x, y)                                                              \
-    &s->frame->data[c_idx][((y) >> s->ps.sps->vshift[c_idx]) * s->frame->linesize[c_idx] + \
-                           (((x) >> s->ps.sps->hshift[c_idx]) << s->ps.sps->pixel_shift)]
-#if CONFIG_HEVC_RPI_DECODER
     HEVCRpiJob * const jb = lc->jb0;
-#endif
 
     int merge_idx = 0;
     struct MvField current_mv = {{{ 0 }}};
@@ -3250,9 +2826,6 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
     MvField * const tab_mvf = s->ref->tab_mvf;
     const RefPicList  *const refPicList = s->ref->refPicList;
     const HEVCFrame *ref0 = NULL, *ref1 = NULL;
-    uint8_t *dst0 = POS(0, x0, y0);
-    uint8_t *dst1 = POS(1, x0, y0);
-    uint8_t *dst2 = POS(2, x0, y0);
     int log2_min_cb_size = s->ps.sps->log2_min_cb_size;
     int min_cb_width     = s->ps.sps->min_cb_width;
     int x_cb             = x0 >> log2_min_cb_size;
@@ -3298,114 +2871,55 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
     }
 
     if (current_mv.pred_flag == PF_L0) {
-        int x0_c = x0 >> s->ps.sps->hshift[1];
-        int y0_c = y0 >> s->ps.sps->vshift[1];
-        int nPbW_c = nPbW >> s->ps.sps->hshift[1];
-        int nPbH_c = nPbH >> s->ps.sps->vshift[1];
+        const int x0_c = x0 >> ctx_hshift(s, 1);
+        const int y0_c = y0 >> ctx_vshift(s, 1);
+        const int nPbW_c = nPbW >> ctx_hshift(s, 1);
+        const int nPbH_c = nPbH >> ctx_vshift(s, 1);
 
-#if CONFIG_HEVC_RPI_DECODER
-        if (s->enable_rpi) {
-            rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 0,
-              s->sh.luma_weight_l0[current_mv.ref_idx[0]], s->sh.luma_offset_l0[current_mv.ref_idx[0]],
+        rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 0,
+          s->sh.luma_weight_l0[current_mv.ref_idx[0]], s->sh.luma_offset_l0[current_mv.ref_idx[0]],
+          ref0->frame);
+
+        if (ctx_cfmt(s) != 0) {
+            rpi_pred_c(s, jb, 0, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 0,
+              s->sh.chroma_weight_l0[current_mv.ref_idx[0]], s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
               ref0->frame);
-        } else
-#endif
-        {
-            luma_mc_uni(s, lc, dst0, s->frame->linesize[0], ref0->frame,
-                    &current_mv.mv[0], x0, y0, nPbW, nPbH,
-                    s->sh.luma_weight_l0[current_mv.ref_idx[0]],
-                    s->sh.luma_offset_l0[current_mv.ref_idx[0]]);
-        }
-
-        if (s->ps.sps->chroma_format_idc) {
-#if CONFIG_HEVC_RPI_DECODER
-            if (s->enable_rpi) {
-                rpi_pred_c(s, jb, 0, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 0,
-                  s->sh.chroma_weight_l0[current_mv.ref_idx[0]], s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
-                  ref0->frame);
-                return;
-            }
-#endif
-            chroma_mc_uni(s, lc, dst1, s->frame->linesize[1], ref0->frame->data[1], ref0->frame->linesize[1],
-                          0, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
-                          s->sh.chroma_weight_l0[current_mv.ref_idx[0]][0], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][0]);
-            chroma_mc_uni(s, lc, dst2, s->frame->linesize[2], ref0->frame->data[2], ref0->frame->linesize[2],
-                          0, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
-                          s->sh.chroma_weight_l0[current_mv.ref_idx[0]][1], s->sh.chroma_offset_l0[current_mv.ref_idx[0]][1]);
+            return;
         }
     } else if (current_mv.pred_flag == PF_L1) {
-        int x0_c = x0 >> s->ps.sps->hshift[1];
-        int y0_c = y0 >> s->ps.sps->vshift[1];
-        int nPbW_c = nPbW >> s->ps.sps->hshift[1];
-        int nPbH_c = nPbH >> s->ps.sps->vshift[1];
+        const int x0_c = x0 >> ctx_hshift(s, 1);
+        const int y0_c = y0 >> ctx_vshift(s, 1);
+        const int nPbW_c = nPbW >> ctx_hshift(s, 1);
+        const int nPbH_c = nPbH >> ctx_vshift(s, 1);
 
-#if CONFIG_HEVC_RPI_DECODER
-        if (s->enable_rpi) {
-            rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 1,
-              s->sh.luma_weight_l1[current_mv.ref_idx[1]], s->sh.luma_offset_l1[current_mv.ref_idx[1]],
+        rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 1,
+          s->sh.luma_weight_l1[current_mv.ref_idx[1]], s->sh.luma_offset_l1[current_mv.ref_idx[1]],
+          ref1->frame);
+
+        if (ctx_cfmt(s) != 0) {
+            rpi_pred_c(s, jb, 1, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 1,
+              s->sh.chroma_weight_l1[current_mv.ref_idx[1]], s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
               ref1->frame);
-        } else
-#endif
-        {
-            luma_mc_uni(s, lc, dst0, s->frame->linesize[0], ref1->frame,
-                    &current_mv.mv[1], x0, y0, nPbW, nPbH,
-                    s->sh.luma_weight_l1[current_mv.ref_idx[1]],
-                    s->sh.luma_offset_l1[current_mv.ref_idx[1]]);
-        }
-
-        if (s->ps.sps->chroma_format_idc) {
-#if CONFIG_HEVC_RPI_DECODER
-            if (s->enable_rpi) {
-                rpi_pred_c(s, jb, 1, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 1,
-                  s->sh.chroma_weight_l1[current_mv.ref_idx[1]], s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
-                  ref1->frame);
-                return;
-            }
-#endif
-            chroma_mc_uni(s, lc, dst1, s->frame->linesize[1], ref1->frame->data[1], ref1->frame->linesize[1],
-                          1, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
-                          s->sh.chroma_weight_l1[current_mv.ref_idx[1]][0], s->sh.chroma_offset_l1[current_mv.ref_idx[1]][0]);
-
-            chroma_mc_uni(s, lc, dst2, s->frame->linesize[2], ref1->frame->data[2], ref1->frame->linesize[2],
-                          1, x0_c, y0_c, nPbW_c, nPbH_c, &current_mv,
-                          s->sh.chroma_weight_l1[current_mv.ref_idx[1]][1], s->sh.chroma_offset_l1[current_mv.ref_idx[1]][1]);
+            return;
         }
     } else if (current_mv.pred_flag == PF_BI) {
-        int x0_c = x0 >> s->ps.sps->hshift[1];
-        int y0_c = y0 >> s->ps.sps->vshift[1];
-        int nPbW_c = nPbW >> s->ps.sps->hshift[1];
-        int nPbH_c = nPbH >> s->ps.sps->vshift[1];
+        const int x0_c = x0 >> ctx_hshift(s, 1);
+        const int y0_c = y0 >> ctx_vshift(s, 1);
+        const int nPbW_c = nPbW >> ctx_hshift(s, 1);
+        const int nPbH_c = nPbH >> ctx_vshift(s, 1);
 
-#if CONFIG_HEVC_RPI_DECODER
-        if (s->enable_rpi) {
-            rpi_pred_y_b(s, jb, x0, y0, nPbW, nPbH, &current_mv, ref0->frame, ref1->frame);
-        } else
-#endif
-        {
-            luma_mc_bi(s, lc, dst0, s->frame->linesize[0], ref0->frame,
-                   &current_mv.mv[0], x0, y0, nPbW, nPbH,
-                   ref1->frame, &current_mv.mv[1], &current_mv);
-        }
+        rpi_pred_y_b(s, jb, x0, y0, nPbW, nPbH, &current_mv, ref0->frame, ref1->frame);
 
-        if (s->ps.sps->chroma_format_idc) {
-#if CONFIG_HEVC_RPI_DECODER
-          if (s->enable_rpi) {
-              rpi_pred_c_b(s, jb, x0_c, y0_c, nPbW_c, nPbH_c,
-                           &current_mv,
-                           s->sh.chroma_weight_l0[current_mv.ref_idx[0]],
-                           s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
-                           s->sh.chroma_weight_l1[current_mv.ref_idx[1]],
-                           s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
-                           ref0->frame,
-                           ref1->frame);
-                return;
-            }
-#endif
-            chroma_mc_bi(s, lc, dst1, s->frame->linesize[1], ref0->frame, ref1->frame,
-                         x0_c, y0_c, nPbW_c, nPbH_c, &current_mv, 0);
-
-            chroma_mc_bi(s, lc, dst2, s->frame->linesize[2], ref0->frame, ref1->frame,
-                         x0_c, y0_c, nPbW_c, nPbH_c, &current_mv, 1);
+        if (ctx_cfmt(s) != 0) {
+          rpi_pred_c_b(s, jb, x0_c, y0_c, nPbW_c, nPbH_c,
+                       &current_mv,
+                       s->sh.chroma_weight_l0[current_mv.ref_idx[0]],
+                       s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
+                       s->sh.chroma_weight_l1[current_mv.ref_idx[1]],
+                       s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
+                       ref0->frame,
+                       ref1->frame);
+            return;
         }
     }
 }
@@ -3537,7 +3051,7 @@ static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCo
         }
     }
 
-    if (s->ps.sps->chroma_format_idc == 3) {
+    if (ctx_cfmt(s) == 3) {
         for (i = 0; i < side; i++) {
             for (j = 0; j < side; j++) {
                 lc->pu.chroma_mode_c[2 * i + j] = chroma_mode = ff_hevc_rpi_intra_chroma_pred_mode_decode(lc);
@@ -3551,7 +3065,7 @@ static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCo
                 }
             }
         }
-    } else if (s->ps.sps->chroma_format_idc == 2) {
+    } else if (ctx_cfmt(s) == 2) {
         int mode_idx;
         lc->pu.chroma_mode_c[0] = chroma_mode = ff_hevc_rpi_intra_chroma_pred_mode_decode(lc);
         if (chroma_mode != 4) {
@@ -3563,7 +3077,7 @@ static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCo
             mode_idx = lc->pu.intra_pred_mode[0];
         }
         lc->pu.intra_pred_mode_c[0] = tab_mode_idx[mode_idx];
-    } else if (s->ps.sps->chroma_format_idc != 0) {
+    } else if (ctx_cfmt(s) != 0) {
         chroma_mode = ff_hevc_rpi_intra_chroma_pred_mode_decode(lc);
         if (chroma_mode != 4) {
             if (lc->pu.intra_pred_mode[0] == intra_chroma_table[chroma_mode])
@@ -3925,7 +3439,7 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
         rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
         rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
           xl, yt, bound_r - xl, yb - yt,
-          s->ps.sps->vshift[1], 1, 1);
+          ctx_vshift(s, 1), 1, 1);
         rpi_cache_flush_finish(rfe);
     }
 
@@ -4015,8 +3529,8 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
     const uint16_t pic_width_y   = sps->width;
     const uint16_t pic_height_y  = sps->height;
 
-    const uint16_t pic_width_c   = sps->width >> sps->hshift[1];
-    const uint16_t pic_height_c  = sps->height >> sps->vshift[1];
+    const uint16_t pic_width_c   = sps->width >> ctx_hshift(s, 1);
+    const uint16_t pic_height_c  = sps->height >> ctx_vshift(s, 1);
 
     // We expect the pointer to change if we use another sps
     if (sps != jb->sps)
@@ -4028,7 +3542,7 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
 
         {
             const int coefs_per_luma = HEVC_MAX_CTB_SIZE * HEVC_RPI_MAX_WIDTH;
-            const int coefs_per_chroma = (coefs_per_luma * 2) >> sps->vshift[1] >> sps->hshift[1];
+            const int coefs_per_chroma = (coefs_per_luma * 2) >> (ctx_vshift(s, 1) + ctx_hshift(s, 1));
             worker_pic_alloc_one(jb, coefs_per_luma + coefs_per_chroma);
         }
 
@@ -4303,7 +3817,7 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     {
         rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
                                         jb->bounds.x, jb->bounds.y, jb->bounds.w, jb->bounds.h,
-                                        s->ps.sps->vshift[1], pred_y, pred_c);
+                                        ctx_vshift(s, 1), pred_y, pred_c);
     }
 
     // If we have emulated VPU ops - do it here
@@ -4593,8 +4107,6 @@ static int gen_entry_points(HEVCRpiContext * const s, const H2645NAL * const nal
     return 0;
 }
 
-
-#if CONFIG_HEVC_RPI_DECODER
 
 // Return
 // < 0   Error
@@ -5179,269 +4691,13 @@ fail:
 }
 
 
-#endif  // RPI
-
-static int hls_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
-{
-    HEVCRpiContext * const s  = avctxt->priv_data;
-    HEVCRpiLocalContext *const lc = s->HEVClc;
-    int ctb_size    = 1 << s->ps.sps->log2_ctb_size;
-    int more_data   = 1;
-    int x_ctb       = 0;
-    int y_ctb       = 0;
-    int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
-    int err;
-
-    // Start of slice
-    if ((err = slice_start(s, lc)) != 0)
-        return err;
-
-    while (more_data && ctb_addr_ts < s->ps.sps->ctb_size) {
-        const int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
-
-        x_ctb = (ctb_addr_rs % s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
-        y_ctb = (ctb_addr_rs / s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
-        hls_decode_neighbour(s, lc, x_ctb, y_ctb, ctb_addr_ts);
-
-        err = ff_hevc_rpi_cabac_init(s, lc, ctb_addr_ts);
-        if (err < 0) {
-            s->tab_slice_address[ctb_addr_rs] = -1;
-            return err;
-        }
-
-        hls_sao_param(s, lc, x_ctb >> s->ps.sps->log2_ctb_size, y_ctb >> s->ps.sps->log2_ctb_size);
-
-        s->deblock[ctb_addr_rs].beta_offset = s->sh.beta_offset;
-        s->deblock[ctb_addr_rs].tc_offset   = s->sh.tc_offset;
-        s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
-
-        more_data = hls_coding_quadtree(s, lc, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
-
-        if (more_data < 0) {
-            s->tab_slice_address[ctb_addr_rs] = -1;
-            return more_data;
-        }
-
-        ctb_addr_ts++;
-        ff_hevc_rpi_save_states(s, lc, ctb_addr_ts);
-        ff_hevc_rpi_hls_filters(s, x_ctb, y_ctb, ctb_size);
-    }
-
-    return ctb_addr_ts;
-}
-
 static int hls_slice_data(HEVCRpiContext * const s, const H2645NAL * const nal)
 {
-#if CONFIG_HEVC_RPI_DECODER
-    if (s->enable_rpi)
-    {
-        int err;
-        if ((err = gen_entry_points(s, nal)) < 0)
-            return err;
+    int err;
+    if ((err = gen_entry_points(s, nal)) < 0)
+        return err;
 
-        return rpi_decode_entry(s->avctx, NULL);
-    }
-    else
-#endif
-    {
-        int arg[2];
-        int ret[2];
-
-        arg[0] = 0;
-        arg[1] = 1;
-
-        s->avctx->execute(s->avctx, hls_decode_entry, arg, ret , 1, sizeof(int));
-        return ret[0];
-    }
-}
-
-static int hls_decode_entry_wpp(AVCodecContext *avctxt, void *input_ctb_row, int job, int self_id)
-{
-    HEVCRpiContext *s1  = avctxt->priv_data, *s;
-    HEVCRpiLocalContext *lc;
-    int ctb_size    = 1<< s1->ps.sps->log2_ctb_size;
-    int more_data   = 1;
-    int *ctb_row_p    = input_ctb_row;
-    int ctb_row = ctb_row_p[job];
-    int ctb_addr_rs = s1->sh.slice_ctb_addr_rs + ctb_row * ((s1->ps.sps->width + ctb_size - 1) >> s1->ps.sps->log2_ctb_size);
-    int ctb_addr_ts = s1->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs];
-    int thread = ctb_row % s1->threads_number;
-    int ret;
-
-    s = s1->sList[self_id];
-    lc = s->HEVClc;
-
-#if CONFIG_HEVC_RPI_DECODER
-    s->enable_rpi = 0;
-#endif
-
-    if(ctb_row) {
-        ret = init_get_bits8(&lc->gb, s->data + s->sh.offset[ctb_row - 1], s->sh.size[ctb_row - 1]);
-        if (ret < 0)
-            goto error;
-        ff_init_cabac_decoder(&lc->cc, s->data + s->sh.offset[(ctb_row)-1], s->sh.size[ctb_row - 1]);
-    }
-
-    while(more_data && ctb_addr_ts < s->ps.sps->ctb_size) {
-        int x_ctb = (ctb_addr_rs % s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
-        int y_ctb = (ctb_addr_rs / s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
-
-        hls_decode_neighbour(s, s->HEVClc, x_ctb, y_ctb, ctb_addr_ts);
-
-        ff_thread_await_progress2(s->avctx, ctb_row, thread, SHIFT_CTB_WPP);
-
-        if (atomic_load(&s1->wpp_err)) {
-            ff_thread_report_progress2(s->avctx, ctb_row , thread, SHIFT_CTB_WPP);
-            return 0;
-        }
-
-        ret = ff_hevc_rpi_cabac_init(s, s->HEVClc, ctb_addr_ts);
-        if (ret < 0)
-            goto error;
-        hls_sao_param(s, s->HEVClc, x_ctb >> s->ps.sps->log2_ctb_size, y_ctb >> s->ps.sps->log2_ctb_size);
-        more_data = hls_coding_quadtree(s, lc, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
-
-        if (more_data < 0) {
-            ret = more_data;
-            goto error;
-        }
-
-        ctb_addr_ts++;
-
-        ff_hevc_rpi_save_states(s, s->HEVClc, ctb_addr_ts);
-        ff_thread_report_progress2(s->avctx, ctb_row, thread, 1);
-        ff_hevc_rpi_hls_filters(s, x_ctb, y_ctb, ctb_size);
-
-        if (!more_data && (x_ctb+ctb_size) < s->ps.sps->width && ctb_row != s->sh.num_entry_point_offsets) {
-            atomic_store(&s1->wpp_err, 1);
-            ff_thread_report_progress2(s->avctx, ctb_row ,thread, SHIFT_CTB_WPP);
-            return 0;
-        }
-
-        if ((x_ctb+ctb_size) >= s->ps.sps->width && (y_ctb+ctb_size) >= s->ps.sps->height ) {
-            ff_thread_report_progress2(s->avctx, ctb_row , thread, SHIFT_CTB_WPP);
-            return ctb_addr_ts;
-        }
-        ctb_addr_rs       = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
-        x_ctb+=ctb_size;
-
-        if(x_ctb >= s->ps.sps->width) {
-            break;
-        }
-    }
-    ff_thread_report_progress2(s->avctx, ctb_row ,thread, SHIFT_CTB_WPP);
-
-    return 0;
-error:
-    s->tab_slice_address[ctb_addr_rs] = -1;
-    atomic_store(&s1->wpp_err, 1);
-    ff_thread_report_progress2(s->avctx, ctb_row ,thread, SHIFT_CTB_WPP);
-    return ret;
-}
-
-static int hls_slice_data_wpp(HEVCRpiContext *s, const H2645NAL *nal)
-{
-//    const uint8_t *data = nal->data;
-//    int length          = nal->size;
-//    HEVCRpiLocalContext *lc = s->HEVClc;
-    int *ret = av_malloc_array(s->sh.num_entry_point_offsets + 1, sizeof(int));
-    int *arg = av_malloc_array(s->sh.num_entry_point_offsets + 1, sizeof(int));
-//    int64_t offset;
-//    int64_t startheader, cmpt = 0;
-    int i;
-//    int j;
-    int res = 0;
-
-    if (!ret || !arg) {
-        av_free(ret);
-        av_free(arg);
-        return AVERROR(ENOMEM);
-    }
-
-    if (s->sh.slice_ctb_addr_rs + s->sh.num_entry_point_offsets * s->ps.sps->ctb_width >= s->ps.sps->ctb_width * s->ps.sps->ctb_height) {
-        av_log(s->avctx, AV_LOG_ERROR, "WPP ctb addresses are wrong (%d %d %d %d)\n",
-            s->sh.slice_ctb_addr_rs, s->sh.num_entry_point_offsets,
-            s->ps.sps->ctb_width, s->ps.sps->ctb_height
-        );
-        res = AVERROR_INVALIDDATA;
-        goto error;
-    }
-
-    ff_alloc_entries(s->avctx, s->sh.num_entry_point_offsets + 1);
-
-    if (!s->sList[1]) {
-        for (i = 1; i < s->threads_number; i++) {
-            s->sList[i] = av_malloc(sizeof(HEVCRpiContext));
-            memcpy(s->sList[i], s, sizeof(HEVCRpiContext));
-            s->HEVClcList[i] = av_mallocz(sizeof(HEVCRpiLocalContext));
-            s->sList[i]->HEVClc = s->HEVClcList[i];
-        }
-    }
-
-#if 1
-    if ((res = gen_entry_points(s, nal)) != 0)
-        goto error;
-#else
-    offset = (lc->gb.index >> 3);
-
-    for (j = 0, cmpt = 0, startheader = offset + s->sh.entry_point_offset[0]; j < nal->skipped_bytes; j++) {
-        if (nal->skipped_bytes_pos[j] >= offset && nal->skipped_bytes_pos[j] < startheader) {
-            startheader--;
-            cmpt++;
-        }
-    }
-
-    for (i = 1; i < s->sh.num_entry_point_offsets; i++) {
-        offset += (s->sh.entry_point_offset[i - 1] - cmpt);
-        for (j = 0, cmpt = 0, startheader = offset
-             + s->sh.entry_point_offset[i]; j < nal->skipped_bytes; j++) {
-            if (nal->skipped_bytes_pos[j] >= offset && nal->skipped_bytes_pos[j] < startheader) {
-                startheader--;
-                cmpt++;
-            }
-        }
-        s->sh.size[i - 1] = s->sh.entry_point_offset[i] - cmpt;
-        s->sh.offset[i - 1] = offset;
-
-    }
-    if (s->sh.num_entry_point_offsets != 0) {
-        offset += s->sh.entry_point_offset[s->sh.num_entry_point_offsets - 1] - cmpt;
-        if (length < offset) {
-            av_log(s->avctx, AV_LOG_ERROR, "entry_point_offset table is corrupted\n");
-            res = AVERROR_INVALIDDATA;
-            goto error;
-        }
-        s->sh.size[s->sh.num_entry_point_offsets - 1] = length - offset;
-        s->sh.offset[s->sh.num_entry_point_offsets - 1] = offset;
-
-    }
-    s->data = data;
-#endif
-
-    for (i = 1; i < s->threads_number; i++) {
-//        s->sList[i]->HEVClc->first_qp_group = 1;
-        s->sList[i]->HEVClc->qp_y = s->sList[0]->HEVClc->qp_y;
-        memcpy(s->sList[i], s, sizeof(HEVCRpiContext));
-        s->sList[i]->HEVClc = s->HEVClcList[i];
-    }
-
-    atomic_store(&s->wpp_err, 0);
-    ff_reset_entries(s->avctx);
-
-    for (i = 0; i <= s->sh.num_entry_point_offsets; i++) {
-        arg[i] = i;
-        ret[i] = 0;
-    }
-
-    if (s->ps.pps->entropy_coding_sync_enabled_flag)
-        s->avctx->execute2(s->avctx, hls_decode_entry_wpp, arg, ret, s->sh.num_entry_point_offsets + 1);
-
-    for (i = 0; i <= s->sh.num_entry_point_offsets; i++)
-        res += ret[i];
-error:
-    av_free(ret);
-    av_free(arg);
-    return res;
+    return rpi_decode_entry(s->avctx, NULL);
 }
 
 static int set_side_data(HEVCRpiContext *s)
@@ -5774,10 +5030,7 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
             if (ret < 0)
                 goto fail;
         } else {
-            if (s->threads_number > 1 && s->sh.num_entry_point_offsets > 0)
-                ctb_addr_ts = hls_slice_data_wpp(s, nal);
-            else
-                ctb_addr_ts = hls_slice_data(s, nal);
+            ctb_addr_ts = hls_slice_data(s, nal);
             if (ctb_addr_ts >= (s->ps.sps->ctb_width * s->ps.sps->ctb_height)) {
                 s->is_decoded = 1;
             }
@@ -5855,16 +5108,11 @@ fail:  // Also success path
         if (s->used_for_ref && s->threads_type == FF_THREAD_FRAME) {
             ff_hevc_rpi_progress_signal_all_done(s);
         }
-#if CONFIG_HEVC_RPI_DECODER
-        // * Flush frame will become confused if we pass it something
-        //   that doesn't have an expected number of planes (e.g. 400)
-        //   So only flush if we are sure we can.
-        else if (s->enable_rpi) {
+        else {
             // Flush frame to real memory as we expect to be able to pass
             // it straight on to mmal
             flush_frame(s, s->frame);
         }
-#endif
     }
     return ret;
 }
@@ -6167,7 +5415,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->qpu_dummy_frame_qpu = qpu_fn(mc_start);  // Use our code as a dummy frame
 #endif
 
-    s->enable_rpi = 0;
     bt_lc_init(s, s->HEVClc, 0);
     job_lc_init(s->HEVClc);
 

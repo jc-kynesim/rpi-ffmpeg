@@ -705,7 +705,6 @@ typedef struct HEVCRpiContext {
     char used_for_ref;  // rpi
 #if CONFIG_HEVC_RPI_DECODER
     char offload_recon;
-    char enable_rpi;
 
     HEVCRpiJobCtl * jbc;
 
@@ -967,7 +966,6 @@ extern const uint8_t ff_hevc_rpi_qpel_extra_before[4];
 extern const uint8_t ff_hevc_rpi_qpel_extra_after[4];
 extern const uint8_t ff_hevc_rpi_qpel_extra[4];
 
-#if CONFIG_HEVC_RPI_DECODER
 int16_t * rpi_alloc_coeff_buf(HEVCRpiJob * const jb, const int buf_no, const int n);
 
 // arm/hevc_misc_neon.S
@@ -986,59 +984,35 @@ void ff_hevc_rpi_progress_signal_field(HEVCRpiContext * const s, const int val, 
 static inline void ff_hevc_rpi_progress_wait_mv(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int y)
 {
-    if (s->enable_rpi)
-        ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
-    else
-        ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
+    ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
 }
 
 static inline void ff_hevc_rpi_progress_signal_mv(HEVCRpiContext * const s, const int y)
 {
-    if (s->enable_rpi && s->used_for_ref)
+    if (s->used_for_ref)
         ff_hevc_rpi_progress_signal_field(s, y, 1);
 }
 
 static inline void ff_hevc_rpi_progress_wait_recon(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int y)
 {
-    if (s->enable_rpi)
-        ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 0);
-    else
-        ff_thread_await_progress((ThreadFrame*)&ref->tf, y, 0);
+    ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 0);
 }
 
 static inline void ff_hevc_rpi_progress_signal_recon(HEVCRpiContext * const s, const int y)
 {
     if (s->used_for_ref)
     {
-        if (s->enable_rpi)
-            ff_hevc_rpi_progress_signal_field(s, y, 0);
-        else
-            ff_thread_report_progress(&s->ref->tf, y, 0);
+        ff_hevc_rpi_progress_signal_field(s, y, 0);
     }
 }
 
 static inline void ff_hevc_rpi_progress_signal_all_done(HEVCRpiContext * const s)
 {
-    if (s->enable_rpi)
-    {
-        ff_hevc_rpi_progress_signal_field(s, INT_MAX, 0);
-        ff_hevc_rpi_progress_signal_field(s, INT_MAX, 1);
-    }
-    else
-        ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
+    ff_hevc_rpi_progress_signal_field(s, INT_MAX, 0);
+    ff_hevc_rpi_progress_signal_field(s, INT_MAX, 1);
 }
 
-#else
-
-// Use #define as that allows us to discard "jb" which won't exist in non-RPI world
-#define ff_hevc_rpi_progress_wait_mv(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
-#define ff_hevc_rpi_progress_wait_recon(s, jb, ref, y) ff_thread_await_progress((ThreadFrame *)&ref->tf, y, 0)
-#define ff_hevc_rpi_progress_signal_mv(s, y)
-#define ff_hevc_rpi_progress_signal_recon(s, y) ff_thread_report_progress(&s->ref->tf, y, 0)
-#define ff_hevc_rpi_progress_signal_all_done(s) ff_thread_report_progress(&s->ref->tf, INT_MAX, 0)
-
-#endif
 
 // Set all done - signal nothing (used in missing refs)
 // Works for both rpi & non-rpi
@@ -1068,7 +1042,16 @@ static inline unsigned int ctx_vshift(const HEVCRpiContext * const s, const int 
 #if HEVC_RPI_420_ONLY
     return cidx == 0 ? 0 : 1;
 #else
-    return s->ps.sps->hshift[cidx];
+    return s->ps.sps->vshift[cidx];
+#endif
+}
+
+static inline int ctx_cfmt(const HEVCRpiContext * const s)
+{
+#if HEVC_RPI_420_ONLY
+    return 1;
+#else
+    return s->ps.sps->chroma_format_idc;
 #endif
 }
 
