@@ -57,11 +57,7 @@ typedef struct MvField {
 // N=5 has width = 8, 16, 32, 48, 64
 // N=6 adds a function for width=24 (in fn array el 5 so existing code should
 // still work)
-#if CONFIG_HEVC_RPI_DECODER
 #define SAO_FILTER_N 6
-#else
-#define SAO_FILTER_N 5
-#endif
 
 
 typedef struct HEVCDSPContext {
@@ -70,7 +66,6 @@ typedef struct HEVCDSPContext {
 
     void (*add_residual[4])(uint8_t *dst, int16_t *res, ptrdiff_t stride);
     void (*add_residual_dc[4])(uint8_t *dst, ptrdiff_t stride, int dc);
-#if CONFIG_HEVC_RPI_DECODER
     void (*add_residual_u[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride, int dc_v);
     void (*add_residual_v[4])(uint8_t *dst, const int16_t *res, ptrdiff_t stride, int dc_u);
 
@@ -78,7 +73,6 @@ typedef struct HEVCDSPContext {
     void (*add_residual_dc_c[4])(uint8_t *dst, ptrdiff_t stride, int32_t dc_uv);
     void (*put_pcm_c)(uint8_t *_dst, ptrdiff_t _stride, int width, int height,
                     struct GetBitContext *gb, int pcm_bit_depth);
-#endif
 
     void (*dequant)(int16_t *coeffs, int16_t log2_size);
 
@@ -92,29 +86,23 @@ typedef struct HEVCDSPContext {
 
     void (*sao_band_filter[SAO_FILTER_N])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                int16_t *sao_offset_val, int sao_left_class, int width, int height);
-#if CONFIG_HEVC_RPI_DECODER
     void (*sao_band_filter_c[SAO_FILTER_N])(uint8_t *_dst, const uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                const int16_t *sao_offset_val_u, int sao_left_class_u,
                                const int16_t *sao_offset_val_v, int sao_left_class_v,
                                int width, int height);
-#endif
 
     /* implicit stride_src parameter has value of 2 * MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE */
     void (*sao_edge_filter[SAO_FILTER_N])(uint8_t *_dst /* align 16 */, uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
                                int16_t *sao_offset_val, int sao_eo_class, int width, int height);
-#if CONFIG_HEVC_RPI_DECODER
     void (*sao_edge_filter_c[SAO_FILTER_N])(uint8_t *_dst /* align 16 */, const uint8_t *_src /* align 32 */, ptrdiff_t stride_dst,
                                const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v, int sao_eo_class, int width, int height);
-#endif
 
     void (*sao_edge_restore[2])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                 struct SAOParams *sao, int *borders, int _width, int _height, int c_idx,
                                 uint8_t *vert_edge, uint8_t *horiz_edge, uint8_t *diag_edge);
-#if CONFIG_HEVC_RPI_DECODER
     void (*sao_edge_restore_c[2])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
                                 struct SAOParams *sao, int *borders, int _width, int _height, int c_idx,
                                 uint8_t *vert_edge, uint8_t *horiz_edge, uint8_t *diag_edge);
-#endif
 
     void (*put_hevc_qpel[10][2][2])(int16_t *dst, uint8_t *src, ptrdiff_t srcstride,
                                     int height, intptr_t mx, intptr_t my, int width);
@@ -167,7 +155,6 @@ typedef struct HEVCDSPContext {
     void (*hevc_v_loop_filter_chroma_c)(uint8_t *pix, ptrdiff_t stride,
                                         int32_t *tc, uint8_t *no_p,
                                         uint8_t *no_q);
-#if CONFIG_HEVC_RPI_DECODER
     void (*hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
                                  unsigned int _stride, unsigned int beta, const int32_t tc[2],
                                  const uint8_t no_p[2], const uint8_t no_q[2],
@@ -177,8 +164,6 @@ typedef struct HEVCDSPContext {
     void (*hevc_v_loop_filter_uv2)(uint8_t * src_r, unsigned int stride, uint32_t tc4,
                                  uint8_t * src_l,
                                  unsigned int no_f);
-
-#endif
 
     void (*hevc_deblocking_boundary_strengths)(int pus, int dup, int in_inc, int out_inc,
                                                const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,

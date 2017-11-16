@@ -31,9 +31,7 @@
 #include "hevc.h"
 #include "rpi_hevcdec.h"
 
-#if CONFIG_HEVC_RPI_DECODER
 #include "libavutil/rpi_sand_fns.h"
-#endif
 
 // BY22 is probably faster than simple bypass if the processor has
 // either a fast 32-bit divide or a fast 32x32->64[63:32] instruction
@@ -2213,11 +2211,9 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             int max_xy = FFMAX(last_significant_coeff_x, last_significant_coeff_y);
             if (max_xy == 0)
             {
-#if CONFIG_HEVC_RPI_DECODER
                 if (use_dc)
                     rpi_add_dc(s, lc->jb0, log2_trafo_size, c_idx, x0, y0, coeffs);
                 else
-#endif
                     s->hevcdsp.idct_dc[log2_trafo_size - 2](coeffs);
             }
             else {
@@ -2240,12 +2236,9 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             coeffs[i] = coeffs[i] + ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
         }
     }
-#if CONFIG_HEVC_RPI_DECODER
+
     if (!use_dc)
         rpi_add_residual(s, lc->jb0, log2_trafo_size, c_idx, x0, y0, coeffs);
-#else
-    s->hevcdsp.add_residual[log2_trafo_size-2](dst, coeffs, stride);
-#endif
 }
 
 #if !USE_BY22

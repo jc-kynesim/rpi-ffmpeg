@@ -307,11 +307,6 @@ void ff_hevc_rpi_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 0, put_hevc_qpel_bi_w_v, depth);          \
     PEL_FUNC(put_hevc_qpel_bi_w, 1, 1, put_hevc_qpel_bi_w_hv, depth)
 
-#if !CONFIG_HEVC_RPI_DECODER
-#define SLICED_LOOP_FILTERS(depth)
-#define SLICED_ADD_RESIDUAL(depth)
-#define SLICED_SAO(depth)
-#else
 #define SLICED_ADD_RESIDUAL(depth)\
     hevcdsp->add_residual_u[0]      = FUNC(add_residual4x4_u, depth);         \
     hevcdsp->add_residual_u[1]      = FUNC(add_residual8x8_u, depth);         \
@@ -341,8 +336,6 @@ void ff_hevc_rpi_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     }                                                                         \
     hevcdsp->sao_edge_restore_c[0] = FUNC(sao_edge_restore_c_0, depth);       \
     hevcdsp->sao_edge_restore_c[1] = FUNC(sao_edge_restore_c_1, depth)
-
-#endif
 
 #define HEVC_DSP(depth)                                                     \
     hevcdsp->put_pcm                = FUNC(put_pcm, depth);                 \

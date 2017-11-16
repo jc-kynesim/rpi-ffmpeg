@@ -98,14 +98,9 @@ void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth)
     hpc->pred_angular_c[2] = FUNCC(pred_angular_2, depth); \
     hpc->pred_angular_c[3] = FUNCC(pred_angular_3, depth);
 
-#if CONFIG_HEVC_RPI_DECODER
 #define HEVC_PRED(depth) \
     HEVC_PRED_Y(depth); \
     HEVC_PRED_C(depth);
-#else
-#define HEVC_PRED(depth) \
-    HEVC_PRED_Y(depth);
-#endif
 
     switch (bit_depth) {
     case 9:

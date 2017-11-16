@@ -43,7 +43,6 @@ static void FUNC(put_pcm)(uint8_t *_dst, ptrdiff_t stride, int width, int height
     }
 }
 
-#if CONFIG_HEVC_RPI_DECODER
 static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int height,
                           GetBitContext *gb, int pcm_bit_depth)
 {
@@ -65,7 +64,6 @@ static void FUNC(put_pcm_c)(uint8_t *_dst, ptrdiff_t stride, int width, int heig
         dst += stride;
     }
 }
-#endif
 
 static av_always_inline void FUNC(add_residual)(uint8_t *_dst, int16_t *res,
                                                 ptrdiff_t stride, int size)
@@ -100,7 +98,6 @@ static av_always_inline void FUNC(add_residual_dc)(uint8_t *_dst, ptrdiff_t stri
 }
 
 
-#if CONFIG_HEVC_RPI_DECODER
 static av_always_inline void FUNC(add_residual_u)(uint8_t *_dst, const int16_t *res,
                                                 ptrdiff_t stride, const int dc_v, int size)
 {
@@ -182,8 +179,6 @@ static av_always_inline void FUNC(add_residual_dc_c)(uint8_t *_dst, ptrdiff_t st
 }
 
 
-#endif
-
 static void FUNC(add_residual4x4)(uint8_t *_dst, int16_t *res,
                                   ptrdiff_t stride)
 {
@@ -228,7 +223,6 @@ static void FUNC(add_residual32x32_dc)(uint8_t *_dst, ptrdiff_t stride, int dc)
     FUNC(add_residual_dc)(_dst, stride, dc, 32);
 }
 
-#if CONFIG_HEVC_RPI_DECODER
 // -- U -- (plaited)
 
 static void FUNC(add_residual4x4_u)(uint8_t *_dst, const int16_t * res,
@@ -330,8 +324,6 @@ static void FUNC(add_residual32x32_dc_c)(uint8_t *_dst, ptrdiff_t stride, int32_
     // Should never occur for 420, which is all that sand supports
     av_assert0(0);
 }
-
-#endif
 
 
 static void FUNC(transform_rdpcm)(int16_t *_coeffs, int16_t log2_size, int mode)
@@ -606,13 +598,11 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
 
 
 #if BIT_DEPTH == 10
-#if CONFIG_HEVC_RPI_DECODER
 // We need a 32 bit variation for the _c restores so hijack bit depth 10
 #undef pixel
 #undef BIT_DEPTH
 #define pixel uint32_t
 #define BIT_DEPTH 32
-#endif
 // All 16 bit variations are the same
 #define sao_edge_restore_0_10 sao_edge_restore_0_9
 #define sao_edge_restore_1_10 sao_edge_restore_1_9
@@ -765,8 +755,6 @@ static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
 
 // --- Plaited chroma versions
 
-#if CONFIG_HEVC_RPI_DECODER
-
 static void FUNC(sao_band_filter_c)(uint8_t *_dst, const uint8_t *_src,
                                   ptrdiff_t stride_dst, ptrdiff_t stride_src,
                                   const int16_t *sao_offset_val_u, int sao_left_class_u,
@@ -867,9 +855,6 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
 #define sao_edge_restore_c_0_16 sao_edge_restore_0_32
 #define sao_edge_restore_c_1_16 sao_edge_restore_1_32
 #endif
-
-#endif  // RPI_HEVC_SAND
-
 
 #undef CMP
 
@@ -2074,8 +2059,6 @@ static void FUNC(hevc_v_loop_filter_luma)(uint8_t *pix, ptrdiff_t stride,
 #undef TQ2
 #undef TQ3
 
-#if CONFIG_HEVC_RPI_DECODER
-
 // line zero
 #define P3 pix_l[0 * xstride]
 #define P2 pix_l[1 * xstride]
@@ -2283,7 +2266,4 @@ static void FUNC(hevc_v_loop_filter_uv2)(uint8_t * src_r, unsigned int stride, u
 #undef P0
 #undef Q0
 #undef Q1
-
-
-#endif
 

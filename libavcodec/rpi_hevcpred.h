@@ -40,7 +40,6 @@ typedef struct HEVCPredContext {
     void (*pred_angular[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
                             int c_idx, int mode);
-#if CONFIG_HEVC_RPI_DECODER
     void (*intra_pred_c[4])(const struct HEVCRpiContext * const s, struct HEVCRpiLocalContext * const lc, int x0, int y0, int c_idx);
 
     void (*pred_planar_c[4])(uint8_t *src, const uint8_t *top,
@@ -50,7 +49,6 @@ typedef struct HEVCPredContext {
     void (*pred_angular_c[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
                             int c_idx, int mode);
-#endif
 } HEVCPredContext;
 
 void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth);

@@ -33,8 +33,8 @@
 
 #define POS(x, y) src[(x) + stride * (y)]
 
-// REPEAT_INCLUDE defined at EOF
-#if CONFIG_HEVC_RPI_DECODER && !defined(INCLUDED_ONCE)
+// INCLUDED_ONCE defined at EOF
+#ifndef INCLUDED_ONCE
 typedef uint8_t (* c8_dst_ptr_t)[2];
 typedef const uint8_t (* c8_src_ptr_t)[2];
 typedef uint16_t (* c16_dst_ptr_t)[2];

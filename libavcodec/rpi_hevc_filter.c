@@ -36,13 +36,9 @@
 
 #include "bit_depth_template.c"
 
-#if CONFIG_HEVC_RPI_DECODER
 #include "rpi_qpu.h"
 #include "rpi_zc.h"
 #include "libavutil/rpi_sand_fns.h"
-#else
-#define RPI_ZC_SAND_8_IN_10_BUF 0
-#endif
 
 #define LUMA 0
 #define CB 1
@@ -376,17 +372,12 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                            x_ctb, y_ctb);
             if (s->ps.pps->transquant_bypass_enable_flag ||
                 (s->ps.sps->pcm.loop_filter_disable_flag && s->ps.sps->pcm_enabled_flag)) {
-#if CONFIG_HEVC_RPI_DECODER
                 // Can't use the edge buffer here as it may be in use by the foreground
                 DECLARE_ALIGNED(64, uint8_t, dstbuf)
                     [2*MAX_PB_SIZE*MAX_PB_SIZE];
-#else
-                uint8_t * const dstbuf = s->HEVClc->edge_emu_buffer;
-#endif
                 dst = dstbuf;
                 stride_dst = 2*MAX_PB_SIZE;
                 copy_CTB(dst, src, width << sh, height, stride_dst, stride_src);
-#if CONFIG_HEVC_RPI_DECODER
                 if (sliced && c_idx != 0)
                 {
                     s->hevcdsp.sao_band_filter_c[tab](src, dst, stride_src, stride_dst,
@@ -395,7 +386,6 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                                                     width, height);
                 }
                 else
-#endif
                 {
                     s->hevcdsp.sao_band_filter[tab](src, dst, stride_src, stride_dst,
                                                     sao->offset_val[c_idx], sao->band_position[c_idx],
@@ -404,18 +394,14 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                 restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
                                    x, y, width, height, c_idx);
             } else {
-#if CONFIG_HEVC_RPI_DECODER
                 if (sliced && c_idx != 0)
                 {
-//                    printf("x,y=%d,%d data[1]=%p, src=%p\n", x0, y0, s->frame->data[1], src);
-
                     s->hevcdsp.sao_band_filter_c[tab](src, src, stride_src, stride_src,
                                                     sao->offset_val[1], sao->band_position[1],
                                                     sao->offset_val[2], sao->band_position[2],
                                                     width, height);
                 }
                 else
-#endif
                 {
                     s->hevcdsp.sao_band_filter[tab](src, src, stride_src, stride_src,
                                                     sao->offset_val[c_idx], sao->band_position[c_idx],
@@ -430,13 +416,9 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
             const int h = s->ps.sps->height >> vshift;
             int top_edge = edges[1];
             int bottom_edge = edges[3];
-#if CONFIG_HEVC_RPI_DECODER
             // Can't use the edge buffer here as it may be in use by the foreground
             DECLARE_ALIGNED(64, uint8_t, dstbuf)
                 [2*(MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE)*(MAX_PB_SIZE + 2) + 64];
-#else
-            uint8_t * const dstbuf = s->HEVClc->edge_emu_buffer;
-#endif
 
             stride_dst = 2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE;
             dst = dstbuf + stride_dst + AV_INPUT_BUFFER_PADDING_SIZE;
@@ -516,7 +498,6 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
 
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
                            x_ctb, y_ctb);
-#if CONFIG_HEVC_RPI_DECODER
             if (sliced && c_idx != 0)
             {
                 // Class always the same for both U & V (which is just as well :-))
@@ -533,7 +514,6 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                                                     diag_edge);
             }
             else
-#endif
             {
                 s->hevcdsp.sao_edge_filter[tab](src, dst, stride_src, sao->offset_val[c_idx],
                                                 sao->eo_class[c_idx], width, height);

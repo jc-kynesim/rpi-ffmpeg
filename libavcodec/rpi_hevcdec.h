@@ -74,9 +74,6 @@
 
 #define EDGE_EMU_BUFFER_STRIDE 80
 
-#if !CONFIG_HEVC_RPI_DECODER
-#define RPI_TSTATS         0
-#else
 #include <semaphore.h>
 #include "rpi_qpu.h"
 
@@ -119,7 +116,6 @@
 #define HEVC_RPI_MAX_WIDTH      2048
 #define HEVC_RPI_MAX_HEIGHT     1088
 
-#endif
 
 /**
  * Value of the luma sample at position (x, y) in the 2D array tab.
@@ -366,9 +362,6 @@ typedef struct HEVCFrame {
     AVBufferRef *rpl_tab_buf;
     AVBufferRef *rpl_buf;
 
-    AVBufferRef *hwaccel_priv_buf;
-    void *hwaccel_picture_private;
-
     /**
      * A sequence counter, so that old frames are output first
      * after a POC reset
@@ -385,18 +378,15 @@ typedef struct HEVCFrame {
     uint8_t dpb_no;
 } HEVCFrame;
 
-#if CONFIG_HEVC_RPI_DECODER
 typedef struct HEVCRpiLocalContextIntra {
     TransformUnit tu;
     NeighbourAvailable na;
 } HEVCRpiLocalContextIntra;
-#endif
 
 typedef struct HEVCRpiLocalContext {
     TransformUnit tu;  // Moved to start to match HEVCRpiLocalContextIntra (yuk!)
     NeighbourAvailable na;
 
-#if CONFIG_HEVC_RPI_DECODER
     // Vars that allow us to locate everything from just an lc
     struct HEVCRpiContext * context;  // ??? make const ???
     unsigned int lc_n; // lc list el no
@@ -424,7 +414,7 @@ typedef struct HEVCRpiLocalContext {
 //    char max_done;
     char bt_is_tile;
     char last_progress_good;
-#endif
+
     char wpp_init;   // WPP/Tile bitstream init has happened
 
     uint8_t cabac_state[HEVC_CONTEXTS];
@@ -466,16 +456,12 @@ typedef struct HEVCRpiLocalContext {
     int boundary_flags;
 } HEVCRpiLocalContext;
 
-#if CONFIG_HEVC_RPI_DECODER
 
 // Each block can have an intra prediction and an add_residual command
 // noof-cmds(2) * max-ctu height(64) / min-transform(4) * planes(3) * MAX_WIDTH
-#if CONFIG_HEVC_RPI_DECODER
+
 // Sand only has 2 planes (Y/C)
 #define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*2*(HEVC_RPI_MAX_WIDTH/4))
-#else
-#define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*3*(HEVC_RPI_MAX_WIDTH/4))
-#endif
 
 #ifdef RPI_DEBLOCK_VPU
 // Worst case is 16x16 CTUs
@@ -685,7 +671,6 @@ typedef struct HEVCRpiStats {
 } HEVCRpiStats;
 #endif
 
-#endif
 
 typedef struct HEVCRpiContext {
     const AVClass *c;  // needed by private avoptions
@@ -703,7 +688,6 @@ typedef struct HEVCRpiContext {
     int                 height;
 
     char used_for_ref;  // rpi
-#if CONFIG_HEVC_RPI_DECODER
     char offload_recon;
 
     HEVCRpiJobCtl * jbc;
@@ -756,7 +740,6 @@ typedef struct HEVCRpiContext {
     struct dblk_vpu_q_s * dvq;
     unsigned int dvq_n;
 #endif
-#endif  // RPI
 
     uint8_t *cabac_state;
 
@@ -847,7 +830,6 @@ typedef struct HEVCRpiContext {
 
     HEVCSEIContext sei;
 
-#if CONFIG_HEVC_RPI_DECODER
     // Put structures that allocate non-trivial storage at the end
     // These are mostly used indirectly so position in the structure doesn't matter
     HEVCRpiLocalContextIntra HEVClcIntra;
@@ -860,7 +842,6 @@ typedef struct HEVCRpiContext {
 #if RPI_TSTATS
     HEVCRpiStats tstats;
 #endif
-#endif  // RPI
 } HEVCRpiContext;
 
 /**

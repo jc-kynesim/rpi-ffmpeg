@@ -66,10 +66,6 @@ static av_always_inline av_const unsigned av_mod_uintp2_c(unsigned a, unsigned p
 #endif
 
 const uint8_t ff_hevc_rpi_pel_weight[65] = { [2] = 0, [4] = 1, [6] = 2, [8] = 3, [12] = 4, [16] = 5, [24] = 6, [32] = 7, [48] = 8, [64] = 9 };
-
-
-#if CONFIG_HEVC_RPI_DECODER
-
 static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, const unsigned int ctu_ts_first);
 
 #define MC_DUMMY_X (-32)
@@ -775,9 +771,6 @@ static void ff_hevc_rpi_progress_kill_wait(HEVCRpiFrameProgressWait * const pwai
 }
 
 
-#endif
-
-
 /**
  * NOTE: Each function hls_foo correspond to the function foo in the
  * specification (HLS stands for High Level Syntax).
@@ -1172,32 +1165,9 @@ static void export_stream_params(AVCodecContext *avctx, const HEVCRpiParamSets *
 
 static enum AVPixelFormat get_format(HEVCRpiContext *s, const HEVCRpiSPS *sps)
 {
-#define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + \
-                     CONFIG_HEVC_D3D11VA_HWACCEL * 2 + \
-                     CONFIG_HEVC_VAAPI_HWACCEL + \
-                     CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL + \
-                     CONFIG_HEVC_VDPAU_HWACCEL)
-    enum AVPixelFormat pix_fmts[HWACCEL_MAX + 4], *fmt = pix_fmts;
+    enum AVPixelFormat pix_fmts[4], *fmt = pix_fmts;
 
-    switch (sps->pix_fmt) {
-    case AV_PIX_FMT_YUV420P:
-    case AV_PIX_FMT_YUVJ420P:
-#if CONFIG_HEVC_RPI_DECODER
-        // Currently geometry calc is stuffed for big sizes
-        if (sps->width < 2048 && sps->height <= 1088) {
-            *fmt++ = AV_PIX_FMT_SAND128;
-        }
-#endif
-        break;
-    case AV_PIX_FMT_YUV420P10:
-#if CONFIG_HEVC_RPI_DECODER
-        // Currently geometry calc is stuffed for big sizes
-        if (sps->width < 2048 && sps->height <= 1088) {
-            *fmt++ = AV_PIX_FMT_SAND64_10;
-        }
-#endif
-        break;
-    }
+    // Admit to no h/w formats
 
     *fmt++ = sps->pix_fmt;
     *fmt = AV_PIX_FMT_NONE;
@@ -1249,7 +1219,8 @@ static int set_sps(HEVCRpiContext * const s, const HEVCRpiSPS * const sps,
     av_freep(&s->sao_pixel_buffer_h[0]);
     av_freep(&s->sao_pixel_buffer_v[0]);
 
-    if (sps->sao_enabled && !s->avctx->hwaccel) {
+    if (sps->sao_enabled)
+    {
         const unsigned int c_count = (ctx_cfmt(s) != 0) ? 3 : 1;
         unsigned int c_idx;
         size_t vsize[3] = {0};
@@ -2287,8 +2258,6 @@ static void hevc_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
 }
 
 
-#if CONFIG_HEVC_RPI_DECODER
-
 static HEVCRpiInterPredQ *
 rpi_nxt_pred(HEVCRpiInterPredEnv * const ipe, const unsigned int load_val, const uint32_t fn)
 {
@@ -2810,10 +2779,6 @@ rpi_pred_c_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
         cp->qpu_mc_curr = (qpu_mc_pred_cmd_t *)(u + 1);
     }
 }
-
-
-#endif
-
 
 
 static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
@@ -3412,7 +3377,6 @@ static void hls_decode_neighbour(const HEVCRpiContext * const s, HEVCRpiLocalCon
         (s->ps.pps->tile_id[ctb_addr_ts] == s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs+1 - s->ps.sps->ctb_width]]));
 }
 
-#if CONFIG_HEVC_RPI_DECODER
 
 static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const jb)
 {
@@ -4014,7 +3978,6 @@ static av_cold void hevc_exit_worker(HEVCRpiContext *s)
     s->jbc = NULL;
 }
 
-#endif
 
 static int slice_start(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc)
 {
@@ -4059,10 +4022,8 @@ static int slice_start(const HEVCRpiContext * const s, HEVCRpiLocalContext *cons
 
     // General setup
     lc->wpp_init = 0;
-#if CONFIG_HEVC_RPI_DECODER
     lc->bt_line_no = 0;
     lc->ts = ctb_addr_ts;
-#endif
     return 0;
 }
 
@@ -4885,8 +4846,7 @@ static int hevc_frame_start(HEVCRpiContext * const s)
     if (ret < 0)
         goto fail;
 
-    if (!s->avctx->hwaccel)
-        ff_thread_finish_setup(s->avctx);
+    ff_thread_finish_setup(s->avctx);
 
     return 0;
 
@@ -4958,10 +4918,8 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_STSA_N  ||
                         s->nal_unit_type == HEVC_NAL_RADL_N  ||
                         s->nal_unit_type == HEVC_NAL_RASL_N);
-#if CONFIG_HEVC_RPI_DECODER
         s->offload_recon = s->used_for_ref;
 //        s->offload_recon = 0;
-#endif
 
 #if DEBUG_DECODE_N
         {
@@ -5024,26 +4982,14 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
             }
         }
 
-        if (s->sh.first_slice_in_pic_flag && s->avctx->hwaccel) {
-            ret = s->avctx->hwaccel->start_frame(s->avctx, NULL, 0);
-            if (ret < 0)
-                goto fail;
+        ctb_addr_ts = hls_slice_data(s, nal);
+        if (ctb_addr_ts >= (s->ps.sps->ctb_width * s->ps.sps->ctb_height)) {
+            s->is_decoded = 1;
         }
 
-        if (s->avctx->hwaccel) {
-            ret = s->avctx->hwaccel->decode_slice(s->avctx, nal->raw_data, nal->raw_size);
-            if (ret < 0)
-                goto fail;
-        } else {
-            ctb_addr_ts = hls_slice_data(s, nal);
-            if (ctb_addr_ts >= (s->ps.sps->ctb_width * s->ps.sps->ctb_height)) {
-                s->is_decoded = 1;
-            }
-
-            if (ctb_addr_ts < 0) {
-                ret = ctb_addr_ts;
-                goto fail;
-            }
+        if (ctb_addr_ts < 0) {
+            ret = ctb_addr_ts;
+            goto fail;
         }
         break;
     case HEVC_NAL_EOS_NUT:
@@ -5260,22 +5206,13 @@ static int hevc_rpi_decode_frame(AVCodecContext *avctx, void *data, int *got_out
     if (ret < 0)
         return ret;
 
-    if (avctx->hwaccel) {  // **** If we have hwaccel we should give up....
-        if (s->ref && (ret = avctx->hwaccel->end_frame(avctx)) < 0) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "hardware accelerator failed to decode picture\n");
+    /* verify the SEI checksum */
+    if (avctx->err_recognition & AV_EF_CRCCHECK && s->is_decoded &&
+        s->sei.picture_hash.is_md5) {
+        ret = verify_md5(s, s->ref->frame);
+        if (ret < 0 && avctx->err_recognition & AV_EF_EXPLODE) {
             ff_hevc_rpi_unref_frame(s, s->ref, ~0);
             return ret;
-        }
-    } else {
-        /* verify the SEI checksum */
-        if (avctx->err_recognition & AV_EF_CRCCHECK && s->is_decoded &&
-            s->sei.picture_hash.is_md5) {
-            ret = verify_md5(s, s->ref->frame);
-            if (ret < 0 && avctx->err_recognition & AV_EF_EXPLODE) {
-                ff_hevc_rpi_unref_frame(s, s->ref, ~0);
-                return ret;
-            }
         }
     }
     s->sei.picture_hash.is_md5 = 0;
@@ -5319,15 +5256,8 @@ static int hevc_ref_frame(HEVCRpiContext *s, HEVCFrame *dst, HEVCFrame *src)
     dst->ctb_count  = src->ctb_count;
     dst->flags      = src->flags;
     dst->sequence   = src->sequence;
-
-    if (src->hwaccel_picture_private) {
-        dst->hwaccel_priv_buf = av_buffer_ref(src->hwaccel_priv_buf);
-        if (!dst->hwaccel_priv_buf)
-            goto fail;
-        dst->hwaccel_picture_private = dst->hwaccel_priv_buf->data;
-    }
-
     return 0;
+
 fail:
     ff_hevc_rpi_unref_frame(s, dst, ~0);
     return AVERROR(ENOMEM);
@@ -5345,7 +5275,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     av_freep(&s->cabac_state);
 
-#if CONFIG_HEVC_RPI_DECODER
 #if RPI_EXTRA_BIT_THREADS
     bit_threads_kill(s);
 #endif
@@ -5357,7 +5286,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     }
     job_lc_kill(s->HEVClc);
     av_rpi_zc_uninit(avctx);
-#endif
 
     av_freep(&s->sao_pixel_buffer_h[0]);  // [1] & [2] allocated with [0]
     av_freep(&s->sao_pixel_buffer_v[0]);
@@ -5413,7 +5341,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->HEVClcList[0] = s->HEVClc;
     s->sList[0] = s;
 
-#if CONFIG_HEVC_RPI_DECODER
     // Whilst FFmpegs init fn is only called once the close fn is called as
     // many times as we have threads (init_thread_copy is called for the
     // threads).  So to match init & term put the init here where it will be
@@ -5439,7 +5366,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     for (i = 0; i != 2; ++i) {
         ff_hevc_rpi_progress_init_state(s->progress_states + i);
     }
-#endif
 
     s->cabac_state = av_malloc(HEVC_CONTEXTS);
     if (!s->cabac_state)
@@ -5557,7 +5483,6 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     s->sei.content_light        = s0->sei.content_light;
     s->sei.alternative_transfer = s0->sei.alternative_transfer;
 
-#if CONFIG_HEVC_RPI_DECODER
     // * We do this here as it allows us to easily locate our parents
     //   global job pool, but there really should be a less nasty way
     if (s->jbc == NULL)
@@ -5565,7 +5490,6 @@ static int hevc_update_thread_context(AVCodecContext *dst,
         av_assert0((s->jbc = rpi_job_ctl_new(s0->jbc->jbg)) != NULL);
         hevc_init_worker(s);
     }
-#endif
 
     return 0;
 }
@@ -5655,7 +5579,6 @@ static void hevc_decode_flush(AVCodecContext *avctx)
 #define OFFSET(x) offsetof(HEVCRpiContext, x)
 #define PAR (AV_OPT_FLAG_DECODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
-#if CONFIG_HEVC_RPI_DECODER
 
 static const AVOption options[] = {
     { "apply_defdispwin", "Apply default display window from VUI", OFFSET(apply_defdispwin),
@@ -5704,5 +5627,4 @@ AVCodec ff_hevc_rpi_decoder = {
     .pix_fmts              = hevc_rpi_pix_fmts,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
 };
-#endif
 
