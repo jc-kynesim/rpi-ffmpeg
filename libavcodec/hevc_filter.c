@@ -403,7 +403,7 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
             diag_edge[3] |= (edges[0] || edges[3]);
         }
         if (c_idx==1 && s->enable_rpi_deblock) {
-            // Need to prepare a 32bit word describing the deblocking for a 16x16 region
+            // Need to prepare two 32bit words describing the deblocking for a 8x16 region
             // x,y is luma position
             // x0,y0 is chroma position
             // width and height in chroma samples (at most one CTU)
@@ -425,9 +425,9 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
             int typ = sao->type_idx[c_idx];  // BAND=1, EDGE=2
             uint32_t (*setup)[2] = s->dvq->uv_sao_setup_arm;
             int16_t *vals = sao->offset_val[1];
-            uint32_t packedval = ((vals[1]&15)<<12) +((vals[2]&15)<<8) +((vals[3]&15)<<4) +(vals[4]&15);
+            uint32_t packedval = ((vals[1]&63)<<18) +((vals[2]&63)<<12) +((vals[3]&63)<<6) +(vals[4]&63);
             int16_t *valsv = sao->offset_val[2];
-            uint32_t packedvalv = ((valsv[1]&15)<<12) +((valsv[2]&15)<<8) +((valsv[3]&15)<<4) +(valsv[4]&15);
+            uint32_t packedvalv = ((valsv[1]&63)<<18) +((valsv[2]&63)<<12) +((valsv[3]&63)<<6) +(valsv[4]&63);
             uint32_t leftClass;
             uint32_t eoClass;
             int lasti = ((height+15)>>4) - 1; // i ranges from 0 to lasti inclusive
@@ -438,9 +438,9 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                     // Pack the values into 4 bits each, also need left class
                     sao->type_idx[c_idx] = SAO_APPLIED;
                     leftClass = sao->band_position[1];
-                    packedval += (1<<30) + (leftClass<<16); // type 1
+                    packedval += (1<<30) + (leftClass<<24); // type 1
                     leftClass = sao->band_position[2];
-                    packedvalv += (leftClass<<16); 
+                    packedvalv += (leftClass<<24); 
                     for(int i = 0; i <= lasti ; i++) {
                         for(int j = 0; j <= lastj; j++) {
                             setup[ i * s->uv_setup_width + j ][0] = packedval;
@@ -450,42 +450,42 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                     break;
                 case SAO_EDGE: 
                     sao->type_idx[c_idx] = SAO_APPLIED;
-#define LEFTFLAG 16
-#define TOPFLAG 17
-#define RIGHTFLAG 18
-#define BOTTOMFLAG 19
-#define TOPLEFTFLAG 20
-#define TOPRIGHTFLAG 21
-#define BOTTOMLEFTFLAG 22
-#define BOTTOMRIGHTFLAG 23
+#define LEFTFLAG (16+8)
+#define TOPFLAG (17+8)
+#define RIGHTFLAG (18+8)
+#define BOTTOMFLAG (19+8)
+#define TOPLEFTFLAG (20+8)
+#define TOPRIGHTFLAG (21+8)
+#define BOTTOMLEFTFLAG (22+8)
+#define BOTTOMRIGHTFLAG (23+8)
                     eoClass = sao->eo_class[c_idx];
                     packedval += (2<<30) + (eoClass<<24); // type 2
                     if (eoClass == 0) {
                         // Use left and right pixels
                         for(int j = 0; j <= lastj; j++) {
-                            uint32_t v = packedval;
+                            uint32_t v = packedvalv;
                             if (j==0 && vert_edge[0]) v |= (1<<TOPLEFTFLAG) | (1<<LEFTFLAG) | (1<<BOTTOMLEFTFLAG);
                             if (j==lastj && vert_edge[1]) v |= (1<<TOPRIGHTFLAG) | (1<<RIGHTFLAG) | (1<<BOTTOMRIGHTFLAG);
                             for(int i = 0; i <= lasti ; i++) {
-                              setup[ i * s->uv_setup_width + j ][0] = v;
-                              setup[ i * s->uv_setup_width + j ][1] = packedvalv;
+                              setup[ i * s->uv_setup_width + j ][0] = packedval;
+                              setup[ i * s->uv_setup_width + j ][1] = v;
                             }
                         }
                     } else if (eoClass == 1) {
                         // up and down pixels
                         for(int i = 0; i <= lasti ; i++) {
-                            uint32_t v = packedval;
+                            uint32_t v = packedvalv;
                             if (i==0 && horiz_edge[0]) v |= (1<<TOPLEFTFLAG) | (1<<TOPFLAG) | (1<<TOPRIGHTFLAG);
                             if (i==lasti && horiz_edge[1]) v |= (1<<BOTTOMLEFTFLAG) | (1<<BOTTOMFLAG) | (1<<BOTTOMRIGHTFLAG);
                             for(int j = 0; j <= lastj; j++) {
-                                setup[ i * s->uv_setup_width + j ][0] = v;
-                                setup[ i * s->uv_setup_width + j ][1] = packedvalv;
+                                setup[ i * s->uv_setup_width + j ][0] = packedval;
+                                setup[ i * s->uv_setup_width + j ][1] = v;
                             }
                         }
                     } else if (eoClass == 2) {
                         // top-left and bottom-right
                         for(int i = 0; i <= lasti ; i++) {
-                            uint32_t v = packedval;
+                            uint32_t v = packedvalv;
                             if (i==0 && horiz_edge[0]) v |= (1<<TOPFLAG) | (1<<TOPRIGHTFLAG);
                             if (i==lasti && horiz_edge[1]) v |= (1<<BOTTOMFLAG) | (1<<BOTTOMLEFTFLAG);
                             for(int j = 0; j <= lastj; j++) {
@@ -505,14 +505,14 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                                 } else {
                                     if (j==lastj) v2 |= vert_edge[1] << BOTTOMRIGHTFLAG;
                                 }
-                                setup[ i * s->uv_setup_width + j ][0] = v2;
-                                setup[ i * s->uv_setup_width + j ][1] = packedvalv;
+                                setup[ i * s->uv_setup_width + j ][0] = packedval;
+                                setup[ i * s->uv_setup_width + j ][1] = v2;
                             }
                         }
                     } else {
                         // top-right and bottom-left
                         for(int i = 0; i <= lasti ; i++) {
-                            uint32_t v = packedval;
+                            uint32_t v = packedvalv;
                             if (i==0 && horiz_edge[0]) v |= (1<<TOPFLAG) | (1<<TOPLEFTFLAG);
                             if (i==lasti && horiz_edge[1]) v |= (1<<BOTTOMFLAG) | (1<<BOTTOMRIGHTFLAG);
                             for(int j = 0; j <= lastj; j++) {
@@ -532,8 +532,8 @@ static void sao_filter_CTB(const HEVCContext * const s, const int x, const int y
                                 } else {
                                     if (j==0) v2 |= vert_edge[0] << BOTTOMLEFTFLAG;
                                 }
-                                setup[ i * s->uv_setup_width + j ][0] = v2;
-                                setup[ i * s->uv_setup_width + j ][1] = packedvalv;
+                                setup[ i * s->uv_setup_width + j ][0] = packedval;
+                                setup[ i * s->uv_setup_width + j ][1] = v2;
                             }
                         }
                     }

@@ -785,9 +785,11 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
     {
         int i;
         int sao_unsupported = sps->log2_ctb_size<6 || (sps->pcm.loop_filter_disable_flag && sps->pcm_enabled_flag);
-        s->enable_rpi_deblock = (sps->bit_depth == 8);
-        if (sps->sao_enabled && sao_unsupported)
+        s->enable_rpi_deblock = 1; // (sps->bit_depth == 8)
+        if (sps->sao_enabled && sao_unsupported) {
+            printf("SAO unsupported\n");
             s->enable_rpi_deblock = 0;
+        }
         // TODO should we ignore if ctb size is not >=32?  SAO may go wrong in this case?
         s->setup_width = (sps->width+15) / 16;
         s->setup_height = (sps->height+15) / 16;
@@ -802,7 +804,7 @@ static int pic_arrays_init(HEVCContext *s, const HEVCSPS *sps)
             // may need 3 commands for deblock, and with ctu size of 64, plus ending 64, as many as 8 16 high rows for each of u and v
             const unsigned int cmd_size = (sizeof(*dvq->vpu_cmds_arm) * (3+8*2) + 15) & ~15;
             const unsigned int uv_size = (sizeof(*dvq->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
-            const unsigned int sao_line_buf_size = ((sps->width * 2 >> sps->hshift[1])+15) & ~15;
+            const unsigned int sao_line_buf_size = ((sps->width * 2 * 2 >> sps->hshift[1])+15) & ~15; // Always allocate enough for 16bit line buffer
             const unsigned int sao_setup_size = (sizeof(*dvq->uv_sao_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
             const unsigned int total_size = cmd_size + uv_size + sao_line_buf_size + sao_setup_size;
             int p_vc;
