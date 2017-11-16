@@ -1518,7 +1518,7 @@ static void rpi_add_residual(const HEVCRpiContext *const s, HEVCRpiJob * const j
     const unsigned int x0, const unsigned int y0, const int16_t * const coeffs)
 {
     const AVFrame * const frame = s->frame;
-    const unsigned int stride = frame->linesize[c_idx];
+    const unsigned int stride = frame_stride1(s->frame, c_idx);
     const unsigned int x = x0 >> ctx_hshift(s, c_idx);
     const unsigned int y = y0 >> ctx_vshift(s, c_idx);
     const int is_sliced = 1;  // av_rpi_is_sand_frame(frame);
@@ -1577,7 +1577,7 @@ static void rpi_add_dc(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const unsigned int x0, const unsigned int y0, const int16_t * const coeffs)
 {
     const AVFrame * const frame = s->frame;
-    const unsigned int stride = frame->linesize[c_idx];
+    const unsigned int stride = frame_stride1(s->frame, c_idx);
     const unsigned int x = x0 >> ctx_hshift(s, c_idx);
     const unsigned int y = y0 >> ctx_vshift(s, c_idx);
     const int is_sliced = 1;

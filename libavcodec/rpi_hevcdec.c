@@ -1884,7 +1884,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                                 log2_trafo_size_c, scan_idx_c, 1);
                 else
                     if (lc->tu.cross_pf) {
-                        ptrdiff_t stride = s->frame->linesize[1];
+                        const ptrdiff_t stride = frame_stride1(s->frame, 1);
                         const int hshift = ctx_hshift(s, 1);
                         const int vshift = ctx_vshift(s, 1);
                         int16_t * const coeffs_y = (int16_t*)lc->edge_emu_buffer;
@@ -1913,7 +1913,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                                 log2_trafo_size_c, scan_idx_c, 2);
                 else
                     if (lc->tu.cross_pf) {
-                        ptrdiff_t stride = s->frame->linesize[2];
+                        ptrdiff_t stride = frame_stride1(s->frame, 2);
                         const int hshift = ctx_hshift(s, 2);
                         const int vshift = ctx_vshift(s, 2);
                         int16_t *coeffs_y = (int16_t*)lc->edge_emu_buffer;
@@ -2132,7 +2132,7 @@ static int pcm_extract(const HEVCRpiContext * const s, const uint8_t * pcm, cons
         return ret;
 
     s->hevcdsp.put_pcm(av_rpi_sand_frame_pos_y(s->frame, x0, y0),
-                       s->frame->linesize[0],
+                       frame_stride1(s->frame, 0),
                        cb_size, cb_size, &gb, s->ps.sps->pcm.bit_depth);
 
     s->hevcdsp.put_pcm_c(av_rpi_sand_frame_pos_c(s->frame, x0 >> ctx_hshift(s, 1), y0 >> ctx_vshift(s, 1)),
@@ -5110,7 +5110,7 @@ static int verify_md5(HEVCRpiContext *s, AVFrame *frame)
 
         av_md5_init(s->sei.picture_hash.md5_ctx);
         for (j = 0; j < h; j++) {
-            const uint8_t *src = frame->data[i] + j * frame->linesize[i];
+            const uint8_t *src = frame->data[i] + j * frame_stride1(frame, 1);
 #if HAVE_BIGENDIAN
             if (pixel_shift) {
                 s->bdsp.bswap16_buf((uint16_t *) s->checksum_buf,

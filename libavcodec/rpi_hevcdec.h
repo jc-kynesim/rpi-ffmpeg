@@ -1008,6 +1008,7 @@ static inline void ff_hevc_rpi_progress_set_all_done(HEVCFrame * const ref)
 }
 
 #define HEVC_RPI_420_ONLY 1
+#define HEVC_RPI_SAND128_ONLY 1
 
 static inline unsigned int ctx_hshift(const HEVCRpiContext * const s, const int cidx)
 {
@@ -1035,5 +1036,19 @@ static inline int ctx_cfmt(const HEVCRpiContext * const s)
     return s->ps.sps->chroma_format_idc;
 #endif
 }
+
+static inline int frame_stride1(const AVFrame * const frame, const int c_idx)
+{
+#if HEVC_RPI_SAND128_ONLY
+    return 128;
+#else
+    return frame->linesize[c_idx];
+#endif
+}
+
+#if HEVC_RPI_SAND128_ONLY
+// Propagate this decision to later zc includes
+#define RPI_ZC_SAND128_ONLY 1
+#endif
 
 #endif /* AVCODEC_RPI_HEVCDEC_H */

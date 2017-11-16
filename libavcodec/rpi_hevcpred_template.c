@@ -181,7 +181,7 @@ do {                                  \
 
     int cur_tb_addr = MIN_TB_ADDR_ZS(x_tb, y_tb);
 
-    const ptrdiff_t stride = s->frame->linesize[c_idx] / sizeof(pixel);
+    const ptrdiff_t stride = frame_stride1(s->frame, c_idx) / sizeof(pixel);
     pixel *const src = c_idx == 0 ?
         (pixel *)av_rpi_sand_frame_pos_y(s->frame, x, y) :
         (pixel *)av_rpi_sand_frame_pos_c(s->frame, x, y);

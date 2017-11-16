@@ -396,7 +396,7 @@ static HEVCFrame *generate_missing_ref(HEVCRpiContext *s, int poc)
         for (i = 0; frame->frame->data[i]; i++)
             for (y = 0; y < (s->ps.sps->height >> s->ps.sps->vshift[i]); y++)
                 for (x = 0; x < (s->ps.sps->width >> s->ps.sps->hshift[i]); x++) {
-                    AV_WN16(frame->frame->data[i] + y * frame->frame->linesize[i] + 2 * x,
+                    AV_WN16(frame->frame->data[i] + y * frame_stride1(frame->frame, 1) + 2 * x,
                             1 << (s->ps.sps->bit_depth - 1));
                 }
     }

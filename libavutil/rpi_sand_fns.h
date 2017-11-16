@@ -52,9 +52,13 @@ void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const
 
 static inline unsigned int av_rpi_sand_frame_stride1(const AVFrame * const frame)
 {
-    // * We could repl;ace thios with a fixed 128 whic would allow the compiler
-    //   to optimize a whole lot better
+#ifdef RPI_ZC_SAND128_ONLY
+    // If we are sure we only only support 128 byte sand formats replace the
+    // var with a constant which should allow for better optimisation
+    return 128;
+#else
     return frame->linesize[0];
+#endif
 }
 
 static inline unsigned int av_rpi_sand_frame_stride2(const AVFrame * const frame)

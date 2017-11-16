@@ -335,7 +335,7 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
         const unsigned int hshift = ctx_hshift(s, c_idx);
         const int x0 = x >> hshift;
         const int y0 = y >> vshift;
-        ptrdiff_t stride_src = s->frame->linesize[c_idx];
+        const ptrdiff_t stride_src = frame_stride1(s->frame, c_idx);
         int ctb_size_h = (1 << (s->ps.sps->log2_ctb_size)) >> hshift;
         int ctb_size_v = (1 << (s->ps.sps->log2_ctb_size)) >> vshift;
         int width    = FFMIN(ctb_size_h, (s->ps.sps->width  >> hshift) - x0);
@@ -539,7 +539,7 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
     if (s->frame->format == AV_PIX_FMT_SAND64_10 && s->frame->buf[RPI_ZC_SAND_8_IN_10_BUF] != NULL &&
         (((x + (1 << (s->ps.sps->log2_ctb_size))) & 255) == 0 || edges[2]))
     {
-        const unsigned int stride1 = s->frame->linesize[0];
+        const unsigned int stride1 = frame_stride1(s->frame, 1);
         const unsigned int stride2 = av_rpi_sand_frame_stride2(s->frame);
         const unsigned int xoff = (x >> 8) * stride2 * stride1;
         const unsigned int ctb_size = (1 << s->ps.sps->log2_ctb_size);
@@ -652,7 +652,7 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
 
                 // This copes properly with no_p/no_q
                 s->hevcdsp.hevc_v_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
-                                                 s->frame->linesize[LUMA],
+                                                 frame_stride1(s->frame, LUMA),
                                                  beta, tc, no_p, no_q,
                                                  av_rpi_sand_frame_pos_y(s->frame, x - 4, y));
                 // *** VPU deblock lost here
@@ -683,7 +683,7 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                     no_q[0] = get_pcm(s, x, y);
                     no_q[1] = get_pcm(s, x + 4, y);
                     s->hevcdsp.hevc_h_loop_filter_luma_c(src,
-                                                         s->frame->linesize[LUMA],
+                                                         frame_stride1(s->frame, LUMA),
                                                          beta, tc, no_p, no_q);
                 } else
 #ifdef RPI_DEBLOCK_VPU
@@ -700,7 +700,7 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                 } else
 #endif
                     s->hevcdsp.hevc_h_loop_filter_luma(src,
-                                                       s->frame->linesize[LUMA],
+                                                       frame_stride1(s->frame, LUMA),
                                                        beta, tc, no_p, no_q);
             }
         }
@@ -742,7 +742,7 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                     }
 
                     s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
-                                                   s->frame->linesize[1],
+                                                   frame_stride1(s->frame, 1),
                                                    tc4,
                                                    av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
                                                    no_f);
@@ -787,8 +787,8 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                     }
 
                     s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
-                                                         s->frame->linesize[1],
-                                                         tc4, no_f);
+                                                     frame_stride1(s->frame, LUMA),
+                                                     tc4, no_f);
                 }
             }
             // **** VPU deblock code gone from here....
