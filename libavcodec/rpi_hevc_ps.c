@@ -815,39 +815,29 @@ static int scaling_list_data(GetBitContext *gb, AVCodecContext *avctx, ScalingLi
     return 0;
 }
 
-static int map_pixel_format(AVCodecContext *avctx, HEVCRpiSPS *sps)
+static int map_pixel_format(HEVCRpiSPS * const sps)
 {
-    const AVPixFmtDescriptor *desc;
+    const int cfmt = sps->chroma_format_idc;
 
     sps->pix_fmt = AV_PIX_FMT_NONE;
     switch (sps->bit_depth) {
     case 8:
-        if (sps->chroma_format_idc == 1) sps->pix_fmt = AV_PIX_FMT_SAND128;
+        if (cfmt == 1)
+            sps->pix_fmt = AV_PIX_FMT_SAND128;
         break;
     case 10:
-        if (sps->chroma_format_idc == 1) sps->pix_fmt = AV_PIX_FMT_SAND64_10;
+        if (cfmt == 1)
+            sps->pix_fmt = AV_PIX_FMT_SAND64_10;
         break;
     default:
         break;
     }
 
-    if (sps->pix_fmt == AV_PIX_FMT_NONE) {
-        av_log(avctx, AV_LOG_ERROR,
-               "The following bit-depths are currently supported: 8 & 10 bits, "
-               "chroma_format_idc is %d, depth is %d\n",
-               sps->chroma_format_idc, sps->bit_depth);
-        return AVERROR_INVALIDDATA;
-    }
-
-    desc = av_pix_fmt_desc_get(sps->pix_fmt);
-    if (!desc)
-        return AVERROR(EINVAL);
-
     sps->hshift[0] = sps->vshift[0] = 0;
-    sps->hshift[2] = sps->hshift[1] = desc->log2_chroma_w;
-    sps->vshift[2] = sps->vshift[1] = desc->log2_chroma_h;
+    sps->hshift[2] = sps->hshift[1] = cfmt > 2 ? 0 : 1; // 1 unless 4:4:4
+    sps->vshift[2] = sps->vshift[1] = cfmt > 1 ? 0 : 1; // 1 unless 4:4:4 or 4:2:2
 
-    sps->pixel_shift = sps->bit_depth > 8;
+    sps->pixel_shift = sps->bit_depth > 8 ? 1 : 0;
 
     return 0;
 }
@@ -911,12 +901,6 @@ int ff_hevc_rpi_parse_sps(HEVCRpiSPS *sps, GetBitContext *gb, unsigned int *sps_
                                    sps->height, 0, avctx)) < 0)
         return ret;
 
-    if (sps->width > HEVC_RPI_MAX_WIDTH || sps->height > HEVC_RPI_MAX_HEIGHT) {
-        av_log(avctx, AV_LOG_ERROR, "Width or height too big: %dx%d, max for hevc_rpi: %dx%d\n",
-               sps->width, sps->height, HEVC_RPI_MAX_WIDTH, HEVC_RPI_MAX_HEIGHT);
-        return AVERROR_INVALIDDATA;
-    }
-
     if (get_bits1(gb)) { // pic_conformance_flag
         int vert_mult  = 1 + (sps->chroma_format_idc < 2);
         int horiz_mult = 1 + (sps->chroma_format_idc < 3);
@@ -953,7 +937,7 @@ int ff_hevc_rpi_parse_sps(HEVCRpiSPS *sps, GetBitContext *gb, unsigned int *sps_
     }
     sps->bit_depth_chroma = bit_depth_chroma;
 
-    ret = map_pixel_format(avctx, sps);
+    ret = map_pixel_format(sps);
     if (ret < 0)
         return ret;
 

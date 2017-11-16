@@ -1202,11 +1202,18 @@ static enum AVPixelFormat get_format(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     *fmt++ = sps->pix_fmt;
     *fmt = AV_PIX_FMT_NONE;
 
-    return ff_thread_get_format(s->avctx, pix_fmts);
+    return pix_fmts[0] == AV_PIX_FMT_NONE ? AV_PIX_FMT_NONE: ff_thread_get_format(s->avctx, pix_fmts);
 }
 
-static int set_sps(HEVCRpiContext *s, const HEVCRpiSPS *sps,
-                   enum AVPixelFormat pix_fmt)
+static int is_sps_supported(const HEVCRpiSPS * const sps)
+{
+    return av_rpi_is_sand_format(sps->pix_fmt) &&
+           sps->width <= HEVC_RPI_MAX_WIDTH &&
+           sps->height <= HEVC_RPI_MAX_HEIGHT;
+}
+
+static int set_sps(HEVCRpiContext * const s, const HEVCRpiSPS * const sps,
+                   const enum AVPixelFormat pix_fmt)
 {
     int ret;
 
@@ -1214,8 +1221,11 @@ static int set_sps(HEVCRpiContext *s, const HEVCRpiSPS *sps,
     s->ps.sps = NULL;
     s->ps.vps = NULL;
 
-    if (!sps)
+    if (sps == NULL)
         return 0;
+
+    if (!is_sps_supported(sps))
+        return AVERROR_DECODER_NOT_FOUND;
 
     ret = pic_arrays_init(s, sps);
     if (ret < 0)
@@ -1310,7 +1320,6 @@ static int hls_slice_header(HEVCRpiContext *s)
     if (s->ps.sps != (HEVCRpiSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data) {
         const HEVCRpiSPS *sps = (HEVCRpiSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data;
         const HEVCRpiSPS *last_sps = s->ps.sps;
-        enum AVPixelFormat pix_fmt;
 
         if (last_sps && IS_IRAP(s) && s->nal_unit_type != HEVC_NAL_CRA_NUT) {
             if (sps->width != last_sps->width || sps->height != last_sps->height ||
@@ -1320,11 +1329,7 @@ static int hls_slice_header(HEVCRpiContext *s)
         }
         ff_hevc_rpi_clear_refs(s);
 
-        pix_fmt = get_format(s, sps);
-        if (pix_fmt < 0)
-            return pix_fmt;
-
-        ret = set_sps(s, sps, pix_fmt);
+        ret = set_sps(s, sps, get_format(s, sps));
         if (ret < 0)
             return ret;
 
@@ -5190,7 +5195,20 @@ static int verify_md5(HEVCRpiContext *s, AVFrame *frame)
     return 0;
 }
 
-static int hevc_decode_extradata(HEVCRpiContext *s, uint8_t *buf, int length, int first)
+static int all_sps_supported(const HEVCRpiContext * const s)
+{
+    for (unsigned int i = 0; i < FF_ARRAY_ELEMS(s->ps.sps_list); i++) {
+        if (s->ps.sps_list[i] != NULL)
+        {
+            const HEVCRpiSPS * const sps = (const HEVCRpiSPS*)s->ps.sps_list[i]->data;
+            if (!is_sps_supported(sps))
+                return 0;
+        }
+    }
+    return 1;
+}
+
+static int hevc_rpi_decode_extradata(HEVCRpiContext *s, uint8_t *buf, int length, int first)
 {
     int ret, i;
 
@@ -5212,7 +5230,7 @@ static int hevc_decode_extradata(HEVCRpiContext *s, uint8_t *buf, int length, in
     return 0;
 }
 
-static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
+static int hevc_rpi_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
                              AVPacket *avpkt)
 {
     int ret;
@@ -5232,7 +5250,7 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
     new_extradata = av_packet_get_side_data(avpkt, AV_PKT_DATA_NEW_EXTRADATA,
                                             &new_extradata_size);
     if (new_extradata && new_extradata_size > 0) {
-        ret = hevc_decode_extradata(s, new_extradata, new_extradata_size, 0);
+        ret = hevc_rpi_decode_extradata(s, new_extradata, new_extradata_size, 0);
         if (ret < 0)
             return ret;
     }
@@ -5242,7 +5260,7 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
     if (ret < 0)
         return ret;
 
-    if (avctx->hwaccel) {
+    if (avctx->hwaccel) {  // **** If we have hwaccel we should give up....
         if (s->ref && (ret = avctx->hwaccel->end_frame(avctx)) < 0) {
             av_log(avctx, AV_LOG_ERROR,
                    "hardware accelerator failed to decode picture\n");
@@ -5559,7 +5577,6 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     avctx->internal->allocate_progress = 1;
 
-#if CONFIG_HEVC_RPI_DECODER
     {
         HEVCRpiJobGlobal * const jbg = jbg_new(FFMAX(avctx->thread_count * 3, 5));
         if (jbg == NULL)
@@ -5574,15 +5591,12 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
             return -1;
         }
     }
-#endif
 
     ret = hevc_init_context(avctx);
     if (ret < 0)
         return ret;
 
-#if CONFIG_HEVC_RPI_DECODER
     hevc_init_worker(s);
-#endif
 
     s->enable_parallel_tiles = 0;
     s->sei.picture_timing.picture_struct = 0;
@@ -5596,8 +5610,13 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
         s->threads_number = 1;
 
     if (avctx->extradata_size > 0 && avctx->extradata) {
-        ret = hevc_decode_extradata(s, avctx->extradata, avctx->extradata_size, 1);
-        if (ret < 0) {
+        ret = hevc_rpi_decode_extradata(s, avctx->extradata, avctx->extradata_size, 1);
+
+        if (ret == 0 && !all_sps_supported(s))
+            ret = AVERROR_DECODER_NOT_FOUND;
+
+        if (ret < 0)
+        {
             hevc_decode_free(avctx);
             return ret;
         }
@@ -5668,7 +5687,7 @@ AVCodec ff_hevc_rpi_decoder = {
     .priv_class            = &hevc_rpi_decoder_class,
     .init                  = hevc_decode_init,
     .close                 = hevc_decode_free,
-    .decode                = hevc_decode_frame,
+    .decode                = hevc_rpi_decode_frame,
     .flush                 = hevc_decode_flush,
     .update_thread_context = hevc_update_thread_context,
     .init_thread_copy      = hevc_init_thread_copy,
