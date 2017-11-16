@@ -343,143 +343,136 @@ static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigne
     );
 }
 
-
-#if 0
-
-// Works but slower than C
-#define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode_by22_arm(c, r)
-static int coeff_abs_level_remaining_decode_by22_arm(CABACContext * const c, const unsigned int c_rice_param)
+#define coeff_abs_level_remaining_decode_bypass coeff_abs_level_remaining_decode_bypass_arm
+static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * const c, unsigned int rice_param)
 {
-    uint32_t n, val, tmp, level;
-
-//    PROFILE_START();
-
+    uint32_t last_coeff_abs_level_remaining;
+    uint32_t prefix, n1, range, n2, ptr, tmp1, tmp2;
     __asm__ (
-            // Peek
-            "bic    %[val],  %[low],   #1  \n\t"
-            "cmp    %[inv], #0          \n\t"
-            "umullne  %[tmp], %[val], %[inv], %[val] \n\t"
-            "lsl    %[val], %[val], #1  \n\t"
-
-            // Count bits (n = prefix)
-            "mvn    %[n], %[val] \n\t"
-            "clz    %[n], %[n]   \n\t"
-
-            "lsl    %[level], %[val], %[n] \n\t"
-            "subs   %[tmp], %[n], #3 \n\t"
-            "blo    2f \n\t"
-
-            // prefix >= 3
-            // < tmp = prefix - 3
-            // > tmp = prefix + rice - 3
-            "add    %[tmp], %[tmp], %[rice] \n\t"
-            // > n = prefix * 2 + rice - 3
-            "add    %[n], %[tmp], %[n] \n\t"
-            "cmp    %[n], #21 \n\t"
-            "bhi    3f \n\t"
-
-            "orr    %[level], %[level], #0x80000000 \n\t"
-            "rsb    %[tmp], %[tmp], #31 \n\t"
-            "lsr    %[level], %[level], %[tmp] \n\t"
-
-            "mov    %[tmp], #2 \n\t"
-            "add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
-            "b      1f \n\t"
-
-            // > 22 bits used in total - need reload
-            "3:  \n\t"
-
-            // Stash prefix + rice - 3 in level (only spare reg)
-            "mov    %[level], %[tmp] \n\t"
-            // Restore n to flush value (prefix)
-            "sub    %[n], %[n], %[tmp] \n\t"
-
-            // Flush + reload
-
-//          "rsb    %[tmp], %[n], #32        \n\t"
-//          "lsr    %[tmp], %[val], %[tmp]   \n\t"
-//          "mul    %[tmp], %[range], %[tmp] \n\t"
-
-            // As it happens we know that all the bits we are flushing are 1
-            // so we can cheat slightly
-            "rsb    %[tmp], %[range], %[range], lsl %[n] \n\t"
-            "lsl    %[tmp], %[tmp], #23      \n\t"
-            "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-            "add    %[bits], %[bits], %[n]   \n\t"
-            "ldr    %[n], [%[ptr], %[bits], lsr #3]  \n\t"
-            "rev    %[n], %[n]               \n\t"
-            "and    %[tmp], %[bits], #7         \n\t"
-            "lsl    %[n], %[n], %[tmp]          \n\t"
-
-            "orr    %[low], %[low], %[n], lsr #9      \n\t"
-
-            // (reload)
-
-            "bic    %[val],  %[low],   #1  \n\t"
-            "cmp    %[inv], #0          \n\t"
-            "umullne  %[tmp], %[val], %[inv], %[val] \n\t"
-            "lsl    %[val], %[val], #1  \n\t"
-
-            // Build value
-
-            "mov    %[n], %[level] \n\t"
-
-            "orr     %[tmp], %[val], #0x80000000 \n\t"
-            "rsb     %[level], %[level], #31 \n\t"
-            "lsr     %[level], %[tmp], %[level] \n\t"
-
-            "mov    %[tmp], #2 \n\t"
-            "add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
-            "b      1f \n\t"
-
-            // prefix < 3
-            "2:  \n\t"
-            "rsb    %[tmp], %[rice], #31 \n\t"
-            "lsr    %[level], %[level], %[tmp] \n\t"
-            "orr    %[level], %[level], %[n], lsl %[rice] \n\t"
-            "add    %[n], %[n], %[rice] \n\t"
-
-            "1:  \n\t"
-            // Flush
-            "add    %[n], %[n], #1 \n\t"
-
-            "rsb    %[tmp], %[n], #32        \n\t"
-            "lsr    %[tmp], %[val], %[tmp]   \n\t"
-
-            "add    %[bits], %[bits], %[n]   \n\t"
-            "ldr    %[val], [%[ptr], %[bits], lsr #3]  \n\t"
-
-            "mul    %[tmp], %[range], %[tmp] \n\t"
-            "lsl    %[tmp], %[tmp], #23      \n\t"
-            "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-            "rev    %[val], %[val]               \n\t"
-            "and    %[tmp], %[bits], #7         \n\t"
-            "lsl    %[val], %[val], %[tmp]          \n\t"
-
-            "orr    %[low], %[low], %[val], lsr #9      \n\t"
+        "ldr     %[remain], [%[c], %[low_off]]                \n\t"
+        "ldr     %[prefix], [%[c], %[range_off]]              \n\t"
+        "bic     %[remain], %[remain], #1                     \n\t"
+        "ldrh    %[tmp2], [%[c], %[by22_bits_off]]            \n\t"
+        "ldr     %[ptr], [%[c], %[ptr_off]]                   \n\t"
+        "cmp     %[prefix], #0                                \n\t"
+        "umullne %[prefix], %[remain], %[prefix], %[remain]   \n\t"
+        "ldrh    %[range], [%[c], %[by22_range_off]]          \n\t"
+        "lsl     %[remain], %[remain], #1                     \n\t"
+        "mvn     %[prefix], %[remain]                         \n\t"
+        "clz     %[prefix], %[prefix]                         \n\t"
+        "rsbs    %[n1], %[prefix], #2                         \n\t"
+        "bcc     1f                                           \n\t"
+        "adc     %[n1], %[rice], %[prefix]                    \n\t"
+        "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
+        "rsb     %[n2], %[n1], #32                            \n\t"
+        "and     %[tmp1], %[tmp2], #7                         \n\t"
+        "strh    %[tmp2], [%[c], %[by22_bits_off]]            \n\t"
+        "lsr     %[tmp2], %[tmp2], #3                         \n\t"
+        "lsr     %[n2], %[remain], %[n2]                      \n\t"
+        "mul     %[n2], %[range], %[n2]                       \n\t"
+        "ldr     %[range], [%[c], %[low_off]]                 \n\t"
+        "ldr     %[ptr], [%[ptr], %[tmp2]]                    \n\t"
+        "rsb     %[tmp2], %[rice], #31                        \n\t"
+        "lsl     %[remain], %[remain], %[prefix]              \n\t"
+        "lsl     %[n2], %[n2], #23                            \n\t"
+        "rsb     %[range], %[n2], %[range], lsl %[n1]         \n\t"
+        "rev     %[ptr], %[ptr]                               \n\t"
+        "lsl     %[n2], %[prefix], %[rice]                    \n\t"
+        "add     %[remain], %[n2], %[remain], lsr %[tmp2]     \n\t"
+        "b       3f                                           \n\t"
+        "1:                                                   \n\t"
+        "add     %[n2], %[rice], %[prefix], lsl #1            \n\t"
+        "cmp     %[n2], %[peek_bits_plus_2]                   \n\t"
+        "bhi     2f                                           \n\t"
+        "sub     %[n1], %[n2], #2                             \n\t"
+        "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
+        "rsb     %[n2], %[n1], #32                            \n\t"
+        "strh    %[tmp2], [%[c], %[by22_bits_off]]            \n\t"
+        "lsr     %[tmp1], %[tmp2], #3                         \n\t"
+        "lsr     %[n2], %[remain], %[n2]                      \n\t"
+        "mul     %[n2], %[range], %[n2]                       \n\t"
+        "rsb     %[range], %[rice], #34                       \n\t"
+        "ldr     %[ptr], [%[ptr], %[tmp1]]                    \n\t"
+        "and     %[tmp1], %[tmp2], #7                         \n\t"
+        "lsl     %[remain], %[remain], %[prefix]              \n\t"
+        "ldr     %[tmp2], [%[c], %[low_off]]                  \n\t"
+        "rsb     %[prefix], %[prefix], %[range]               \n\t"
+        "orr     %[remain], %[remain], #0x80000000            \n\t"
+        "rev     %[ptr], %[ptr]                               \n\t"
+        "lsl     %[n2], %[n2], #23                            \n\t"
+        "mov     %[range], #2                                 \n\t"
+        "rsb     %[tmp2], %[n2], %[tmp2], lsl %[n1]           \n\t"
+        "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
+        "lsl     %[rice], %[range], %[rice]                   \n\t"
+        "orr     %[range], %[tmp2], %[ptr], lsr #9            \n\t"
+        "add     %[remain], %[rice], %[remain], lsr %[prefix] \n\t"
+        "b       4f                                           \n\t"
+        "2:                                                   \n\t"
+        "add     %[n1], %[tmp2], %[prefix]                    \n\t"
+        "ldr     %[tmp2], [%[ptr], %[n1], lsr #3]             \n\t"
+        "rsb     %[tmp1], %[prefix], #32                      \n\t"
+        "push    {%[rice]}                                    \n\t"
+        "and     %[rice], %[n1], #7                           \n\t"
+        "lsr     %[tmp1], %[remain], %[tmp1]                  \n\t"
+        "ldr     %[ptr], [%[c], %[low_off]]                   \n\t"
+        "mul     %[remain], %[range], %[tmp1]                 \n\t"
+        "rev     %[tmp2], %[tmp2]                             \n\t"
+        "rsb     %[n2], %[prefix], %[n2]                      \n\t"
+        "ldr     %[tmp1], [%[c], %[range_off]]                \n\t"
+        "lsl     %[rice], %[tmp2], %[rice]                    \n\t"
+        "sub     %[tmp2], %[n2], #2                           \n\t"
+        "lsl     %[remain], %[remain], #23                    \n\t"
+        "rsb     %[remain], %[remain], %[ptr], lsl %[prefix]  \n\t"
+        "orr     %[remain], %[remain], %[rice], lsr #9        \n\t"
+        "add     %[prefix], %[n1], %[tmp2]                    \n\t"
+        "bic     %[n1], %[remain], #1                         \n\t"
+        "ldr     %[ptr], [%[c], %[ptr_off]]                   \n\t"
+        "cmp     %[tmp1], #0                                  \n\t"
+        "rsb     %[rice], %[tmp2], #32                        \n\t"
+        "umullne %[tmp1], %[n1], %[tmp1], %[n1]               \n\t"
+        "and     %[tmp1], %[prefix], #7                       \n\t"
+        "ldr     %[ptr], [%[ptr], %[prefix], lsr #3]          \n\t"
+        "lsl     %[n1], %[n1], #1                             \n\t"
+        "lsr     %[rice], %[n1], %[rice]                      \n\t"
+        "rsb     %[n2], %[n2], #34                            \n\t"
+        "mul     %[range], %[range], %[rice]                  \n\t"
+        "pop     {%[rice]}                                    \n\t"
+        "rev     %[ptr], %[ptr]                               \n\t"
+        "orr     %[n1], %[n1], #0x80000000                    \n\t"
+        "strh    %[prefix], [%[c], %[by22_bits_off]]          \n\t"
+        "mov     %[prefix], #2                                \n\t"
+        "lsl     %[range], %[range], #23                      \n\t"
+        "rsb     %[range], %[range], %[remain], lsl %[tmp2]   \n\t"
+        "lsl     %[remain], %[prefix], %[rice]                \n\t"
+        "add     %[remain], %[remain], %[n1], lsr %[n2]       \n\t"
+        "3:                                                   \n\t"
+        "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
+        "orr     %[range], %[range], %[ptr], lsr #9           \n\t"
+        "4:                                                   \n\t"
+        "str     %[range], [%[c], %[low_off]]                 \n\t"
         :  // Outputs
-         [level]"=&r"(level),
-             [n]"=&r"(n),
-           [val]"=&r"(val),
-           [tmp]"=&r"(tmp),
-          [bits]"+r"(c->by22.bits),
-           [low]"+r"(c->low)
+            [remain]"=&r"(last_coeff_abs_level_remaining),
+              [rice]"+r"(rice_param),
+            [prefix]"=&r"(prefix),
+                [n1]"=&r"(n1),
+             [range]"=&r"(range),
+                [n2]"=&r"(n2),
+               [ptr]"=&r"(ptr),
+              [tmp1]"=&r"(tmp1),
+              [tmp2]"=&r"(tmp2)
         :  // Inputs
-            [rice]"r"(c_rice_param),
-             [inv]"r"(c->range),
-           [range]"r"(c->by22.range),
-             [ptr]"r"(c->bytestream)
+                           [c]"r"(c),
+            [peek_bits_plus_2]"I"(CABAC_BY22_PEEK_BITS + 2),
+                     [low_off]"J"(offsetof(CABACContext, low)),
+                   [range_off]"J"(offsetof(CABACContext, range)),
+               [by22_bits_off]"J"(offsetof(CABACContext, by22.bits)),
+              [by22_range_off]"J"(offsetof(CABACContext, by22.range)),
+                     [ptr_off]"J"(offsetof(CABACContext, bytestream))
         :  // Clobbers
-                "cc"
+           "cc", "memory"
     );
-
-//    PROFILE_ACC(residual_abs);
-
-    return level;
+    return last_coeff_abs_level_remaining;
 }
-#endif
 
 #endif /* HAVE_ARMV6T2_INLINE */
 
