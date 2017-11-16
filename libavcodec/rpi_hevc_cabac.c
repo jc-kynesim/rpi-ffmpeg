@@ -49,6 +49,28 @@
 // code size.
 #define USE_N_END_1 1
 
+// BY22 notes that bypass is simply a divide into the bitstream and so we
+// can peek out large quantities of bits at once and treat the result as if
+// it was VLC.  In many cases this will lead to O(1) processing rather than
+// O(n) though the setup and teardown is sufficiently expensive that it is
+// only worth using if we expect to be dealing with more than a few bits
+// The definition of "a few bits" will vary from platform to platform but
+// tests on ARM show that it probably isn't worth it for a single coded
+// residual, but is for >1 - it also seems likely that if there are
+// more residuals then they are likely to be bigger and this will make the
+// O(1) nature of the code more worthwhile.
+
+#if !USE_BY22_DIV
+// * 1/x @ 32 bits gets us 22 bits of accuracy
+#define CABAC_BY22_PEEK_BITS  22
+#else
+// A real 32-bit divide gets us another bit
+// If we have a 64 bit int & a unit time divider then we should get a lot
+// of bits (55)  but that is untested and it is unclear if it would give
+// us a large advantage
+#define CABAC_BY22_PEEK_BITS  23
+#endif
+
 #if ARCH_ARM
 #include "arm/rpi_hevc_cabac.h"
 #endif
@@ -604,29 +626,6 @@ static inline unsigned int hevc_clz32(unsigned int x)
 
 #define bypass_start(cc) get_cabac_by22_start(cc)
 #define bypass_finish(cc) get_cabac_by22_finish(cc)
-
-// BY22 notes that bypass is simply a divide into the bitstream and so we
-// can peek out large quantities of bits at once and treat the result as if
-// it was VLC.  In many cases this will lead to O(1) processing rather than
-// O(n) though the setup and teardown is sufficiently expensive that it is
-// only worth using if we expect to be dealing with more than a few bits
-// The definition of "a few bits" will vary from platform to platform but
-// tests on ARM show that it probably isn't worth it for a single coded
-// residual, but is for >1 - it also seems likely that if there are
-// more residuals then they are likely to be bigger and this will make the
-// O(1) nature of the code more worthwhile.
-
-
-#if !USE_BY22_DIV
-// * 1/x @ 32 bits gets us 22 bits of accuracy
-#define CABAC_BY22_PEEK_BITS  22
-#else
-// A real 32-bit divide gets us another bit
-// If we have a 64 bit int & a unit time divider then we should get a lot
-// of bits (55)  but that is untested and it is unclear if it would give
-// us a large advantage
-#define CABAC_BY22_PEEK_BITS  23
-#endif
 
 // Bypass block start
 // Must be called before _by22_peek is used as it sets the CABAC environment
