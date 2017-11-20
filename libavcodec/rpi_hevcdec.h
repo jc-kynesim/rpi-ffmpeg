@@ -99,8 +99,7 @@
 #define RPI_TSTATS              0
 
 // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-// (currently slower than deblocking on the ARM)
-// #define RPI_DEBLOCK_VPU
+#define RPI_DEBLOCK_VPU
 
 #define RPI_VPU_DEBLOCK_CACHED 0
 
@@ -725,11 +724,14 @@ typedef struct HEVCRpiContext {
     {
         GPU_MEM_PTR_T deblock_vpu_gmem;
 
-        uint8_t (*y_setup_arm)[2][2][2][4];
-        uint8_t (*y_setup_vc)[2][2][2][4];
+        uint8_t (*uv_setup_arm)[2][2][4];  // [V=0][U/V][Edge=0..3] or [H=1][top/bottom][u/v][edge=0..1]
+        uint8_t (*uv_setup_vc)[2][2][4];
 
-        uint8_t (*uv_setup_arm)[2][2][2][4];
-        uint8_t (*uv_setup_vc)[2][2][2][4];
+        uint8_t *uv_sao_line_arm;
+        uint8_t *uv_sao_line_vc;
+
+        uint32_t (*uv_sao_setup_arm)[2]; // 2 entries for U/V values
+        uint32_t (*uv_sao_setup_vc)[2];
 
         int (*vpu_cmds_arm)[6]; // r0-r5 for each command
         int vpu_cmds_vc;
