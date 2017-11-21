@@ -1158,10 +1158,10 @@ VASMVIDCORE := ../local/bin/vasmvidcore_std
 
 ifneq ("$(wildcard $(QASM_PY))","")
 $(SUBDIR)rpi_hevc_shader.c: $(SUBDIR)rpi_hevc_shader.qasm
-	$(QASM_PY) -mc_c:rpi_hevc_shader,rpi_hevc_shader,rpi_hevc_shader $< > $@
+	$(QASM_PY) -mc_c:rpi_hevc_shader,rpi_hevc_shader,ff_hevc_rpi_shader $< > $@
 
 $(SUBDIR)rpi_hevc_shader.h: $(SUBDIR)rpi_hevc_shader.qasm
-	$(QASM_PY) -mc_h:rpi_hevc_shader,rpi_shader,rpi_hevc_shader $< > $@
+	$(QASM_PY) -mc_h:rpi_hevc_shader,rpi_hevc_shader,ff_hevc_rpi_shader $< > $@
 endif
 
 ifneq ("$(wildcard $(VASMVIDCORE))","")

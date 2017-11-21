@@ -1566,5 +1566,5 @@ unsigned int ff_hevc_rpi_shader[] = {
 // ::mc_end
 };
 #ifdef __HIGHC__
-#pragma Align_to(8, rpi_shader)
+#pragma Align_to(8, ff_hevc_rpi_shader)
 #endif
