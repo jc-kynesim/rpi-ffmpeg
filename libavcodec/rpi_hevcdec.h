@@ -117,6 +117,12 @@
 #define HEVC_RPI_MAX_HEIGHT     1088
 
 
+// Min CTB size is 16
+#if ((HEVC_RPI_MAX_WIDTH + 15) / 16) * ((HEVC_RPI_MAX_HEIGHT + 15) / 16) >= (1 << 16)
+#error Check CTB translation array el sizes (currently uint16_t)
+#endif
+
+
 /**
  * Value of the luma sample at position (x, y) in the 2D array tab.
  */
@@ -301,14 +307,13 @@ typedef struct CodingUnit {
     uint8_t cu_transquant_bypass_flag;
 } CodingUnit;
 
-typedef struct NeighbourAvailable {
-    int cand_bottom_left;
-    int cand_left;
-    int cand_up;
-    int cand_up_left;
-    int cand_up_right;
-    int cand_up_right_sap;
-} NeighbourAvailable;
+typedef struct RpiNeighbourAvailable {
+    char cand_bottom_left;
+    char cand_left;
+    char cand_up;
+    char cand_up_left;
+    char cand_up_right;
+} RpiNeighbourAvailable;
 
 typedef struct PredictionUnit {
     int mpm_idx;
@@ -380,12 +385,15 @@ typedef struct HEVCFrame {
 
 typedef struct HEVCRpiLocalContextIntra {
     TransformUnit tu;
-    NeighbourAvailable na;
+    RpiNeighbourAvailable na;
 } HEVCRpiLocalContextIntra;
 
 typedef struct HEVCRpiLocalContext {
     TransformUnit tu;  // Moved to start to match HEVCRpiLocalContextIntra (yuk!)
-    NeighbourAvailable na;
+    RpiNeighbourAvailable na;
+
+    GetBitContext gb;
+    CABACContext cc;
 
     // Vars that allow us to locate everything from just an lc
     struct HEVCRpiContext * context;  // ??? make const ???
@@ -411,37 +419,20 @@ typedef struct HEVCRpiLocalContext {
 
     struct HEVCRpiJob * jb0;
     char unit_done;  // Set once we have dealt with this slice
-//    char max_done;
     char bt_is_tile;
     char last_progress_good;
-
-    char wpp_init;   // WPP/Tile bitstream init has happened
-
-    uint8_t cabac_state[HEVC_CONTEXTS];
-
-    uint8_t stat_coeff[4];
-
-//    uint8_t first_qp_group;
-
-    GetBitContext gb;
-    CABACContext cc;
+    char cabac_init_req;
 
     int8_t qp_y;
     int8_t curr_qp_y;
-
-    int qPy_pred;
+    int8_t qPy_pred;
 
     uint8_t ctb_left_flag;
     uint8_t ctb_up_flag;
     uint8_t ctb_up_right_flag;
     uint8_t ctb_up_left_flag;
-    int     end_of_tiles_x;
-    int     end_of_tiles_y;
-    /* +7 is for subpixel interpolation, *2 for high bit depths */
-    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
-    /* The extended size between the new edge emu buffer is abused by SAO */
-    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer2)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
-    DECLARE_ALIGNED(32, int16_t, tmp [MAX_PB_SIZE * MAX_PB_SIZE]);
+    int     end_of_ctb_x;
+    int     end_of_ctb_y;
 
     int ct_depth;
     CodingUnit cu;
@@ -453,7 +444,17 @@ typedef struct HEVCRpiLocalContext {
 #define BOUNDARY_UPPER_TILE     (1 << 3)
     /* properties of the boundary of the current CTB for the purposes
      * of the deblocking filter */
-    int boundary_flags;
+    unsigned int boundary_flags;
+
+    uint8_t stat_coeff[4];
+    uint8_t cabac_state[HEVC_CONTEXTS];
+
+    /* +7 is for subpixel interpolation, *2 for high bit depths */
+    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
+    /* The extended size between the new edge emu buffer is abused by SAO */
+    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer2)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
+    DECLARE_ALIGNED(32, int16_t, tmp [MAX_PB_SIZE * MAX_PB_SIZE]);
+
 } HEVCRpiLocalContext;
 
 
@@ -671,6 +672,11 @@ typedef struct HEVCRpiStats {
 } HEVCRpiStats;
 #endif
 
+typedef struct HEVCRpiCabacState
+{
+    uint8_t rice[4];
+    uint8_t state[HEVC_CONTEXTS];
+} HEVCRpiCabacState;
 
 typedef struct HEVCRpiContext {
     const AVClass *c;  // needed by private avoptions
@@ -741,7 +747,7 @@ typedef struct HEVCRpiContext {
     unsigned int dvq_n;
 #endif
 
-    uint8_t *cabac_state;
+    HEVCRpiCabacState *cabac_save;
 
     /** 1 if the independent slice segment header was successfully parsed */
     uint8_t slice_initialized;
@@ -759,7 +765,7 @@ typedef struct HEVCRpiContext {
     ///< candidate references for the current frame
     RefPicList rps[5];
 
-    SliceHeader sh;
+    RpiSliceHeader sh;
     SAOParams *sao;
     DBParams *deblock;
     enum HEVCNALUnitType nal_unit_type;
@@ -867,8 +873,9 @@ int ff_hevc_rpi_frame_rps(HEVCRpiContext *s);
  */
 int ff_hevc_rpi_slice_rpl(HEVCRpiContext *s);
 
-void ff_hevc_rpi_save_states(HEVCRpiContext *s, const HEVCRpiLocalContext * const lc, int ctb_addr_ts);
-int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, int ctb_addr_ts);
+void ff_hevc_rpi_save_states(HEVCRpiContext *s, const HEVCRpiLocalContext * const lc);
+int ff_hevc_rpi_cabac_init_decoder(HEVCRpiLocalContext * const lc);
+int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, const unsigned int ctb_flags);
 int ff_hevc_rpi_sao_merge_flag_decode(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_sao_type_idx_decode(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_sao_band_position_decode(HEVCRpiLocalContext * const lc);

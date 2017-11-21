@@ -1259,7 +1259,7 @@ fail:
 static int hls_slice_header(HEVCRpiContext *s)
 {
     GetBitContext *gb = &s->HEVClc->gb;
-    SliceHeader *sh   = &s->sh;
+    RpiSliceHeader *sh   = &s->sh;
     int i, ret;
 
     // Coded parameters
@@ -1649,13 +1649,6 @@ static int hls_slice_header(HEVCRpiContext *s)
                "[%d, 51].\n",
                sh->slice_qp,
                -s->ps.sps->qp_bd_offset);
-        return AVERROR_INVALIDDATA;
-    }
-
-    sh->slice_ctb_addr_rs = sh->slice_segment_addr;
-
-    if (!s->sh.slice_ctb_addr_rs && s->sh.dependent_slice_segment_flag) {
-        av_log(s->avctx, AV_LOG_ERROR, "Impossible slice segment.\n");
         return AVERROR_INVALIDDATA;
     }
 
@@ -3337,44 +3330,38 @@ static int hls_coding_quadtree(const HEVCRpiContext * const s, HEVCRpiLocalConte
 static void hls_decode_neighbour(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                                  const int x_ctb, const int y_ctb, const int ctb_addr_ts)
 {
-    const int ctb_size          = 1 << s->ps.sps->log2_ctb_size;
-    const int ctb_addr_rs       = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
-    const int ctb_addr_in_slice = ctb_addr_rs - s->sh.slice_addr;  // slice_addr = RS addr of start of slice
-    const int idxX = s->ps.pps->col_idxX[x_ctb >> s->ps.sps->log2_ctb_size];
+    const unsigned int ctb_size          = 1 << s->ps.sps->log2_ctb_size;
+    const unsigned int ctb_addr_rs       = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
+    const unsigned int ctb_addr_rs_in_slice = ctb_addr_rs - s->sh.slice_addr;  // slice_addr = RS addr of start of slice
+    const unsigned int ctb_flags = s->ps.pps->ctb_ts_flags[ctb_addr_ts];
+    const unsigned int line_w = s->ps.sps->ctb_width;
 
     s->tab_slice_address[ctb_addr_rs] = s->sh.slice_addr;
 
-    lc->end_of_tiles_x = idxX + 1 >= s->ps.pps->num_tile_columns ? s->ps.sps->width :
-        (s->ps.pps->col_bd[idxX + 1] << s->ps.sps->log2_ctb_size);
-
-    if (ctb_addr_ts == 0 || s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[ctb_addr_ts - 1] ||
-        (s->ps.pps->entropy_coding_sync_enabled_flag && (x_ctb >> s->ps.sps->log2_ctb_size) == s->ps.pps->col_bd[idxX]))
-    {
-//        lc->first_qp_group = 1;
-        lc->qPy_pred = s->sh.slice_qp;
-    }
-
-    lc->end_of_tiles_y = FFMIN(y_ctb + ctb_size, s->ps.sps->height);
+    lc->end_of_ctb_x = FFMIN(x_ctb + ctb_size, s->ps.sps->width);
+    lc->end_of_ctb_y = FFMIN(y_ctb + ctb_size, s->ps.sps->height);
 
     lc->boundary_flags = 0;
 
-    if (x_ctb <= 0 || s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs - 1]])
+    if ((ctb_flags & CTB_TS_FLAGS_SOTL) != 0)
         lc->boundary_flags |= BOUNDARY_LEFT_TILE;
     if (x_ctb > 0 && s->tab_slice_address[ctb_addr_rs] != s->tab_slice_address[ctb_addr_rs - 1])
         lc->boundary_flags |= BOUNDARY_LEFT_SLICE;
-    if (y_ctb <= 0 || s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs - s->ps.sps->ctb_width]])
+    if ((ctb_flags & CTB_TS_FLAGS_TOT) != 0)
         lc->boundary_flags |= BOUNDARY_UPPER_TILE;
-    if (y_ctb > 0 && s->tab_slice_address[ctb_addr_rs] != s->tab_slice_address[ctb_addr_rs - s->ps.sps->ctb_width])
+    if (y_ctb > 0 && s->tab_slice_address[ctb_addr_rs] != s->tab_slice_address[ctb_addr_rs - line_w])
         lc->boundary_flags |= BOUNDARY_UPPER_SLICE;
 
     lc->ctb_left_flag = (lc->boundary_flags & (BOUNDARY_LEFT_SLICE | BOUNDARY_LEFT_TILE)) == 0;
     lc->ctb_up_flag   = (lc->boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0;
-    lc->ctb_up_left_flag = (lc->boundary_flags & (BOUNDARY_LEFT_TILE | BOUNDARY_UPPER_TILE)) == 0 &&
-        (ctb_addr_in_slice-1 >= s->ps.sps->ctb_width);
 
-    lc->ctb_up_right_flag = ((y_ctb > 0) && (x_ctb + ctb_size) < lc->end_of_tiles_x &&
-        (ctb_addr_in_slice+1 >= s->ps.sps->ctb_width) &&
-        (s->ps.pps->tile_id[ctb_addr_ts] == s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs+1 - s->ps.sps->ctb_width]]));
+    // Use line width rather than tile width for addr_in_slice test as
+    // addr_in_slice is in raster units
+    lc->ctb_up_left_flag = (lc->boundary_flags & (BOUNDARY_LEFT_TILE | BOUNDARY_UPPER_TILE)) == 0 &&
+        (ctb_addr_rs_in_slice >= line_w + 1);
+
+    lc->ctb_up_right_flag = (ctb_flags & (CTB_TS_FLAGS_EOTL | CTB_TS_FLAGS_TOT)) == 0 &&
+        (ctb_addr_rs_in_slice + 1 >= line_w);
 }
 
 
@@ -3399,11 +3386,10 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
 
     // Flush (SAO)
     if (y > y0) {
-        const int tile_end = y_end ||
-            s->ps.pps->tile_id[jb->ctu_ts_last] != s->ps.pps->tile_id[jb->ctu_ts_last + 1];
         const unsigned int xl = x0 > ctb_size ? x0 - ctb_size : 0;
         const unsigned int yt = y0 > ctb_size ? y0 - ctb_size : 0;
-        const unsigned int yb = tile_end ? bound_b : y - ctb_size;
+        const unsigned int yb = (s->ps.pps->ctb_ts_flags[jb->ctu_ts_last] & CTB_TS_FLAGS_EOT) != 0 ?
+            bound_b : y - ctb_size;
 
         rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
         rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
@@ -3981,15 +3967,17 @@ static av_cold void hevc_exit_worker(HEVCRpiContext *s)
 
 static int slice_start(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc)
 {
-    const int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
+    const int ctb_addr_ts = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_segment_addr];
     const int tiles = s->ps.pps->num_tile_rows * s->ps.pps->num_tile_columns;
+    const unsigned int tile_id = s->ps.pps->tile_id[ctb_addr_ts];
 
     // Check for obvious disasters
-    if (!ctb_addr_ts && s->sh.dependent_slice_segment_flag) {
+    if (ctb_addr_ts == 0 && s->sh.dependent_slice_segment_flag) {
         av_log(s->avctx, AV_LOG_ERROR, "Impossible initial tile.\n");
         return AVERROR_INVALIDDATA;
     }
 
+    // If dependant then ctb_addr_ts != 0 from previous check
     if (s->sh.dependent_slice_segment_flag) {
         int prev_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts - 1];
         if (s->tab_slice_address[prev_rs] != s->sh.slice_addr) {
@@ -3999,7 +3987,7 @@ static int slice_start(const HEVCRpiContext * const s, HEVCRpiLocalContext *cons
     }
 
     if (!s->ps.pps->entropy_coding_sync_enabled_flag &&
-        s->ps.pps->tile_id[ctb_addr_ts] + s->sh.num_entry_point_offsets >= tiles)
+        tile_id + s->sh.num_entry_point_offsets >= tiles)
     {
         av_log(s->avctx, AV_LOG_ERROR, "Entry points exceed tiles\n");
         return AVERROR_INVALIDDATA;
@@ -4008,20 +3996,21 @@ static int slice_start(const HEVCRpiContext * const s, HEVCRpiLocalContext *cons
     // Tiled stuff must start at start of tile if it has multiple entry points
     if (!s->ps.pps->entropy_coding_sync_enabled_flag &&
         s->sh.num_entry_point_offsets != 0 &&
-        s->sh.slice_ctb_addr_rs != s->ps.pps->tile_pos_rs[s->ps.pps->tile_id[ctb_addr_ts]])
+        ctb_addr_ts != s->ps.pps->tile_pos_ts[tile_id])
     {
         av_log(s->avctx, AV_LOG_ERROR, "Multiple tiles in slice; slice start != tile start\n");
         return AVERROR_INVALIDDATA;
     }
 
-    // Setup any required decode vars
-    if (!s->sh.dependent_slice_segment_flag)
-        lc->qPy_pred = s->sh.slice_qp;
+    ff_hevc_rpi_cabac_init_decoder(lc);
 
+    // Setup any required decode vars
+    lc->cabac_init_req = !s->sh.dependent_slice_segment_flag;
+
+//    printf("SS: req=%d, sol=%d, sot=%d\n", lc->cabac_init_req, sol, sot);
     lc->qp_y = s->sh.slice_qp;
 
     // General setup
-    lc->wpp_init = 0;
     lc->bt_line_no = 0;
     lc->ts = ctb_addr_ts;
     return 0;
@@ -4030,6 +4019,7 @@ static int slice_start(const HEVCRpiContext * const s, HEVCRpiLocalContext *cons
 static int gen_entry_points(HEVCRpiContext * const s, const H2645NAL * const nal)
 {
     const GetBitContext * const gb = &s->HEVClc->gb;
+    RpiSliceHeader * const sh = &s->sh;
     int i, j;
 
     const unsigned int length = nal->size;
@@ -4037,38 +4027,43 @@ static int gen_entry_points(HEVCRpiContext * const s, const H2645NAL * const nal
     unsigned int cmpt;
     unsigned int startheader;
 
-    if (s->sh.num_entry_point_offsets == 0) {
+    if (sh->num_entry_point_offsets == 0) {
+        s->data = NULL;
         return 0;
     }
 
-    for (j = 0, cmpt = 0, startheader = offset + s->sh.entry_point_offset[0]; j < nal->skipped_bytes; j++) {
+    // offset in slice header includes emulation prevention bytes.
+    // Unfortunately those have been removed by the time we get here so we
+    // have to compensate.  The nal layer keeps a track of where they were.
+    for (j = 0, cmpt = 0, startheader = offset + sh->entry_point_offset[0]; j < nal->skipped_bytes; j++) {
         if (nal->skipped_bytes_pos[j] >= offset && nal->skipped_bytes_pos[j] < startheader) {
             startheader--;
             cmpt++;
         }
     }
 
-    for (i = 1; i < s->sh.num_entry_point_offsets; i++) {
-        offset += (s->sh.entry_point_offset[i - 1] - cmpt);
+    for (i = 1; i < sh->num_entry_point_offsets; i++) {
+        offset += (sh->entry_point_offset[i - 1] - cmpt);
         for (j = 0, cmpt = 0, startheader = offset
-             + s->sh.entry_point_offset[i]; j < nal->skipped_bytes; j++) {
+             + sh->entry_point_offset[i]; j < nal->skipped_bytes; j++) {
             if (nal->skipped_bytes_pos[j] >= offset && nal->skipped_bytes_pos[j] < startheader) {
                 startheader--;
                 cmpt++;
             }
         }
-        s->sh.size[i - 1] = s->sh.entry_point_offset[i] - cmpt;
-        s->sh.offset[i - 1] = offset;
+        sh->size[i - 1] = sh->entry_point_offset[i] - cmpt;
+        sh->offset[i - 1] = offset;
     }
-    if (s->sh.num_entry_point_offsets != 0) {
-        offset += s->sh.entry_point_offset[s->sh.num_entry_point_offsets - 1] - cmpt;
-        if (length < offset) {
-            av_log(s->avctx, AV_LOG_ERROR, "entry_point_offset table is corrupted\n");
-            return AVERROR_INVALIDDATA;
-        }
-        s->sh.size[s->sh.num_entry_point_offsets - 1] = length - offset;
-        s->sh.offset[s->sh.num_entry_point_offsets - 1] = offset;
+
+    offset += sh->entry_point_offset[sh->num_entry_point_offsets - 1] - cmpt;
+    if (length < offset) {
+        av_log(s->avctx, AV_LOG_ERROR, "entry_point_offset table is corrupted\n");
+        return AVERROR_INVALIDDATA;
     }
+    sh->size[sh->num_entry_point_offsets - 1] = length - offset;
+    sh->offset[sh->num_entry_point_offsets - 1] = offset;
+
+    // Remember data start pointer as we won't have nal later
     s->data = nal->data;
     return 0;
 }
@@ -4095,10 +4090,11 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
         const int x_ctb = (ctb_addr_rs % s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
         const int y_ctb = (ctb_addr_rs / s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
         int q_full;
+        const unsigned int ctb_flags = s->ps.pps->ctb_ts_flags[ctb_addr_ts];
 
         hls_decode_neighbour(s, lc, x_ctb, y_ctb, ctb_addr_ts);
 
-        ff_hevc_rpi_cabac_init(s, lc, ctb_addr_ts);
+        ff_hevc_rpi_cabac_init(s, lc, ctb_flags);
 
         hls_sao_param(s, lc, x_ctb >> s->ps.sps->log2_ctb_size, y_ctb >> s->ps.sps->log2_ctb_size);
 
@@ -4113,23 +4109,28 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
             return more_data;
         }
 
-        // Inc TS to next.
-        // N.B. None of the other position vars have changed
-        ctb_addr_ts++;
-        ff_hevc_rpi_save_states(s, lc, ctb_addr_ts);
+        if (more_data && ((ctb_flags & CTB_TS_FLAGS_EOT) != 0 ||
+             (s->ps.pps->entropy_coding_sync_enabled_flag && (ctb_flags & CTB_TS_FLAGS_EOTL) != 0)))
+        {
+            if (get_cabac_terminate(&lc->cc) < 0 ||
+                skip_bytes(&lc->cc, 0) == NULL)
+            {
+                return -1;
+            }
+        }
+
+        if ((ctb_flags & CTB_TS_FLAGS_CSAVE) != 0)
+            ff_hevc_rpi_save_states(s, lc);
 
         // Report progress so we can use our MVs in other frames
-        if (s->threads_type == FF_THREAD_FRAME && x_ctb + ctb_size >= s->ps.sps->width) {
+        if (s->threads_type == FF_THREAD_FRAME && (ctb_flags & CTB_TS_FLAGS_EOL) != 0)
             ff_hevc_rpi_progress_signal_mv(s, y_ctb + ctb_size - 1);
-        }
 
         // End of line || End of tile line || End of tile
         // (EoL covers end of frame for our purposes here)
-        q_full = x_ctb + ctb_size >= s->ps.sps->width ||
-            s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts] != ctb_addr_rs + 1 ||
-            s->ps.pps->tile_id[ctb_addr_ts - 1] != s->ps.pps->tile_id[ctb_addr_ts];
+        q_full = ((ctb_flags & CTB_TS_FLAGS_EOTL) != 0);
 
-        // Allocate QPU chuncks on fixed size 64 pel boundries rather than
+        // Allocate QPU chunks on fixed size 64 pel boundries rather than
         // whatever ctb_size is today.
         // * We might quite like to continue to 64 pel vertical too but that
         //   currently confuses WPP
@@ -4149,6 +4150,9 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
                 q_full = 1;
             }
         }
+
+        // Inc TS to next.
+        ctb_addr_ts++;
 
         if (q_full)
         {
@@ -4205,6 +4209,8 @@ static void movlc(HEVCRpiLocalContext *const dst_lc, HEVCRpiLocalContext *const 
     // Always need to store where we are in the bitstream
     dst_lc->ts = src_lc->ts;
     dst_lc->gb = src_lc->gb;
+    // Cabac init request will be built at start of next slice
+
     // Need to store context if we might have a dependent seg
     if (is_dep)
     {
@@ -4235,7 +4241,7 @@ static int rpi_run_one_line(HEVCRpiContext *const s, HEVCRpiLocalContext * const
         line + line_inc > (unsigned int)s->sh.num_entry_point_offsets ?
             INT_MAX :
         is_tile ?
-            s->ps.pps->ctb_addr_rs_to_ts[s->ps.pps->tile_pos_rs[tile_id + line_inc]] :
+            s->ps.pps->tile_pos_ts[tile_id + line_inc] :
             lc->ts + lc->bt_line_width * line_inc;
     // Tile wants line, WPP a few CTUs (must be >= 2 for cabac context to work)
     const unsigned int partial_size = is_tile ? line_ts_width(s, lc->ts) : 2;
@@ -4259,14 +4265,11 @@ static int rpi_run_one_line(HEVCRpiContext *const s, HEVCRpiLocalContext * const
             return err;
 
         ff_init_cabac_decoder(&lc->cc, data, len);
-
-        lc->wpp_init = 1;  // Stop ff_hevc_rpi_cabac_init trying to read non-existant termination bits
     }
 
     // We should never be processing a dependent slice here so reset is good
     // ?? These probably shouldn't be needed (as they should be set by later
     //    logic) but do seem to be required
-    lc->qPy_pred = s->sh.slice_qp;
     lc->qp_y = s->sh.slice_qp;
 
     do
@@ -4421,7 +4424,7 @@ static void tile_one_row_setup_lcs(HEVCRpiContext * const s, unsigned int slice_
         HEVCRpiLocalContext * const lc = s->HEVClcList[i];
         const unsigned int tile = tile0 + line;
 
-        lc->ts = pps->ctb_addr_rs_to_ts[pps->tile_pos_rs[tile]];
+        lc->ts = pps->tile_pos_ts[tile];
         lc->bt_line_no = line;
         lc->bt_is_tile = 1;
         lc->bt_line_width = line_ts_width(s, lc->ts);
@@ -5273,7 +5276,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     av_freep(&s->sei.picture_hash.md5_ctx);
 
-    av_freep(&s->cabac_state);
+    av_freep(&s->cabac_save);
 
 #if RPI_EXTRA_BIT_THREADS
     bit_threads_kill(s);
@@ -5367,12 +5370,10 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
         ff_hevc_rpi_progress_init_state(s->progress_states + i);
     }
 
-    s->cabac_state = av_malloc(HEVC_CONTEXTS);
-    if (!s->cabac_state)
+    if ((s->cabac_save = av_malloc(sizeof(*s->cabac_save))) == NULL)
         goto fail;
 
-    s->output_frame = av_frame_alloc();
-    if (!s->output_frame)
+     if ((s->output_frame = av_frame_alloc()) == NULL)
         goto fail;
 
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++) {

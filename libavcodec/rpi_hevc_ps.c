@@ -1262,9 +1262,10 @@ static void hevc_pps_free(void *opaque, uint8_t *data)
     av_freep(&pps->col_idxX);
     av_freep(&pps->ctb_addr_rs_to_ts);
     av_freep(&pps->ctb_addr_ts_to_rs);
-    av_freep(&pps->tile_pos_rs);
+    av_freep(&pps->tile_pos_ts);
     av_freep(&pps->tile_size);
     av_freep(&pps->tile_id);
+    av_freep(&pps->ctb_ts_flags);
     av_freep(&pps->min_tb_addr_zs_tab);
 
     av_freep(&pps);
@@ -1361,12 +1362,16 @@ static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
     pps->ctb_addr_rs_to_ts = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_addr_rs_to_ts));
     pps->ctb_addr_ts_to_rs = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_addr_ts_to_rs));
     pps->tile_id           = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->tile_id));
-    pps->tile_size         = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->tile_size));
+    pps->tile_size         = av_malloc_array(pps->num_tile_columns * pps->num_tile_rows, sizeof(*pps->tile_size));
+    pps->tile_pos_ts       = av_malloc_array(pps->num_tile_columns * pps->num_tile_rows, sizeof(*pps->tile_pos_ts));
+    pps->ctb_ts_flags      = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_ts_flags));
     pps->min_tb_addr_zs_tab = av_malloc_array((sps->tb_mask+2) * (sps->tb_mask+2), sizeof(*pps->min_tb_addr_zs_tab));
     if (!pps->ctb_addr_rs_to_ts || !pps->ctb_addr_ts_to_rs ||
-        !pps->tile_id || !pps->min_tb_addr_zs_tab) {
+        !pps->tile_id || !pps->min_tb_addr_zs_tab || pps->tile_pos_ts == NULL || pps->tile_size == NULL) {
         return AVERROR(ENOMEM);
     }
+
+    memset(pps->ctb_ts_flags, 0, pic_area_in_ctbs * sizeof(*pps->ctb_ts_flags));
 
     for (ctb_addr_rs = 0; ctb_addr_rs < pic_area_in_ctbs; ctb_addr_rs++) {
         int tb_x   = ctb_addr_rs % sps->ctb_width;
@@ -1401,24 +1406,62 @@ static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
         pps->ctb_addr_ts_to_rs[val]         = ctb_addr_rs;
     }
 
-    for (j = 0, tile_id = 0; j < pps->num_tile_rows; j++)
-        for (i = 0; i < pps->num_tile_columns; i++, tile_id++)
-            for (y = pps->row_bd[j]; y < pps->row_bd[j + 1]; y++)
-                for (x = pps->col_bd[i]; x < pps->col_bd[i + 1]; x++)
-                    pps->tile_id[pps->ctb_addr_rs_to_ts[y * sps->ctb_width + x]] = tile_id;
+    {
+        uint8_t * pflags = pps->ctb_ts_flags;
+        uint16_t * ptid = pps->tile_id;
 
-    pps->tile_pos_rs = av_malloc_array(tile_id, sizeof(*pps->tile_pos_rs));
-    if (!pps->tile_pos_rs)
-        return AVERROR(ENOMEM);
-
-    for (j = 0; j < pps->num_tile_rows; j++)
-        for (i = 0; i < pps->num_tile_columns; i++)
+        for (j = 0, tile_id = 0; j < pps->num_tile_rows; j++)
         {
-            pps->tile_size[j * pps->num_tile_columns + i] =
-                pps->column_width[i] * pps->row_height[j];
-            pps->tile_pos_rs[j * pps->num_tile_columns + i] =
-                pps->row_bd[j] * sps->ctb_width + pps->col_bd[i];
+            for (i = 0; i < pps->num_tile_columns; i++, tile_id++)
+            {
+                const unsigned int tile_w = pps->column_width[i];
+
+                pflags[0] |= CTB_TS_FLAGS_CIREQ;
+
+                for (x = 0; x != tile_w; ++x) {
+                    pflags[x] |= CTB_TS_FLAGS_TOT;
+                }
+
+                for (y = pps->row_bd[j]; y < pps->row_bd[j + 1]; y++)
+                {
+                    pflags[0] |= CTB_TS_FLAGS_SOTL;
+
+                    if (pps->entropy_coding_sync_enabled_flag)
+                    {
+                        if (pps->column_width[i] != 1)
+                            pflags[1] |= CTB_TS_FLAGS_CSAVE;
+                        else
+                            pflags[0] |= CTB_TS_FLAGS_CIREQ;
+
+                        if ((pflags[0] & CTB_TS_FLAGS_CIREQ) == 0)
+                            pflags[0] |= CTB_TS_FLAGS_CLOAD;
+                    }
+
+                    for (x = 0; x != tile_w; ++x)
+                        *ptid++ = tile_id;
+
+                    pflags += tile_w;
+                    pflags[-1] |= CTB_TS_FLAGS_EOTL;
+                    if (i + 1 == pps->num_tile_columns)
+                        pflags[-1] |= CTB_TS_FLAGS_EOL;
+                }
+
+                pflags[-1] |= CTB_TS_FLAGS_EOT;
+            }
         }
+    }
+
+    {
+        unsigned int ts = 0;
+        for (j = 0; j < pps->num_tile_rows; j++)
+            for (i = 0; i < pps->num_tile_columns; i++)
+            {
+                const unsigned int size = pps->column_width[i] * pps->row_height[j];
+                pps->tile_size[j * pps->num_tile_columns + i] = size;
+                pps->tile_pos_ts[j * pps->num_tile_columns + i] = ts;
+                ts += size;
+            }
+    }
 
     log2_diff = sps->log2_ctb_size - sps->log2_min_tb_size;
     pps->min_tb_addr_zs = &pps->min_tb_addr_zs_tab[1*(sps->tb_mask+2)+1];

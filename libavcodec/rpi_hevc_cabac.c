@@ -712,30 +712,19 @@ static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, 
 #endif  // USE_BY22
 
 
-void ff_hevc_rpi_save_states(HEVCRpiContext *s, const HEVCRpiLocalContext * const lc, int ctb_addr_ts)
+void ff_hevc_rpi_save_states(HEVCRpiContext *s, const HEVCRpiLocalContext * const lc)
 {
-    // ???? Does this work with tiles + WPP? (No)
-    // **** Need to save rice state too
-    // pred_qpy is handled by get_qPy_pred and lc->first_qp_group
-    if (s->ps.pps->entropy_coding_sync_enabled_flag &&
-        (ctb_addr_ts % s->ps.sps->ctb_width == 2 ||
-         (s->ps.sps->ctb_width == 2 &&
-          ctb_addr_ts % s->ps.sps->ctb_width == 0))) {
-        memcpy(s->cabac_state, lc->cabac_state, HEVC_CONTEXTS);
-    }
+    memcpy(s->cabac_save->rice, lc->stat_coeff, 4);
+    memcpy(s->cabac_save->state, lc->cabac_state, HEVC_CONTEXTS);
 }
 
 static void load_states(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc)
 {
-    memcpy(lc->cabac_state, s->cabac_state, HEVC_CONTEXTS);
+    memcpy(lc->stat_coeff, s->cabac_save->rice, 4);
+    memcpy(lc->cabac_state, s->cabac_save->state, HEVC_CONTEXTS);
 }
 
-static int cabac_reinit(HEVCRpiLocalContext *lc)
-{
-    return skip_bytes(&lc->cc, 0) == NULL ? AVERROR_INVALIDDATA : 0;
-}
-
-static int cabac_init_decoder(HEVCRpiLocalContext * const lc)
+int ff_hevc_rpi_cabac_init_decoder(HEVCRpiLocalContext * const lc)
 {
     GetBitContext * const gb = &lc->gb;
     skip_bits(gb, 1);
@@ -769,67 +758,19 @@ static void cabac_init_state(const HEVCRpiContext * const s, HEVCRpiLocalContext
         lc->stat_coeff[i] = 0;
 }
 
-int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, int ctb_addr_ts)
+int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, const unsigned int ctb_flags)
 {
-    if (ctb_addr_ts == s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs]) {
-        int ret = cabac_init_decoder(lc);
-        if (ret < 0)
-            return ret;
-        if (s->sh.dependent_slice_segment_flag == 0 ||
-            (s->ps.pps->tiles_enabled_flag &&
-             s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[ctb_addr_ts - 1]))
-            cabac_init_state(s, lc);
-
-        if (!s->sh.first_slice_in_pic_flag &&
-            s->ps.pps->entropy_coding_sync_enabled_flag) {
-            if (ctb_addr_ts % s->ps.sps->ctb_width == 0) {
-                if (s->ps.sps->ctb_width == 1)
-                    cabac_init_state(s, lc);
-                else if (s->sh.dependent_slice_segment_flag == 1)
-                    load_states(s, lc);
-            }
-        }
-    } else {
-        if (s->ps.pps->tiles_enabled_flag &&
-            s->ps.pps->tile_id[ctb_addr_ts] != s->ps.pps->tile_id[ctb_addr_ts - 1]) {
-            if (!lc->wpp_init) {
-                int ret;
-                if (s->threads_number == 1)  // **** Ummm... can only be 1 in our world but this is a wpp test
-                    ret = cabac_reinit(lc);
-                else
-                    ret = cabac_init_decoder(lc);
-                if (ret < 0)
-                    return ret;
-            }
-            lc->wpp_init = 0;
-
-            cabac_init_state(s, lc);
-        }
-        if (s->ps.pps->entropy_coding_sync_enabled_flag) {
-            if (ctb_addr_ts % s->ps.sps->ctb_width == 0) {  // ** Tiles + WPP bust
-                // If wpp_init is set then we have been set up in the correct pos
-                if (!lc->wpp_init) {
-                    int ret;
-                    // * Strong argument for putting the read terminate & align
-                    //   at the end of the previous block (where it logically
-                    //   resides) rather than here
-                    get_cabac_terminate(&lc->cc);
-                    if (s->threads_number == 1)
-                        ret = cabac_reinit(lc);
-                    else
-                        ret = cabac_init_decoder(lc);
-                    if (ret < 0)
-                        return ret;
-                }
-                lc->wpp_init = 0;
-
-                if (s->ps.sps->ctb_width == 1)
-                    cabac_init_state(s, lc);
-                else
-                    load_states(s, lc);
-            }
-        }
+    if (lc->cabac_init_req == 1 || (ctb_flags & CTB_TS_FLAGS_CIREQ) != 0)
+    {
+        lc->qPy_pred = s->sh.slice_qp;
+        cabac_init_state(s, lc);
     }
+    else if ((ctb_flags & CTB_TS_FLAGS_CLOAD) != 0)
+    {
+        lc->qPy_pred = s->sh.slice_qp;
+        load_states(s, lc);
+    }
+    lc->cabac_init_req = 0;
     return 0;
 }
 

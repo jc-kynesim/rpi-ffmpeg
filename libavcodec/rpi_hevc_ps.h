@@ -45,7 +45,7 @@ typedef struct LongTermRPS {
     uint8_t nb_refs;
 } LongTermRPS;
 
-typedef struct SliceHeader {
+typedef struct RpiSliceHeader {
     unsigned int pps_id;
 
     ///< address (in raster order) of the first block in the current slice segment
@@ -118,9 +118,7 @@ typedef struct SliceHeader {
 
     int16_t luma_offset_l1[16];
     int16_t chroma_offset_l1[16][2];
-
-    int slice_ctb_addr_rs;
-} SliceHeader;
+} RpiSliceHeader;
 
 typedef struct HEVCWindow {
     unsigned int left_offset;
@@ -315,6 +313,15 @@ typedef struct HEVCRpiSPS {
     int data_size;
 } HEVCRpiSPS;
 
+#define CTB_TS_FLAGS_SOTL       (1U << 0)       // X start of tile line
+#define CTB_TS_FLAGS_EOTL       (1U << 1)
+#define CTB_TS_FLAGS_EOL        (1U << 2)
+#define CTB_TS_FLAGS_EOT        (1U << 3)
+#define CTB_TS_FLAGS_CSAVE      (1U << 4)
+#define CTB_TS_FLAGS_CIREQ      (1U << 5)     // Cabac init request
+#define CTB_TS_FLAGS_TOT        (1U << 6)
+#define CTB_TS_FLAGS_CLOAD      (1U << 7)
+
 typedef struct HEVCRpiPPS {
     unsigned int sps_id; ///< seq_parameter_set_id
 
@@ -375,19 +382,21 @@ typedef struct HEVCRpiPPS {
     uint8_t log2_sao_offset_scale_chroma;
 
     // Inferred parameters
-    unsigned int *column_width;  ///< ColumnWidth
-    unsigned int *row_height;    ///< RowHeight
-    unsigned int *col_bd;        ///< ColBd
-    unsigned int *row_bd;        ///< RowBd
-    int *col_idxX;
+    uint16_t *column_width;  ///< ColumnWidth
+    uint16_t *row_height;    ///< RowHeight
+    uint16_t *col_bd;        ///< ColBd
+    uint16_t *row_bd;        ///< RowBd
+    uint16_t *col_idxX;
 
-    int *ctb_addr_rs_to_ts; ///< CtbAddrRSToTS
-    int *ctb_addr_ts_to_rs; ///< CtbAddrTSToRS
-    int *tile_id;           ///< TileId
-    int *tile_pos_rs;       ///< TilePosRS
-    int *tile_size;         ///< TileSize
+    // We can limit these to uint16_t given our other size limits
+    uint16_t *ctb_addr_rs_to_ts; ///< CtbAddrRSToTS
+    uint16_t *ctb_addr_ts_to_rs; ///< CtbAddrTSToRS
+    uint16_t *tile_id;           ///< TileId
+    uint16_t *tile_pos_ts;       ///< TilePosRS
+    uint16_t *tile_size;         ///< TileSize
     int *min_tb_addr_zs;    ///< MinTbAddrZS
     int *min_tb_addr_zs_tab;///< MinTbAddrZS
+    uint8_t * ctb_ts_flags;
 
     uint8_t data[4096];
     int data_size;

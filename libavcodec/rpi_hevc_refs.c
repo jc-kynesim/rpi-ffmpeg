@@ -278,7 +278,7 @@ static int init_slice_rpl(HEVCRpiContext *s)
 
 int ff_hevc_rpi_slice_rpl(HEVCRpiContext *s)
 {
-    SliceHeader *sh = &s->sh;
+    RpiSliceHeader *sh = &s->sh;
 
     uint8_t nb_list = sh->slice_type == HEVC_SLICE_B ? 2 : 1;
     uint8_t list_idx;
