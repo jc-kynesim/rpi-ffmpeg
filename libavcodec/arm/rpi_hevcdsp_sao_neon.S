@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014 - 2015 Seppo Tomperi <seppo.tomperi@vtt.fi>
+ *               2017 John Cox <jc@kynesim.co.uk> (for Raspberry Pi)
  *
  * This file is part of FFmpeg.
  *
@@ -1366,7 +1367,6 @@ endfunc
 
 .macro  edge_4bx4_e1, body_fn
         mov      r6, lr
-debug_me:
         sub      r1, r3
         // load a
         vld1.32  {d0[0]}, [r1], r3
