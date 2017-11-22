@@ -1242,8 +1242,9 @@ static av_always_inline int significant_coeff_flag_decode_0(HEVCRpiLocalContext 
 
 
 #ifndef coeff_abs_level_remaining_decode_bypass
-static int coeff_abs_level_remaining_decode_bypass(CABACContext * const c, const unsigned int rice_param)
+static int coeff_abs_level_remaining_decode_bypass(HEVCRpiLocalContext * const lc, const unsigned int rice_param)
 {
+    CABACContext * const c = &lc->cc;
     uint32_t y;
     unsigned int prefix;
     unsigned int last_coeff_abs_level_remaining;
@@ -2113,7 +2114,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                         }
 
                         {
-                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_bypass(&lc->cc, c_rice_param);
+                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_bypass(lc, c_rice_param);
                             const int trans_coeff_level = *level + last_coeff_abs_level_remaining + 1;
 
                             sum_abs += last_coeff_abs_level_remaining + 1;

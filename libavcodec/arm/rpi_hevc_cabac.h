@@ -344,19 +344,19 @@ static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigne
 }
 
 #define coeff_abs_level_remaining_decode_bypass coeff_abs_level_remaining_decode_bypass_arm
-static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * const c, unsigned int rice_param)
+static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContext * const lc, unsigned int rice_param)
 {
     uint32_t last_coeff_abs_level_remaining;
     uint32_t prefix, n1, range, n2, ptr, tmp1, tmp2;
     __asm__ (
-        "ldr     %[remain], [%[c], %[low_off]]                \n\t"
-        "ldr     %[prefix], [%[c], %[range_off]]              \n\t"
+        "ldr     %[remain], [%[lc], %[low_off]]               \n\t"
+        "ldr     %[prefix], [%[lc], %[range_off]]             \n\t"
         "bic     %[remain], %[remain], #1                     \n\t"
-        "ldrh    %[tmp2], [%[c], %[by22_bits_off]]            \n\t"
-        "ldr     %[ptr], [%[c], %[ptr_off]]                   \n\t"
+        "ldrh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
+        "ldr     %[ptr], [%[lc], %[ptr_off]]                  \n\t"
         "cmp     %[prefix], #0                                \n\t"
         "umullne %[prefix], %[remain], %[prefix], %[remain]   \n\t"
-        "ldrh    %[range], [%[c], %[by22_range_off]]          \n\t"
+        "ldrh    %[range], [%[lc], %[by22_range_off]]         \n\t"
         "lsl     %[remain], %[remain], #1                     \n\t"
         "mvn     %[prefix], %[remain]                         \n\t"
         "clz     %[prefix], %[prefix]                         \n\t"
@@ -366,11 +366,11 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
         "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
         "rsb     %[n2], %[n1], #32                            \n\t"
         "and     %[tmp1], %[tmp2], #7                         \n\t"
-        "strh    %[tmp2], [%[c], %[by22_bits_off]]            \n\t"
+        "strh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
         "lsr     %[tmp2], %[tmp2], #3                         \n\t"
         "lsr     %[n2], %[remain], %[n2]                      \n\t"
         "mul     %[n2], %[range], %[n2]                       \n\t"
-        "ldr     %[range], [%[c], %[low_off]]                 \n\t"
+        "ldr     %[range], [%[lc], %[low_off]]                \n\t"
         "ldr     %[ptr], [%[ptr], %[tmp2]]                    \n\t"
         "rsb     %[tmp2], %[rice], #31                        \n\t"
         "lsl     %[remain], %[remain], %[prefix]              \n\t"
@@ -387,7 +387,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
         "sub     %[n1], %[n2], #2                             \n\t"
         "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
         "rsb     %[n2], %[n1], #32                            \n\t"
-        "strh    %[tmp2], [%[c], %[by22_bits_off]]            \n\t"
+        "strh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
         "lsr     %[tmp1], %[tmp2], #3                         \n\t"
         "lsr     %[n2], %[remain], %[n2]                      \n\t"
         "mul     %[n2], %[range], %[n2]                       \n\t"
@@ -395,7 +395,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
         "ldr     %[ptr], [%[ptr], %[tmp1]]                    \n\t"
         "and     %[tmp1], %[tmp2], #7                         \n\t"
         "lsl     %[remain], %[remain], %[prefix]              \n\t"
-        "ldr     %[tmp2], [%[c], %[low_off]]                  \n\t"
+        "ldr     %[tmp2], [%[lc], %[low_off]]                 \n\t"
         "rsb     %[prefix], %[prefix], %[range]               \n\t"
         "orr     %[remain], %[remain], #0x80000000            \n\t"
         "rev     %[ptr], %[ptr]                               \n\t"
@@ -414,11 +414,11 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
         "push    {%[rice]}                                    \n\t"
         "and     %[rice], %[n1], #7                           \n\t"
         "lsr     %[tmp1], %[remain], %[tmp1]                  \n\t"
-        "ldr     %[ptr], [%[c], %[low_off]]                   \n\t"
+        "ldr     %[ptr], [%[lc], %[low_off]]                  \n\t"
         "mul     %[remain], %[range], %[tmp1]                 \n\t"
         "rev     %[tmp2], %[tmp2]                             \n\t"
         "rsb     %[n2], %[prefix], %[n2]                      \n\t"
-        "ldr     %[tmp1], [%[c], %[range_off]]                \n\t"
+        "ldr     %[tmp1], [%[lc], %[range_off]]               \n\t"
         "lsl     %[rice], %[tmp2], %[rice]                    \n\t"
         "sub     %[tmp2], %[n2], #2                           \n\t"
         "lsl     %[remain], %[remain], #23                    \n\t"
@@ -426,7 +426,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
         "orr     %[remain], %[remain], %[rice], lsr #9        \n\t"
         "add     %[prefix], %[n1], %[tmp2]                    \n\t"
         "bic     %[n1], %[remain], #1                         \n\t"
-        "ldr     %[ptr], [%[c], %[ptr_off]]                   \n\t"
+        "ldr     %[ptr], [%[lc], %[ptr_off]]                  \n\t"
         "cmp     %[tmp1], #0                                  \n\t"
         "rsb     %[rice], %[tmp2], #32                        \n\t"
         "umullne %[tmp1], %[n1], %[tmp1], %[n1]               \n\t"
@@ -439,7 +439,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
         "pop     {%[rice]}                                    \n\t"
         "rev     %[ptr], %[ptr]                               \n\t"
         "orr     %[n1], %[n1], #0x80000000                    \n\t"
-        "strh    %[prefix], [%[c], %[by22_bits_off]]          \n\t"
+        "strh    %[prefix], [%[lc], %[by22_bits_off]]         \n\t"
         "mov     %[prefix], #2                                \n\t"
         "lsl     %[range], %[range], #23                      \n\t"
         "rsb     %[range], %[range], %[remain], lsl %[tmp2]   \n\t"
@@ -449,7 +449,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
         "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
         "orr     %[range], %[range], %[ptr], lsr #9           \n\t"
         "4:                                                   \n\t"
-        "str     %[range], [%[c], %[low_off]]                 \n\t"
+        "str     %[range], [%[lc], %[low_off]]                \n\t"
         :  // Outputs
             [remain]"=&r"(last_coeff_abs_level_remaining),
               [rice]"+r"(rice_param),
@@ -461,13 +461,13 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext * con
               [tmp1]"=&r"(tmp1),
               [tmp2]"=&r"(tmp2)
         :  // Inputs
-                           [c]"r"(c),
+                          [lc]"r"(lc),
             [peek_bits_plus_2]"I"(CABAC_BY22_PEEK_BITS + 2),
-                     [low_off]"J"(offsetof(CABACContext, low)),
-                   [range_off]"J"(offsetof(CABACContext, range)),
-               [by22_bits_off]"J"(offsetof(CABACContext, by22.bits)),
-              [by22_range_off]"J"(offsetof(CABACContext, by22.range)),
-                     [ptr_off]"J"(offsetof(CABACContext, bytestream))
+                     [low_off]"J"(offsetof(HEVCRpiLocalContext, cc.low)),
+                   [range_off]"J"(offsetof(HEVCRpiLocalContext, cc.range)),
+               [by22_bits_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.bits)),
+              [by22_range_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.range)),
+                     [ptr_off]"J"(offsetof(HEVCRpiLocalContext, cc.bytestream))
         :  // Clobbers
            "cc", "memory"
     );

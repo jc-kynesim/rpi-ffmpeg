@@ -387,6 +387,8 @@ typedef struct HEVCRpiLocalContext {
     TransformUnit tu;  // Moved to start to match HEVCRpiLocalContextIntra (yuk!)
     NeighbourAvailable na;
 
+    CABACContext cc;
+
     // Vars that allow us to locate everything from just an lc
     struct HEVCRpiContext * context;  // ??? make const ???
     unsigned int lc_n; // lc list el no
@@ -424,7 +426,6 @@ typedef struct HEVCRpiLocalContext {
 //    uint8_t first_qp_group;
 
     GetBitContext gb;
-    CABACContext cc;
 
     int8_t qp_y;
     int8_t curr_qp_y;
