@@ -3422,12 +3422,18 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
         const unsigned int xl = x0 > ctb_size ? x0 - ctb_size : 0;
         const unsigned int yt = y0 > ctb_size ? y0 - ctb_size : 0;
         const unsigned int yb = tile_end ? bound_b : y - ctb_size;
-
-        rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
-        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-          xl, yt, bound_r - xl, yb - yt,
-          ctx_vshift(s, 1), 1, 1);
-        rpi_cache_flush_finish(rfe);
+#ifdef RPI_DEBLOCK_VPU
+        const int flush_chroma = !(s->enable_rpi_deblock && av_rpi_is_sand_frame(s->frame));
+#else
+        const int flush_chroma = 1;
+#endif
+        if (flush_chroma) {
+          rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
+          rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+            xl, yt, bound_r - xl, yb - yt,
+            ctx_vshift(s, 1), 1, flush_chroma);
+          rpi_cache_flush_finish(rfe);
+        }
     }
 
     // Signal

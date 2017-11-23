@@ -1152,6 +1152,16 @@ static void ff_hevc_rpi_flush_buffer_lines(HEVCRpiContext *s, int start, int end
     rpi_cache_flush_finish(rfe);
 }
 
+// Set top bits so that image buffer goes via the L2 cache
+static int choose_cached(int addr) {
+#ifdef RPI_USE_VPU_L2
+  return (addr&0x3fffffff) | 
+              (0x40000000);
+#else
+  return addr;
+#endif
+}
+
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
 static void rpi_deblock(HEVCRpiContext *s, int y, int deblock_h, int sao_y, int sao_h)
 {
@@ -1172,7 +1182,7 @@ static void rpi_deblock(HEVCRpiContext *s, int y, int deblock_h, int sao_y, int 
   // TODO flush buffer of beta/tc setup when it becomes cached
 
   // Prepare multiple commands at once to avoid calling overhead
-  s->dvq->vpu_cmds_arm[cmd][0] = (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y >> s->ps.sps->vshift[1]) );
+  s->dvq->vpu_cmds_arm[cmd][0] = choose_cached( (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y >> s->ps.sps->vshift[1]) ) );
   s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[3] * 128;
   s->dvq->vpu_cmds_arm[cmd][2] = s->uv_setup_width;  // number of 8x16 blocks to process
   //s->dvq->vpu_cmds_arm[cmd][2] = 1;  // number of 8x16 blocks to process
@@ -1191,7 +1201,7 @@ static void rpi_deblock(HEVCRpiContext *s, int y, int deblock_h, int sao_y, int 
           int h2 = FFMIN(16, (sao_h >> s->ps.sps->vshift[1]) - 16 * i);
           //int h2 = (sao_h >> s->ps.sps->vshift[1]) - 16 * i;
           int w2 = s->ps.sps->width >> s->ps.sps->hshift[1];
-          s->dvq->vpu_cmds_arm[cmd][0] = (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y0 ) );
+          s->dvq->vpu_cmds_arm[cmd][0] = choose_cached( (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y0 ) ) );
           s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[3] * 128;  // stride
           s->dvq->vpu_cmds_arm[cmd][2] = (int) s->dvq->uv_sao_line_vc;    // line buffer
           s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->uv_sao_setup_vc + s->uv_setup_width * (y0>>4) ); // sao_data
@@ -1216,7 +1226,7 @@ static void rpi_deblock(HEVCRpiContext *s, int y, int deblock_h, int sao_y, int 
 
   s->dvq_n = (s->dvq_n + 1) & (RPI_DEBLOCK_VPU_Q_COUNT - 1);
   s->dvq = s->dvq_ents + s->dvq_n;
-
+  
   vpu_qpu_wait(&s->dvq->cmd_id);
 }
 
