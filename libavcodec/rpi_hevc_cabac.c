@@ -692,8 +692,9 @@ static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
 // Flush n bypass bits. n must be >= 1 to guarantee correct operation
 // val is an unmodified copy of whatever _by22_peek returned
 #ifndef get_cabac_by22_flush
-static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, const uint32_t val)
+static inline void get_cabac_by22_flush(HEVCRpiLocalContext * const lc, const unsigned int n, const uint32_t val)
 {
+    CABACContext * const c = &lc->cc;
     // Subtract the bits used & reshift up to the top of the word
 #if USE_BY22_DIV
     const uint32_t low = (((unsigned int)c->low << n) - (((val >> (32 - n)) * (unsigned int)c->range) << 23));
@@ -1269,7 +1270,7 @@ static int coeff_abs_level_remaining_decode_bypass(HEVCRpiLocalContext * const l
     else {
         unsigned int suffix;
 
-        get_cabac_by22_flush(c, prefix, y);
+        get_cabac_by22_flush(lc, prefix, y);
         y = get_cabac_by22_peek(c);
 
         suffix = (y | 0x80000000) >> (34 - (prefix + rice_param));
@@ -1277,7 +1278,7 @@ static int coeff_abs_level_remaining_decode_bypass(HEVCRpiLocalContext * const l
         n = prefix + rice_param - 2;
     }
 
-    get_cabac_by22_flush(c, n, y);
+    get_cabac_by22_flush(lc, n, y);
 
     return last_coeff_abs_level_remaining;
 }
@@ -1327,11 +1328,12 @@ static inline uint32_t coeff_sign_flag_decode(CABACContext * const c, const unsi
 #endif
 
 #ifndef coeff_sign_flag_decode_bypass
-static inline uint32_t coeff_sign_flag_decode_bypass(CABACContext * const c, const unsigned int nb)
+static inline uint32_t coeff_sign_flag_decode_bypass(HEVCRpiLocalContext * const lc, const unsigned int nb)
 {
+    CABACContext * const c = &lc->cc;
     uint32_t y;
     y = get_cabac_by22_peek(c);
-    get_cabac_by22_flush(c, nb, y);
+    get_cabac_by22_flush(lc, nb, y);
     return y & ~(0xffffffffU >> nb);
 }
 #endif
@@ -2096,7 +2098,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
 
                 bypass_start(&lc->cc);
 
-                coeff_sign_flags = coeff_sign_flag_decode_bypass(&lc->cc, nb_significant_coeff_flag - sign_hidden);
+                coeff_sign_flags = coeff_sign_flag_decode_bypass(lc, nb_significant_coeff_flag - sign_hidden);
 
                 if (coded_vals != 0)
                 {
@@ -2322,7 +2324,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             {
                 // Need too many bits - flush
                 // n = k
-                get_cabac_by22_flush(cc, k, val);
+                get_cabac_by22_flush(lc, k, val);
                 b = val = get_cabac_by22_peek(cc);
                 n = k + 1;
             }
@@ -2336,7 +2338,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             // Max abs value of an mv is 2^15 - 1 (i.e. a prefix len of 15 bits)
             if (y > 1 && n > CABAC_BY22_PEEK_BITS - 15)
             {
-                get_cabac_by22_flush(cc, n, val);
+                get_cabac_by22_flush(lc, n, val);
                 b = val = get_cabac_by22_peek(cc);
                 n = 0;
             }
@@ -2361,7 +2363,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             if (n > CABAC_BY22_PEEK_BITS)
             {
                 // Need too many bits - flush
-                get_cabac_by22_flush(cc, n - (k + 1), val);
+                get_cabac_by22_flush(lc, n - (k + 1), val);
                 b = val = get_cabac_by22_peek(cc);
                 n = k + 1;
             }
@@ -2372,7 +2374,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             // don't care about b anymore
         }
 
-        get_cabac_by22_flush(cc, n, val);
+        get_cabac_by22_flush(lc, n, val);
         bypass_finish(cc);
     }
 
