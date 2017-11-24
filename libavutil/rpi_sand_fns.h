@@ -50,6 +50,11 @@ void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const
                          unsigned int w, unsigned int h, const unsigned int shr);
 
 
+// dst must contain required pixel format & allocated data buffers
+// Cropping on the src buffer will be honoured and dst crop will be set to zero
+int av_rpi_sand_to_planar_frame(AVFrame * const dst, const AVFrame * const src);
+
+
 static inline unsigned int av_rpi_sand_frame_stride1(const AVFrame * const frame)
 {
 #ifdef RPI_ZC_SAND128_ONLY

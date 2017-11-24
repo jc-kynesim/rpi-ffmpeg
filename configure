@@ -2200,6 +2200,7 @@ CONFIG_EXTRA="
     rtpdec
     rtpenc_chain
     rv34dsp
+    sand
     sinewin
     snappy
     srtp
@@ -2503,7 +2504,7 @@ hap_encoder_deps="libsnappy"
 hap_encoder_select="texturedspenc"
 hevc_decoder_select="bswapdsp cabac golomb hevcparse videodsp"
 hevc_rpi_decoder_deps="rpi"
-hevc_rpi_decoder_select="hevc_decoder"
+hevc_rpi_decoder_select="hevc_decoder sand"
 huffyuv_decoder_select="bswapdsp huffyuvdsp llviddsp"
 huffyuv_encoder_select="bswapdsp huffman huffyuvencdsp llvidencdsp"
 iac_decoder_select="imc_decoder"
@@ -3273,6 +3274,8 @@ tinterlace_filter_deps="gpl"
 tinterlace_merge_test_deps="tinterlace_filter"
 tinterlace_pad_test_deps="tinterlace_filter"
 tonemap_filter_deps="const_nan"
+unsand_filter_deps="rpi"
+unsand_filter_select="sand"
 uspp_filter_deps="gpl avcodec"
 vaguedenoiser_filter_deps="gpl"
 vidstabdetect_filter_deps="libvidstab"
