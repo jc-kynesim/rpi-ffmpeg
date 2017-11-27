@@ -26,6 +26,9 @@
 #include "libavcodec/avcodec.h"
 #include "libavcodec/bit_depth_template.c"
 
+// NEON inter pred fns for qpel & epel (non-sand) exist in the git repo but
+// have been removed from head as we never use them.
+
 void ff_hevc_rpi_v_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_rpi_h_loop_filter_luma_neon(uint8_t *_pix, ptrdiff_t _stride, int _beta, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
 void ff_hevc_rpi_v_loop_filter_chroma_neon(uint8_t *_pix, ptrdiff_t _stride, int *_tc, uint8_t *_no_p, uint8_t *_no_q);
@@ -228,114 +231,6 @@ void ff_hevc_rpi_sao_band_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t str
                                 int16_t *sao_offset_val, int sao_left_class, int width, int height);
 
 
-#define PUT_PIXELS(name) \
-    void name(int16_t *dst, uint8_t *src, \
-                                ptrdiff_t srcstride, int height, \
-                                intptr_t mx, intptr_t my, int width)
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w2_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w4_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w6_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w8_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w12_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w16_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w24_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w32_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w48_neon_8);
-PUT_PIXELS(ff_hevc_rpi_put_pixels_w64_neon_8);
-#undef PUT_PIXELS
-void ff_hevc_rpi_put_epel_h_neon_8(int16_t *dst, uint8_t *src,
-                                ptrdiff_t srcstride, int height,
-                                intptr_t mx, intptr_t my, int width);
-void ff_hevc_rpi_put_epel_v_neon_8(int16_t *dst, uint8_t *src,
-                                ptrdiff_t srcstride, int height,
-                                intptr_t mx, intptr_t my, int width);
-void ff_hevc_rpi_put_epel_hv_neon_8(int16_t *dst, uint8_t *src,
-                                ptrdiff_t srcstride, int height,
-                                intptr_t mx, intptr_t my, int width);
-
-static void (*put_hevc_qpel_neon[4][4])(int16_t *dst, ptrdiff_t dststride, uint8_t *src, ptrdiff_t srcstride,
-                                   int height, int width);
-static void (*put_hevc_qpel_uw_neon[4][4])(uint8_t *dst, ptrdiff_t dststride, uint8_t *_src, ptrdiff_t _srcstride,
-                                   int width, int height, int16_t* src2, ptrdiff_t src2stride);
-void ff_hevc_rpi_put_qpel_neon_wrapper(int16_t *dst, uint8_t *src, ptrdiff_t srcstride,
-                                   int height, intptr_t mx, intptr_t my, int width);
-void ff_hevc_rpi_put_qpel_uni_neon_wrapper(uint8_t *dst, ptrdiff_t dststride, uint8_t *src, ptrdiff_t srcstride,
-                                   int height, intptr_t mx, intptr_t my, int width);
-void ff_hevc_rpi_put_qpel_bi_neon_wrapper(uint8_t *dst, ptrdiff_t dststride, uint8_t *src, ptrdiff_t srcstride,
-                                       int16_t *src2,
-                                       int height, intptr_t mx, intptr_t my, int width);
-#define QPEL_FUNC(name) \
-    void name(int16_t *dst, ptrdiff_t dststride, uint8_t *src, ptrdiff_t srcstride, \
-                                   int height, int width)
-
-QPEL_FUNC(ff_hevc_rpi_put_qpel_v1_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_v2_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_v3_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h1_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h2_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h3_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h1v1_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h1v2_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h1v3_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h2v1_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h2v2_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h2v3_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h3v1_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h3v2_neon_8);
-QPEL_FUNC(ff_hevc_rpi_put_qpel_h3v3_neon_8);
-#undef QPEL_FUNC
-
-#define QPEL_FUNC_UW_PIX(name) \
-    void name(uint8_t *dst, ptrdiff_t dststride, uint8_t *_src, ptrdiff_t _srcstride, \
-                                   int height, intptr_t mx, intptr_t my, int width);
-QPEL_FUNC_UW_PIX(ff_hevc_rpi_put_qpel_uw_pixels_w4_neon_8);
-QPEL_FUNC_UW_PIX(ff_hevc_rpi_put_qpel_uw_pixels_w8_neon_8);
-QPEL_FUNC_UW_PIX(ff_hevc_rpi_put_qpel_uw_pixels_w16_neon_8);
-QPEL_FUNC_UW_PIX(ff_hevc_rpi_put_qpel_uw_pixels_w24_neon_8);
-QPEL_FUNC_UW_PIX(ff_hevc_rpi_put_qpel_uw_pixels_w32_neon_8);
-QPEL_FUNC_UW_PIX(ff_hevc_rpi_put_qpel_uw_pixels_w48_neon_8);
-QPEL_FUNC_UW_PIX(ff_hevc_rpi_put_qpel_uw_pixels_w64_neon_8);
-#undef QPEL_FUNC_UW_PIX
-
-#define QPEL_FUNC_UW(name) \
-    void name(uint8_t *dst, ptrdiff_t dststride, uint8_t *_src, ptrdiff_t _srcstride, \
-                                   int width, int height, int16_t* src2, ptrdiff_t src2stride);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_pixels_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_v1_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_v2_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_v3_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h1_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h2_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h3_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h1v1_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h1v2_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h1v3_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h2v1_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h2v2_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h2v3_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h3v1_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h3v2_neon_8);
-QPEL_FUNC_UW(ff_hevc_rpi_put_qpel_uw_h3v3_neon_8);
-#undef QPEL_FUNC_UW
-
-void ff_hevc_rpi_put_qpel_neon_wrapper(int16_t *dst, uint8_t *src, ptrdiff_t srcstride,
-                                   int height, intptr_t mx, intptr_t my, int width) {
-
-    put_hevc_qpel_neon[my][mx](dst, MAX_PB_SIZE, src, srcstride, height, width);
-}
-
-void ff_hevc_rpi_put_qpel_uni_neon_wrapper(uint8_t *dst, ptrdiff_t dststride, uint8_t *src, ptrdiff_t srcstride,
-                                   int height, intptr_t mx, intptr_t my, int width) {
-
-    put_hevc_qpel_uw_neon[my][mx](dst, dststride, src, srcstride, width, height, NULL, 0);
-}
-
-void ff_hevc_rpi_put_qpel_bi_neon_wrapper(uint8_t *dst, ptrdiff_t dststride, uint8_t *src, ptrdiff_t srcstride,
-                                       int16_t *src2,
-                                       int height, intptr_t mx, intptr_t my, int width) {
-    put_hevc_qpel_uw_neon[my][mx](dst, dststride, src, srcstride, width, height, src2, MAX_PB_SIZE);
-}
-
 void ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, int in_inc, int out_inc,
                                                 const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
                                                 const MvField *curr, const MvField *neigh, uint8_t *bs);
@@ -503,79 +398,6 @@ av_cold void ff_hevcdsp_rpi_init_neon(HEVCDSPContext *c, const int bit_depth)
         c->sao_band_filter_c[5]        = ff_hevc_rpi_sao_band_c_24_neon_8;
         c->sao_edge_filter_c[5]        = ff_hevc_rpi_sao_edge_c_24_neon_8;
 #endif
-        put_hevc_qpel_neon[1][0]       = ff_hevc_rpi_put_qpel_v1_neon_8;
-        put_hevc_qpel_neon[2][0]       = ff_hevc_rpi_put_qpel_v2_neon_8;
-        put_hevc_qpel_neon[3][0]       = ff_hevc_rpi_put_qpel_v3_neon_8;
-        put_hevc_qpel_neon[0][1]       = ff_hevc_rpi_put_qpel_h1_neon_8;
-        put_hevc_qpel_neon[0][2]       = ff_hevc_rpi_put_qpel_h2_neon_8;
-        put_hevc_qpel_neon[0][3]       = ff_hevc_rpi_put_qpel_h3_neon_8;
-        put_hevc_qpel_neon[1][1]       = ff_hevc_rpi_put_qpel_h1v1_neon_8;
-        put_hevc_qpel_neon[1][2]       = ff_hevc_rpi_put_qpel_h2v1_neon_8;
-        put_hevc_qpel_neon[1][3]       = ff_hevc_rpi_put_qpel_h3v1_neon_8;
-        put_hevc_qpel_neon[2][1]       = ff_hevc_rpi_put_qpel_h1v2_neon_8;
-        put_hevc_qpel_neon[2][2]       = ff_hevc_rpi_put_qpel_h2v2_neon_8;
-        put_hevc_qpel_neon[2][3]       = ff_hevc_rpi_put_qpel_h3v2_neon_8;
-        put_hevc_qpel_neon[3][1]       = ff_hevc_rpi_put_qpel_h1v3_neon_8;
-        put_hevc_qpel_neon[3][2]       = ff_hevc_rpi_put_qpel_h2v3_neon_8;
-        put_hevc_qpel_neon[3][3]       = ff_hevc_rpi_put_qpel_h3v3_neon_8;
-        put_hevc_qpel_uw_neon[1][0]      = ff_hevc_rpi_put_qpel_uw_v1_neon_8;
-        put_hevc_qpel_uw_neon[2][0]      = ff_hevc_rpi_put_qpel_uw_v2_neon_8;
-        put_hevc_qpel_uw_neon[3][0]      = ff_hevc_rpi_put_qpel_uw_v3_neon_8;
-        put_hevc_qpel_uw_neon[0][1]      = ff_hevc_rpi_put_qpel_uw_h1_neon_8;
-        put_hevc_qpel_uw_neon[0][2]      = ff_hevc_rpi_put_qpel_uw_h2_neon_8;
-        put_hevc_qpel_uw_neon[0][3]      = ff_hevc_rpi_put_qpel_uw_h3_neon_8;
-        put_hevc_qpel_uw_neon[1][1]      = ff_hevc_rpi_put_qpel_uw_h1v1_neon_8;
-        put_hevc_qpel_uw_neon[1][2]      = ff_hevc_rpi_put_qpel_uw_h2v1_neon_8;
-        put_hevc_qpel_uw_neon[1][3]      = ff_hevc_rpi_put_qpel_uw_h3v1_neon_8;
-        put_hevc_qpel_uw_neon[2][1]      = ff_hevc_rpi_put_qpel_uw_h1v2_neon_8;
-        put_hevc_qpel_uw_neon[2][2]      = ff_hevc_rpi_put_qpel_uw_h2v2_neon_8;
-        put_hevc_qpel_uw_neon[2][3]      = ff_hevc_rpi_put_qpel_uw_h3v2_neon_8;
-        put_hevc_qpel_uw_neon[3][1]      = ff_hevc_rpi_put_qpel_uw_h1v3_neon_8;
-        put_hevc_qpel_uw_neon[3][2]      = ff_hevc_rpi_put_qpel_uw_h2v3_neon_8;
-        put_hevc_qpel_uw_neon[3][3]      = ff_hevc_rpi_put_qpel_uw_h3v3_neon_8;
-        for (x = 0; x < 10; x++) {
-            c->put_hevc_qpel[x][1][0]         = ff_hevc_rpi_put_qpel_neon_wrapper;
-            c->put_hevc_qpel[x][0][1]         = ff_hevc_rpi_put_qpel_neon_wrapper;
-            c->put_hevc_qpel[x][1][1]         = ff_hevc_rpi_put_qpel_neon_wrapper;
-            c->put_hevc_qpel_uni[x][1][0]     = ff_hevc_rpi_put_qpel_uni_neon_wrapper;
-            c->put_hevc_qpel_uni[x][0][1]     = ff_hevc_rpi_put_qpel_uni_neon_wrapper;
-            c->put_hevc_qpel_uni[x][1][1]     = ff_hevc_rpi_put_qpel_uni_neon_wrapper;
-            c->put_hevc_qpel_bi[x][1][0]      = ff_hevc_rpi_put_qpel_bi_neon_wrapper;
-            c->put_hevc_qpel_bi[x][0][1]      = ff_hevc_rpi_put_qpel_bi_neon_wrapper;
-            c->put_hevc_qpel_bi[x][1][1]      = ff_hevc_rpi_put_qpel_bi_neon_wrapper;
-            c->put_hevc_epel[x][1][0]         = ff_hevc_rpi_put_epel_v_neon_8;
-            c->put_hevc_epel[x][0][1]         = ff_hevc_rpi_put_epel_h_neon_8;
-            c->put_hevc_epel[x][1][1]         = ff_hevc_rpi_put_epel_hv_neon_8;
-        }
-        c->put_hevc_epel[0][0][0]  = ff_hevc_rpi_put_pixels_w2_neon_8;
-        c->put_hevc_epel[1][0][0]  = ff_hevc_rpi_put_pixels_w4_neon_8;
-        c->put_hevc_epel[2][0][0]  = ff_hevc_rpi_put_pixels_w6_neon_8;
-        c->put_hevc_epel[3][0][0]  = ff_hevc_rpi_put_pixels_w8_neon_8;
-        c->put_hevc_epel[4][0][0]  = ff_hevc_rpi_put_pixels_w12_neon_8;
-        c->put_hevc_epel[5][0][0]  = ff_hevc_rpi_put_pixels_w16_neon_8;
-        c->put_hevc_epel[6][0][0]  = ff_hevc_rpi_put_pixels_w24_neon_8;
-        c->put_hevc_epel[7][0][0]  = ff_hevc_rpi_put_pixels_w32_neon_8;
-        c->put_hevc_epel[8][0][0]  = ff_hevc_rpi_put_pixels_w48_neon_8;
-        c->put_hevc_epel[9][0][0]  = ff_hevc_rpi_put_pixels_w64_neon_8;
-
-        c->put_hevc_qpel[0][0][0]  = ff_hevc_rpi_put_pixels_w2_neon_8;
-        c->put_hevc_qpel[1][0][0]  = ff_hevc_rpi_put_pixels_w4_neon_8;
-        c->put_hevc_qpel[2][0][0]  = ff_hevc_rpi_put_pixels_w6_neon_8;
-        c->put_hevc_qpel[3][0][0]  = ff_hevc_rpi_put_pixels_w8_neon_8;
-        c->put_hevc_qpel[4][0][0]  = ff_hevc_rpi_put_pixels_w12_neon_8;
-        c->put_hevc_qpel[5][0][0]  = ff_hevc_rpi_put_pixels_w16_neon_8;
-        c->put_hevc_qpel[6][0][0]  = ff_hevc_rpi_put_pixels_w24_neon_8;
-        c->put_hevc_qpel[7][0][0]  = ff_hevc_rpi_put_pixels_w32_neon_8;
-        c->put_hevc_qpel[8][0][0]  = ff_hevc_rpi_put_pixels_w48_neon_8;
-        c->put_hevc_qpel[9][0][0]  = ff_hevc_rpi_put_pixels_w64_neon_8;
-
-        c->put_hevc_qpel_uni[1][0][0]  = ff_hevc_rpi_put_qpel_uw_pixels_w4_neon_8;
-        c->put_hevc_qpel_uni[3][0][0]  = ff_hevc_rpi_put_qpel_uw_pixels_w8_neon_8;
-        c->put_hevc_qpel_uni[5][0][0]  = ff_hevc_rpi_put_qpel_uw_pixels_w16_neon_8;
-        c->put_hevc_qpel_uni[6][0][0]  = ff_hevc_rpi_put_qpel_uw_pixels_w24_neon_8;
-        c->put_hevc_qpel_uni[7][0][0]  = ff_hevc_rpi_put_qpel_uw_pixels_w32_neon_8;
-        c->put_hevc_qpel_uni[8][0][0]  = ff_hevc_rpi_put_qpel_uw_pixels_w48_neon_8;
-        c->put_hevc_qpel_uni[9][0][0]  = ff_hevc_rpi_put_qpel_uw_pixels_w64_neon_8;
     }
     else if (bit_depth == 10) {
         c->hevc_v_loop_filter_luma     = ff_hevc_rpi_v_loop_filter_luma_neon_10;

@@ -141,10 +141,8 @@ NEON-OBJS-$(CONFIG_HEVC_DECODER)       += arm/hevcdsp_init_neon.o       \
 NEON-OBJS-$(CONFIG_HEVC_RPI_DECODER)   += arm/rpi_hevcdsp_init_neon.o    \
                                           arm/rpi_hevc_misc_neon.o       \
                                           arm/rpi_hevcdsp_deblock_neon.o \
-                                          arm/rpi_hevcdsp_epel_neon.o    \
                                           arm/rpi_hevcdsp_idct_neon.o    \
                                           arm/rpi_hevcdsp_res16_neon.o   \
-                                          arm/rpi_hevcdsp_qpel_neon.o    \
                                           arm/rpi_hevcdsp_sao_neon.o     \
                                           arm/rpi_hevcdsp_cres_neon.o
 NEON-OBJS-$(CONFIG_RV30_DECODER)       += arm/rv34dsp_neon.o
