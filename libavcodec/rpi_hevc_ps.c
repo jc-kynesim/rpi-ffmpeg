@@ -1718,6 +1718,7 @@ int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
     if (get_bits_left(gb) < 0) {
         av_log(avctx, AV_LOG_ERROR,
                "Overread PPS by %d bits\n", -get_bits_left(gb));
+        ret = AVERROR_INVALIDDATA;
         goto err;
     }
 
