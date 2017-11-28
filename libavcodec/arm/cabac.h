@@ -53,7 +53,7 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
 {
     const uint8_t *mlps_tables = ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128;
     int bit, ptr, low, tmp1, tmp2;
-    __asm__ (
+    __asm__ volatile (
         "ldr     %[bit], [%[c], %[range_off]]             \n\t"
         "ldrb    %[ptr], [%[state]]                       \n\t"
         "sub     %[tmp1], %[mlps_tables], %[lps_off]      \n\t"
