@@ -49,6 +49,28 @@
 // code size.
 #define USE_N_END_1 1
 
+// BY22 notes that bypass is simply a divide into the bitstream and so we
+// can peek out large quantities of bits at once and treat the result as if
+// it was VLC.  In many cases this will lead to O(1) processing rather than
+// O(n) though the setup and teardown is sufficiently expensive that it is
+// only worth using if we expect to be dealing with more than a few bits
+// The definition of "a few bits" will vary from platform to platform but
+// tests on ARM show that it probably isn't worth it for a single coded
+// residual, but is for >1 - it also seems likely that if there are
+// more residuals then they are likely to be bigger and this will make the
+// O(1) nature of the code more worthwhile.
+
+#if !USE_BY22_DIV
+// * 1/x @ 32 bits gets us 22 bits of accuracy
+#define CABAC_BY22_PEEK_BITS  22
+#else
+// A real 32-bit divide gets us another bit
+// If we have a 64 bit int & a unit time divider then we should get a lot
+// of bits (55)  but that is untested and it is unclear if it would give
+// us a large advantage
+#define CABAC_BY22_PEEK_BITS  23
+#endif
+
 #if ARCH_ARM
 #include "arm/rpi_hevc_cabac.h"
 #endif
@@ -605,29 +627,6 @@ static inline unsigned int hevc_clz32(unsigned int x)
 #define bypass_start(cc) get_cabac_by22_start(cc)
 #define bypass_finish(cc) get_cabac_by22_finish(cc)
 
-// BY22 notes that bypass is simply a divide into the bitstream and so we
-// can peek out large quantities of bits at once and treat the result as if
-// it was VLC.  In many cases this will lead to O(1) processing rather than
-// O(n) though the setup and teardown is sufficiently expensive that it is
-// only worth using if we expect to be dealing with more than a few bits
-// The definition of "a few bits" will vary from platform to platform but
-// tests on ARM show that it probably isn't worth it for a single coded
-// residual, but is for >1 - it also seems likely that if there are
-// more residuals then they are likely to be bigger and this will make the
-// O(1) nature of the code more worthwhile.
-
-
-#if !USE_BY22_DIV
-// * 1/x @ 32 bits gets us 22 bits of accuracy
-#define CABAC_BY22_PEEK_BITS  22
-#else
-// A real 32-bit divide gets us another bit
-// If we have a 64 bit int & a unit time divider then we should get a lot
-// of bits (55)  but that is untested and it is unclear if it would give
-// us a large advantage
-#define CABAC_BY22_PEEK_BITS  23
-#endif
-
 // Bypass block start
 // Must be called before _by22_peek is used as it sets the CABAC environment
 // into the correct state.  _by22_finish must be called to return to 'normal'
@@ -693,8 +692,9 @@ static inline uint32_t get_cabac_by22_peek(const CABACContext * const c)
 // Flush n bypass bits. n must be >= 1 to guarantee correct operation
 // val is an unmodified copy of whatever _by22_peek returned
 #ifndef get_cabac_by22_flush
-static inline void get_cabac_by22_flush(CABACContext * c, const unsigned int n, const uint32_t val)
+static inline void get_cabac_by22_flush(HEVCRpiLocalContext * const lc, const unsigned int n, const uint32_t val)
 {
+    CABACContext * const c = &lc->cc;
     // Subtract the bits used & reshift up to the top of the word
 #if USE_BY22_DIV
     const uint32_t low = (((unsigned int)c->low << n) - (((val >> (32 - n)) * (unsigned int)c->range) << 23));
@@ -1184,8 +1184,9 @@ static av_always_inline int significant_coeff_flag_decode_0(HEVCRpiLocalContext 
 
 
 #ifndef coeff_abs_level_remaining_decode_bypass
-static int coeff_abs_level_remaining_decode_bypass(CABACContext * const c, const unsigned int rice_param)
+static int coeff_abs_level_remaining_decode_bypass(HEVCRpiLocalContext * const lc, const unsigned int rice_param)
 {
+    CABACContext * const c = &lc->cc;
     uint32_t y;
     unsigned int prefix;
     unsigned int last_coeff_abs_level_remaining;
@@ -1210,7 +1211,7 @@ static int coeff_abs_level_remaining_decode_bypass(CABACContext * const c, const
     else {
         unsigned int suffix;
 
-        get_cabac_by22_flush(c, prefix, y);
+        get_cabac_by22_flush(lc, prefix, y);
         y = get_cabac_by22_peek(c);
 
         suffix = (y | 0x80000000) >> (34 - (prefix + rice_param));
@@ -1218,7 +1219,7 @@ static int coeff_abs_level_remaining_decode_bypass(CABACContext * const c, const
         n = prefix + rice_param - 2;
     }
 
-    get_cabac_by22_flush(c, n, y);
+    get_cabac_by22_flush(lc, n, y);
 
     return last_coeff_abs_level_remaining;
 }
@@ -1268,11 +1269,12 @@ static inline uint32_t coeff_sign_flag_decode(CABACContext * const c, const unsi
 #endif
 
 #ifndef coeff_sign_flag_decode_bypass
-static inline uint32_t coeff_sign_flag_decode_bypass(CABACContext * const c, const unsigned int nb)
+static inline uint32_t coeff_sign_flag_decode_bypass(HEVCRpiLocalContext * const lc, const unsigned int nb)
 {
+    CABACContext * const c = &lc->cc;
     uint32_t y;
     y = get_cabac_by22_peek(c);
-    get_cabac_by22_flush(c, nb, y);
+    get_cabac_by22_flush(lc, nb, y);
     return y & ~(0xffffffffU >> nb);
 }
 #endif
@@ -2037,7 +2039,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
 
                 bypass_start(&lc->cc);
 
-                coeff_sign_flags = coeff_sign_flag_decode_bypass(&lc->cc, nb_significant_coeff_flag - sign_hidden);
+                coeff_sign_flags = coeff_sign_flag_decode_bypass(lc, nb_significant_coeff_flag - sign_hidden);
 
                 if (coded_vals != 0)
                 {
@@ -2055,7 +2057,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                         }
 
                         {
-                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_bypass(&lc->cc, c_rice_param);
+                            const int last_coeff_abs_level_remaining = coeff_abs_level_remaining_decode_bypass(lc, c_rice_param);
                             const int trans_coeff_level = *level + last_coeff_abs_level_remaining + 1;
 
                             sum_abs += last_coeff_abs_level_remaining + 1;
@@ -2263,7 +2265,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             {
                 // Need too many bits - flush
                 // n = k
-                get_cabac_by22_flush(cc, k, val);
+                get_cabac_by22_flush(lc, k, val);
                 b = val = get_cabac_by22_peek(cc);
                 n = k + 1;
             }
@@ -2277,7 +2279,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             // Max abs value of an mv is 2^15 - 1 (i.e. a prefix len of 15 bits)
             if (y > 1 && n > CABAC_BY22_PEEK_BITS - 15)
             {
-                get_cabac_by22_flush(cc, n, val);
+                get_cabac_by22_flush(lc, n, val);
                 b = val = get_cabac_by22_peek(cc);
                 n = 0;
             }
@@ -2302,7 +2304,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             if (n > CABAC_BY22_PEEK_BITS)
             {
                 // Need too many bits - flush
-                get_cabac_by22_flush(cc, n - (k + 1), val);
+                get_cabac_by22_flush(lc, n - (k + 1), val);
                 b = val = get_cabac_by22_peek(cc);
                 n = k + 1;
             }
@@ -2313,7 +2315,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             // don't care about b anymore
         }
 
-        get_cabac_by22_flush(cc, n, val);
+        get_cabac_by22_flush(lc, n, val);
         bypass_finish(cc);
     }
 

@@ -61,19 +61,18 @@ static inline void update_rice_arm(uint8_t * const stat_coeff,
     const unsigned int last_coeff_abs_level_remaining,
     const unsigned int c_rice_param)
 {
-    int t;
+    int t = last_coeff_abs_level_remaining << 1;
     __asm__ (
-    "lsl   %[t], %[coeff], #1               \n\t"
     "lsrs  %[t], %[t], %[shift]             \n\t"
+
     "it    eq                               \n\t"
     "subeq %[stat], %[stat], #1             \n\t"
     "cmp   %[t], #6                         \n\t"
     "adc   %[stat], %[stat], #0             \n\t"
     "usat  %[stat], #8, %[stat]             \n\t"
-    : [stat]"+&r"(*stat_coeff),
-         [t]"=&r"(t)
-    :  [coeff]"r"(last_coeff_abs_level_remaining),
-       [shift]"r"(c_rice_param)
+    : [stat]"+r"(*stat_coeff),
+         [t]"+r"(t)
+    :  [shift]"r"(c_rice_param)
     : "cc"
     );
 }
@@ -101,10 +100,10 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "ite        eq                                          \n\t"
          "usateq     %[st]         , #2          , %[i]          \n\t"
          "movne      %[st]         , #0                          \n\t"
-
-         "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
          "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
          "and        %[tmp]        , %[range]    , #0xC0         \n\t"
+
+         "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
          "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
          "ldrb       %[tmp]        , [%[r_b], %[tmp], lsl #1]    \n\t"
          "sub        %[range]      , %[range]    , %[tmp]        \n\t"
@@ -112,20 +111,18 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
          "cmp        %[low]        , %[range], lsl #17           \n\t"
          "ittt       ge                                          \n\t"
          "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-         "mvnge      %[bit]        , %[bit]                      \n\t"
          "movge      %[range]      , %[tmp]                      \n\t"
-
-         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
-         "and        %[bit]        , %[bit]      , #1            \n\t"
-         "orr        %[rv]         , %[bit]      , %[rv], lsl #1 \n\t"
+         "mvnge      %[bit]        , %[bit]                      \n\t"
 
          "clz        %[tmp]        , %[range]                    \n\t"
          "sub        %[tmp]        , #23                         \n\t"
-
+         "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
+         "and        %[bit]        , %[bit]      , #1            \n\t"
+         "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
          "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
+         "orr        %[rv]         , %[bit]      , %[rv], lsl #1 \n\t"
          "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
 
-         "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
 // There is a small speed gain from combining both conditions, using a single
 // branch and then working out what that meant later
          "lsls       %[tmp]        , %[low]      , #16           \n\t"
@@ -139,29 +136,28 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
 
 // Do reload
          "ldrh       %[tmp]        , [%[bptr]]   , #2            \n\t"
+         "rbit       %[bit]        , %[low]                      \n\t"
          "movw       %[r_b]        , #0xFFFF                     \n\t"
+         "clz        %[bit]        , %[bit]                      \n\t"
          "rev        %[tmp]        , %[tmp]                      \n\t"
+         "sub        %[bit]        , %[bit]      , #16           \n\t"
+         "cmp        %[n]          , %[i]                        \n\t"
          "rsb        %[tmp]        , %[r_b]      , %[tmp], lsr #15 \n\t"
 
-         "rbit       %[r_b]        , %[low]                      \n\t"
-         "clz        %[r_b]        , %[r_b]                      \n\t"
-         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
-
 #if CONFIG_THUMB
-         "lsl        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
+         "lsl        %[tmp]        , %[tmp]      , %[bit]        \n\t"
          "add        %[low]        , %[low]      , %[tmp]        \n\t"
 #else
-         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
+         "add        %[low]        , %[low]      , %[tmp], lsl %[bit] \n\t"
 #endif
 
-         "cmp        %[n]          , %[i]                        \n\t"
          "bne        1b                                          \n\t"
          "2:                                                     \n\t"
          :    [bit]"=&r"(bit),
-              [low]"+&r"(c->low),
-            [range]"+&r"(c->range),
+              [low]"+r"(c->low),
+            [range]"+r"(c->range),
               [r_b]"=&r"(reg_b),
-             [bptr]"+&r"(c->bytestream),
+             [bptr]"+r"(c->bytestream),
                 [i]"=&r"(i),
               [tmp]"=&r"(tmp),
                [st]"=&r"(st),
@@ -169,7 +165,6 @@ static inline unsigned int get_cabac_greater1_bits_arm(CABACContext * const c, c
           :  [state0]"r"(state0),
                   [n]"r"(n),
         [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
-               [byte]"M"(offsetof(CABACContext, bytestream)),
             [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
          : "memory", "cc"
     );
@@ -186,26 +181,32 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 {
     unsigned int reg_b, tmp, st, bit;
      __asm__ (
-         "1:                                                     \n\t"
 // Get bin from map
-         "ldrb       %[st]         , [%[ctx_map], %[n]]          \n\t"
+         "ldrb       %[st]         , [%[ctx_map], %[n]]!         \n\t"
+         "1:                                                     \n\t"
 
 // Load state & ranges
-         "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
          "ldrb       %[bit]        , [%[state0], %[st]]          \n\t"
          "and        %[tmp]        , %[range]    , #0xC0         \n\t"
+         "sub        %[r_b]        , %[mlps_tables], %[lps_off]  \n\t"
          "add        %[r_b]        , %[r_b]      , %[tmp], lsl #1 \n\t"
          "ldrb       %[tmp]        , [%[r_b], %[bit]]            \n\t"
          "sub        %[range]      , %[range]    , %[tmp]        \n\t"
 
          "cmp        %[low]        , %[range], lsl #17           \n\t"
          "ittt       ge                                          \n\t"
-         "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
          "mvnge      %[bit]        , %[bit]                      \n\t"
+         "subge      %[low]        , %[low]      , %[range], lsl #17 \n\t"
          "movge      %[range]      , %[tmp]                      \n\t"
 
+// Renorm
+         "clz        %[tmp]        , %[range]                    \n\t"
          "ldrb       %[r_b]        , [%[mlps_tables], %[bit]]    \n\t"
+         "sub        %[tmp]        , #23                         \n\t"
+         "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
          "tst        %[bit]        , #1                          \n\t"
+         "ldrb       %[st]         , [%[ctx_map], #-1]!          \n\t"
+         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
 // GCC asm seems to need strbne written differently for thumb and arm
 #if CONFIG_THUMB
          "it         ne                                          \n\t"
@@ -214,24 +215,17 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
          "strneb     %[n]          , [%[idx]]    , #1            \n\t"
 #endif
 
-// Renorm
-         "clz        %[tmp]        , %[range]                    \n\t"
-         "sub        %[tmp]        , #23                         \n\t"
-         "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
-         "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
-
-         "strb       %[r_b]        , [%[state0], %[st]]          \n\t"
 // There is a small speed gain from combining both conditions, using a single
 // branch and then working out what that meant later
          "subs       %[n]          , %[n]        , #1            \n\t"
+         "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
 #if CONFIG_THUMB
          "itt        ne                                          \n\t"
          "lslsne     %[tmp]        , %[low]      , #16           \n\t"
-         "bne        1b                                          \n\t"
 #else
          "lslnes     %[tmp]        , %[low]      , #16           \n\t"
-         "bne        1b                                          \n\t"
 #endif
+         "bne        1b                                          \n\t"
 
 // If we have bits left then n must be 0 so give up now
          "lsls       %[tmp]        , %[low]      , #16           \n\t"
@@ -239,38 +233,36 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 
 // Do reload
          "ldrh       %[tmp]        , [%[bptr]]   , #2            \n\t"
+         "rbit       %[bit]        , %[low]                      \n\t"
          "movw       %[r_b]        , #0xFFFF                     \n\t"
+         "clz        %[bit]        , %[bit]                      \n\t"
+         "cmp        %[n]          , #0                          \n\t"
          "rev        %[tmp]        , %[tmp]                      \n\t"
+         "sub        %[bit]        , %[bit]      , #16           \n\t"
          "rsb        %[tmp]        , %[r_b]      , %[tmp], lsr #15 \n\t"
 
-         "rbit       %[r_b]        , %[low]                      \n\t"
-         "clz        %[r_b]        , %[r_b]                      \n\t"
-         "sub        %[r_b]        , %[r_b]      , #16           \n\t"
-
 #if CONFIG_THUMB
-         "lsl        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
+         "lsl        %[tmp]        , %[tmp]      , %[bit]        \n\t"
          "add        %[low]        , %[low]      , %[tmp]        \n\t"
 #else
-         "add        %[low]        , %[low]      , %[tmp], lsl %[r_b] \n\t"
+         "add        %[low]        , %[low]      , %[tmp], lsl %[bit] \n\t"
 #endif
 
 // Check to see if we still have more to do
-         "cmp        %[n]          , #0                          \n\t"
          "bne        1b                                          \n\t"
          "2:                                                     \n\t"
          :    [bit]"=&r"(bit),
-              [low]"+&r"(c->low),
-            [range]"+&r"(c->range),
+              [low]"+r"(c->low),
+            [range]"+r"(c->range),
               [r_b]"=&r"(reg_b),
-             [bptr]"+&r"(c->bytestream),
-              [idx]"+&r"(p),
-                [n]"+&r"(n),
+             [bptr]"+r"(c->bytestream),
+              [idx]"+r"(p),
+                [n]"+r"(n),
               [tmp]"=&r"(tmp),
-               [st]"=&r"(st)
+               [st]"=&r"(st),
+          [ctx_map]"+r"(ctx_map)
           :  [state0]"r"(state0),
-            [ctx_map]"r"(ctx_map),
         [mlps_tables]"r"(ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128),
-               [byte]"M"(offsetof(CABACContext, bytestream)),
             [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
          : "memory", "cc"
     );
@@ -293,17 +285,15 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 #define get_cabac_by22_peek get_cabac_by22_peek_arm
 static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
 {
-    uint32_t rv, tmp;
+    uint32_t rv = c->low &~ 1, tmp;
     __asm__ (
-        "bic      %[rv]  , %[low], #1            \n\t"
         "cmp      %[inv] , #0                    \n\t"
         "it       ne                             \n\t"
         "umullne  %[tmp] , %[rv] , %[inv], %[rv] \n\t"
         :  // Outputs
-             [rv]"=&r"(rv),
+             [rv]"+r"(rv),
              [tmp]"=r"(tmp)
         :  // Inputs
-             [low]"r"(c->low),
              [inv]"r"(c->range)
         :  // Clobbers
                 "cc"
@@ -311,180 +301,176 @@ static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
     return rv << 1;
 }
 
-#if 0
-
-// ***** Slower than the C  :-(
 #define get_cabac_by22_flush get_cabac_by22_flush_arm
-static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigned int n, const uint32_t val)
+static inline void get_cabac_by22_flush_arm(HEVCRpiLocalContext *const lc, const unsigned int n, uint32_t val)
 {
-    uint32_t m, tmp;
-    __asm__ (
-    "add    %[bits], %[bits], %[n]   \n\t"
-    "ldr    %[m], [%[ptr], %[bits], lsr #3]  \n\t"
-
-    "rsb    %[tmp], %[n], #32        \n\t"
-    "lsr    %[tmp], %[val], %[tmp]   \n\t"
-    "mul    %[tmp], %[range], %[tmp] \n\t"
-
-    "rev    %[m], %[m]               \n\t"
-
-    "lsl    %[tmp], %[tmp], #23      \n\t"
-    "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-    "and    %[tmp], %[bits], #7         \n\t"
-    "lsl    %[m], %[m], %[tmp]          \n\t"
-
-    "orr    %[low], %[low], %[m], lsr #9      \n\t"
+    uint32_t bits, ptr, tmp1, tmp2;
+    __asm__ volatile (
+        "ldrh    %[bits], [%[lc], %[bits_off]]     \n\t"
+        "ldr     %[ptr], [%[lc], %[ptr_off]]       \n\t"
+        "rsb     %[tmp1], %[n], #32                \n\t"
+        "add     %[bits], %[bits], %[n]            \n\t"
+        "ldrh    %[tmp2], [%[lc], %[range_off]]    \n\t"
+        "lsr     %[tmp1], %[val], %[tmp1]          \n\t"
+        "ldr     %[val], [%[lc], %[low_off]]       \n\t"
+        "ldr     %[ptr], [%[ptr], %[bits], lsr #3] \n\t"
+        "mul     %[tmp1], %[tmp2], %[tmp1]         \n\t"
+        "and     %[tmp2], %[bits], #7              \n\t"
+        "strh    %[bits], [%[lc], %[bits_off]]     \n\t"
+        "rev     %[ptr], %[ptr]                    \n\t"
+        "lsl     %[tmp1], %[tmp1], #23             \n\t"
+        "rsb     %[val], %[tmp1], %[val], lsl %[n] \n\t"
+        "lsl     %[ptr], %[ptr], %[tmp2]           \n\t"
+        "orr     %[val], %[val], %[ptr], lsr #9    \n\t"
+        "str     %[val], [%[lc], %[low_off]]       \n\t"
         :  // Outputs
-             [m]"=&r"(m),
-           [tmp]"=&r"(tmp),
-          [bits]"+&r"(c->by22.bits),
-           [low]"+&r"(c->low)
+            [val]"+r"(val),
+           [bits]"=&r"(bits),
+            [ptr]"=&r"(ptr),
+           [tmp1]"=&r"(tmp1),
+           [tmp2]"=&r"(tmp2)
         :  // Inputs
-               [n]"r"(n),
-             [val]"r"(val),
-             [inv]"r"(c->range),
-           [range]"r"(c->by22.range),
-             [ptr]"r"(c->bytestream)
+                  [lc]"r"(lc),
+                   [n]"r"(n),
+            [bits_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.bits)),
+             [ptr_off]"J"(offsetof(HEVCRpiLocalContext, cc.bytestream)),
+           [range_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.range)),
+             [low_off]"J"(offsetof(HEVCRpiLocalContext, cc.low))
         :  // Clobbers
+           "memory"
     );
 }
 
-
-// Works but slower than C
-#define coeff_abs_level_remaining_decode_by22(c,r) coeff_abs_level_remaining_decode_by22_arm(c, r)
-static int coeff_abs_level_remaining_decode_by22_arm(CABACContext * const c, const unsigned int c_rice_param)
+#define coeff_abs_level_remaining_decode_bypass coeff_abs_level_remaining_decode_bypass_arm
+static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContext * const lc, unsigned int rice_param)
 {
-    uint32_t n, val, tmp, level;
-
-//    PROFILE_START();
-
+    uint32_t last_coeff_abs_level_remaining;
+    uint32_t prefix, n1, range, n2, ptr, tmp1, tmp2;
     __asm__ (
-            // Peek
-            "bic    %[val],  %[low],   #1  \n\t"
-            "cmp    %[inv], #0          \n\t"
-            "umullne  %[tmp], %[val], %[inv], %[val] \n\t"
-            "lsl    %[val], %[val], #1  \n\t"
-
-            // Count bits (n = prefix)
-            "mvn    %[n], %[val] \n\t"
-            "clz    %[n], %[n]   \n\t"
-
-            "lsl    %[level], %[val], %[n] \n\t"
-            "subs   %[tmp], %[n], #3 \n\t"
-            "blo    2f \n\t"
-
-            // prefix >= 3
-            // < tmp = prefix - 3
-            // > tmp = prefix + rice - 3
-            "add    %[tmp], %[tmp], %[rice] \n\t"
-            // > n = prefix * 2 + rice - 3
-            "add    %[n], %[tmp], %[n] \n\t"
-            "cmp    %[n], #21 \n\t"
-            "bhi    3f \n\t"
-
-            "orr    %[level], %[level], #0x80000000 \n\t"
-            "rsb    %[tmp], %[tmp], #31 \n\t"
-            "lsr    %[level], %[level], %[tmp] \n\t"
-
-            "mov    %[tmp], #2 \n\t"
-            "add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
-            "b      1f \n\t"
-
-            // > 22 bits used in total - need reload
-            "3:  \n\t"
-
-            // Stash prefix + rice - 3 in level (only spare reg)
-            "mov    %[level], %[tmp] \n\t"
-            // Restore n to flush value (prefix)
-            "sub    %[n], %[n], %[tmp] \n\t"
-
-            // Flush + reload
-
-//          "rsb    %[tmp], %[n], #32        \n\t"
-//          "lsr    %[tmp], %[val], %[tmp]   \n\t"
-//          "mul    %[tmp], %[range], %[tmp] \n\t"
-
-            // As it happens we know that all the bits we are flushing are 1
-            // so we can cheat slightly
-            "rsb    %[tmp], %[range], %[range], lsl %[n] \n\t"
-            "lsl    %[tmp], %[tmp], #23      \n\t"
-            "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-            "add    %[bits], %[bits], %[n]   \n\t"
-            "ldr    %[n], [%[ptr], %[bits], lsr #3]  \n\t"
-            "rev    %[n], %[n]               \n\t"
-            "and    %[tmp], %[bits], #7         \n\t"
-            "lsl    %[n], %[n], %[tmp]          \n\t"
-
-            "orr    %[low], %[low], %[n], lsr #9      \n\t"
-
-            // (reload)
-
-            "bic    %[val],  %[low],   #1  \n\t"
-            "cmp    %[inv], #0          \n\t"
-            "umullne  %[tmp], %[val], %[inv], %[val] \n\t"
-            "lsl    %[val], %[val], #1  \n\t"
-
-            // Build value
-
-            "mov    %[n], %[level] \n\t"
-
-            "orr     %[tmp], %[val], #0x80000000 \n\t"
-            "rsb     %[level], %[level], #31 \n\t"
-            "lsr     %[level], %[tmp], %[level] \n\t"
-
-            "mov    %[tmp], #2 \n\t"
-            "add    %[level], %[level], %[tmp], lsl %[rice] \n\t"
-            "b      1f \n\t"
-
-            // prefix < 3
-            "2:  \n\t"
-            "rsb    %[tmp], %[rice], #31 \n\t"
-            "lsr    %[level], %[level], %[tmp] \n\t"
-            "orr    %[level], %[level], %[n], lsl %[rice] \n\t"
-            "add    %[n], %[n], %[rice] \n\t"
-
-            "1:  \n\t"
-            // Flush
-            "add    %[n], %[n], #1 \n\t"
-
-            "rsb    %[tmp], %[n], #32        \n\t"
-            "lsr    %[tmp], %[val], %[tmp]   \n\t"
-
-            "add    %[bits], %[bits], %[n]   \n\t"
-            "ldr    %[val], [%[ptr], %[bits], lsr #3]  \n\t"
-
-            "mul    %[tmp], %[range], %[tmp] \n\t"
-            "lsl    %[tmp], %[tmp], #23      \n\t"
-            "rsb    %[low], %[tmp], %[low], lsl %[n] \n\t"
-
-            "rev    %[val], %[val]               \n\t"
-            "and    %[tmp], %[bits], #7         \n\t"
-            "lsl    %[val], %[val], %[tmp]          \n\t"
-
-            "orr    %[low], %[low], %[val], lsr #9      \n\t"
+        "ldr     %[remain], [%[lc], %[low_off]]               \n\t"
+        "ldr     %[prefix], [%[lc], %[range_off]]             \n\t"
+        "bic     %[remain], %[remain], #1                     \n\t"
+        "ldrh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
+        "ldr     %[ptr], [%[lc], %[ptr_off]]                  \n\t"
+        "cmp     %[prefix], #0                                \n\t"
+        "umullne %[prefix], %[remain], %[prefix], %[remain]   \n\t"
+        "ldrh    %[range], [%[lc], %[by22_range_off]]         \n\t"
+        "lsl     %[remain], %[remain], #1                     \n\t"
+        "mvn     %[prefix], %[remain]                         \n\t"
+        "clz     %[prefix], %[prefix]                         \n\t"
+        "rsbs    %[n1], %[prefix], #2                         \n\t"
+        "bcc     1f                                           \n\t"
+        "adc     %[n1], %[rice], %[prefix]                    \n\t"
+        "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
+        "rsb     %[n2], %[n1], #32                            \n\t"
+        "and     %[tmp1], %[tmp2], #7                         \n\t"
+        "strh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
+        "lsr     %[tmp2], %[tmp2], #3                         \n\t"
+        "lsr     %[n2], %[remain], %[n2]                      \n\t"
+        "mul     %[n2], %[range], %[n2]                       \n\t"
+        "ldr     %[range], [%[lc], %[low_off]]                \n\t"
+        "ldr     %[ptr], [%[ptr], %[tmp2]]                    \n\t"
+        "rsb     %[tmp2], %[rice], #31                        \n\t"
+        "lsl     %[remain], %[remain], %[prefix]              \n\t"
+        "lsl     %[n2], %[n2], #23                            \n\t"
+        "rsb     %[range], %[n2], %[range], lsl %[n1]         \n\t"
+        "rev     %[ptr], %[ptr]                               \n\t"
+        "lsl     %[n2], %[prefix], %[rice]                    \n\t"
+        "add     %[remain], %[n2], %[remain], lsr %[tmp2]     \n\t"
+        "b       3f                                           \n\t"
+        "1:                                                   \n\t"
+        "add     %[n2], %[rice], %[prefix], lsl #1            \n\t"
+        "cmp     %[n2], %[peek_bits_plus_2]                   \n\t"
+        "bhi     2f                                           \n\t"
+        "sub     %[n1], %[n2], #2                             \n\t"
+        "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
+        "rsb     %[n2], %[n1], #32                            \n\t"
+        "strh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
+        "lsr     %[tmp1], %[tmp2], #3                         \n\t"
+        "lsr     %[n2], %[remain], %[n2]                      \n\t"
+        "mul     %[n2], %[range], %[n2]                       \n\t"
+        "rsb     %[range], %[rice], #34                       \n\t"
+        "ldr     %[ptr], [%[ptr], %[tmp1]]                    \n\t"
+        "and     %[tmp1], %[tmp2], #7                         \n\t"
+        "lsl     %[remain], %[remain], %[prefix]              \n\t"
+        "ldr     %[tmp2], [%[lc], %[low_off]]                 \n\t"
+        "rsb     %[prefix], %[prefix], %[range]               \n\t"
+        "orr     %[remain], %[remain], #0x80000000            \n\t"
+        "rev     %[ptr], %[ptr]                               \n\t"
+        "lsl     %[n2], %[n2], #23                            \n\t"
+        "mov     %[range], #2                                 \n\t"
+        "rsb     %[tmp2], %[n2], %[tmp2], lsl %[n1]           \n\t"
+        "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
+        "lsl     %[rice], %[range], %[rice]                   \n\t"
+        "orr     %[range], %[tmp2], %[ptr], lsr #9            \n\t"
+        "add     %[remain], %[rice], %[remain], lsr %[prefix] \n\t"
+        "b       4f                                           \n\t"
+        "2:                                                   \n\t"
+        "add     %[n1], %[tmp2], %[prefix]                    \n\t"
+        "ldr     %[tmp2], [%[ptr], %[n1], lsr #3]             \n\t"
+        "rsb     %[tmp1], %[prefix], #32                      \n\t"
+        "push    {%[rice]}                                    \n\t"
+        "and     %[rice], %[n1], #7                           \n\t"
+        "lsr     %[tmp1], %[remain], %[tmp1]                  \n\t"
+        "ldr     %[ptr], [%[lc], %[low_off]]                  \n\t"
+        "mul     %[remain], %[range], %[tmp1]                 \n\t"
+        "rev     %[tmp2], %[tmp2]                             \n\t"
+        "rsb     %[n2], %[prefix], %[n2]                      \n\t"
+        "ldr     %[tmp1], [%[lc], %[range_off]]               \n\t"
+        "lsl     %[rice], %[tmp2], %[rice]                    \n\t"
+        "sub     %[tmp2], %[n2], #2                           \n\t"
+        "lsl     %[remain], %[remain], #23                    \n\t"
+        "rsb     %[remain], %[remain], %[ptr], lsl %[prefix]  \n\t"
+        "orr     %[remain], %[remain], %[rice], lsr #9        \n\t"
+        "add     %[prefix], %[n1], %[tmp2]                    \n\t"
+        "bic     %[n1], %[remain], #1                         \n\t"
+        "ldr     %[ptr], [%[lc], %[ptr_off]]                  \n\t"
+        "cmp     %[tmp1], #0                                  \n\t"
+        "rsb     %[rice], %[tmp2], #32                        \n\t"
+        "umullne %[tmp1], %[n1], %[tmp1], %[n1]               \n\t"
+        "and     %[tmp1], %[prefix], #7                       \n\t"
+        "ldr     %[ptr], [%[ptr], %[prefix], lsr #3]          \n\t"
+        "lsl     %[n1], %[n1], #1                             \n\t"
+        "lsr     %[rice], %[n1], %[rice]                      \n\t"
+        "rsb     %[n2], %[n2], #34                            \n\t"
+        "mul     %[range], %[range], %[rice]                  \n\t"
+        "pop     {%[rice]}                                    \n\t"
+        "rev     %[ptr], %[ptr]                               \n\t"
+        "orr     %[n1], %[n1], #0x80000000                    \n\t"
+        "strh    %[prefix], [%[lc], %[by22_bits_off]]         \n\t"
+        "mov     %[prefix], #2                                \n\t"
+        "lsl     %[range], %[range], #23                      \n\t"
+        "rsb     %[range], %[range], %[remain], lsl %[tmp2]   \n\t"
+        "lsl     %[remain], %[prefix], %[rice]                \n\t"
+        "add     %[remain], %[remain], %[n1], lsr %[n2]       \n\t"
+        "3:                                                   \n\t"
+        "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
+        "orr     %[range], %[range], %[ptr], lsr #9           \n\t"
+        "4:                                                   \n\t"
+        "str     %[range], [%[lc], %[low_off]]                \n\t"
         :  // Outputs
-         [level]"=&r"(level),
-             [n]"=&r"(n),
-           [val]"=&r"(val),
-           [tmp]"=&r"(tmp),
-          [bits]"+&r"(c->by22.bits),
-           [low]"+&r"(c->low)
+            [remain]"=&r"(last_coeff_abs_level_remaining),
+              [rice]"+r"(rice_param),
+            [prefix]"=&r"(prefix),
+                [n1]"=&r"(n1),
+             [range]"=&r"(range),
+                [n2]"=&r"(n2),
+               [ptr]"=&r"(ptr),
+              [tmp1]"=&r"(tmp1),
+              [tmp2]"=&r"(tmp2)
         :  // Inputs
-            [rice]"r"(c_rice_param),
-             [inv]"r"(c->range),
-           [range]"r"(c->by22.range),
-             [ptr]"r"(c->bytestream)
+                          [lc]"r"(lc),
+            [peek_bits_plus_2]"I"(CABAC_BY22_PEEK_BITS + 2),
+                     [low_off]"J"(offsetof(HEVCRpiLocalContext, cc.low)),
+                   [range_off]"J"(offsetof(HEVCRpiLocalContext, cc.range)),
+               [by22_bits_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.bits)),
+              [by22_range_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.range)),
+                     [ptr_off]"J"(offsetof(HEVCRpiLocalContext, cc.bytestream))
         :  // Clobbers
-                "cc"
+           "cc", "memory"
     );
-
-//    PROFILE_ACC(residual_abs);
-
-    return level;
+    return last_coeff_abs_level_remaining;
 }
-#endif
 
 #endif /* HAVE_ARMV6T2_INLINE */
 
