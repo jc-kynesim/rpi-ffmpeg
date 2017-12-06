@@ -638,9 +638,11 @@ static void worker_pic_free_one(HEVCRpiJob * const jb)
 {
     // Free coeff stuff - allocation not the same for all buffers
     HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
-
+#ifdef RPI_VPU_INTRA_PRED
+#else
     if (cf->s[0].buf != NULL)
         av_freep(&cf->mptr);
+#endif
     if (cf->s[2].buf != NULL)
         gpu_free(&cf->gptr);
     memset(cf, 0, sizeof(*cf));
@@ -649,17 +651,29 @@ static void worker_pic_free_one(HEVCRpiJob * const jb)
 static int worker_pic_alloc_one(HEVCRpiJob * const jb, const unsigned int coeff_count)
 {
     HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
+    
+    int size23 = (coeff_count + 32*32) * sizeof(cf->s[2].buf[0]);
+    int size0 = coeff_count * sizeof(cf->s[0].buf[0]) + 63;
 
-    if (gpu_malloc_cached((coeff_count + 32*32) * sizeof(cf->s[2].buf[0]), &cf->gptr) != 0)
+#ifdef RPI_VPU_INTRA_PRED
+    if (gpu_malloc_cached(size23 + size0, &cf->gptr) != 0)
         goto fail;
+#else
+    if (gpu_malloc_cached(size23, &cf->gptr) != 0)
+        goto fail;
+#endif
     cf->s[2].buf = (int16_t *)cf->gptr.arm;
     cf->s[3].buf = cf->s[2].buf + coeff_count;
 
+#ifdef RPI_VPU_INTRA_PRED
+    cf->s[0].buf = (int16_t *)( (int)cf->gptr.arm + size23 );
+#else
     // Must be 64 byte aligned for our zero zapping code so over-allocate &
     // round
-    if ((cf->mptr = av_malloc(coeff_count * sizeof(cf->s[0].buf[0]) + 63)) == NULL)
+    if ((cf->mptr = av_malloc(size0)) == NULL)
         goto fail;
     cf->s[0].buf = (void *)(((intptr_t)cf->mptr + 63) & ~63);
+#endif
     return 0;
 
 fail:
@@ -1787,6 +1801,31 @@ static inline HEVCPredCmd * rpi_new_intra_cmd(HEVCRpiJob * const jb)
 static void do_intra_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int log2_trafo_size, int x0, int y0, int c_idx)
 {
     // If rpi_enabled then sand - U & V done on U call
+#ifdef RPI_VPU_INTRA_PRED
+    if (c_idx == 1 && s->rpi_vpu_intra_pred) {
+        uint32_t *setup = lc->jb0->intra.vpu_cmds + lc->jb0->intra.vpu_n;
+        int size = 1 << log2_trafo_size;
+        int numleft = 0;
+        int numabove = 0;
+        int code = lc->tu.intra_pred_mode_c;
+        x0 >>= ctx_hshift(s, c_idx);
+        y0 >>= ctx_vshift(s, c_idx);
+        lc->jb0->intra.vpu_n += 2;
+        if (lc->na.cand_left)
+          numleft += size;
+        if (lc->na.cand_bottom_left)
+          numleft += size;
+        if (lc->na.cand_up)
+          numabove += size;
+        if (lc->na.cand_up_right)
+          numabove += size;
+        // numleft(8) numabove(8) code(8) size(8)
+        // x(16) y(16)
+        *setup++ = (numleft<<24) + (numabove<<16) + (code<<8) + size;
+        *setup++ = (x0<<16) + y0;
+        return;
+    }
+#endif
     if (c_idx <= 1)
     {
         HEVCPredCmd *const cmd = rpi_new_intra_cmd(lc->jb0);
@@ -3422,7 +3461,12 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
         const unsigned int xl = x0 > ctb_size ? x0 - ctb_size : 0;
         const unsigned int yt = y0 > ctb_size ? y0 - ctb_size : 0;
         const unsigned int yb = tile_end ? bound_b : y - ctb_size;
-#ifdef RPI_DEBLOCK_VPU
+#ifdef RPI_USE_VPU_L2
+        // TODO
+        // This define should be RPI_DEBLOCK_VPU
+        // but for some reason it causes the tests to fail?
+        //
+        // The chroma should already have been flushed by the time this flush is called?
         const int flush_chroma = !(s->enable_rpi_deblock && av_rpi_is_sand_frame(s->frame));
 #else
         const int flush_chroma = 1;
@@ -3777,6 +3821,12 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
             rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, 0, cf->s[2].n * csize);
             rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, offset32, cf->s[3].n * csize);
         }
+#ifdef RPI_VPU_INTRA_PRED
+        if (s->rpi_vpu_intra_pred && cf->s[0].n ) {
+            const unsigned int csize = sizeof(cf->s[0].buf[0]);
+            rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, (int)cf->s[0].buf - (int)cf->s[2].buf, cf->s[0].n * csize);
+        }
+#endif
     }
 
     pred_c = mc_terminate_add_c(s, vqj, rfe, &jb->chroma_ip);
@@ -3843,6 +3893,32 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     vpu_qpu_wait(&sync_y);
 
     rpi_cache_flush_finish(rfe);
+    
+#ifdef RPI_VPU_INTRA_PRED
+    // Now start up the Intra prediction work
+    if (s->rpi_vpu_intra_pred && jb->intra.vpu_n ) {
+        const vpu_qpu_job_h vqj2 = vpu_qpu_job_new();
+        assert ( jb->intra.vpu_n < 3 * RPI_MAX_PRED_CMDS);
+        //printf("Got %d commands (%d)\n",jb->intra.vpu_n,3 * RPI_MAX_PRED_CMDS);
+        //for(int i=0;i<16;i++) {
+        //  printf("%0x\n",jb->intra.vpu_cmds[i]);
+        //}
+        // hevc_residual(uint8_t *img (r0), int stride (r1), int numcmds (r2), uint32_t cmds[numcmds] (r3))
+        vpu_qpu_job_add_vpu(vqj2,
+                vpu_get_fn(s->ps.sps->bit_depth),
+                choose_intra_cached( (int) (get_vc_address_u(s->frame) ) ),
+                s->frame->linesize[3] * 128,
+                jb->intra.vpu_n,
+                (int)jb->intra.gptr.vc,
+                0,
+                8);
+        vpu_qpu_job_add_sync_this(vqj2, &sync_y);
+        vpu_qpu_job_finish(vqj2);
+        vpu_qpu_wait(&sync_y);
+        
+        jb->intra.vpu_n = 0; // Reset ready for next batch
+    }
+#endif
 }
 
 
@@ -3860,6 +3936,12 @@ static HEVCRpiJob * job_new(void)
 
     jb->intra.n = 0;
     jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS);
+    
+#ifdef RPI_VPU_INTRA_PRED
+    jb->intra.vpu_n = 0; // TODO is there some place else this should be reset?
+    gpu_malloc_uncached(RPI_MAX_PRED_CMDS * 3 * sizeof(uint32_t), &jb->intra.gptr);
+    jb->intra.vpu_cmds = (uint32_t*)jb->intra.gptr.arm;
+#endif
 
     // * Sizeof the union structure might be overkill but at the moment it
     //   is correct (it certainly isn't going to be too small)
@@ -3884,6 +3966,9 @@ static void job_delete(HEVCRpiJob * const jb)
     av_freep(&jb->intra.cmds);
     rpi_free_inter_pred(&jb->chroma_ip);
     rpi_free_inter_pred(&jb->luma_ip);
+#ifdef RPI_VPU_INTRA_PRED
+    gpu_free(&jb->intra.gptr);
+#endif
 }
 
 static void jbg_delete(HEVCRpiJobGlobal * const jbg)
@@ -4111,6 +4196,12 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
     HEVCRpiJob * const jb = lc->jb0;
     int more_data = 1;
     int ctb_addr_ts = lc->ts;
+
+#ifdef RPI_VPU_INTRA_PRED    
+// Decide whether we can use intra prediction on chroma
+    s->rpi_vpu_intra_pred = av_rpi_is_sand_frame(s->frame) && !s->ps.pps->constrained_intra_pred_flag && !s->ps.sps->pcm_enabled_flag;
+    //printf("vpu_intra=%d\n",s->rpi_vpu_intra_pred);
+#endif
 
     lc->unit_done = 0;
     while (more_data && ctb_addr_ts < s->ps.sps->ctb_size)

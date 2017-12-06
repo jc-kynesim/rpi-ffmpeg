@@ -1513,6 +1513,24 @@ static inline int next_subset(HEVCRpiLocalContext * const lc, int i, const int c
     return i;
 }
 
+#ifdef RPI_VPU_INTRA_PRED
+
+#define CODE_RESID_U 128
+#define CODE_RESID_V 129
+#define CODE_RESID_DC_U 130
+#define CODE_RESID_DC_V 131
+
+// Set top bits so that image buffer goes via the L2 cache
+int choose_intra_cached(int addr) {
+#ifdef RPI_USE_VPU_L2
+  return (addr&0x3fffffff) | 
+              (0x40000000);
+#else
+  return addr;
+#endif
+}
+#endif
+
 static void rpi_add_residual(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
     const unsigned int log2_trafo_size, const unsigned int c_idx,
     const unsigned int x0, const unsigned int y0, const int16_t * const coeffs)
@@ -1530,6 +1548,22 @@ static void rpi_add_residual(const HEVCRpiContext *const s, HEVCRpiJob * const j
 
     const unsigned int i = jb->intra.n;
     HEVCPredCmd *const pc = jb->intra.cmds + i - 1;
+    
+#ifdef RPI_VPU_INTRA_PRED
+    if (c_idx >= 1 && s->rpi_vpu_intra_pred) {
+        // spare(16) code(8) size(8)
+        // pred address (32)
+        // residual address (32)  (Or DC coefficient)
+        uint32_t *setup = jb->intra.vpu_cmds + jb->intra.vpu_n;
+        int size = 1 << log2_trafo_size;
+        int code = c_idx == 1 ? CODE_RESID_U : CODE_RESID_V;
+        jb->intra.vpu_n += 3;
+        *setup++ = (code<<8) + size;
+        *setup++ = choose_intra_cached( (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, x, y) ) );
+        *setup++ = (int)coeffs - (int)jb->coeffs.gptr.arm + (int)jb->coeffs.gptr.vc;
+        return;
+    }
+#endif
 
     if (i != 0 && c_idx == 2 && pc->type == RPI_PRED_ADD_RESIDUAL_U &&
         pc->ta.dst == dst)
@@ -1592,6 +1626,22 @@ static void rpi_add_dc(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
 
     const unsigned int i = jb->intra.n;
     HEVCPredCmd *const pc = jb->intra.cmds + i - 1;
+    
+#ifdef RPI_VPU_INTRA_PRED
+    if (c_idx >= 1 && s->rpi_vpu_intra_pred) {
+        // spare(16) code(8) size(8)
+        // pred address (32)
+        // residual address (32)  (Or DC coefficient)
+        uint32_t *setup = jb->intra.vpu_cmds + jb->intra.vpu_n;
+        int size = 1 << log2_trafo_size;
+        int code = c_idx == 1 ? CODE_RESID_DC_U : CODE_RESID_DC_V;
+        jb->intra.vpu_n += 3;
+        *setup++ = (code<<8) + size;
+        *setup++ = choose_intra_cached( (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, x, y) ) );
+        *setup++ = coeff;
+        return;
+    }
+#endif
 
     if (i != 0 && c_idx == 2 && pc->type == RPI_PRED_ADD_RESIDUAL_U &&
         pc->ta.dst == dst)

@@ -6,8 +6,11 @@
 # Author : Peter de Rivaz
 # ******************************************************************************
 
+# Lines that fail to assemble start with #:
+# The script insert_magic_opcodes.sh inserts the machine code directly for these.
+
 # HEVC VPU Transform
-#             fe
+#
 # Transform matrix can be thought of as
 #   output row vector = input row vector * transMatrix2
 #
@@ -101,6 +104,8 @@ hevc_trans_16x16:
   beq sao_process_row
   cmp r5,7
   beq hevc_uv_deblock_16x16_striped
+  cmp r5,8
+  beq hevc_residual
 
   push r6-r15, lr # TODO cut down number of used registers
   mov r14,r3 # coeffs32
@@ -746,7 +751,7 @@ filtering_done:
 #     u0u1u2u3v0v1v2v3 -> first extract all u edges to filter, then extract all v edges to filter for vertical edges
 # We will processing a pair of 8*16 blocks of samples in each iteration (allowing the same underlying code to work once we extract the strengths appropriately)
 # A single load of setup contains enough information for the whole 16x16 block
-  
+
 hevc_uv_deblock_16x16:
   push r6-r15, lr
   mov r14,0
@@ -846,7 +851,7 @@ uv_skip_save_top:
 uv_start_deblock_loop:
   # move onto next 16x16 (could do this with circular buffer support instead)
   add r3,16
-  
+
   and r3,r8
   add r4,32
   # Perform loop counter operations (may work with an addcmpbgt as well?)
@@ -936,7 +941,7 @@ do_chroma_filter_with_tc: # Alternative entry point when tc already prepared
   vadd HX(P0,0),HX(P0,0),HX(delta,0)
   vsub HX(Q0,0),HX(Q0,0),HX(delta,0)
   b lr
-  
+
 # This version works in a striped format
 #
 # samples are stored UVUV in stripes 128 bytes wide.
@@ -970,7 +975,7 @@ do_chroma_filter_with_tc: # Alternative entry point when tc already prepared
 #
 # Vertical filtering does one pass for top edge, one for middle edge
 # Horiz filtering does one pass for U, then one pass for V
-  
+
 hevc_uv_deblock_16x16_striped:
   push r6-r15, lr
   mov r14, r1 # Save stride between stripes
@@ -986,7 +991,7 @@ hevc_uv_deblock_16x16_striped:
   vmov H(zeros,0),0
   mov r3, (1<<BIT_DEPTH)-1
   vmov HX(maxvalue,0), r3
-  
+
 # r0 is location of current block - 4 * stride
 # r1 is stride between rows = 128
 # r2 is location of current block
@@ -1035,7 +1040,7 @@ uv_deblock_loop_striped:
   # TODO if the setup is entirely zeros, we can skip the following processing!
   vstb H(zeros,0),(r4)
   bl uv_vert_filter_striped
-  
+
   bl uv_horz_filter_striped
   mov r12,r11
   add r3,8*64
@@ -1173,7 +1178,7 @@ uv_vert_filter_striped:
   valtl H(setup,0),H(setup,0),H(setup,0)
   valtl HX(tc,0),H(setup,0),H(setup,0)
   bl do_chroma_filter_with_tc
-  
+
 .if BIT_DEPTH==8
   vadds V(16,15)+r3, HX(P0,0), 0
   vadds V(16,17)+r3, HX(Q0,0), 0
@@ -1183,7 +1188,7 @@ uv_vert_filter_striped:
   vmin VX(16,47)+r3, HX(P0,0), HX(maxvalue,0)
   vmin VX(16,1)+r3, HX(Q0,0), HX(maxvalue,0)
 .endif
-  
+
   pop pc
 
 # Filter edge at H(16,0)+r3
@@ -1208,7 +1213,7 @@ uv_horz_filter_striped:
   vadd H(tc,0),H(setup,8),0 # Could remove this if we store u/v in alternate order (issue is only ra port has shifted access)
   valtl HX(tc,0),H(setup,0),H(tc,0) # u0v0u1v1...
   bl do_chroma_filter_with_tc
-  
+
 .if BIT_DEPTH==8
   vadds H(15,0)+r3, HX(P0,0), 0
   # P3 and Q3 never change so don't bother saving back
@@ -1247,7 +1252,7 @@ loop_cmds:
 
   pop r6-r7, pc
 
-  
+
 # SAO FILTER
 #
 # Works in units of 8x16 blocks with interleaved U/V samples
@@ -1256,7 +1261,7 @@ loop_cmds:
 # r1 = used as temporary
 # r2 = upper context
 # r3 pointer to current block (0,16,32,48)
-# r6 sao data 
+# r6 sao data
 #
 # EDGE MODE
 # {typeidx(2) spare(4) eoclass(2) saooffsetval_u(6*4)}
@@ -1267,7 +1272,7 @@ loop_cmds:
 # {spare(3) leftclass_v(5) saooffsetval_v(6*4)}
 # For edge, sidedata is 8 flags
 # For band, sidedata is leftclass
-# 
+#
 # sao values packed 6 bits each, LSBits for offset[4].
 #
 # Flag values mark which parts of the boundary to restore
@@ -1326,7 +1331,7 @@ loop_cmds:
 sao_process_row:
   push r6-r15, lr
   mov r9, r1
-  mov r11, r3 
+  mov r11, r3
   mov r12, 0xffff
   and r12, r12, r4 # Width
   lsr r13, r4, 16 # Height
@@ -1340,7 +1345,7 @@ sao_process_row:
   mov r1, (1<<BIT_DEPTH)-1
   vmov HX(Vsaomax,0), r1
   mov r1, 128
-  
+
 .if BIT_DEPTH==8
   mov r14, 16 # Amount to move onto next block
   # Prepare by loading the first block
@@ -1359,11 +1364,11 @@ sao_process_row:
   vmov HX(Vnextbelow,0), HX(32,32)
   vmov HX(Vnextmid++,0), VX(16,46++) REP 2
 .endif
- 
+
   # We have no need to store horizontal context as we always do an entire 16 high row each time.
-  
+
   # However, we may need diagonals and right pixels so fetch the block data one ahead
-  
+
 sao_block_loop:
   # At start of loop:
   #  r0 points to current block (that we will need to save)
@@ -1377,13 +1382,13 @@ sao_block_loop:
   vmov H(15,0), H(15,16)
   vmov V(16,14++), V(16,30++) REP 2
   vmov H(32,0), H(32,16)
-  
+
   # Shift prefetched block into current block
   vmov H(15,16), H(15,32)
   vmov H(16++,16), H(16++,32) REP 16
   vmov H(32,16), H(32,32)
   mov r1, 128
-  
+
   # Load upper context
   vldb H(15,32), 16(r2)
   # Load next block
@@ -1400,7 +1405,7 @@ sao_block_loop:
   # HX(nextmid++,0) REP 2 has right two columns of next
   # HX(nextabove,0) has next upper context
   # HX(nextbelow,0) has next lower context
-  
+
   # First repair the next block
   vmov HX(15,32), HX(Vnextabove,0)
   vmov HX(32,32), HX(Vnextbelow,0)
@@ -1421,7 +1426,7 @@ sao_block_loop:
   vldh HX(16++,32), (r0 += r1) REP 16
   # Load bottom right data
   vldh HX(32,32), (r6)
-  
+
   sub r0, r14
   ### Store next values
   vmov HX(Vnextabove,0), HX(15,32)
@@ -1438,18 +1443,18 @@ sao_block_loop:
   vmov HX(32,32), HX(Vprevbelow,0) IFNZ
 .endif
 
-  # Load data: 
+  # Load data:
   ld r6, (r11)
   ld r3, 4(r11)
-  
+
   # Move the offset values into the VRF
   vmov HY(VsaoOffsetVal,0), r6
   valtl HY(VsaoOffsetVal,0),HY(VsaoOffsetVal,0), r3 # Alternate u with v offsets
   vshl HY(VsaoOffsetVal,0),HY(VsaoOffsetVal,0),8 # Move into MSBs
-  
+
   # Process and save block
   bl sao_block
-  
+
   # Save upper context
 .if BIT_DEPTH==8
   vstb H(31,16),(r2)
@@ -1458,10 +1463,10 @@ sao_block_loop:
 .endif
   # Move onto next block
   add r0, r14
-  
+
   # Prepare r5 to move to the following block
   add r8,1 # When we reach 8 we need to switch r7
-  
+
 .if BIT_DEPTH==8
   mov r14,16 # Amount to move on
   and r1,r8,7
@@ -1488,7 +1493,7 @@ normal_case_sao:
   cmp r8,r7
   blt sao_block_loop
   pop r6-r15, pc
-  
+
 
 sao_block:
   lsr r10, r6, 30 # Top 2 bits are class
@@ -1498,14 +1503,14 @@ sao_block:
   beq sao_band
   # sao_copy has nothing to do
   b lr
-    
+
 sao_band:
   asr r6,LeftClass # only bottom 5 bits are used
   asr r3,LeftClass
   vmov H(VLeftClass,0), r6
   valtl H(VLeftClass,0), H(VLeftClass,0), r3 # Alternate U and V left class
-  
-  vmov HX(Vtemp,0), 4 
+
+  vmov HX(Vtemp,0), 4
 
   # Set up loop to process a single 16x16 block
   mov r3, 0
@@ -1540,7 +1545,7 @@ sao_band_loop:
 .endif
   addcmpblt r3,r1,r15,sao_band_loop
   subscale16 r3,r15,r1 # Put r3 back again
-  
+
   # Store processed block
   mov r1, 128
 .if BIT_DEPTH==8
@@ -1549,7 +1554,7 @@ sao_band_loop:
   vsth HX(48++,32), (r0 += r1) REP 16
 .endif
   b lr
-  
+
 .if BIT_DEPTH==8
 # We pass in r3,r4,r5 as the three locations to be examined
 sao_edge:
@@ -1583,7 +1588,7 @@ got_class:
   mov r3, 0
   mov r1,64
   addscale16 r15,r3,r1
-sao_edge_loop:  
+sao_edge_loop:
   vmov H(16,48)+r3, H(16,16)+r3 # Default values are unchanged
   vsub HX(Vdiff0,0),H(16,16)+r3,H(0,0)+r4
   vsgn HX(Vk,0),HX(Vdiff0,0),HX(Vzeros,0) CLRA SACC
@@ -1600,29 +1605,29 @@ sao_edge_loop:
   vadd HX(Vk,0), HX(Vk,0), 1
   vadd HX(Vk,0), HX(Vk,0), 1 IFN
   ##vadd H(16,48)+r3,HX(Vk,0), 0
-  
+
   vmul HX(Vk,0), HX(Vk,0), 6 # Amount to shift
   vshl HY(Voffset,0),HY(VsaoOffsetVal,0), HX(Vk,0)
   vasr HY(Voffset,0),HY(Voffset,0),26
   #vmov H(16,48)+r3,0
   #vmov H(16,48)+r3,1 IFZ
   #vmov H(16,48)+r3,4 IFNZ
-  
+
   vadds H(16,48)+r3, H(16,16)+r3, HX(Voffset,0) IFNZ
-  
+
   add r4,r1
   add r5,r1
   addcmpblt r3,r1,r15,sao_edge_loop
-  
+
   mov r4, 0x3ffc  # Repair all but corners (done afterwards)
   #vbitplanes -, r4 SETF
   .half 0xf408
   .half 0xe038
   .half 0x03c4
-  
+
   # Check if we need to repair some edges
   mov r5, r13 # Offset to reach bottom edge
-  sub r3, r12 , 1 
+  sub r3, r12 , 1
   min r3, r3, 7 # Offset for right edge
   add r3, r3, r3 # * 2 for U/V offsets
   btst r6, TopFlag # Set if at the top edge, so ne means we need to restore, eq means not
@@ -1673,17 +1678,17 @@ done_bottomleft:
   .half 0xf408
   .half 0xe038
   .half 0x03c4
-  
+
   btst r6, TopRightFlag
   beq done_topright
   vmov H(16,48), H(16,16) IFNZ
 done_topright:
   btst r6, BottomRightFlag
   beq done_bottomright
-  
+
   vmov H(16,48)+r5, H(16,16)+r5 IFNZ
 done_bottomright:
-  
+
   mov r1, 128
 
   # Store processed block
@@ -1728,7 +1733,7 @@ got_class:
   mov r3, 0
   mov r1,64
   addscale16 r15,r3,r1
-sao_edge_loop:  
+sao_edge_loop:
   vmov HX(48,32)+r3, HX(16,0)+r3 # Default values are unchanged
   vsub HX(Vdiff0,0),HX(16,0)+r3,HX(0,0)+r4
   vsgn HX(Vk,0),HX(Vdiff0,0),HX(Vzeros,0) CLRA SACC
@@ -1744,28 +1749,28 @@ sao_edge_loop:
   # So add 1, then another 1 if negative
   vadd HX(Vk,0), HX(Vk,0), 1
   vadd HX(Vk,0), HX(Vk,0), 1 IFN
-  
+
   vmul HX(Vk,0), HX(Vk,0), 6 # Amount to shift
   vshl HY(Voffset,0),HY(VsaoOffsetVal,0), HX(Vk,0)
   vasr HY(Voffset,0),HY(Voffset,0),26
-  
+
   vadds HX(48,32)+r3, HX(16,0)+r3, HX(Voffset,0) IFNZ
   vmax HX(48,32)+r3,HX(48,32)+r3,0
   vmin HX(48,32)+r3,HX(48,32)+r3,HX(Vsaomax,0)
-  
+
   add r4,r1
   add r5,r1
   addcmpblt r3,r1,r15,sao_edge_loop
-  
+
   mov r4, 0x3ffc  # Repair all but corners (done afterwards)
   #vbitplanes -, r4 SETF
   .half 0xf408
   .half 0xe038
   .half 0x03c4
-  
+
   # Check if we need to repair some edges
   mov r5, r13 # Offset to reach bottom edge
-  sub r3, r12 , 1 
+  sub r3, r12 , 1
   min r3, r3, 7 # Offset for right edge
   add r3, r3, r3 # * 2 for U/V offsets
   btst r6, TopFlag # Set if at the top edge, so ne means we need to restore, eq means not
@@ -1816,20 +1821,852 @@ done_bottomleft:
   .half 0xf408
   .half 0xe038
   .half 0x03c4
-  
+
   btst r6, TopRightFlag
   beq done_topright
   vmov HX(48,32), HX(16,0) IFNZ
 done_topright:
   btst r6, BottomRightFlag
   beq done_bottomright
-  
+
   vmov HX(48,32)+r5, HX(16,0)+r5 IFNZ
 done_bottomright:
-  
+
   mov r1, 128
 
   # Store processed block
   vsth HX(48++,32), (r0 += r1) REP 16
   b lr
 .endif
+
+###############################################################################
+# Intra prediction
+#
+# Chroma intra prediction is either DC/plane or 0/45/90 degrees.
+#
+# We will have a stream of intra prediction commands along with
+# residual commands
+#
+###############################################################################
+
+# We don't support constrained intra prediction as this complicates where the
+# samples can be extended from.
+
+# INITIAL SETUP
+# base address
+# stride (in bytes)
+#
+# PER INTRA COMMAND
+# numleft(8) numabove(8) code(8) size(8)
+# x(16) y(16)
+#
+# PER RESIDUAL COMMAND
+# spare(16) code(8) size(8)
+# pred address (32)
+# residual address (32)  (Or DC coefficient)
+#
+# Looks like ref code uses a DC mode in some cases and tries to combine consecutive DC modes together
+# Would be better, but for the moment avoid the combination.
+
+# Sizes 4/8/16/32
+
+.equ CODE_INTRA_PLANAR, 0
+.equ CODE_INTRA_DC, 1
+.equ CODE_INTRA_LEFT, 10
+.equ CODE_INTRA_DOWN, 26
+.equ CODE_INTRA_DIAGONAL, 34
+# Could compress these codes if desired
+.equ CODE_RESID_U, 128
+.equ CODE_RESID_V, 129
+.equ CODE_RESID_DC_U, 130
+.equ CODE_RESID_DC_V, 131
+
+# Rows 0..32 used for left context
+.set Vxplus1_orig, 33
+.set Vxplus1, 34
+.set VselectU, 35
+.set VselectV, 36
+.set Vtemp, 37
+.set Vtop, 38 # 4 rows of top samples here
+.set Vtop1, 39
+.set Vtop4, 42 # another 4 rows of top-right samples here
+.set Vleft, 46 # these left samples are used during dc prediction
+.set Vleft1, 47
+.set Vleft2, 48
+.set Vleft3, 49
+.set Vmaxvalue, 50
+.set Vsize, 51
+.set Vtrafosizeplus1, 52
+.set Vleftspecial, 53
+.set Vtopspecial, 54
+.set Vleftcoeff, 55
+.set Vleftcoeff2, 56
+.set Vtopcoeff, 57
+.set Vtopcoeff2, 58
+
+# Overall loop
+# hevc_residual(uint8_t *img (r0), int stride (r1), int numcmds (r2), uint32_t cmds[numcmds] (r3))
+#
+# r2 size
+# r4 code
+#
+# r12 img
+# r13 stride
+# r14 pointer to final cmd
+# r15 cmds
+hevc_residual:
+  push r6-r15, lr
+  mov r12,r0
+  mov r13,r1
+  mov r14,r2
+  mov r15,r3
+  lsl r14,r14,2
+  add r14,r14,r15 # Adjust to point to end
+  # Prepare some constants in the VRF
+  mov r3, (1<<BIT_DEPTH)-1
+  # Prepare x plus 1 (pairs due to UV format)
+  vmov VX(32,0++),1 REP 2
+  vmov VX(32,2++),2 REP 2
+  vmov VX(32,4++),3 REP 2
+  vmov VX(32,6++),4 REP 2
+  vmov VX(32,8++),5 REP 2
+  vmov VX(32,10++),6 REP 2
+  vmov VX(32,12++),7 REP 2
+  vmov VX(32,14++),8 REP 2
+  vmov HX(Vmaxvalue,0), r3
+  vand -,HX(Vxplus1_orig,0),1 SETF # NZ for U, Z for V
+  vmov HX(VselectU,0),0
+  vmov HX(VselectV,0),0
+  mov r1,0xffff
+  vmov HX(VselectU,0),r1 IFNZ
+  vmov HX(VselectV,0),r1 IFZ
+  mov r1, 128
+residual_cmd_loop:
+  ld r0, (r15)
+  add r15,4
+  lsr r9, r0, 16 # r9: numleft, numabove
+  lsr r4,r0,8
+#:and r0,r0,255
+  .half 0x6e80 #AUTOINSERTED
+#:and r4,r4,255
+  .half 0x6e84 #AUTOINSERTED
+  # TODO could use a switch statement here to reduce number of comparisons?  Or bisect decisions instead?
+  cmp r4, CODE_RESID_U
+  beq resid_u
+  cmp r4, CODE_RESID_V
+  beq resid_v
+  cmp r4, CODE_RESID_DC_U
+  beq resid_dc_u
+  cmp r4, CODE_RESID_DC_V
+  beq resid_dc_v
+  # Now we have an intra command
+  # load x,y
+# r2 address of block
+# r1 x&63
+# r9 numleft, numabove
+# r10 x
+  ld r2, (r15)
+  add r15,4
+  lsr r10, r2, 16
+#:and r2, r2, 0xffff # y
+  .half 0x6f02 #AUTOINSERTED
+  lsl r2, 7 # Multiply by 128 bytes
+  add r2, r12
+  lsr r1, r10, 6 # r1 = x/64 = number of tiles
+  mul r1, r13
+  add r2, r1
+#:and r1, r10, 63 # r1 = x&63
+  .half 0xc1c1 #AUTOINSERTED
+  .half 0x5746 #AUTOINSERTED
+  addscale2 r2, r2, r1 # r2 is now the address of the block
+  cmp r4, CODE_INTRA_LEFT
+  beq straight_across_prediction
+  cmp r4, CODE_INTRA_DOWN
+  beq straight_down_prediction
+  cmp r4, CODE_INTRA_DC
+  beq dc_prediction
+  cmp r4, CODE_INTRA_PLANAR
+  beq planar_prediction
+  cmp r4, CODE_INTRA_DIAGONAL
+  beq diagonal_prediction
+  b planar_prediction # Needs more complicated code here to handle other shifts
+  
+next_residual_cmd:
+  cmp r15, r14
+  blt residual_cmd_loop
+  pop r6-r15, pc
+
+# Residual
+
+# r2 prediction pointer
+# r1 128 stride
+# r0 size
+# r3 residual pointer
+# r4 residual stride (2*size)
+#
+# r8 upper bound for loop
+# r9 16
+
+# At entry we already have r0 set up, but need to prepare the rest
+
+# Set flags corresponding to appropriate U/V channel and size
+
+resid_v:
+  mov r4,0x5555
+  b resid_common
+resid_u:
+  mov r4,0xaaaa # Z marks important places so bits are cleared for U samples
+resid_common:
+  #vbitplanes -, r4 SETF
+  .half 0xf408
+  .half 0xe038
+  .half 0x03c4
+
+  # Set flags based on the size
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  ld r2, (r15)
+  add r15,4
+  ld r3, (r15)
+  add r15,4
+  lsl r4, r0, 1
+  add r8, r3, r4
+  mov r9, 16
+
+residual_loop:
+.if BIT_DEPTH==8
+  vmov HX(0++,0),0 REP r0  # TODO could combine this with later operations
+  vldb H(0++,0), (r2 += r1) REP r0
+.else
+  vldh HX(0++,0), (r2 += r1) REP r0
+.endif
+  vldh HX(0++,32), (r3 += r4) REP r0
+  valtl HX(0++,32), HX(0++,32), HX(0++,32) REP r0 # Copy U/V samples into pairs
+#:vadd HX(0++,0), HX(0++,0), HX(0++,32) REP r0 IFZ
+  .half 0xfd07 #AUTOINSERTED
+  .half 0x8020 #AUTOINSERTED
+  .half 0x0280 #AUTOINSERTED
+  .half 0xfbe0 #AUTOINSERTED
+  .half 0x403e #AUTOINSERTED
+  vmax HX(0++,0), HX(0++,0), 0 REP r0 IFZ
+  vmin HX(0++,0), HX(0++,0), HX(Vmaxvalue,0) REP r0 IFZ
+.if BIT_DEPTH==8
+  vstb HX(0++,0), (r2 += r1) REP r0 IFZ
+  add r2,16
+.else
+  vsth HX(0++,0), (r2 += r1) REP r0 IFZ
+  add r2,32
+.endif
+  # Now need to repeat for each 8 wide strip
+  addcmpblt r3,r9,r8,residual_loop
+  b next_residual_cmd
+
+resid_dc_v:
+  mov r4,0x5555
+  b resid_dc_common
+resid_dc_u:
+  mov r4,0xaaaa # Z marks important places so bits are cleared for U samples
+resid_dc_common:
+#:vbitplanes HX(Vtemp,0), r4 SETF
+  .half 0xf408 #AUTOINSERTED
+  .half 0x8978 #AUTOINSERTED
+  .half 0x03c4 #AUTOINSERTED
+
+  # Set flags based on the size
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  ld r2, (r15)
+  add r15,4
+  ld r3, (r15)
+  add r15,4
+  lsl r4, r0, 1 # UV pairs
+.if BIT_DEPTH==8
+  mov r9, 16
+.else
+  mov r9, 32
+  lsl r4, r4, 1 # Each sample is 16bits
+.endif
+  add r8, r2, r4
+  mov r1, 128
+residual_dc_loop:
+.if BIT_DEPTH==8
+  vmov HX(0++,0), 0 REP r0
+  vldb H(0++,0), (r2 += r1) REP r0
+  # vmov H(0++,0), 128 REP r0 # HACK to default value
+.else
+  vldh HX(0++,0), (r2 += r1) REP r0
+.endif
+#:vadd HX(0++,0), HX(0++,0), r3 REP r0 IFZ
+  .half 0xfd07 #AUTOINSERTED
+  .half 0x8020 #AUTOINSERTED
+  .half 0x0380 #AUTOINSERTED
+  .half 0xfbe0 #AUTOINSERTED
+  .half 0x400c #AUTOINSERTED
+  vmax HX(0++,0), HX(0++,0), 0 REP r0 IFZ
+  vmin HX(0++,0), HX(0++,0), HX(Vmaxvalue,0) REP r0 IFZ
+.if BIT_DEPTH==8
+# TODO is it faster to use flags on st, or to only modify c certain parts?
+#:vstb H(0++,0), (r2 += r1) REP r0 IFZ
+  .half 0xf887 #AUTOINSERTED
+  .half 0xe000 #AUTOINSERTED
+  .half 0x0380 #AUTOINSERTED
+  .half 0x13e0 #AUTOINSERTED
+  .half 0x4008 #AUTOINSERTED
+.else
+#:vsth HX(0++,0), (r2 += r1) REP r0 IFZ
+  .half 0xf88f #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0380 #AUTOINSERTED
+  .half 0x13e0 #AUTOINSERTED
+  .half 0x4008 #AUTOINSERTED
+.endif
+  # Now need to repeat for each 8 wide strip
+  addcmpblt r2,r9,r8,residual_dc_loop
+  b next_residual_cmd
+
+# This function fetches the above data into HX(Vtop++,0)
+fetch_above:
+#:and r10, r9, 255 # r10 becomes numabove
+  .half 0xc1ca #AUTOINSERTED
+  .half 0x4f48 #AUTOINSERTED
+  cmp r10,0
+  beq no_samples_above
+  sub r2,128
+  mov r1, 32
+.if BIT_DEPTH==8
+  vmov HX(Vtop++,0), 0 REP 4
+  vldb H(Vtop++,0), (r2+=r1) REP 4  # Slightly overfetching for small blocks here
+.else
+  vldh HX(Vtop++,0), (r2+=r1) REP 4  # Slightly overfetching for small blocks here
+.endif
+  # Note that we are not doing constrained, so we will either find all the top samples valid, or none of them
+  # TODO what happens at right hand edge of image?
+  # TODO could have an early out if extra context not required?
+  cmp r10,r0
+  bgt can_load_more
+  # we need to edge extend from last samples
+  addscale2 r5, r2, r0
+.if BIT_DEPTH==8
+  sub r5, 2
+  ldb r4, (r5) # U
+  ldb r5,1(r5) # V
+.else
+  sub r5, 4
+  ldh r4, (r5) # U
+  ldh r5,2(r5) # V
+.endif
+  vmov HX(Vtemp,0), r4
+  valtl HX(Vtemp,0), HX(Vtemp,0), r5
+  # Now figure out which rows to overwrite
+  # Size offset num
+  # 4    0      1 Special case this as needs flags
+  # 8    1      1
+  # 16   2      2
+  # 32   4      4
+  lsr r4,r0,3 # r4 is now the offset in y
+  lsl r5,r4,6 # r5 convert to VRF offset
+  add r2, 128 # Fix r2 back to pointing at top-left of block
+  cmp r4,0
+  bne multiplerows
+  vmov HX(Vtop,0), HX(Vtemp,0) IFNZ
+  b lr
+multiplerows:
+  mov r6,r0
+  mov r0,r4
+  vmov HX(Vtop++,0)+r5, HX(Vtemp,0) REP r0
+  mov r0,r6
+  b lr
+
+can_load_more:
+  add r5, r1, r0 # new x position
+.if BIT_DEPTH==8
+  cmp r5, 64
+.else
+  cmp r5, 32
+.endif
+  beq fetch_from_next_tile
+  addscale2 r3, r2, r0
+  lsr r4,r0,3 # r4 is now the offset in y
+  lsl r5,r4,6 # r5 convert to VRF offset
+  cmp r4,0
+  beq already_loaded
+  mov r6,r0
+  mov r0,r4
+.if BIT_DEPTH==8
+  vmov HX(Vtop++,0), 0 REP r0
+  vldb H(Vtop++,0)+r5, (r3+=r1) REP r0
+.else
+  vldh HX(Vtop++,0)+r5, (r3+=r1) REP r0
+.endif
+  mov r0,r6
+already_loaded:
+  add r2, 128
+  b lr
+fetch_from_next_tile:
+  addscale2 r3, r2, r0  # Move to end of block
+  add r2,128            # fixup r2
+  sub r3,128            # wind back tile width
+  add r3, r12           # move to next tile
+  lsr r4,r0,3 # r4 is now the offset in y
+  lsl r5,r4,6 # r5 convert to VRF offset
+  cmp r4,0
+  bne fetch_multiple_next_tile
+  # Block size 4, want to load second 8 samples
+.if BIT_DEPTH==8
+  sub r3, 8
+  vmov HX(Vtemp,0), 0
+  vld H(Vtemp,0),(r3) IFNZ
+.else
+  sub r3, 16
+  vldh HX(Vtemp,0),(r3) IFNZ
+.endif
+
+  b lr
+fetch_multiple_next_tile:
+  mov r6,r0
+  mov r0,r4
+.if BIT_DEPTH==8
+  vmov HX(Vtop++,0),0 REP r0
+  vldb H(Vtop++,0)+r5, (r3+=r1) REP r0  # TODO this may be overfetching
+.else
+  vldh HX(Vtop++,0)+r5, (r3+=r1) REP r0  # TODO this may be overfetching
+.endif
+  mov r0,r6
+  b lr
+
+no_samples_above:
+  cmp r9,0
+  beq no_samples_at_all
+  # Need to fetch the left hand samples and replicate
+  cmp r1,0
+  beq different_tile2
+  sub r5,r2,4
+  b got_left_pointer
+different_tile2:
+.if BIT_DEPTH==8
+  add r5,r2,128-2
+.else
+  add r5,r2,128-4
+.endif
+  sub r5, r5, r13
+got_left_pointer:
+.if BIT_DEPTH==8
+  ldb r4, (r5) # U
+  ldb r5, 1(r5) # V
+.else
+  ldh r4, (r5) # U
+  ldh r5, 2(r5) # V
+.endif
+  vmov HX(Vtemp,0), r4
+  valtl HX(Vtop++,0), HX(Vtemp,0), r5 REP 8  # TODO could reduce rep count here based on size
+  b lr
+no_samples_at_all:
+  mov r4, 1<<(BIT_DEPTH-1)
+  vmov HX(Vtop++,0), r4 REP 8
+  b lr
+
+# Straight down prediction
+# First step is to prepare above samples in HX(Vtop++,0)  (note that this covers up to 4 rows for a 32x32 block)
+# For use in planar, we also prepare the next 4 rows
+straight_down_prediction:
+  # Set flags according to size
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  # Fetch top samples
+  bl fetch_above
+  mov r1, 128
+  mov r9, 32
+  lsl r4, r0, 1
+  add r8, r2, r4
+  mov r5, 0 # Offset in VRF
+straight_down_loop:
+.if BIT_DEPTH==8
+  vst H(Vtop,0)+r5, (r2 += r1) REP r0 IFZ
+.else
+  vsth HX(Vtop,0)+r5, (r2 += r1) REP r0 IFZ
+.endif
+  add r5, 64
+  addcmpblt r2,r9,r8,straight_down_loop
+  b next_residual_cmd
+
+# At entry we have:
+# r2 address of block
+# r1 x&63
+# r0 size
+# r4 code
+#
+# r9 numleft, numabove
+#
+# r12 img
+# r13 stride
+# r14 numcmds remaining
+# r15 cmds
+#
+# fetch_left will fetch valid samples for 0..32
+# however, doesn't do extension if numleft <= size
+fetch_left:
+  add r0, 1 # We will fetch one row more than needed in case of planar
+  cmp r9, 0xff
+  bgt have_some_left
+  cmp r9, 0
+  beq use_default_value
+.if BIT_DEPTH==8
+  ldb r4, -128(r2) # U from above
+  ldb r5, -127(r2) # V from above
+.else
+  ldh r4, -128(r2) # U from above
+  ldh r5, -126(r2) # V from above
+.endif
+  vmov HX(0,0), r4
+  valtl HX(0++,32), HX(0,0), r5 REP r0
+  sub r0,1
+  b lr
+
+use_default_value:
+  mov r4, 1<<(BIT_DEPTH-1)
+  vmov VX(0,14++), r4 REP 2
+  vmov VX(16,14++), r4 REP 2
+  sub r0, 1
+  b lr
+have_some_left:
+  cmp r1,0
+  beq different_tile
+  mov r1, 128
+.if BIT_DEPTH==8
+  sub r4, r2, 16 # In the same tile
+  vmov H(0++,0), 0 REP r0
+  vldb H(0++,0), (r4 += r1) REP r0
+.else
+  sub r4, r2, 32 # In the same tile
+  vldh HX(0++,0), (r4 += r1) REP r0
+.endif
+  sub r0,1
+  b lr
+different_tile:
+.if BIT_DEPTH==8
+  add r4, r2, 128-16
+  sub r4, r13
+  mov r1, 128
+  vmov HX(0++,0), 0 REP r0
+  vldb H(0++,0), (r4 += r1) REP r0
+.else
+  add r4, r2, 128-32
+  sub r4, r13
+  mov r1, 128
+  vldh HX(0++,0), (r4 += r1) REP r0
+.endif
+  sub r0,1
+  b lr
+
+straight_across_prediction:
+# Need to look at numleft to decide how to get edge samples
+# If 0, then extend from top if present, or default value otherwise
+
+  # Set flags according to size
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  # Fetch samples to left
+  bl fetch_left
+
+  # Copy the significant rows across
+  vmov VX(0,32++), VX(0,14++) REP 16  # Could reduce this for smaller sizes
+  cmp r0,16
+  ble prepared_data_across
+  vmov VX(16,32++), VX(16,14++) REP 16
+prepared_data_across:
+# This prediction can now be reused for all stores across
+  mov r1, 128
+.if BIT_DEPTH==8
+  mov r9, 16
+  addscale2 r8, r2, r0
+.else
+  mov r9, 32
+  addscale4 r8, r2, r0
+.endif
+straight_across_prediction_loop:
+.if BIT_DEPTH==8
+  vstb H(0++,32), (r2 += r1) REP r0 IFZ
+.else
+  vsth HX(0++,32), (r2 += r1) REP r0 IFZ
+.endif
+  addcmpblt r2,r9,r8,straight_across_prediction_loop
+  b next_residual_cmd
+
+
+# 45 degree prediction
+diagonal_prediction:
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  bl fetch_above
+
+  # Now can work down
+  cmp r0, 4
+  bne large_blocks
+# For 4x4 we can unroll the loop
+.if BIT_DEPTH==8
+  vstb H(Vtop,0), (r2) IFZ
+  add r2, 128
+  vstb H(Vtop,2), (r2) IFZ
+  add r2, 128
+  vstb H(Vtop,4), (r2) IFZ
+  add r2, 128
+  vstb H(Vtop,6), (r2) IFZ
+.else
+  vsth HX(Vtop,0), (r2) IFZ
+  add r2, 128
+  vsth HX(Vtop,2), (r2) IFZ
+  add r2, 128
+  vsth HX(Vtop,4), (r2) IFZ
+  add r2, 128
+  vsth HX(Vtop,6), (r2) IFZ
+.endif
+  b next_residual_cmd
+
+large_blocks:
+  # TODO worried about change to r2 when move right?
+  b next_residual_cmd # SKIP diagonal for the moment...
+
+  # Work in units of 8 down
+  mov r5,0
+  lsl r10,r0,6
+outer_diagonal_loop:
+# r5,r10 counts on in 64s until reach size
+  mov r4,r5
+  lsl r9,r0,6
+  add r9,r4
+  mov r6,64
+mid_diagonal_loop:
+# r4,r9 used as 64*y offset for outer loop
+# prepare HX(0,0) and HX(0,32) with appropriate samples for shifted access across top samples
+#:vadd HX(0,0), HX(Vtop,0)+r4, 0
+  .half 0xf504 #AUTOINSERTED
+  .half 0x8026 #AUTOINSERTED
+  .half 0x6400 #AUTOINSERTED
+#:vadd HX(0,32), HX(Vtop1,0)+r4, 0
+  .half 0xf504 #AUTOINSERTED
+  .half 0xa026 #AUTOINSERTED
+  .half 0x7400 #AUTOINSERTED
+# r3,r8 used for inner loop
+  mov r3,0
+  mov r8,16
+diagonal_loop:
+.if BIT_DEPTH==8
+  vstb H(0,0)+r3, (r2)
+.else
+  vsth HX(0,0)+r3, (r2)
+.endif
+  add r2, 128
+  addcmpblt r3,2,r8,diagonal_loop
+  addcmpblt r4,r6,r9,mid_diagonal_loop
+  addcmpblt r5,r6,r10,outer_diagonal_loop
+  b next_residual_cmd
+
+# DC prediction
+dc_prediction:
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  bl fetch_above
+  bl fetch_left
+  valtl HX(Vleft,0),VX(0,14),VX(0,15)
+  valtu HX(Vleft1,0),VX(0,14),VX(0,15)
+  valtl HX(Vleft2,0),VX(16,14),VX(16,15)
+  valtu HX(Vleft3,0),VX(16,14),VX(16,15)
+  # Size 4 -> 1
+  # Size 8 -> 1
+  lsr r5,r0,3
+  max r5,r5,1
+  mov r6,r0
+  mov r0,r4
+#:vadd HX(0,0),HX(Vleft++,0),HX(Vtop++,0) CLRA UACC REP r0 # TODO make this unsigned somehow?
+  .half 0xfd07 #AUTOINSERTED
+  .half 0x8022 #AUTOINSERTED
+  .half 0xe226 #AUTOINSERTED
+  .half 0xf3e0 #AUTOINSERTED
+  .half 0x09be #AUTOINSERTED
+#:vand -,HX(0,0),HX(VselectU,0) SUM r3 IFZ
+  .half 0xfc80 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0223 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x52fc #AUTOINSERTED
+#:vand -,HX(0,0),HX(VselectV,0) SUM r4 IFZ
+  .half 0xfc80 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0224 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x533c #AUTOINSERTED
+  mov r0,r6
+  lsr r3,r3,r0
+  lsr r3,r3,1
+  lsr r4,r4,r0
+  lsr r4,r4,1
+  vand HX(1,0), HX(VselectU,0), r3
+  vand HX(2,0), HX(VselectV,0), r4
+  vor HX(0,0), HX(1,0), HX(2,0)
+  mov r1, 128
+.if BIT_DEPTH==8
+  mov r9, 16
+  addscale2 r8, r2, r0
+.else
+  mov r9, 32
+  addscale4 r8, r2, r0
+.endif
+dc_loop:
+.if BIT_DEPTH==8
+  vstb H(0,0), (r2 += r1) REP r0 IFZ
+.else
+  vsth HX(0,0), (r2 += r1) REP r0 IFZ
+.endif
+  addcmpblt r2,r9,r8,dc_loop
+  b next_residual_cmd
+
+
+# Planar prediction
+# Can use 0x1000 offset to get replicating alias (less useful as we need pairs of values)
+# Is there a way to get PPU number out easily?
+# Could simply preload or precalculate?
+
+# POS(x, y) = ((size - 1 - x) * left[y] + (x + 1) * top[size]  +
+#              (size - 1 - y) * top[x]  + (y + 1) * left[size] + size) >> (trafo_size + 1);
+
+
+# Replicate left UV pairs over the whole 32x16 block
+# r0 size
+# r5 y*64
+# r6 y+1
+planar_prediction:
+  # fetch samples and prepare extensions
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  bl fetch_left
+  bl fetch_above
+
+  lsr r8,r9,8 # r8 is now numleft
+  cmp r8,r0 # if greater than size we are already done
+  lsl r4,r0,6 # r4 points to left sample
+  bgt left_data_extended
+  vmov HX(0,0)+r4, HX(63,0)+r4 # copy from samples above
+left_data_extended:
+  vmov HX(Vsize,0), r0
+  # Duplicate out the extra samples using special behaviour
+  add r4,0x1000 # Special replicating alias
+  vmov HX(Vleftspecial,0),VX(0,14)+r4  # U sample
+  valtl HX(Vleftspecial,0),HX(Vleftspecial,0),VX(0,15)+r4 # V sample
+  # For top sample we need to split r0 into high,low where low has 3 bits
+  # result offset is high*64+low*2
+  and r4,r0,7 # r4=low
+  lsr r5,r0,3 # r5=high
+  lsl r5,6
+  addscale2 r4,r5,r4
+  add r4,r4,0x1000
+  vmov HX(Vtopspecial,0),HX(Vtop,0)+r4  # U sample
+  add r4,1
+  valtl HX(Vtopspecial,0),HX(Vtopspecial,0),HX(Vtop,0)+r4 # V sample
+
+#:msb r4,r0  # 1->0, 2->1, 4->2
+  .half 0x5b04 #AUTOINSERTED
+  add r4,1   # log2(trafosize) + 1
+  vmov HX(Vtrafosizeplus1,0), r4
+
+  # This loop goes all the way down (up to 32 samples down)
+  mov r10,r2 # base address
+  mov r4, 0 # shift for accessing different bits of vtop
+.if BIT_DEPTH==8
+  addscale2 r11,r10,r0 # final base address
+.else
+  addscale4 r11,r10,r0 # final base address
+.endif
+  vmov HX(Vxplus1,0), HX(Vxplus1_orig,0)
+  vmov VX(0,32++), VX(0,14++)  REP 16
+  cmp r0,16
+  blt planar_loop_x
+  vmov VX(16,32++), VX(16,14++) REP 16
+planar_loop_x:
+  mov r2,r10  # Restore base address
+  mov r5,0
+  mov r6,1
+planar_loop:
+  vsub HX(Vleftcoeff,0),HX(Vsize,0),HX(Vxplus1,0)
+  vadd HX(Vtopcoeff2,0),HX(Vxplus1,0),1
+  vsub HX(Vtopcoeff,0),HX(Vsize,0),r6
+#:vmul -,HX(0,32)+r5,HX(Vleftcoeff,0) CLRA UACC
+  .half 0xfd80 #AUTOINSERTED
+  .half 0xe028 #AUTOINSERTED
+  .half 0x0237 #AUTOINSERTED
+  .half 0xf140 #AUTOINSERTED
+  .half 0x09bc #AUTOINSERTED
+#:vmul -,HX(Vleftspecial,0),r6 UACC
+  .half 0xfd80 #AUTOINSERTED
+  .half 0xe023 #AUTOINSERTED
+  .half 0x5380 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x0898 #AUTOINSERTED
+#:vmul -,HX(Vtop,0)+r4,HX(Vtopcoeff,0) UACC
+  .half 0xfd80 #AUTOINSERTED
+  .half 0xe022 #AUTOINSERTED
+  .half 0x6239 #AUTOINSERTED
+  .half 0xf100 #AUTOINSERTED
+  .half 0x08bc #AUTOINSERTED
+
+#:vmul -,HX(Vtopspecial,0),HX(Vxplus1,0) UACC
+  .half 0xfd80 #AUTOINSERTED
+  .half 0xe023 #AUTOINSERTED
+  .half 0x6222 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x08bc #AUTOINSERTED
+#:vmov HX(0,0), r0 UACC
+  .half 0xfc00 #AUTOINSERTED
+  .half 0x8038 #AUTOINSERTED
+  .half 0x0380 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x0880 #AUTOINSERTED
+  vlsr HX(0,0),HX(0,0),HX(Vtrafosizeplus1,0)
+.if BIT_DEPTH==8
+  #vmov HX(0,0), HX(0,32)+r5 # HACK - looks okay
+  #vmov HX(0,0), HX(Vtop,0)+r4 # HACK - looks okay
+  #vmov HX(0,0), HX(Vtopspecial,0) # HACK - looks okay
+  #vmov HX(0,0), HX(Vleftspecial,0) # HACK - looks okay
+  #vmov HX(0,0), HX(Vleftcoeff,0) # HACK - looks okay
+  #vmov HX(0,0), HX(Vtopcoeff,0) # HACK - looks okay
+  #vmov HX(0,0), HX(Vxplus1,0) # HACK - looks okay
+  
+  #vmov H(0,0), H(Vtopspecial,16) # BAD!
+  vstb H(0,0),(r2) IFZ
+.else
+  vsth HX(0,0),(r2) IFZ
+.endif
+  add r2,128
+  add r5,64
+  addcmpblt r6,1,r0,planar_loop
+  # Now move on by 8 pixels
+  vadd HX(Vxplus1,0),HX(Vxplus1,0),8
+.if BIT_DEPTH==8
+  add r10,16
+.else
+  add r10,32
+.endif
+  add r4,64
+  cmp r10,r11
+  blt planar_loop_x
+  b next_residual_cmd

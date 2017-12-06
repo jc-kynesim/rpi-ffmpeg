@@ -107,6 +107,9 @@
 // Define RPI_VPU_DEBLOCK_CACHED to use ARM cache for setup instructions 
 #define RPI_VPU_DEBLOCK_CACHED 0
 
+// Define RPI_VPU_INTRA_PRED to use VPU for chroma intra pred
+#define RPI_VPU_INTRA_PRED
+
 // Use ARM emulation of QPU pred
 // These are for debug only as the emulation makes only limited
 // effort to be fast
@@ -549,7 +552,20 @@ typedef struct HEVCRpiInterPredEnv
 typedef struct HEVCRpiIntraPredEnv {
     unsigned int n;        // Number of commands
     HEVCPredCmd * cmds;
+#ifdef RPI_VPU_INTRA_PRED
+    unsigned int vpu_n; // Number of VPU commands
+    uint32_t *vpu_cmds; // Pointer to start of buffer the VPU cmds 
+    GPU_MEM_PTR_T gptr; // Memory descriptor for VPU commands
+#endif
 } HEVCRpiIntraPredEnv;
+
+#ifdef RPI_VPU_INTRA_PRED
+#define CODE_INTRA_PLANAR 0
+#define CODE_INTRA_DC 1
+#define CODE_INTRA_LEFT 10
+#define CODE_INTRA_DOWN 26
+#define CODE_INTRA_DIAGONAL 34
+#endif
 
 typedef struct HEVCRpiCoeffEnv {
     unsigned int n;
@@ -559,7 +575,11 @@ typedef struct HEVCRpiCoeffEnv {
 typedef struct HEVCRpiCoeffsEnv {
     HEVCRpiCoeffEnv s[4];
     GPU_MEM_PTR_T gptr;
+#ifdef RPI_VPU_INTRA_PRED
+    // All coefficients allocated in VPU memory
+#else
     void * mptr;
+#endif
 } HEVCRpiCoeffsEnv;
 
 typedef struct HEVCRpiFrameProgressWait {
@@ -705,6 +725,10 @@ typedef struct HEVCRpiContext {
     HEVCRpiQpu qpu;
 
     HEVCRpiFrameProgressState progress_states[2];
+    
+#ifdef RPI_VPU_INTRA_PRED
+    int rpi_vpu_intra_pred;
+#endif
 
 #ifdef RPI_DEBLOCK_VPU
 // With the new scheme of rpi_execute_dblk_cmds 
@@ -945,6 +969,10 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                                 const int x0, const int y0,
                                 const int log2_trafo_size, const enum ScanType scan_idx,
                                 const int c_idx);
+                                
+#ifdef RPI_VPU_INTRA_PRED
+int choose_intra_cached(int addr);
+#endif
 
 void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc);
 

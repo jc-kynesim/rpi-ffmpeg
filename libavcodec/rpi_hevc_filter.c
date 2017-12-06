@@ -1178,7 +1178,11 @@ static void rpi_deblock(HEVCRpiContext *s, int y, int deblock_h, int sao_y, int 
 
   // Flush image, 4 lines above to bottom of ctb stripe
   // TODO no need to flush luma (similarly, no need to flush chroma later on when rpi_deblock in use)
+#ifdef RPI_VPU_INTRA_PRED
+  ff_hevc_rpi_flush_buffer_lines(s, FFMAX(y-4,0), y+deblock_h, 1, !s->rpi_vpu_intra_pred); 
+#else
   ff_hevc_rpi_flush_buffer_lines(s, FFMAX(y-4,0), y+deblock_h, 1, 1);
+#endif
   // TODO flush buffer of beta/tc setup when it becomes cached
 
   // Prepare multiple commands at once to avoid calling overhead
