@@ -333,7 +333,6 @@ static void ff_hevc_rpi_sao_band_c_24_neon_10(uint8_t *_dst, const uint8_t *_src
 av_cold void ff_hevcdsp_rpi_init_neon(HEVCDSPContext *c, const int bit_depth)
 {
     if (bit_depth == 8) {
-        int x;
         c->hevc_v_loop_filter_luma     = ff_hevc_rpi_v_loop_filter_luma_neon;
         c->hevc_v_loop_filter_luma_c   = ff_hevc_rpi_v_loop_filter_luma_neon;
         c->hevc_h_loop_filter_luma     = ff_hevc_rpi_h_loop_filter_luma_neon;
