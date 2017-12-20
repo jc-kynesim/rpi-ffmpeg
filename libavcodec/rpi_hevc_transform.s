@@ -1904,6 +1904,22 @@ done_bottomright:
 .set Vtopcoeff, 57
 .set Vtopcoeff2, 58
 
+# Share the left/top registers for the general prediction
+.set Vacross, 52
+.set Vlastleft, 53
+.set Vlastabove, 54
+.set VintraPredAngle, 55
+.set VinvAngle, 56
+.set Vflags, 57
+.set Vidx, 58
+.set Vfact, 59
+.set Vref, 60
+.set Vref2, 61
+
+# Constant across all intra predictions
+.set VuvOffset_14_15, 61
+.set VuvOffsetTop_0_1, 62
+
 # Overall loop
 # hevc_residual(uint8_t *img (r0), int stride (r1), int numcmds (r2), uint32_t cmds[numcmds] (r3))
 #
@@ -1940,6 +1956,12 @@ hevc_residual:
   mov r1,0xffff
   vmov HX(VselectU,0),r1 IFNZ
   vmov HX(VselectV,0),r1 IFZ
+  vmov HX(VuvOffset_14_15,0),14 IFNZ
+  vmov HX(VuvOffset_14_15,0),15 IFZ
+  mov r1, Vtop*64
+  vmov HX(VuvOffsetTop_0_1,0),r1 IFNZ
+  mov r1, Vtop*64 + 1
+  vmov HX(VuvOffsetTop_0_1,0),r1 IFZ
   mov r1, 128
 residual_cmd_loop:
   ld r0, (r15)
@@ -1989,8 +2011,9 @@ residual_cmd_loop:
   beq planar_prediction
   cmp r4, CODE_INTRA_DIAGONAL
   beq diagonal_prediction
-  b planar_prediction # Needs more complicated code here to handle other shifts
-  
+  b diagonal_prediction # TODO this should call general_prediction - but that code is currently broken
+  #b general_prediction
+
 next_residual_cmd:
   cmp r15, r14
   blt residual_cmd_loop
@@ -2311,10 +2334,9 @@ straight_down_loop:
 # r14 numcmds remaining
 # r15 cmds
 #
-# fetch_left will fetch valid samples for 0..32
+# fetch_left will fetch valid samples for -1..r0-1
 # however, doesn't do extension if numleft <= size
 fetch_left:
-  add r0, 1 # We will fetch one row more than needed in case of planar
   cmp r9, 0xff
   bgt have_some_left
   cmp r9, 0
@@ -2327,15 +2349,15 @@ fetch_left:
   ldh r5, -126(r2) # V from above
 .endif
   vmov HX(0,0), r4
-  valtl HX(0++,32), HX(0,0), r5 REP r0
-  sub r0,1
+  valtl HX(0++,0), HX(0,0), r5 REP r0
+  valtl HX(63,0), HX(0,0), r5
   b lr
 
 use_default_value:
   mov r4, 1<<(BIT_DEPTH-1)
   vmov VX(0,14++), r4 REP 2
   vmov VX(16,14++), r4 REP 2
-  sub r0, 1
+  vmov HX(63,0), r4
   b lr
 have_some_left:
   cmp r1,0
@@ -2345,11 +2367,15 @@ have_some_left:
   sub r4, r2, 16 # In the same tile
   vmov H(0++,0), 0 REP r0
   vldb H(0++,0), (r4 += r1) REP r0
+  sub r4, 128
+  vmov HX(63,0), 0
+  vldb H(63,0), (r4)
 .else
   sub r4, r2, 32 # In the same tile
   vldh HX(0++,0), (r4 += r1) REP r0
+  sub r4, 128
+  vldh HX(63,0), (r4)
 .endif
-  sub r0,1
   b lr
 different_tile:
 .if BIT_DEPTH==8
@@ -2358,13 +2384,17 @@ different_tile:
   mov r1, 128
   vmov HX(0++,0), 0 REP r0
   vldb H(0++,0), (r4 += r1) REP r0
+  sub r4, 128
+  vmov HX(63,0), 0
+  vldb H(63,0), (r4)
 .else
   add r4, r2, 128-32
   sub r4, r13
   mov r1, 128
   vldh HX(0++,0), (r4 += r1) REP r0
+  sub r4, 128
+  vldh HX(63,0), (r4)
 .endif
-  sub r0,1
   b lr
 
 straight_across_prediction:
@@ -2559,7 +2589,9 @@ planar_prediction:
   .half 0xf4c8 #AUTOINSERTED
   .half 0xe020 #AUTOINSERTED
   .half 0x0540 #AUTOINSERTED
+  add r0,1 # Need one more sample
   bl fetch_left
+  sub r0,1
   bl fetch_above
 
   lsr r8,r9,8 # r8 is now numleft
@@ -2650,7 +2682,7 @@ planar_loop:
   #vmov HX(0,0), HX(Vleftcoeff,0) # HACK - looks okay
   #vmov HX(0,0), HX(Vtopcoeff,0) # HACK - looks okay
   #vmov HX(0,0), HX(Vxplus1,0) # HACK - looks okay
-  
+
   #vmov H(0,0), H(Vtopspecial,16) # BAD!
   vstb H(0,0),(r2) IFZ
 .else
@@ -2669,4 +2701,235 @@ planar_loop:
   add r4,64
   cmp r10,r11
   blt planar_loop_x
+  b next_residual_cmd
+
+#int16 table8dot5[35] = { 0,0,0,0,0, 0,0,0,0,0, // 0->9
+#                        0,-4096,-1638,-910,-630,-482,-390,-315,-256,-315,  // 10->19
+#                        -390,-482,-630,-910,-1638,-4096,0,0,0,0,
+#                        0,0,0,0,0};
+# COmputes inv angle
+table8dot5:
+  .short 0,0,0,0,0, 0,0,0,0,0,0,-4096,-1638,-910,-630,-482,-390,-315,-256,-315,-390,-482,-630,-910,-1638,-4096,0,0,0,0,0,0,0,0,0
+
+# int8 table8dot4[35] = {0,0,32,26,21,17,13,9,5,2,0,-2,-5,-9,-13,-17,-21,-26, -32,-26,-21,-17,-13,-9,-5,-2,0,2,5,9,13,17,21,26,32};
+# Computes intra pred angle
+table8dot4:
+  .byte 0,0,32,26,21,17,13,9,5,2,0,-2,-5,-9,-13,-17,-21,-26, -32,-26,-21,-17,-13,-9,-5,-2,0,2,5,9,13,17,21,26,32
+  .balign 4
+
+# r0 size   (setup on entry)
+# r2 destination for predicted block (setup on entry)
+# r3 direction
+# r4 direction (setup on entry destroyed by fetch_above)
+# r5 intraPredAngle (from table 8.4)
+# r6 invAngle (from table 8.5)
+# r9 numleft, numabove
+#
+# r12 img               (keep)
+# r13 stride            (keep)
+# r14 numcmds remaining (keep)
+# r15 cmds              (keep)
+#
+# HX(Vtop++,0) contains the above samples
+# HX(0++,14:15) contains left samples
+# Note that we can never have more than 32 left valid samples
+#
+# After fetch_above and fetch_left we can bump up the number of available samples to the size
+general_prediction:
+  mov r3,r4
+  # fetch samples and prepare extensions
+  vsub HX(0,0),HX(Vxplus1_orig,0),r0
+#:vmax -,HX(0,0),0 IFZ SETF  # Z means x values are important
+  .half 0xf4c8 #AUTOINSERTED
+  .half 0xe020 #AUTOINSERTED
+  .half 0x0540 #AUTOINSERTED
+  mov r10,r0 # Save original verion of size
+  add r0,r0   # Need bottom-left samples as well
+#:min r0,32   # There will never be more than 32 that are valid
+  .half 0xb220 #AUTOINSERTED
+  .half 0x0020 #AUTOINSERTED
+  bl fetch_left
+  mov r0, r10 # Restore r0=size
+  bl fetch_above
+
+  add r10,pc,table8dot4-$     # LIVE(r10)
+  add r11,pc,table8dot5-$     # LIVE(r11)
+  ldb r5,(r10,r3)             # LIVE(r5) = intraPredAngle   DEAD(r10)
+  ldhs r6,(r11,r3)            # LIVE(r6) = invAngle         DEAD(r11)
+# Need to prepare a 1d lookup ref
+# Or may simply want to do all with calculations - always ends up referencing one of the edge pixels
+#
+# 1d ref could be a lot more efficient, followed by using shifted pixel access and either V or H destinations
+# However, need more than 64 pixels wide so doesn't easily fit.
+# Perhaps could fetch 1d ref per 8 pixel chunks?
+  cmp r5, 18
+  blt angle_less_than_18
+  #
+  # iIdx = ( ( y + 1 )*intraPredAngle ) >> 5
+  # iFact = ( ( y + 1 )*intraPredAngle ) & 31
+  # predSamplesIntra[ x ][ y ] = ( ( 32 - iFact )*ref[ x+iIdx+1 ] + iFact*ref[ x+iIdx+2] + 16 ) >> 5
+  #
+  # ref[x] is p[-1+x][-1] x>=0  (top edge)
+  #        or p[-1][ -1+( ( x*invAngle+128 )>>8 ) ] otherwise (left edge)
+
+  vmov HX(VintraPredAngle,0), r5   # DEAD(r5)
+  vmov HX(VinvAngle,0), r6         # DEAD(r6)
+
+  asr r5,r9,8  # LIVE(r5) = numleft
+  max r5,r0,r5 # fetch_left has ensured we have at least r0 pixels on the left
+  sub r5,r5,1  # convert to last valid pixel
+  vmov HX(Vlastleft,0), r5 # DEAD(r5)
+#:and r5,r9,255
+  .half 0xc1c5 #AUTOINSERTED
+  .half 0x4f48 #AUTOINSERTED
+  max r5,r0,r5
+  sub r5,r5,1
+  vmov HX(Vlastabove,0), r5
+
+  # Save flags for later use
+  vmov HX(Vflags,0), 0 IFZ
+  vmov HX(Vflags,0), 1 IFNZ
+
+  # Loop over vertical tiles 8 wide
+  vmov HX(Vxplus1,0), HX(Vxplus1_orig,0)
+  mov r10,0 # LIVE(r10) = x
+
+xloop_over_18:
+  # loop over y
+  mov r4,1                         # LIVE(r4) = y+1
+
+yloop_over_18:
+  vmul HX(Vidx,0), HX(VintraPredAngle,0),r4   # abs(intraPredAngle)<=32
+  vand HX(Vfact,0), HX(Vidx,0), 31
+  vasr HX(Vidx,0), HX(Vidx,0), 5
+  vadd HX(Vref,0), HX(Vxplus1,0),HX(Vidx,0)
+  vadd HX(Vref2,0), HX(Vref,0), 1
+
+  # To convert to reference we need to do different things for x>0 or not
+  vsub HX(Vacross,0),HX(Vref,0),1 SETF # IFN means we need to access the left edge pixels
+  vmul HX(Vtemp,0),HX(Vref,0),HX(VinvAngle,0)
+#:vsub HX(Vtemp,0), HX(Vtemp,0), 128  # Can get >>8 for free by accessing top byte, subtraction of 128 instead of add because we want to be relative to top-left sample
+  .half 0xfd20 #AUTOINSERTED
+  .half 0x8962 #AUTOINSERTED
+  .half 0x5480 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x0000 #AUTOINSERTED
+  vmin HX(Vtemp,0), HX(Vlastleft,0), H(Vtemp,16)  # tmp can equal -1
+  # Need to access location (tmp&63)*64 + 14/15 depending on U/V
+  vand HX(Vtemp,0), HX(Vtemp,0), 63
+  vshl HX(Vtemp,0), HX(Vtemp,0), 6
+#:vadd -,HX(Vtemp,0), HX(VuvOffset_14_15,0) CLRA ACC IFN
+  .half 0xfd00 #AUTOINSERTED
+  .half 0xe022 #AUTOINSERTED
+  .half 0x523d #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x8fbc #AUTOINSERTED
+  # Now access location (across&7)*2+uvTop+(across>>3)*64
+  vmin HX(Vacross,0), HX(Vacross,0), HX(Vlastabove,0)
+  vand HX(Vtemp,0), HX(Vacross,7), 7
+  vshl HX(Vtemp,0), HX(Vtemp,0), 1
+#:vadd -, HX(Vtemp,0), HX(VuvOffsetTop_0_1,0) CLRA ACC IFNN
+  .half 0xfd00 #AUTOINSERTED
+  .half 0xe022 #AUTOINSERTED
+  .half 0x523e #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0xafbc #AUTOINSERTED
+#:vlsr HX(Vtemp,0), HX(Vtemp,0), 3
+  .half 0xf450 #AUTOINSERTED
+  .half 0x8962 #AUTOINSERTED
+  .half 0x5403 #AUTOINSERTED
+#:vshl -, HX(Vtemp,0), 6 ACC IFNN
+  .half 0xfc40 #AUTOINSERTED
+  .half 0xe022 #AUTOINSERTED
+  .half 0x5406 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0xae80 #AUTOINSERTED
+# vlookup HX(Vref,0) sadly vlookup was removed after vc02 so this cannot assemble
+
+# Now repeat for ref2
+  vsub HX(Vacross,0),HX(Vref2,0),1 SETF # IFN means we need to access the left edge pixels
+  vmul HX(Vtemp,0),HX(Vref2,0),HX(VinvAngle,0)
+#:vsub HX(Vtemp,0), HX(Vtemp,0), 128  # Can get >>8 for free by accessing top byte, subtraction of 128 instead of add because we want to be relative to top-left sample
+  .half 0xfd20 #AUTOINSERTED
+  .half 0x8962 #AUTOINSERTED
+  .half 0x5480 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x0000 #AUTOINSERTED
+  vmin HX(Vtemp,0), HX(Vlastleft,0), H(Vtemp,16)  # tmp can equal -1
+  # Need to access location (tmp&63)*64 + 14/15 depending on U/V
+  vand HX(Vtemp,0), HX(Vtemp,0), 63
+  vshl HX(Vtemp,0), HX(Vtemp,0), 6
+#:vadd -,HX(Vtemp,0), HX(VuvOffset_14_15,0) CLRA ACC IFN
+  .half 0xfd00 #AUTOINSERTED
+  .half 0xe022 #AUTOINSERTED
+  .half 0x523d #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x8fbc #AUTOINSERTED
+  # Now access location (across&7)*2+uvTop+(across>>3)*64
+  vmin HX(Vacross,0), HX(Vacross,0), HX(Vlastabove,0)
+  vand HX(Vtemp,0), HX(Vacross,7), 7
+  vshl HX(Vtemp,0), HX(Vtemp,0), 1
+#:vadd -, HX(Vtemp,0), HX(VuvOffsetTop_0_1,0) CLRA ACC IFNN
+  .half 0xfd00 #AUTOINSERTED
+  .half 0xe022 #AUTOINSERTED
+  .half 0x523e #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0xafbc #AUTOINSERTED
+  vlsr HX(Vtemp,0), HX(Vtemp,0), 3
+#:vshl -, HX(Vtemp,0), 6 ACC IFNN
+  .half 0xfc40 #AUTOINSERTED
+  .half 0xe022 #AUTOINSERTED
+  .half 0x5406 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0xae80 #AUTOINSERTED
+# vlookup HX(Vref2,0)
+
+# Combine
+#:vmul -,HX(Vfact,0), HX(Vref2,0) CLRA ACC
+  .half 0xfd80 #AUTOINSERTED
+  .half 0xe023 #AUTOINSERTED
+  .half 0xb23d #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x0fbc #AUTOINSERTED
+  vrsub HX(Vfact,0), HX(Vfact,0), 32
+#:vmul -,HX(Vfact,0), HX(Vref,0) ACC
+  .half 0xfd80 #AUTOINSERTED
+  .half 0xe023 #AUTOINSERTED
+  .half 0xb23c #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x0ebc #AUTOINSERTED
+#:vmov HX(Vtemp,0), 16 ACC
+  .half 0xfc00 #AUTOINSERTED
+  .half 0x8978 #AUTOINSERTED
+  .half 0x0410 #AUTOINSERTED
+  .half 0xf3c0 #AUTOINSERTED
+  .half 0x0e80 #AUTOINSERTED
+  vlsr HX(Vtemp,0), HX(Vtemp,0), 5
+
+  vmov -,HX(Vflags,0) SETF
+.if BIT_DEPTH == 8
+  vstb H(Vtemp,0), (r2) IFZ
+.else
+  vsth HX(Vtemp,0), (r2) IFZ
+.endif
+  add r2, 128
+  add r4, 1
+  cmp r4, r0
+  ble yloop_over_18
+
+  subscale128 r2, r0
+.if BIT_DEPTH == 8
+  add r2, 16
+.else
+  add r2, 32
+.endif
+  vadd HX(Vxplus1,0), HX(Vxplus1,0), 8
+  add r10, 8
+  cmp r10, r0
+  blt xloop_over_18
+
+  b next_residual_cmd
+
+angle_less_than_18:
+  # TODO
   b next_residual_cmd

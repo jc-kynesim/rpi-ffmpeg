@@ -99,16 +99,18 @@
 #define RPI_TSTATS              0
 
 // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-#define RPI_DEBLOCK_VPU
+//#define RPI_DEBLOCK_VPU
 
 // Define RPI_USE_VPU_L2 to use the VPU's L2 cache for deblock/sao
+// NOTE This causes mismatches at the moment
 //#define RPI_USE_VPU_L2
 
 // Define RPI_VPU_DEBLOCK_CACHED to use ARM cache for setup instructions 
 #define RPI_VPU_DEBLOCK_CACHED 0
 
 // Define RPI_VPU_INTRA_PRED to use VPU for chroma intra pred
-#define RPI_VPU_INTRA_PRED
+// NOTE This causes mismatches at the moment
+//#define RPI_VPU_INTRA_PRED
 
 // Use ARM emulation of QPU pred
 // These are for debug only as the emulation makes only limited
