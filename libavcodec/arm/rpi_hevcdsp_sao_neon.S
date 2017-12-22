@@ -1151,8 +1151,10 @@ endfunc
         subs     r12, #1
         vext.8   q2,  q5,  q6, #(16 - \pb)
         vext.8   q3,  q6,  q7, #(16 - \pb)
+        pld      [r1]
         // load b
         vext.8   q11, q7,  q8, #\pb     @ Avoid overwrite
+        pld      [r1, #64]
         vext.8   q8,  q4,  q5, #\pb
         vext.8   q9,  q5,  q6, #\pb
         vext.8   q10, q6,  q7, #\pb
@@ -1331,12 +1333,13 @@ endfunc
         vstm     r0, {q0-q3}
         // copy c to a
         vmov.64  q0, q4
-        pople    {lr}
+        pld      [r1, r3]
         vmov.64  q1, q5
-        bxle     lr
+        pople    {lr}
         vmov.64  q2, q6
-        add      r0, r0, r2
+        bxle     lr
         vmov.64  q3, q7
+        add      r0, r0, r2
         // copy b to c
         vmov.64  q4, q8
         vmov.64  q5, q9
@@ -1486,8 +1489,9 @@ endfunc
 1:      // load b
         vldmia   r1, {d16-d24}
         vext.8   q8, q8, q9, #\pb
-        subs     r12, #1
+        pld      [r1, r3]
         vext.8   q9, q9, q10, #\pb
+        subs     r12, #1
         vext.8   q10, q10, q11, #\pb
         vext.8   q11, q11, q12, #\pb
         bl       \body_fn
@@ -1508,6 +1512,7 @@ endfunc
         vext.8   q5, q8, q9, #16 - \pb
         add      r1, r1, r3
         vext.8   q6, q9, q10, #16 - \pb
+        pld      [r6, #-8]
         vext.8   q7, q10, q11, #16 - \pb
         b        1b
 .endm
@@ -1681,8 +1686,9 @@ endfunc
         vldr     d17, [r1, #-8]
         vldmia   r1, {d18-d25}
         vext.8   q8, q8, q9, #16 - \pb
-        subs     r12, #1
+        pld      [r1, r3]
         vext.8   q9, q9, q10, #16 - \pb
+        subs     r12, #1
         vext.8   q10, q10, q11, #16 - \pb
         vext.8   q11, q11, q12, #16 - \pb
         bl       \body_fn
