@@ -940,11 +940,14 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
 
 // ACTIVE_THREADS specifies how many ARM threads we should try to keep active at any stage
 #define ACTIVE_THREADS 4
+#define ACTIVE_VPU_THREADS 2
 
 static atomic_int gate_active_count = 0;
+static atomic_int gate_vpu_active_count = 0;
 static atomic_int gate_decode_order = 0;
 
 sem_t gate_sem;
+sem_t gate_vpu_sem;
 
 int gate_get_decode_order(void) {
   int r = atomic_fetch_add(&gate_decode_order,1);
@@ -983,5 +986,26 @@ void gate_init() {
   if (first) {
     first=0;
     sem_init(&gate_sem,0,0);
+    sem_init(&gate_vpu_sem,0,0);
   }
 }
+
+void gate_vpu_start(int high_priority, int decode_order) {
+  if (!high_priority) {
+    while (sem_wait(&gate_vpu_sem) != 0) {
+      av_assert0(errno == EINTR);
+    }
+  }
+  (void)atomic_fetch_add(&gate_vpu_active_count,1);
+}
+
+// Call this function before doing an operation that may sleep
+// The reference count is decreased
+void gate_vpu_stop(void) {
+  int count = atomic_fetch_add(&gate_vpu_active_count,-1);
+  if (count < ACTIVE_VPU_THREADS) {
+    sem_post(&gate_vpu_sem);
+  }
+}
+
+

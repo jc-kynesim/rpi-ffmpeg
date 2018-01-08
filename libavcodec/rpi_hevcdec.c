@@ -3860,6 +3860,11 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
             }
         }
     }
+    if (!s->offload_recon) {
+      // If not offloaded, this is being done in pass0
+      gate_stop();
+    }
+    gate_vpu_start(s->used_for_ref, s->decode_order);
 
     vpu_qpu_job_finish(vqj);
 
@@ -3899,6 +3904,12 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     // ? Could/should be moved to next pass which would let us add more jobs
     //   to the VPU Q on this thread but when I tried that it all went a bit slower
     vpu_qpu_wait(&sync_y);
+    
+    gate_vpu_stop();
+    if (!s->offload_recon) {
+      // If not offloaded, this is being done in pass0
+      gate_start(s->used_for_ref,s->decode_order);
+    }
 
     rpi_cache_flush_finish(rfe);
     
