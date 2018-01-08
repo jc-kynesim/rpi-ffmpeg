@@ -939,7 +939,7 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
 }
 
 // ACTIVE_THREADS specifies how many ARM threads we should try to keep active at any stage
-#define ACTIVE_THREADS 4
+#define ACTIVE_THREADS 5
 #define ACTIVE_VPU_THREADS 2
 
 // TODO worried about possible lock up if no threads are active?
@@ -956,11 +956,45 @@ int gate_get_decode_order(void) {
   return r;
 }
 
+// MAXWAITING should be greater than maximum processing threads
+#define MAXWAITING 256
+static int priority[2][MAXWAITING];
+static int numwaiting[2];
+
 // Call this function whenever an ARM thread is about to start some processing
 // The reference count is increased.
 static void priv_gate_start(int chan, int high_priority, int decode_order, int max_threads) {
+  int pri = (high_priority<<30) - (decode_order&0x3fffffff);
   pthread_mutex_lock(&gate_mutex);
-  while ( gate_active_count[chan] >= max_threads && !high_priority) {
+  // Add us to the list
+  av_assert0(numwaiting[chan] < MAXWAITING);
+  priority[chan][numwaiting[chan]++] = pri;
+  //printf("Waiting for %d\n",pri);
+  while (1) {
+    int i;
+    int our_pos = -1;
+    int schedule_us = 1;
+    // Search in stack for most important job
+    if (gate_active_count[chan] >= max_threads) {
+      schedule_us = 0;
+    } else {
+      for (i=0;i<numwaiting[chan];i++) {
+        int p = priority[chan][i];
+        if (p > pri) {
+          schedule_us = 0;
+          break;
+        } else if (p == pri) {
+          our_pos = i;
+        }
+      }
+    }
+    if (schedule_us) {
+      int last = --numwaiting[chan]; // last is index of last in list
+      av_assert0(our_pos >= 0);
+      priority[chan][our_pos] = priority[chan][last];
+      //printf("Starting with %d\n",pri);
+      break;
+    }
     pthread_cond_wait(&gate_cv[chan], &gate_mutex);
   }
   gate_active_count[chan]++;
@@ -973,7 +1007,7 @@ static void priv_gate_stop(int chan, int max_threads) {
   pthread_mutex_lock(&gate_mutex);
   gate_active_count[chan]--;
   if (gate_active_count[chan] < max_threads) {
-    pthread_cond_signal(&gate_cv[chan]);
+    pthread_cond_broadcast(&gate_cv[chan]);
   }
   pthread_mutex_unlock(&gate_mutex);
 }

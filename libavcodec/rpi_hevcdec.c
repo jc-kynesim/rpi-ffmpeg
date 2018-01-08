@@ -5061,9 +5061,9 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_STSA_N  ||
                         s->nal_unit_type == HEVC_NAL_RADL_N  ||
                         s->nal_unit_type == HEVC_NAL_RASL_N);
-//        s->offload_recon = s->used_for_ref;
+        s->offload_recon = s->used_for_ref;
 //        s->offload_recon = 0;
-        s->offload_recon = 1;
+//        s->offload_recon = 1;
 
 #if DEBUG_DECODE_N
         {
