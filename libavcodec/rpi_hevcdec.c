@@ -3447,9 +3447,9 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     const unsigned int xr = bound_r - (x_end ? 0 : ctb_size);
     const unsigned int yb = bound_b - (y_end ? 0 : ctb_size);
     unsigned int x, y;
-    
+#if RPI_GATE
     gate_start(s->used_for_ref,s->decode_order);
-
+#endif
     for (y = y0; y < yb; y += ctb_size ) {
         for (x = x0; x < xr; x += ctb_size ) {
             ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
@@ -3490,8 +3490,9 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     // Job done now
     // ? Move outside this fn
     job_free(s->jbc, jb);
-    
+#if RPI_GATE
     gate_stop();
+#endif
 }
 
 
@@ -3502,9 +3503,9 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     unsigned int i;
     HEVCRpiIntraPredEnv * const iap = &jb->intra;
     const HEVCPredCmd *cmd = iap->cmds;
-    
+#if RPI_GATE
     gate_start(s->used_for_ref,s->decode_order);
-
+#endif
     for (i = iap->n; i > 0; i--, cmd++)
     {
         switch (cmd->type)
@@ -3555,9 +3556,9 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
                 abort();
         }
     }
-    
+#if RPI_GATE
     gate_stop();
-
+#endif
     // Mark done
     iap->n = 0;
 }
@@ -3860,11 +3861,13 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
             }
         }
     }
+#if RPI_GATE
     if (!s->offload_recon) {
       // If not offloaded, this is being done in pass0
       gate_stop();
     }
     gate_vpu_start(s->used_for_ref, s->decode_order);
+#endif
 
     vpu_qpu_job_finish(vqj);
 
@@ -3904,12 +3907,13 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     // ? Could/should be moved to next pass which would let us add more jobs
     //   to the VPU Q on this thread but when I tried that it all went a bit slower
     vpu_qpu_wait(&sync_y);
-    
+#if RPI_GATE    
     gate_vpu_stop();
     if (!s->offload_recon) {
       // If not offloaded, this is being done in pass0
       gate_start(s->used_for_ref,s->decode_order);
     }
+#endif    
 
     rpi_cache_flush_finish(rfe);
     
@@ -4215,9 +4219,9 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
     HEVCRpiJob * const jb = lc->jb0;
     int more_data = 1;
     int ctb_addr_ts = lc->ts;
-    
+#if RPI_GATE    
     gate_start(s->used_for_ref,s->decode_order);
-
+#endif
 #ifdef RPI_VPU_INTRA_PRED    
 // Decide whether we can use intra prediction on chroma
     s->rpi_vpu_intra_pred = av_rpi_is_sand_frame(s->frame) && !s->ps.pps->constrained_intra_pred_flag && !s->ps.sps->pcm_enabled_flag;
@@ -4302,9 +4306,9 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
 
     lc->unit_done = (more_data <= 0);
     lc->ts = ctb_addr_ts;
-    
+#if RPI_GATE    
     gate_stop();
-    
+#endif    
     return 0;
 }
 
@@ -5057,9 +5061,9 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_STSA_N  ||
                         s->nal_unit_type == HEVC_NAL_RADL_N  ||
                         s->nal_unit_type == HEVC_NAL_RASL_N);
-        s->offload_recon = s->used_for_ref;
+//        s->offload_recon = s->used_for_ref;
 //        s->offload_recon = 0;
-//        s->offload_recon = 1;
+        s->offload_recon = 1;
 
 #if DEBUG_DECODE_N
         {
@@ -5323,7 +5327,9 @@ static int hevc_rpi_decode_frame(AVCodecContext *avctx, void *data, int *got_out
     int new_extradata_size;
     uint8_t *new_extradata;
     HEVCRpiContext *s = avctx->priv_data;
+#if RPI_GATE
     s->decode_order = gate_get_decode_order();
+#endif
 
     if (!avpkt->size) {
         ret = ff_hevc_rpi_output_frame(s, data, 1);

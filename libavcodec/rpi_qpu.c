@@ -942,12 +942,14 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
 #define ACTIVE_THREADS 4
 #define ACTIVE_VPU_THREADS 2
 
-static atomic_int gate_active_count = 0;
-static atomic_int gate_vpu_active_count = 0;
+// TODO worried about possible lock up if no threads are active?
+// TODO worried about implementation, may add too many semaphores?
+
+static int gate_active_count[2] = {0,0};
 static atomic_int gate_decode_order = 0;
 
-sem_t gate_sem;
-sem_t gate_vpu_sem;
+pthread_mutex_t gate_mutex;
+pthread_cond_t gate_cv[2];
 
 int gate_get_decode_order(void) {
   int r = atomic_fetch_add(&gate_decode_order,1);
@@ -956,28 +958,33 @@ int gate_get_decode_order(void) {
 
 // Call this function whenever an ARM thread is about to start some processing
 // The reference count is increased.
-void gate_start(int high_priority, int decode_order) {
-  if (!high_priority) {
-    gate_check();
+static void priv_gate_start(int chan, int high_priority, int decode_order, int max_threads) {
+  pthread_mutex_lock(&gate_mutex);
+  while ( gate_active_count[chan] >= max_threads && !high_priority) {
+    pthread_cond_wait(&gate_cv[chan], &gate_mutex);
   }
-  (void)atomic_fetch_add(&gate_active_count,1);
+  gate_active_count[chan]++;
+  pthread_mutex_unlock(&gate_mutex);
 }
 
 // Call this function before doing an operation that may sleep
 // The reference count is decreased
-void gate_stop(void) {
-  int count = atomic_fetch_add(&gate_active_count,-1);
-  if (count < ACTIVE_THREADS) {
-    sem_post(&gate_sem);
+static void priv_gate_stop(int chan, int max_threads) {
+  pthread_mutex_lock(&gate_mutex);
+  gate_active_count[chan]--;
+  if (gate_active_count[chan] < max_threads) {
+    pthread_cond_signal(&gate_cv[chan]);
   }
+  pthread_mutex_unlock(&gate_mutex);
 }
 
-// Call this function for non-reference frames
-// It will only continue execution when there are enough spare cores
-void gate_check(void) {
-  while (sem_wait(&gate_sem) != 0) {
-    av_assert0(errno == EINTR);
-  }
+
+void gate_start(int high_priority, int decode_order) {
+  priv_gate_start(0,high_priority,decode_order, ACTIVE_THREADS);
+}
+
+void gate_stop(void) {
+  priv_gate_stop(0, ACTIVE_THREADS);
 }
 
 // Called once to initialize the semaphore
@@ -985,27 +992,21 @@ void gate_init() {
   static int first = 1;
   if (first) {
     first=0;
-    sem_init(&gate_sem,0,0);
-    sem_init(&gate_vpu_sem,0,0);
+    pthread_mutex_init(&gate_mutex, NULL);
+    pthread_cond_init (&gate_cv[0], NULL);
+    pthread_cond_init (&gate_cv[1], NULL);
   }
 }
 
 void gate_vpu_start(int high_priority, int decode_order) {
-  if (!high_priority) {
-    while (sem_wait(&gate_vpu_sem) != 0) {
-      av_assert0(errno == EINTR);
-    }
-  }
-  (void)atomic_fetch_add(&gate_vpu_active_count,1);
+  priv_gate_start(1,high_priority,decode_order, ACTIVE_VPU_THREADS);
 }
 
-// Call this function before doing an operation that may sleep
-// The reference count is decreased
 void gate_vpu_stop(void) {
-  int count = atomic_fetch_add(&gate_vpu_active_count,-1);
-  if (count < ACTIVE_VPU_THREADS) {
-    sem_post(&gate_vpu_sem);
-  }
+  priv_gate_stop(1, ACTIVE_VPU_THREADS);
 }
+
+
+
 
 
