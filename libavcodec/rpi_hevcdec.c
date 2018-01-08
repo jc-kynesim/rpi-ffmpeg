@@ -80,8 +80,20 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
 #define QPU_Y_CMD_PER_CTU_MAX (16 * 16)
 #define QPU_C_CMD_PER_CTU_MAX (8 * 8)
 
-#define QPU_C_COMMANDS (((HEVC_RPI_MAX_WIDTH * 64) / (4 * 4)) / 4 + 2 * QPU_N_MAX)
-#define QPU_Y_COMMANDS (((HEVC_RPI_MAX_WIDTH * 64) / (4 * 4))     + 2 * QPU_N_MAX)
+#define QPU_MAX_CTU_PER_LINE ((HEVC_RPI_MAX_WIDTH + 63) / 64)
+
+#define QPU_GRPS (QPU_N_MAX / QPU_N_GRP)
+#define QPU_CTU_PER_GRP ((QPU_MAX_CTU_PER_LINE + QPU_GRPS - 1) / QPU_GRPS)
+
+#define QPU_Y_CMD_SLACK_PER_Q (QPU_Y_CMD_PER_CTU_MAX / 2)
+#define QPU_C_CMD_SLACK_PER_Q (QPU_C_CMD_PER_CTU_MAX / 2)
+
+// Total cmds to allocate - allow for slack & setup
+#define QPU_Y_COMMANDS (QPU_CTU_PER_GRP * QPU_GRPS * QPU_Y_CMD_PER_CTU_MAX + (1 + QPU_Y_CMD_SLACK_PER_Q) * QPU_N_MAX)
+#define QPU_C_COMMANDS (QPU_CTU_PER_GRP * QPU_GRPS * QPU_C_CMD_PER_CTU_MAX + (1 + QPU_C_CMD_SLACK_PER_Q) * QPU_N_MAX)
+
+#define QPU_Y_SYNCS (QPU_N_MAX * (16 + 2))
+#define QPU_C_SYNCS (QPU_N_MAX * (8 + 2))
 
 // The QPU code for UV blocks only works up to a block width of 8
 #define RPI_CHROMA_BLOCK_WIDTH 8
@@ -2254,11 +2266,25 @@ static void hevc_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
 static HEVCRpiInterPredQ *
 rpi_nxt_pred(HEVCRpiInterPredEnv * const ipe, const unsigned int load_val, const uint32_t fn)
 {
-    HEVCRpiInterPredQ * yp = ipe->q + ipe->curr;
-    HEVCRpiInterPredQ * ypt = yp + 1;
-    for (unsigned int i = 1; i != ipe->n_grp; ++i, ++ypt) {
-        if (ypt->load < yp->load)
+    HEVCRpiInterPredQ * yp = NULL;
+    HEVCRpiInterPredQ * ypt = ipe->q + ipe->curr;
+    const unsigned int max_fill = ipe->max_fill;
+    unsigned int load = UINT_MAX;
+
+    for (unsigned int i = 0; i != ipe->n_grp; ++i, ++ypt) {
+        // We will always have enough room between the Qs but if we are
+        // running critically low due to poor scheduling then use fill size
+        // rather than load to determine QPU.  This has obvious dire
+        // performance implications but (a) it is better than crashing
+        // and (b) it should (almost) never happen
+        const unsigned int tfill = (char *)ypt->qpu_mc_curr - (char *)ypt->qpu_mc_base;
+        const unsigned int tload = tfill > max_fill ? tfill + 0x1000000 : ypt->load;
+
+        if (tload < load)
+        {
             yp = ypt;
+            load = tload;
+        }
     }
 
     yp->load += load_val;
@@ -2281,7 +2307,9 @@ static void rpi_inter_pred_sync(HEVCRpiInterPredEnv * const ipe)
     }
 }
 
-// Returns 0 on success, -1 if Q is dangerously full
+// Returns 0 on success
+// We no longer check for Q fullness as wew have emergncy code in ctu alloc
+// * However it might be an idea to have some means of spotting that we've used it
 static int rpi_inter_pred_next_ctu(HEVCRpiInterPredEnv * const ipe)
 {
     if (!ipe->used_grp)
@@ -2295,12 +2323,6 @@ static int rpi_inter_pred_next_ctu(HEVCRpiInterPredEnv * const ipe)
     ipe->used = 1;
     ipe->used_grp = 0;
 
-    for (unsigned int i = 0; i != ipe->n_grp; ++i) {
-        HEVCRpiInterPredQ * const q = ipe->q + i + ipe->curr;
-        if ((char *)q->qpu_mc_curr - (char *)q->qpu_mc_base > ipe->max_fill) {
-            return -1;
-        }
-    }
     return 0;
 }
 
@@ -3825,16 +3847,21 @@ static HEVCRpiJob * job_new(void)
 
     // * Sizeof the union structure might be overkill but at the moment it
     //   is correct (it certainly isn't going to be too small)
-    // *** really should add per ctu sync words to be accurate
+    // Set max fill to slack/2 from the end of the Q
+    // If we exceed this in any Q then we will schedule by size (which should
+    // mean that we never use that Q again part from syncs)
+    // * Given how agressive the overflow resonse is we could maybe put the
+    //   threshold even nearer the end, but I don't expect us to ever hit
+    //   it on any real stream anyway.
 
     rpi_inter_pred_alloc(&jb->chroma_ip,
                          QPU_N_MAX, QPU_N_GRP,
-                         QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t),
-                         QPU_C_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_c_t));
+                         QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t) + QPU_C_SYNCS * sizeof(uint32_t),
+                         QPU_C_CMD_SLACK_PER_Q * sizeof(qpu_mc_pred_c_t) / 2);
     rpi_inter_pred_alloc(&jb->luma_ip,
                          QPU_N_MAX,  QPU_N_GRP,
-                         QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t),
-                         QPU_Y_CMD_PER_CTU_MAX * sizeof(qpu_mc_pred_y_t));
+                         QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t) + QPU_Y_SYNCS * sizeof(uint32_t),
+                         QPU_Y_CMD_SLACK_PER_Q * sizeof(qpu_mc_pred_y_t) / 2);
 
     return jb;
 }
