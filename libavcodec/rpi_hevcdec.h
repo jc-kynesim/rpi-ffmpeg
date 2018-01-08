@@ -392,7 +392,6 @@ typedef struct HEVCRpiLocalContext {
     TransformUnit tu;  // Moved to start to match HEVCRpiLocalContextIntra (yuk!)
     RpiNeighbourAvailable na;
 
-    GetBitContext gb;
     CABACContext cc;
 
     // Vars that allow us to locate everything from just an lc
@@ -423,6 +422,10 @@ typedef struct HEVCRpiLocalContext {
     char last_progress_good;
     char cabac_init_req;
 
+    uint8_t cabac_state[HEVC_CONTEXTS];
+    uint8_t stat_coeff[4];
+    GetBitContext gb;
+
     int8_t qp_y;
     int8_t curr_qp_y;
     int8_t qPy_pred;
@@ -445,9 +448,6 @@ typedef struct HEVCRpiLocalContext {
     /* properties of the boundary of the current CTB for the purposes
      * of the deblocking filter */
     unsigned int boundary_flags;
-
-    uint8_t stat_coeff[4];
-    uint8_t cabac_state[HEVC_CONTEXTS];
 
     /* +7 is for subpixel interpolation, *2 for high bit depths */
     DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
