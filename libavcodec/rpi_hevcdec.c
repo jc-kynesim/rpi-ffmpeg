@@ -3447,6 +3447,8 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     const unsigned int xr = bound_r - (x_end ? 0 : ctb_size);
     const unsigned int yb = bound_b - (y_end ? 0 : ctb_size);
     unsigned int x, y;
+    
+    gate_start(s->used_for_ref,s->decode_order);
 
     for (y = y0; y < yb; y += ctb_size ) {
         for (x = x0; x < xr; x += ctb_size ) {
@@ -3488,6 +3490,8 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     // Job done now
     // ? Move outside this fn
     job_free(s->jbc, jb);
+    
+    gate_stop();
 }
 
 
@@ -3498,6 +3502,8 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     unsigned int i;
     HEVCRpiIntraPredEnv * const iap = &jb->intra;
     const HEVCPredCmd *cmd = iap->cmds;
+    
+    gate_start(s->used_for_ref,s->decode_order);
 
     for (i = iap->n; i > 0; i--, cmd++)
     {
@@ -3549,6 +3555,8 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
                 abort();
         }
     }
+    
+    gate_stop();
 
     // Mark done
     iap->n = 0;
@@ -4196,6 +4204,8 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
     HEVCRpiJob * const jb = lc->jb0;
     int more_data = 1;
     int ctb_addr_ts = lc->ts;
+    
+    gate_start(s->used_for_ref,s->decode_order);
 
 #ifdef RPI_VPU_INTRA_PRED    
 // Decide whether we can use intra prediction on chroma
@@ -4281,6 +4291,9 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
 
     lc->unit_done = (more_data <= 0);
     lc->ts = ctb_addr_ts;
+    
+    gate_stop();
+    
     return 0;
 }
 
@@ -5035,6 +5048,7 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_RASL_N);
         s->offload_recon = s->used_for_ref;
 //        s->offload_recon = 0;
+//        s->offload_recon = 1;
 
 #if DEBUG_DECODE_N
         {
@@ -5298,6 +5312,7 @@ static int hevc_rpi_decode_frame(AVCodecContext *avctx, void *data, int *got_out
     int new_extradata_size;
     uint8_t *new_extradata;
     HEVCRpiContext *s = avctx->priv_data;
+    s->decode_order = gate_get_decode_order();
 
     if (!avpkt->size) {
         ret = ff_hevc_rpi_output_frame(s, data, 1);
@@ -5613,6 +5628,8 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 {
     HEVCRpiContext *s = avctx->priv_data;
     int ret;
+    
+    gate_init();
 
     avctx->internal->allocate_progress = 1;
 

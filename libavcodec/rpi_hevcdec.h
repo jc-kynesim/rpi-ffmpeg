@@ -714,6 +714,7 @@ typedef struct HEVCRpiContext {
 
     char used_for_ref;  // rpi
     char offload_recon;
+    int decode_order; // Used to assign priority;
 
     HEVCRpiJobCtl * jbc;
 
