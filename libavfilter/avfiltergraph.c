@@ -457,7 +457,6 @@ static int query_formats(AVFilterGraph *graph, AVClass *log_ctx)
 
     for (i = 0; i < graph->nb_filters; i++) {
         AVFilterContext *f = graph->filters[i];
-
         if (formats_declared(f))
             continue;
         if (f->filter->query_formats)

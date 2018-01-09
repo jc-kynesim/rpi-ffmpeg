@@ -34,10 +34,6 @@
 #define VLC_DEPTH 2
 
 
-#define VLC_BITS 7
-#define VLC_DEPTH 2
-
-
 typedef struct CLLCContext {
     AVCodecContext *avctx;
     BswapDSPContext bdsp;
