@@ -24,45 +24,72 @@
 
 .set EDGE_SRC_STRIDE, 160
 
-.macro sao_band_64b_8 XLAT0, XLAT1, Q_K128
-        vshr.u8 q12, q8, #3
-        vadd.s8  q8, \Q_K128
-        vshr.u8 q13, q9, #3
-        vadd.s8  q9, \Q_K128
+.macro sao_band_64b_8 XLAT0, XLAT1, Q_K128, I1, I2, I3, I4
+        vshr.u8   q12, q8, #3
+        \I1
+        vadd.i8   q8, \Q_K128
+        \I2
+        vshr.u8   q13, q9, #3
+        \I3
+        vadd.i8   q9, \Q_K128
+        \I4
+        vtbl.8    d24, \XLAT0, d24
+        vtbl.8    d25, \XLAT0, d25
+        vtbl.8    d26, \XLAT1, d26
+        vtbl.8    d27, \XLAT1, d27
 
-        vtbl.8   d24, \XLAT0, d24
-        vtbl.8   d25, \XLAT0, d25
-        vtbl.8   d26, \XLAT1, d26
-        vtbl.8   d27, \XLAT1, d27
+        vqadd.s8  q8, q12
+        vshr.u8   q12, q10, #3
+        vadd.i8   q10, \Q_K128
+        vqadd.s8  q9, q13
+        vshr.u8   q13, q11, #3
+        vadd.i8   q11, \Q_K128
 
-        vqadd.s8 q8, q12
-        vshr.u8 q12, q10, #3
-        vadd.s8  q10, \Q_K128
-        vqadd.s8 q9, q13
-        vshr.u8 q13, q11, #3
-        vadd.s8  q11, \Q_K128
-
-        vsub.s8  q8, \Q_K128
-        vtbl.8   d24, \XLAT0, d24
-        vtbl.8   d25, \XLAT0, d25
-        vsub.s8  q9, \Q_K128
-        vtbl.8   d26, \XLAT1, d26
-        vtbl.8   d27, \XLAT1, d27
-        vqadd.s8 q10, q12
-        vqadd.s8 q11, q13
-        vsub.s8  q10, \Q_K128
-        vsub.s8  q11, \Q_K128
+        vtbl.8    d24, \XLAT0, d24
+        vtbl.8    d25, \XLAT0, d25
+        vtbl.8    d26, \XLAT1, d26
+        vtbl.8    d27, \XLAT1, d27
+        vqadd.s8  q10, q12
+        vsub.i8   q8, \Q_K128
+        vqadd.s8  q11, q13
+        vsub.i8   q9, \Q_K128
+        vsub.i8   q10, \Q_K128
+        vsub.i8   q11, \Q_K128
 .endm
 
-.macro sao_band_16b_8 XLAT0, XLAT1, Q_K128
-        vshr.u8 q12, q8, #3
-        vadd.s8  q8, \Q_K128
-
-        vtbl.8   d24, \XLAT0, d24
-        vtbl.8   d25, \XLAT1, d25
-
-        vqadd.s8 q8, q12
-        vsub.s8  q8, \Q_K128
+.macro sao_band_16b_8 XLAT0, XLAT1, Q_K128, L1, L2, L3, L4, L5, S1, S2, S3, S4
+        \L1
+        \L2
+        \L3
+        \L4
+        \L5
+        vadd.i8   q12, q8, \Q_K128
+        vshr.u8   q8, #3
+        vtbl.8    d16, \XLAT0, d16
+        vtbl.8    d17, \XLAT1, d17
+        vqadd.s8  q12, q8
+        bmi       2f
+1:        \L1
+          \L2
+          \L3
+          \L4
+          \L5
+        vsub.i8   q13, q12, \Q_K128
+          vadd.i8   q12, q8, \Q_K128
+          vshr.u8   q8, #3
+        \S1
+        \S2
+        \S3
+        \S4
+          vtbl.8    d16, \XLAT0, d16
+          vtbl.8    d17, \XLAT1, d17
+          vqadd.s8  q12, q8
+          bpl       1b
+2:        vsub.i8   q13, q12, \Q_K128
+          \S1
+          \S2
+          \S3
+          \S4
 .endm
 
 
@@ -78,13 +105,15 @@
 .endm
 
 @ Clobbers q12, q13
-.macro sao_band_64b_16  Q0, Q1, Q2, Q3, XLAT0, XLAT1, Q_MIN, Q_MAX, bit_depth
+.macro sao_band_64b_16  Q0, Q1, Q2, Q3, XLAT0, XLAT1, Q_MIN, Q_MAX, bit_depth, I1, I2
         vshrn.i16 d24, \Q0, #(\bit_depth - 5)
         vshrn.i16 d25, \Q1, #(\bit_depth - 5)
         vshrn.i16 d26, \Q2, #(\bit_depth - 5)
-        vshrn.i16 d27, \Q3, #(\bit_depth - 5)
+        \I1
         vtbl.8    d24, \XLAT0, d24
+        vshrn.i16 d27, \Q3, #(\bit_depth - 5)
         vtbl.8    d25, \XLAT1, d25
+        \I2
         vtbl.8    d26, \XLAT0, d26
         vtbl.8    d27, \XLAT1, d27
         vaddw.s8  \Q0, d24
@@ -94,18 +123,48 @@
         clip16_4   \Q0, \Q1, \Q2, \Q3, \Q_MIN, \Q_MAX
 .endm
 
-@ Clobbers q12
-.macro sao_band_32b_16  Q0, Q1, XLAT0, XLAT1, Q_MIN, Q_MAX, bit_depth
-        vshrn.i16 d24, \Q0, #(\bit_depth - 5)
-        vshrn.i16 d25, \Q1, #(\bit_depth - 5)
+@ Clobbers q10, q11, q12
+.macro sao_band_32b_16 Q0, Q1, XLAT0, XLAT1, Q_MIN, Q_MAX, bit_depth, L1, L2, L3, L4, L5, S1, S2, S3, S4
+        \L1
+        \L2
+        \L3
+        \L4
+        \L5
+        vshrn.i16 d24, \Q0, #\bit_depth - 5
+        vshrn.i16 d25, \Q1, #\bit_depth - 5
         vtbl.8    d24, \XLAT0, d24
         vtbl.8    d25, \XLAT1, d25
-        vaddw.s8  \Q0, d24
-        vaddw.s8  \Q1, d25
-        vmax.s16  \Q0, \Q_MIN
-        vmax.s16  \Q1, \Q_MIN
-        vmin.s16  \Q0, \Q_MAX
-        vmin.s16  \Q1, \Q_MAX
+        vaddw.s8  q10, \Q0, d24
+        vaddw.s8  q11, \Q1, d25
+        bmi       2f
+1:        \L1
+          \L2
+          \L3
+          \L4
+          \L5
+        vmax.s16  q10, \Q_MIN
+        vmax.s16  q11, \Q_MIN
+          vshrn.i16 d24, \Q0, #\bit_depth - 5
+          vshrn.i16 d25, \Q1, #\bit_depth - 5
+        vmin.s16  q10, \Q_MAX
+        vmin.s16  q11, \Q_MAX
+        \S1
+        \S2
+        \S3
+        \S4
+          vtbl.8    d24, \XLAT0, d24
+          vtbl.8    d25, \XLAT1, d25
+          vaddw.s8  q10, \Q0, d24
+          vaddw.s8  q11, \Q1, d25
+          bpl       1b
+2:        vmax.s16  q10, \Q_MIN
+          vmax.s16  q11, \Q_MIN
+          vmin.s16  q10, \Q_MAX
+          vmin.s16  q11, \Q_MAX
+          \S1
+          \S2
+          \S3
+          \S4
 .endm
 
 
@@ -123,84 +182,57 @@
 @ It also loads other common regs
 
 function band_load_y
+        ldr       ip, [sp, #16]         @ &sao_offset_val[0]
+        ldr       r4, [sp, #20]         @ sao_left_class
+        vmov.i64  d4, #0
         vmov.i64  q0, #0
-        ldr       r12, [sp, #8]         @ &sao_offset_val[0]
-        add       r12, #2               @ 1st interesting val is [1]
-        vld1.16   {d16}, [r12]          @ Unaligned
-        vmov.i64  q1, #0
-        ldr       r12, [sp, #12]        @ sao_left_class
-
-        mov       r4, sp
-        sub       sp, #32
-        and       sp, #~63              @ Align stack so we can wrap with a simple AND
-        vst1.8    {q0, q1}, [sp, :256]  @ Put zero array on stack
-        add       r12, sp
-        vst1.8    {d16[0]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[2]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[4]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[6]}, [r12]
-        vld1.8    {q0, q1}, [sp, :256]  @ Pop modified array
-        mov       sp, r4
-
-        ldr       r12, [sp, #20]        @ height
         pld       [r1]
-
-        sub       r12, #1
+        vld2.8    {q8}, [ip]
+        sub       ip, sp, #8*5
+        vmov.i64  q1, #0
+        add       r4, ip, r4
+        vpush     {d0-d4}               @ Put zero array on stack
+        vshr.u64  d16, d16, #8          @ 1st interesting val is [1]
+        ldr       ip, [ip, #8*5 + 28]   @ height
+        vst1.32   {d16[0]}, [r4]
         add       r4, r1, r3
+        vpop      {d0-d4}               @ Pop modified array
+        sub       ip, ip, #1
+        vorr      d0, d0, d4
         bx        lr
 endfunc
 
 
 function band_load_c
-        vmov.i64  q2, #0
-        ldr       r12, [sp, #8]         @ &sao_offset_val1[0]
-        add       r12, #2               @ 1st interesting val is [1]
-        vld1.16   {d16}, [r12]          @ Unaligned
-        vmov.i64  q3, #0
-        ldr       r12, [sp, #12]        @ sao_left_class
-
-        mov       r4, sp                @ Remember SP
-        sub       sp, #32
-        and       sp, #~63              @ Align stack so we can wrap with a simple AND
-
-        vst1.8    {q2, q3}, [sp, :256]  @ Put zero array on stack
-        add       r12, sp
-        vst1.8    {d16[0]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[2]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[4]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[6]}, [r12]
-        vld1.8    {q0, q1}, [sp, :256]  @ Pop modified array
-
-        @ And again for the 2nd set
-        ldr       r12, [r4, #16]        @ &sao_offset_val2[0]
-        add       r12, #2               @ 1st interesting val is [1]
-        vld1.16   {d16}, [r12]          @ Unaligned
-        ldr       r12, [r4, #20]        @ sao_left_class2
-
-        vst1.8    {q2, q3}, [sp, :256]  @ Put zero array on stack (again)
-        add       r12, sp
-        vst1.8    {d16[0]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[2]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[4]}, [r12]!
-        and       r12, #~32
-        vst1.8    {d16[6]}, [r12]
-        vld1.8    {q2, q3}, [sp, :256]  @ Pop modified array
-
-        mov       sp, r4
-
-        ldr       r12, [sp, #28]        @ height
+        ldr       ip, [sp, #16]         @ &sao_offset_val1[0]
+        ldr       r4, [sp, #20]         @ sao_left_class1
+        vmov.i64  d24, #0
+        vmov.i64  q10, #0
         pld       [r1]
-
-        subs      r12, #1
+        vld2.8    {q8}, [ip]
+        sub       ip, sp, #8*5
+        vmov.i64  q11, #0
+        add       r4, ip, r4
+        ldr       ip, [sp, #24]         @ &sao_offset_val2[0]
+        vpush     {d20-d24}             @ Put zero array on stack
+        vld2.8    {q9}, [ip]
+        vshr.u64  d16, d16, #8          @ 1st interesting val is [1]
+        ldr       ip, [sp, #8*5 + 28]   @ sao_left_class2
+        vst1.32   {d16[0]}, [r4]
+        add       ip, sp, ip
+        vshr.u64  d18, d18, #8          @ 1st interesting val is [1]
+        vldmia    sp, {d0-d3}           @ Load modified array
+        vldr      d16, [sp, #8*4]
         add       r4, r1, r3
+        vstmia    sp, {d20-d24}         @ Put zero array on stack (again)
+        vst1.32   {d18[0]}, [ip]
+        vorr      d0, d0, d16
+        vldmia    sp, {d4-d7}           @ Load modified array
+        vldr      d18, [sp, #8*4]
+        ldr       ip, [sp, #8*5 + 36]   @ height
+        add       sp, sp, #8*5
+        vorr      d4, d4, d18
+        sub       ip, ip, #1
         bx        lr
 endfunc
 
@@ -216,24 +248,21 @@ endfunc
 @   int height)                 [sp, #12]
 
 function ff_hevc_rpi_sao_band_64_neon_8, export=1
-        push      {r4, lr}
-        bl        band_load_y
+        push      {r4-r6, lr}
         vmov.u8   q15, #128
+        bl        band_load_y
 
-1:      subs      r12, #1
-        vldm      r1, {q8-q11}
-        pld       [r4]
-        add       r1, r3
-
-        sao_band_64b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
-
-        it ne
-        addne     r4, r3
-        vstm      r0, {q8-q11}
+1:      vldmia    r1, {q8-q11}
+        sao_band_64b_8 {d0-d3}, {d0-d3}, q15, \
+            "pld       [r4]",                 \
+            "subs      ip, #1",               \
+            "addne     r4, r3",               \
+            "add       r1, r3"
+        vstmia    r0, {q8-q11}
         add       r0, r2
         bpl       1b
 
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 endfunc
 
 @ ff_hevc_rpi_sao_band_32_neon_8 (
@@ -247,21 +276,25 @@ endfunc
 @   int height)                 [sp, #12]
 
 function ff_hevc_rpi_sao_band_32_neon_8, export=1
-        push      {r4, lr}
-        bl        band_load_y
+        push      {r4-r6, lr}
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
         vmov.u8   q15, #128
+        bl        band_load_y
 
-1:      subs      r12, #2
-        vld1.8    { q8, q9 }, [r1, :128], r3
-        vld1.8    {q10, q11}, [r1, :128], r3
+1:      vld1.8    { q8, q9 }, [r1, :128], r3
+        subs      ip, #2
+        vld1.8    {q10, q11}, [r6, :128], r3
 
-        sao_band_64b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
+        sao_band_64b_8 {d0-d3}, {d0-d3}, q15
 
         vst1.8    { q8, q9 }, [r0, :128], r2
-        vst1.8    {q10, q11}, [r0, :128], r2
+        vst1.8    {q10, q11}, [r5, :128], r2
         bpl       1b
 
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 endfunc
 
 @ ff_hevc_rpi_sao_band_16_neon_8 (
@@ -275,25 +308,29 @@ endfunc
 @   int height)                 [sp, #12]
 
 function ff_hevc_rpi_sao_band_16_neon_8, export=1
-        push      {r4, lr}
-        bl        band_load_y
+        push      {r4-r6, lr}
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
         vmov.u8   q15, #128
+        bl        band_load_y
 
-1:      subs      r12, #4
-        vld1.8    { q8}, [r1, :128], r3
-        vld1.8    { q9}, [r1, :128], r3
+1:      vld1.8    { q8}, [r1, :128], r3
+        subs      ip, #4
+        vld1.8    { q9}, [r6, :128], r3
         vld1.8    {q10}, [r1, :128], r3
-        vld1.8    {q11}, [r1, :128], r3
+        vld1.8    {q11}, [r6, :128], r3
 
-        sao_band_64b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
+        sao_band_64b_8 {d0-d3}, {d0-d3}, q15
 
         vst1.8    { q8}, [r0, :128], r2
-        vst1.8    { q9}, [r0, :128], r2
+        vst1.8    { q9}, [r5, :128], r2
         vst1.8    {q10}, [r0, :128], r2
-        vst1.8    {q11}, [r0, :128], r2
+        vst1.8    {q11}, [r5, :128], r2
         bpl       1b
 
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 endfunc
 
 @ ff_hevc_rpi_sao_band_8_neon_8 (
@@ -307,39 +344,38 @@ endfunc
 @   int height)                 [sp, #12]
 
 function ff_hevc_rpi_sao_band_8_neon_8, export=1
-        push      {r4, lr}
-        bl        band_load_y
-        ldr       lr, [sp, #16]         @ width
+        ldr       ip, [sp, #8]          @ width
+        push      {r4-r6, lr}
         vmov.u8   q15, #128
-        cmp       lr, #8
+        cmp       ip, #8
+        bl        band_load_y
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
         blt       4f
 
-1:      subs      r12, #2
-        vld1.8    {d16}, [r1, :64], r3
-        vld1.8    {d17}, [r1, :64], r3
-
-        sao_band_16b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
-
-        vst1.8    {d16}, [r0, :64], r2
-        vst1.8    {d17}, [r0, :64], r2
-        bpl       1b
-        pop       {r4, pc}
-
+        sao_band_16b_8 {d0-d3}, {d0-d3}, q15, \
+            "vld1.8    {d16}, [r1, :64], r3", \
+            "subs      ip, #2",               \
+            "vld1.8    {d17}, [r6, :64], r3", \
+            "",                               \
+            "",                               \
+            "vst1.8 {d26}, [r0, :64], r2",    \
+            "vst1.8 {d27}, [r5, :64], r2"
+        pop       {r4-r6, pc}
 4:
-1:      subs      r12, #4
-        vld1.32   {d16[0]}, [r1, :32], r3
-        vld1.32   {d16[1]}, [r1, :32], r3
-        vld1.32   {d17[0]}, [r1, :32], r3
-        vld1.32   {d17[1]}, [r1, :32], r3
-
-        sao_band_16b_8 "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q15
-
-        vst1.32   {d16[0]}, [r0, :32], r2
-        vst1.32   {d16[1]}, [r0, :32], r2
-        vst1.32   {d17[0]}, [r0, :32], r2
-        vst1.32   {d17[1]}, [r0, :32], r2
-        bpl       1b
-        pop       {r4, pc}
+        sao_band_16b_8 {d0-d3}, {d0-d3}, q15,    \
+            "vld1.32   {d16[0]}, [r1, :32], r3", \
+            "subs      ip, #4",                  \
+            "vld1.32   {d16[1]}, [r6, :32], r3", \
+            "vld1.32   {d17[0]}, [r1, :32], r3", \
+            "vld1.32   {d17[1]}, [r6, :32], r3", \
+            "vst1.32   {d26[0]}, [r0, :32], r2", \
+            "vst1.32   {d26[1]}, [r5, :32], r2", \
+            "vst1.32   {d27[0]}, [r0, :32], r2", \
+            "vst1.32   {d27[1]}, [r5, :32], r2"
+        pop       {r4-r6, pc}
 endfunc
 
 @ ff_hevc_rpi_sao_band_c_32_neon_8(
@@ -355,31 +391,25 @@ endfunc
 @   int height             sp[20]
 
 function ff_hevc_rpi_sao_band_c_32_neon_8, export=1
-        push    {r4, lr}
-        bl      band_load_c
+        push      {r4-r6, lr}
+        add       r5, r0, #32
+        add       r6, r1, #32
+        vmov.u8   q15, #128
+        bl        band_load_c
 
-        vmov.i8   q15, #128
-        sub       r3, #32
-        sub       r2, #32
+1:      vld2.8    { q8, q9 }, [r1, :128], r3
+        subs      ip, #1
+        vld2.8    {q10, q11}, [r6, :128], r3
 
-1:      subs      r12, #1
-        vld2.8    { q8, q9 }, [r1, :128]!
-        vld2.8    {q10, q11}, [r1, :128], r3
+        sao_band_64b_8 {d0-d3}, {d4-d7}, q15, \
+            "pld       [r4]",                 \
+            "addne     r4, r3"
 
-        pld       [r4]
-
-        sao_band_64b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
-
-        vst2.8    { q8, q9 }, [r0, :128]!
-        vst2.8    {q10, q11}, [r0, :128], r2
-
-        itt ne
-        addne     r4, r3
-        addne     r4, #32
-
+        vst2.8    { q8, q9 }, [r0, :128], r2
+        vst2.8    {q10, q11}, [r5, :128], r2
         bpl       1b
 
-        pop     {r4, pc}
+        pop     {r4-r6, pc}
 endfunc
 
 @ ff_hevc_rpi_sao_band_c_16_neon_8(
@@ -395,21 +425,25 @@ endfunc
 @   int height             sp[20]
 
 function ff_hevc_rpi_sao_band_c_16_neon_8, export=1
-        push    {r4, lr}
-        bl      band_load_c
-        vmov.i8   q15, #128
+        push      {r4-r6, lr}
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
+        vmov.u8   q15, #128
+        bl        band_load_c
 
-1:      subs      r12, #2
-        vld2.8    { q8, q9 }, [r1, :128], r3
-        vld2.8    {q10, q11}, [r1, :128], r3
+1:      vld2.8    { q8, q9 }, [r1, :128], r3
+        subs      ip, #2
+        vld2.8    {q10, q11}, [r6, :128], r3
 
-        sao_band_64b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
+        sao_band_64b_8 {d0-d3}, {d4-d7}, q15
 
         vst2.8    { q8, q9 }, [r0, :128], r2
-        vst2.8    {q10, q11}, [r0, :128], r2
-
+        vst2.8    {q10, q11}, [r5, :128], r2
         bpl       1b
-        pop     {r4, pc}
+
+        pop     {r4-r6, pc}
 endfunc
 
 @ ff_hevc_rpi_sao_band_c_8_neon_8(
@@ -425,35 +459,36 @@ endfunc
 @   int height             sp[20]
 
 function ff_hevc_rpi_sao_band_c_8_neon_8, export=1
-        push    {r4, lr}
-        bl      band_load_c
-        ldr       lr, [sp, #16]         @ width
+        ldr       ip, [sp, #16]         @ width
+        push      {r4-r6, lr}
         vmov.u8   q15, #128
-        cmp       lr, #8
+        cmp       ip, #8
+        bl        band_load_c
         blt       4f
 
-1:      subs      r12, #1
-        vld2.8    {d16, d17}, [r1, :128], r3
-
-        sao_band_16b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
-
-        vst2.8    {d16, d17}, [r0, :128], r2
-        bpl       1b
-        pop     {r4, pc}
-
+        sao_band_16b_8 {d0-d3}, {d4-d7}, q15,      \
+            "vld2.8    {d16-d17}, [r1, :128], r3", \
+            "subs      ip, #1",                    \
+            "",                                    \
+            "",                                    \
+            "",                                    \
+            "vst2.8    {d26-d27}, [r0, :128], r2"
+        pop       {r4-r6, pc}
 4:
-1:      subs      r12, #1
-        vld1.8    {d16}, [r1, :64], r3
-        vld1.8    {d17}, [r1, :64], r3
-        vuzp.8    d16, d17
-
-        sao_band_16b_8 "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q15
-
-        vzip.8    d16, d17
-        vst1.8    {d16}, [r0, :64], r2
-        vst1.8    {d17}, [r0, :64], r2
-        bpl       1b
-        pop     {r4, pc}
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
+        sao_band_16b_8 {d0-d3}, {d4-d7}, q15, \
+            "vld1.8    {d16}, [r1, :64], r3", \
+            "subs      ip, #2",               \
+            "vld1.8    {d17}, [r6, :64], r3", \
+            "vuzp.8    d16, d17",             \
+            "",                               \
+            "vzip.8    d26, d27",             \
+            "vst1.8    {d26}, [r0, :64], r2", \
+            "vst1.8    {d27}, [r5, :64], r2"
+        pop       {r4-r6, pc}
 endfunc
 
 
@@ -468,24 +503,23 @@ endfunc
 @   int height)                 [sp, #12]
 
 .macro band_64_16 bit_depth
-        push      {r4, lr}
-        movw      lr, #(1 << \bit_depth) - 1
+        push      {r4-r6, lr}
         vmov.i64  q2, #0
-        vdup.i16  q3, lr
+        vmov.i16  q3, #(1 << \bit_depth) - 1
         bl        band_load_y
         vpush     {q4-q7}
 
-1:      subs      r12, #1
-        vldm      r1, {q4-q11}
-        add       r1, r3
-        sao_band_64b_16 q4,  q5,  q6,  q7, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q2, q3, \bit_depth
-        sao_band_64b_16 q8,  q9, q10, q11, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q2, q3, \bit_depth
+1:      vldm      r1, {q4-q11}
+        sao_band_64b_16 q4,  q5,  q6,  q7, {d0-d3}, {d0-d3}, q2, q3, \bit_depth, \
+            "subs      ip, #1",                                                  \
+            "add       r1, r3"
+        sao_band_64b_16 q8,  q9, q10, q11, {d0-d3}, {d0-d3}, q2, q3, \bit_depth
         vstm      r0, {q4-q11}
         add       r0, r2
         bpl       1b
 
         vpop      {q4-q7}
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 .endm
 
 function ff_hevc_rpi_sao_band_64_neon_10, export=1
@@ -503,21 +537,20 @@ endfunc
 @   int height)                 [sp, #12]
 
 .macro band_32_16 bit_depth
-        push      {r4, lr}
-        movw      lr, #(1 << \bit_depth) - 1
+        push      {r4-r6, lr}
         vmov.i64  q2, #0
-        vdup.i16  q3, lr
+        vmov.i16  q3, #(1 << \bit_depth) - 1
         bl        band_load_y
 
-1:      subs      r12, #1
-        vldm      r1, {q8-q11}
-        add       r1, r3
-        sao_band_64b_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q2, q3, \bit_depth
+1:      vldm      r1, {q8-q11}
+        sao_band_64b_16 q8,  q9,  q10, q11, {d0-d3}, {d0-d3}, q2, q3, \bit_depth, \
+            "subs      ip, #1",                                                   \
+            "add       r1, r3"
         vstm      r0, {q8-q11}
         add       r0, r2
         bpl       1b
 
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 .endm
 
 function ff_hevc_rpi_sao_band_32_neon_10, export=1
@@ -535,21 +568,24 @@ endfunc
 @   int height)                 [sp, #12]
 
 .macro band_16_16 bit_depth
-        push      {r4, lr}
-        movw      lr, #(1 << \bit_depth) - 1
+        push      {r4-r6, lr}
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
         vmov.i64  q14, #0
-        vdup.i16  q15, lr
+        vmov.i16  q15, #(1 << \bit_depth) - 1
         bl        band_load_y
 
-1:      subs      r12, #2
-        vld1.16   { q8, q9 }, [r1, :128], r3
-        vld1.16   {q10, q11}, [r1, :128], r3
-        sao_band_64b_16 q8,  q9,  q10, q11, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q14, q15, \bit_depth
+1:      vld1.16   { q8, q9 }, [r1, :128], r3
+        subs      r12, #2
+        vld1.16   {q10, q11}, [r6, :128], r3
+        sao_band_64b_16 q8,  q9,  q10, q11, {d0-d3}, {d0-d3}, q14, q15, \bit_depth
         vst1.16   { q8, q9 }, [r0, :128], r2
-        vst1.16   {q10, q11}, [r0, :128], r2
+        vst1.16   {q10, q11}, [r5, :128], r2
         bpl       1b
 
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 .endm
 
 function ff_hevc_rpi_sao_band_16_neon_10, export=1
@@ -567,37 +603,39 @@ endfunc
 @   int height)                 [sp, #12]
 
 .macro band_8_16 bit_depth
-        push      {r4, lr}
-        movw      lr, #(1 << \bit_depth) - 1
+        ldr       ip, [sp, #8]          @ width
+        push      {r4-r6, lr}
         vmov.i64  q14, #0
-        vdup.i16  q15, lr
+        cmp       ip, #8
+        vmov.i16  q15, #(1 << \bit_depth) - 1
         bl        band_load_y
-        ldr       lr, [sp, #16]
-        cmp       lr, #8
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
         blt       4f
 
-1:      subs      r12, #2
-        vld1.16   { q8}, [r1, :128], r3
-        vld1.16   { q9}, [r1, :128], r3
-        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q14, q15, \bit_depth
-        vst1.16   { q8}, [r0, :128], r2
-        vst1.16   { q9}, [r0, :128], r2
-        bpl       1b
-        pop       {r4, pc}
-
+        sao_band_32b_16 q8, q9, {d0-d3}, {d0-d3}, q14, q15, \bit_depth, \
+            "vld1.16   {q8}, [r1, :128], r3",                           \
+            "subs      ip, #2",                                         \
+            "vld1.16   {q9}, [r6, :128], r3",                           \
+            "",                                                         \
+            "",                                                         \
+            "vst1.16   {q10}, [r0, :128], r2",                          \
+            "vst1.16   {q11}, [r5, :128], r2"
+        pop       {r4-r6, pc}
 4:
-1:      subs      r12, #4
-        vld1.16   {d16}, [r1, :64], r3
-        vld1.16   {d17}, [r1, :64], r3
-        vld1.16   {d18}, [r1, :64], r3
-        vld1.16   {d19}, [r1, :64], r3
-        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d0,d1,d2,d3}", q14, q15, \bit_depth
-        vst1.16   {d16}, [r0, :64], r2
-        vst1.16   {d17}, [r0, :64], r2
-        vst1.16   {d18}, [r0, :64], r2
-        vst1.16   {d19}, [r0, :64], r2
-        bpl       1b
-        pop       {r4, pc}
+        sao_band_32b_16 q8, q9, {d0-d3}, {d0-d3}, q14, q15, \bit_depth, \
+            "vld1.16   {d16}, [r1, :64], r3",                           \
+            "subs      ip, #4",                                         \
+            "vld1.16   {d17}, [r6, :64], r3",                           \
+            "vld1.16   {d18}, [r1, :64], r3",                           \
+            "vld1.16   {d19}, [r6, :64], r3",                           \
+            "vst1.16   {d20}, [r0, :64], r2",                           \
+            "vst1.16   {d21}, [r5, :64], r2",                           \
+            "vst1.16   {d22}, [r0, :64], r2",                           \
+            "vst1.16   {d23}, [r5, :64], r2"
+        pop       {r4-r6, pc}
 .endm
 
 function ff_hevc_rpi_sao_band_8_neon_10, export=1
@@ -618,39 +656,37 @@ endfunc
 @   int height             sp[20]
 
 .macro band_c_32_16 bit_depth
-        push      {r4, lr}
-        bl        band_load_c
-        vpush     {q4-q7}
-        movw      lr, #(1 << \bit_depth) - 1
+        push      {r4-r6, lr}
+        add       r5, r0, #32
+        add       r6, r1, #32
+        sub       r2, #64
+        sub       r3, #64
         vmov.i64  q14, #0
-        vdup.i16  q15, lr
-        sub       r2, #96
+        vmov.i16  q15, #(1 << \bit_depth) - 1
+        bl        band_load_c
+        mov       lr, #64
+        vpush     {q4-q7}
 
-1:      subs      r12, #1
+1:      vld2.16   { q4, q5 }, [r1, :128], lr
+        subs      ip, #1
+        vld2.16   { q6, q7 }, [r6, :128], lr
+        vld2.16   { q8, q9 }, [r1, :128], r3
+        vld2.16   {q10, q11}, [r6, :128], r3
 
-        vld2.16   { q4, q5 }, [r1, :128]!
-        vld2.16   { q6, q7 }, [r1, :128]!
-        vld2.16   { q8, q9 }, [r1, :128]!
-        vld2.16   {q10, q11}, [r1, :128], r3
+        sao_band_64b_16 q4,  q5,  q6,  q7, {d0-d3}, {d4-d7}, q14, q15, \bit_depth, \
+            "pld       [r4]",                                                      \
+            "addne     r4, r3"
+        sao_band_64b_16 q8,  q9, q10, q11, {d0-d3}, {d4-d7}, q14, q15, \bit_depth
 
-        pld       [r4]
-        sub       r1, #96
-
-        sao_band_64b_16 q4,  q5,  q6,  q7, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
-        sao_band_64b_16 q8,  q9, q10, q11, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
-
-        it ne
-        addne     r4, r3
-
-        vst2.16   { q4, q5 }, [r0, :128]!
-        vst2.16   { q6, q7 }, [r0, :128]!
-        vst2.16   { q8, q9 }, [r0, :128]!
-        vst2.16   {q10, q11}, [r0, :128], r2
+        vst2.16   { q4, q5 }, [r0, :128], lr
+        vst2.16   { q6, q7 }, [r5, :128], lr
+        vst2.16   { q8, q9 }, [r0, :128], r2
+        vst2.16   {q10, q11}, [r5, :128], r2
 
         bpl       1b
 
         vpop      {q4-q7}
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 .endm
 
 function ff_hevc_rpi_sao_band_c_32_neon_10, export=1
@@ -671,26 +707,25 @@ endfunc
 @   int height             sp[20]
 
 .macro band_c_16_16 bit_depth
-        push      {r4, lr}
-        bl        band_load_c
-        movw      lr, #(1 << \bit_depth) - 1
+        push      {r4-r6, lr}
+        add       r5, r0, #32
+        add       r6, r1, #32
         vmov.i64  q14, #0
-        vdup.i16  q15, lr
-        sub       r2, #32
-        sub       r3, #32
+        vmov.i16  q15, #(1 << \bit_depth) - 1
+        bl        band_load_c
 
-1:      subs      r12, #1
+1:      vld2.16   { q8, q9 }, [r1, :128], r3
+        subs      ip, #1
+        vld2.16   {q10, q11}, [r6, :128], r3
 
-        vld2.16   { q8, q9 }, [r1, :128]!
-        vld2.16   {q10, q11}, [r1, :128], r3
+        sao_band_64b_16 q4,  q5,  q6,  q7, {d0-d3}, {d4-d7}, q14, q15, \bit_depth
+        sao_band_64b_16 q8,  q9, q10, q11, {d0-d3}, {d4-d7}, q14, q15, \bit_depth
 
-        sao_band_64b_16 q8,  q9, q10, q11, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
-
-        vst2.16   { q8, q9 }, [r0, :128]!
-        vst2.16   {q10, q11}, [r0, :128], r2
+        vst2.16   { q8, q9 }, [r0, :128], r2
+        vst2.16   {q10, q11}, [r5, :128], r2
 
         bpl       1b
-        pop       {r4, pc}
+        pop       {r4-r6, pc}
 .endm
 
 function ff_hevc_rpi_sao_band_c_16_neon_10, export=1
@@ -711,37 +746,36 @@ endfunc
 @   int height             sp[20]
 
 .macro band_c_8_16 bit_depth
-        push      {r4, lr}
-        bl        band_load_c
-        movw      lr, #(1 << \bit_depth) - 1
+        ldr       ip, [sp, #16]         @ width
+        push      {r4-r6, lr}
         vmov.i64  q14, #0
-        vdup.i16  q15, lr
-        ldr       lr, [sp, #24]         @ width
-        cmp       lr, #8
+        cmp       ip, #8
+        vmov.i16  q15, #(1 << \bit_depth) - 1
+        bl        band_load_c
         blt       4f
 
-1:      subs      r12, #1
-        vld2.16   { q8, q9 }, [r1, :128], r3
-
-        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
-
-        vst2.16   { q8, q9 }, [r0, :128], r2
-
-        bpl       1b
-        pop       {r4, pc}
-
+        sao_band_32b_16 q8, q9, {d0-d3}, {d4-d7}, q14, q15, \bit_depth, \
+            "vld2.16   {q8,q9}, [r1, :128], r3",                        \
+            "subs      ip, #1",                                         \
+            "",                                                         \
+            "",                                                         \
+            "",                                                         \
+            "vst2.16   {q10,q11}, [r0, :128], r2"
+        pop       {r4-r6, pc}
 4:
-1:      subs      r12, #2
-        vld2.16   {d16, d17}, [r1, :128], r3
-        vld2.16   {d18, d19}, [r1, :128], r3
-
-        sao_band_32b_16 q8,  q9, "{d0,d1,d2,d3}", "{d4,d5,d6,d7}", q14, q15, \bit_depth
-
-        vst2.16   {d16, d17}, [r0, :128], r2
-        vst2.16   {d18, d19}, [r0, :128], r2
-
-        bpl       1b
-        pop       {r4, pc}
+        add       r5, r0, r2
+        add       r6, r1, r3
+        lsl       r2, #1
+        lsl       r3, #1
+        sao_band_32b_16 q8, q9, {d0-d3}, {d4-d7}, q14, q15, \bit_depth, \
+            "vld2.16   {d16,d18}, [r1, :128], r3",                      \
+            "subs      ip, #2",                                         \
+            "vld2.16   {d17,d19}, [r6, :128], r3",                      \
+            "",                                                         \
+            "",                                                         \
+            "vst2.16   {d20,d22}, [r0, :128], r2",                      \
+            "vst2.16   {d21,d23}, [r5, :128], r2"
+        pop       {r4-r6, pc}
 .endm
 
 function ff_hevc_rpi_sao_band_c_8_neon_10, export=1
