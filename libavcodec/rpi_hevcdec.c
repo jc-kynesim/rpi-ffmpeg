@@ -1630,8 +1630,16 @@ static int hls_slice_header(HEVCRpiContext *s)
                 return AVERROR(ENOMEM);
             }
             for (i = 0; i < sh->num_entry_point_offsets; i++) {
-                unsigned val = get_bits_long(gb, offset_len);
-                sh->entry_point_offset[i] = val + 1; // +1; // +1 to get the size
+                uint32_t val_minus1 = get_bits_long(gb, offset_len);
+                if (val_minus1 > (1 << 28))
+                {
+                    // We can declare offsets of > 2^28 bad without loss of generality
+                    // Will check actual bounds wrt NAL later, but this keeps
+                    // the values within bounds we can deal with easily
+                    av_log(s->avctx, AV_LOG_ERROR, "entry_point_offset_minus1 %d invalid\n", val_minus1);
+                    return AVERROR_INVALIDDATA;
+                }
+                sh->entry_point_offset[i] = val_minus1 + 1; // +1 to get the size
             }
             if (s->threads_number > 1 && (s->ps.pps->num_tile_rows > 1 || s->ps.pps->num_tile_columns > 1)) {
                 s->enable_parallel_tiles = 0; // TODO: you can enable tiles in parallel here
@@ -4054,6 +4062,8 @@ static int gen_entry_points(HEVCRpiContext * const s, const H2645NAL * const nal
     unsigned int cmpt;
     unsigned int startheader;
 
+//    printf("Bufsize=%d, raw_size=%d, size_bits=%d, size_bit/8=%d\n", nal->rbsp_buffer_size, nal->raw_size, nal->size_bits, (nal->size_bits + 7) / 8);
+
     if (sh->num_entry_point_offsets == 0) {
         s->data = NULL;
         return 0;
@@ -4071,12 +4081,15 @@ static int gen_entry_points(HEVCRpiContext * const s, const H2645NAL * const nal
 
     for (i = 1; i < sh->num_entry_point_offsets; i++) {
         offset += (sh->entry_point_offset[i - 1] - cmpt);
-        for (j = 0, cmpt = 0, startheader = offset
-             + sh->entry_point_offset[i]; j < nal->skipped_bytes; j++) {
+        for (j = 0, cmpt = 0, startheader = offset + sh->entry_point_offset[i]; j < nal->skipped_bytes; j++) {
             if (nal->skipped_bytes_pos[j] >= offset && nal->skipped_bytes_pos[j] < startheader) {
                 startheader--;
                 cmpt++;
             }
+        }
+        if (sh->entry_point_offset[i] <= cmpt) {
+            av_log(s->avctx, AV_LOG_ERROR, "entry point offset <= skipped bytes\n");
+            return AVERROR_INVALIDDATA;
         }
         sh->size[i - 1] = sh->entry_point_offset[i] - cmpt;
         sh->offset[i - 1] = offset;
