@@ -875,7 +875,7 @@ int ff_hevc_rpi_slice_rpl(HEVCRpiContext *s);
 
 void ff_hevc_rpi_save_states(HEVCRpiContext *s, const HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cabac_init_decoder(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, const unsigned int ctb_flags);
+void ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, const unsigned int ctb_flags);
 int ff_hevc_rpi_sao_merge_flag_decode(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_sao_type_idx_decode(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_sao_band_position_decode(HEVCRpiLocalContext * const lc);
@@ -948,7 +948,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                                 const int c_idx);
 
 void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc);
-
+int ff_hevc_rpi_cabac_overflow(const HEVCRpiLocalContext * const lc);
 
 extern const uint8_t ff_hevc_rpi_qpel_extra_before[4];
 extern const uint8_t ff_hevc_rpi_qpel_extra_after[4];

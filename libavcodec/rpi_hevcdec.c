@@ -1825,14 +1825,17 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                     lc->tu.cu_qp_delta = -lc->tu.cu_qp_delta;
             lc->tu.is_cu_qp_delta_coded = 1;
 
-            if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset / 2) ||
-                lc->tu.cu_qp_delta >  (25 + s->ps.sps->qp_bd_offset / 2)) {
+// Was:
+//            if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset / 2) ||
+//                if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset / 2) ||
+// 2016 standard says:
+            if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset) ||
+                lc->tu.cu_qp_delta > 25) {
                 av_log(s->avctx, AV_LOG_ERROR,
                        "The cu_qp_delta %d is outside the valid range "
                        "[%d, %d].\n",
                        lc->tu.cu_qp_delta,
-                       -(26 + s->ps.sps->qp_bd_offset / 2),
-                        (25 + s->ps.sps->qp_bd_offset / 2));
+                       -(26 + s->ps.sps->qp_bd_offset), 25);
                 return AVERROR_INVALIDDATA;
             }
 
@@ -4144,8 +4147,14 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
 
         more_data = hls_coding_quadtree(s, lc, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
+        if (ff_hevc_rpi_cabac_overflow(lc))
+        {
+            av_log(s->avctx, AV_LOG_ERROR, "Quadtree bitstream overread\n ");
+            more_data = AVERROR_INVALIDDATA;
+        }
+
         if (more_data < 0) {
-            s->tab_slice_address[ctb_addr_rs] = -1;
+            s->tab_slice_address[ctb_addr_rs] = -1;  // Mark slice as broken
             return more_data;
         }
 
@@ -4155,6 +4164,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
             if (get_cabac_terminate(&lc->cc) < 0 ||
                 skip_bytes(&lc->cc, 0) == NULL)
             {
+                av_log(s->avctx, AV_LOG_ERROR, "Error reading terminate el\n ");
                 return -1;
             }
         }

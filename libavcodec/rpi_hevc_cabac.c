@@ -614,6 +614,16 @@ static inline unsigned int hevc_clz32(unsigned int x)
 }
 #endif
 
+static inline int cabac_overflow(const CABACContext * const cc)
+{
+    av_assert0(cc->bytestream >= cc->bytestream_start);
+    return cc->bytestream >= cc->bytestream_end + 4;
+}
+
+int ff_hevc_rpi_cabac_overflow(const HEVCRpiLocalContext * const lc)
+{
+    return cabac_overflow(&lc->cc);
+}
 
 #if !USE_BY22
 // If no by22 then _by22 functions will revert to normal and so _peek/_flush
@@ -758,7 +768,7 @@ static void cabac_init_state(const HEVCRpiContext * const s, HEVCRpiLocalContext
         lc->stat_coeff[i] = 0;
 }
 
-int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, const unsigned int ctb_flags)
+void ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, const unsigned int ctb_flags)
 {
     if (lc->cabac_init_req == 1 || (ctb_flags & CTB_TS_FLAGS_CIREQ) != 0)
     {
@@ -771,7 +781,6 @@ int ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *
         load_states(s, lc);
     }
     lc->cabac_init_req = 0;
-    return 0;
 }
 
 #define GET_CABAC_LC(ctx) get_cabac(&lc->cc, lc->cabac_state + (ctx))
@@ -2118,7 +2127,8 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             }
         }
     } while ((i = next_subset(lc, i, c_idx_nz,
-        significant_coeff_group_flag, scan_x_cg, scan_y_cg, &prev_sig)) >= 0);
+                              significant_coeff_group_flag, scan_x_cg, scan_y_cg, &prev_sig)) >= 0 &&
+             !cabac_overflow(&lc->cc));
 
     if (lc->cu.cu_transquant_bypass_flag) {
         if (explicit_rdpcm_flag || (s->ps.sps->implicit_rdpcm_enabled_flag &&
