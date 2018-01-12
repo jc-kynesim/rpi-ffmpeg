@@ -3493,7 +3493,7 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
                 break;
 
             default:
-                av_log(NULL, AV_LOG_PANIC, "Bad command %d in worker pred Q\n", cmd->type);
+                av_log(s->avctx, AV_LOG_PANIC, "Bad command %d in worker pred Q\n", cmd->type);
                 abort();
         }
     }
@@ -4186,7 +4186,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
                 // * This is very annoying (and slow) to cope with in WPP so
                 //   we treat it as an error there (no known stream triggers this
                 //   with the current buffer sizes).  Non-wpp should cope fine.
-                av_log(s, AV_LOG_WARNING,  "%s: Q full before EoL\n", __func__);
+                av_log(s->avctx, AV_LOG_WARNING,  "%s: Q full before EoL\n", __func__);
                 q_full = 1;
             }
         }
@@ -4358,7 +4358,7 @@ static int rpi_run_one_line(HEVCRpiContext *const s, HEVCRpiLocalContext * const
                 (lc->ts < ts_eol && !is_last && (lc->ts != ts_prev + partial_size || lc->unit_done)))
             {
                 if (err == 0) {
-                    av_log(s, AV_LOG_ERROR, "Unexpected end of tile/wpp section\n");
+                    av_log(s->avctx, AV_LOG_ERROR, "Unexpected end of tile/wpp section\n");
                     err = AVERROR_INVALIDDATA;
                 }
                 worker_free(s, lc);
@@ -4485,10 +4485,10 @@ static void * bit_thread(void * v)
 
         if ((err = rpi_run_one_line(s, lc, 0)) < 0) {  // Never first tile/wpp
             if (lc->bt_terminate) {
-                av_log(s, AV_LOG_ERROR, "%s: Unexpected termination\n", __func__);
+                av_log(s->avctx, AV_LOG_ERROR, "%s: Unexpected termination\n", __func__);
                 break;
             }
-            av_log(s, AV_LOG_WARNING, "%s: Decode failure: %d\n", __func__, err);
+            av_log(s->avctx, AV_LOG_WARNING, "%s: Decode failure: %d\n", __func__, err);
         }
     }
 
@@ -4692,7 +4692,7 @@ static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
 fail:
     // Cleanup
-    av_log(s, AV_LOG_ERROR, "%s failed: err=%d\n", __func__, err);
+    av_log(s->avctx, AV_LOG_ERROR, "%s failed: err=%d\n", __func__, err);
     // Free our job & wait for temination
     worker_free(s, lc);
     worker_wait(s, lc);
@@ -5440,7 +5440,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     return 0;
 
 fail:
-    av_log(s, AV_LOG_ERROR, "%s: Failed\n", __func__);
+    av_log(s->avctx, AV_LOG_ERROR, "%s: Failed\n", __func__);
     hevc_decode_free(avctx);
     return AVERROR(ENOMEM);
 }
@@ -5546,13 +5546,13 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
         HEVCRpiJobGlobal * const jbg = jbg_new(FFMAX(avctx->thread_count * 3, 5));
         if (jbg == NULL)
         {
-            av_log(s, AV_LOG_ERROR, "%s: Job global init failed\n", __func__);
+            av_log(s->avctx, AV_LOG_ERROR, "%s: Job global init failed\n", __func__);
             return -1;
         }
 
         if ((s->jbc = rpi_job_ctl_new(jbg)) == NULL)
         {
-            av_log(s, AV_LOG_ERROR, "%s: Job ctl init failed\n", __func__);
+            av_log(s->avctx, AV_LOG_ERROR, "%s: Job ctl init failed\n", __func__);
             return -1;
         }
     }
