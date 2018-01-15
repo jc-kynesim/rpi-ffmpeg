@@ -4065,8 +4065,6 @@ static int gen_entry_points(HEVCRpiContext * const s, const H2645NAL * const nal
     unsigned int cmpt;
     unsigned int startheader;
 
-//    printf("Bufsize=%d, raw_size=%d, size_bits=%d, size_bit/8=%d\n", nal->rbsp_buffer_size, nal->raw_size, nal->size_bits, (nal->size_bits + 7) / 8);
-
     if (sh->num_entry_point_offsets == 0) {
         s->data = NULL;
         return 0;
