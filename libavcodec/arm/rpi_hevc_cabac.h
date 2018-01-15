@@ -302,27 +302,27 @@ static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)
 }
 
 #define get_cabac_by22_flush get_cabac_by22_flush_arm
-static inline void get_cabac_by22_flush_arm(HEVCRpiLocalContext *const lc, const unsigned int n, uint32_t val)
+static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigned int n, uint32_t val)
 {
     uint32_t bits, ptr, tmp1, tmp2;
     __asm__ volatile (
-        "ldrh    %[bits], [%[lc], %[bits_off]]     \n\t"
-        "ldr     %[ptr], [%[lc], %[ptr_off]]       \n\t"
+        "ldrh    %[bits], [%[cc], %[bits_off]]     \n\t"
+        "ldr     %[ptr], [%[cc], %[ptr_off]]       \n\t"
         "rsb     %[tmp1], %[n], #32                \n\t"
         "add     %[bits], %[bits], %[n]            \n\t"
-        "ldrh    %[tmp2], [%[lc], %[range_off]]    \n\t"
+        "ldrh    %[tmp2], [%[cc], %[range_off]]    \n\t"
         "lsr     %[tmp1], %[val], %[tmp1]          \n\t"
-        "ldr     %[val], [%[lc], %[low_off]]       \n\t"
+        "ldr     %[val], [%[cc], %[low_off]]       \n\t"
         "ldr     %[ptr], [%[ptr], %[bits], lsr #3] \n\t"
         "mul     %[tmp1], %[tmp2], %[tmp1]         \n\t"
         "and     %[tmp2], %[bits], #7              \n\t"
-        "strh    %[bits], [%[lc], %[bits_off]]     \n\t"
+        "strh    %[bits], [%[cc], %[bits_off]]     \n\t"
         "rev     %[ptr], %[ptr]                    \n\t"
         "lsl     %[tmp1], %[tmp1], #23             \n\t"
         "rsb     %[val], %[tmp1], %[val], lsl %[n] \n\t"
         "lsl     %[ptr], %[ptr], %[tmp2]           \n\t"
         "orr     %[val], %[val], %[ptr], lsr #9    \n\t"
-        "str     %[val], [%[lc], %[low_off]]       \n\t"
+        "str     %[val], [%[cc], %[low_off]]       \n\t"
         :  // Outputs
             [val]"+r"(val),
            [bits]"=&r"(bits),
@@ -330,31 +330,31 @@ static inline void get_cabac_by22_flush_arm(HEVCRpiLocalContext *const lc, const
            [tmp1]"=&r"(tmp1),
            [tmp2]"=&r"(tmp2)
         :  // Inputs
-                  [lc]"r"(lc),
+                  [cc]"r"(c),
                    [n]"r"(n),
-            [bits_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.bits)),
-             [ptr_off]"J"(offsetof(HEVCRpiLocalContext, cc.bytestream)),
-           [range_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.range)),
-             [low_off]"J"(offsetof(HEVCRpiLocalContext, cc.low))
+            [bits_off]"J"(offsetof(CABACContext, by22.bits)),
+             [ptr_off]"J"(offsetof(CABACContext, bytestream)),
+           [range_off]"J"(offsetof(CABACContext, by22.range)),
+             [low_off]"J"(offsetof(CABACContext, low))
         :  // Clobbers
            "memory"
     );
 }
 
 #define coeff_abs_level_remaining_decode_bypass coeff_abs_level_remaining_decode_bypass_arm
-static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContext * const lc, unsigned int rice_param)
+static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext *const c, unsigned int rice_param)
 {
     uint32_t last_coeff_abs_level_remaining;
     uint32_t prefix, n1, range, n2, ptr, tmp1, tmp2;
-    __asm__ (
-        "ldr     %[remain], [%[lc], %[low_off]]               \n\t"
-        "ldr     %[prefix], [%[lc], %[range_off]]             \n\t"
+    __asm__ volatile (
+        "ldr     %[remain], [%[cc], %[low_off]]               \n\t"
+        "ldr     %[prefix], [%[cc], %[range_off]]             \n\t"
         "bic     %[remain], %[remain], #1                     \n\t"
-        "ldrh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
-        "ldr     %[ptr], [%[lc], %[ptr_off]]                  \n\t"
+        "ldrh    %[tmp2], [%[cc], %[by22_bits_off]]           \n\t"
+        "ldr     %[ptr], [%[cc], %[ptr_off]]                  \n\t"
         "cmp     %[prefix], #0                                \n\t"
         "umullne %[prefix], %[remain], %[prefix], %[remain]   \n\t"
-        "ldrh    %[range], [%[lc], %[by22_range_off]]         \n\t"
+        "ldrh    %[range], [%[cc], %[by22_range_off]]         \n\t"
         "lsl     %[remain], %[remain], #1                     \n\t"
         "mvn     %[prefix], %[remain]                         \n\t"
         "clz     %[prefix], %[prefix]                         \n\t"
@@ -364,11 +364,11 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
         "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
         "rsb     %[n2], %[n1], #32                            \n\t"
         "and     %[tmp1], %[tmp2], #7                         \n\t"
-        "strh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
+        "strh    %[tmp2], [%[cc], %[by22_bits_off]]           \n\t"
         "lsr     %[tmp2], %[tmp2], #3                         \n\t"
         "lsr     %[n2], %[remain], %[n2]                      \n\t"
         "mul     %[n2], %[range], %[n2]                       \n\t"
-        "ldr     %[range], [%[lc], %[low_off]]                \n\t"
+        "ldr     %[range], [%[cc], %[low_off]]                \n\t"
         "ldr     %[ptr], [%[ptr], %[tmp2]]                    \n\t"
         "rsb     %[tmp2], %[rice], #31                        \n\t"
         "lsl     %[remain], %[remain], %[prefix]              \n\t"
@@ -385,7 +385,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
         "sub     %[n1], %[n2], #2                             \n\t"
         "add     %[tmp2], %[tmp2], %[n1]                      \n\t"
         "rsb     %[n2], %[n1], #32                            \n\t"
-        "strh    %[tmp2], [%[lc], %[by22_bits_off]]           \n\t"
+        "strh    %[tmp2], [%[cc], %[by22_bits_off]]           \n\t"
         "lsr     %[tmp1], %[tmp2], #3                         \n\t"
         "lsr     %[n2], %[remain], %[n2]                      \n\t"
         "mul     %[n2], %[range], %[n2]                       \n\t"
@@ -393,7 +393,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
         "ldr     %[ptr], [%[ptr], %[tmp1]]                    \n\t"
         "and     %[tmp1], %[tmp2], #7                         \n\t"
         "lsl     %[remain], %[remain], %[prefix]              \n\t"
-        "ldr     %[tmp2], [%[lc], %[low_off]]                 \n\t"
+        "ldr     %[tmp2], [%[cc], %[low_off]]                 \n\t"
         "rsb     %[prefix], %[prefix], %[range]               \n\t"
         "orr     %[remain], %[remain], #0x80000000            \n\t"
         "rev     %[ptr], %[ptr]                               \n\t"
@@ -412,11 +412,11 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
         "push    {%[rice]}                                    \n\t"
         "and     %[rice], %[n1], #7                           \n\t"
         "lsr     %[tmp1], %[remain], %[tmp1]                  \n\t"
-        "ldr     %[ptr], [%[lc], %[low_off]]                  \n\t"
+        "ldr     %[ptr], [%[cc], %[low_off]]                  \n\t"
         "mul     %[remain], %[range], %[tmp1]                 \n\t"
         "rev     %[tmp2], %[tmp2]                             \n\t"
         "rsb     %[n2], %[prefix], %[n2]                      \n\t"
-        "ldr     %[tmp1], [%[lc], %[range_off]]               \n\t"
+        "ldr     %[tmp1], [%[cc], %[range_off]]               \n\t"
         "lsl     %[rice], %[tmp2], %[rice]                    \n\t"
         "sub     %[tmp2], %[n2], #2                           \n\t"
         "lsl     %[remain], %[remain], #23                    \n\t"
@@ -424,7 +424,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
         "orr     %[remain], %[remain], %[rice], lsr #9        \n\t"
         "add     %[prefix], %[n1], %[tmp2]                    \n\t"
         "bic     %[n1], %[remain], #1                         \n\t"
-        "ldr     %[ptr], [%[lc], %[ptr_off]]                  \n\t"
+        "ldr     %[ptr], [%[cc], %[ptr_off]]                  \n\t"
         "cmp     %[tmp1], #0                                  \n\t"
         "rsb     %[rice], %[tmp2], #32                        \n\t"
         "umullne %[tmp1], %[n1], %[tmp1], %[n1]               \n\t"
@@ -437,7 +437,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
         "pop     {%[rice]}                                    \n\t"
         "rev     %[ptr], %[ptr]                               \n\t"
         "orr     %[n1], %[n1], #0x80000000                    \n\t"
-        "strh    %[prefix], [%[lc], %[by22_bits_off]]         \n\t"
+        "strh    %[prefix], [%[cc], %[by22_bits_off]]         \n\t"
         "mov     %[prefix], #2                                \n\t"
         "lsl     %[range], %[range], #23                      \n\t"
         "rsb     %[range], %[range], %[remain], lsl %[tmp2]   \n\t"
@@ -447,7 +447,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
         "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
         "orr     %[range], %[range], %[ptr], lsr #9           \n\t"
         "4:                                                   \n\t"
-        "str     %[range], [%[lc], %[low_off]]                \n\t"
+        "str     %[range], [%[cc], %[low_off]]                \n\t"
         :  // Outputs
             [remain]"=&r"(last_coeff_abs_level_remaining),
               [rice]"+r"(rice_param),
@@ -459,13 +459,13 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(HEVCRpiLocalContex
               [tmp1]"=&r"(tmp1),
               [tmp2]"=&r"(tmp2)
         :  // Inputs
-                          [lc]"r"(lc),
+                          [cc]"r"(c),
             [peek_bits_plus_2]"I"(CABAC_BY22_PEEK_BITS + 2),
-                     [low_off]"J"(offsetof(HEVCRpiLocalContext, cc.low)),
-                   [range_off]"J"(offsetof(HEVCRpiLocalContext, cc.range)),
-               [by22_bits_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.bits)),
-              [by22_range_off]"J"(offsetof(HEVCRpiLocalContext, cc.by22.range)),
-                     [ptr_off]"J"(offsetof(HEVCRpiLocalContext, cc.bytestream))
+                     [low_off]"J"(offsetof(CABACContext, low)),
+                   [range_off]"J"(offsetof(CABACContext, range)),
+               [by22_bits_off]"J"(offsetof(CABACContext, by22.bits)),
+              [by22_range_off]"J"(offsetof(CABACContext, by22.range)),
+                     [ptr_off]"J"(offsetof(CABACContext, bytestream))
         :  // Clobbers
            "cc", "memory"
     );
