@@ -256,7 +256,7 @@ function ff_hevc_rpi_sao_band_64_neon_8, export=1
         sao_band_64b_8 {d0-d3}, {d0-d3}, q15, \
             "pld       [r4]",                 \
             "subs      ip, #1",               \
-            "addne     r4, r3",               \
+            "it ne; addne r4, r3",            \
             "add       r1, r3"
         vstmia    r0, {q8-q11}
         add       r0, r2
@@ -403,7 +403,7 @@ function ff_hevc_rpi_sao_band_c_32_neon_8, export=1
 
         sao_band_64b_8 {d0-d3}, {d4-d7}, q15, \
             "pld       [r4]",                 \
-            "addne     r4, r3"
+            "it ne; addne r4, r3"
 
         vst2.8    { q8, q9 }, [r0, :128], r2
         vst2.8    {q10, q11}, [r5, :128], r2
@@ -675,7 +675,7 @@ endfunc
 
         sao_band_64b_16 q4,  q5,  q6,  q7, {d0-d3}, {d4-d7}, q14, q15, \bit_depth, \
             "pld       [r4]",                                                      \
-            "addne     r4, r3"
+            "it ne; addne r4, r3"
         sao_band_64b_16 q8,  q9, q10, q11, {d0-d3}, {d4-d7}, q14, q15, \bit_depth
 
         vst2.16   { q4, q5 }, [r0, :128], lr
@@ -1370,8 +1370,10 @@ endfunc
         vmov.64  q0, q4
         pld      [r1, r3]
         vmov.64  q1, q5
+        it       le
         pople    {lr}
         vmov.64  q2, q6
+        it       le
         bxle     lr
         vmov.64  q3, q7
         add      r0, r0, r2
@@ -1407,6 +1409,7 @@ endfunc
         vmov     q1, q9
         vst1.8   {q2-q3}, [r0, :256], r2
         vmov     q2, q10
+        it       le
         bxle     r6
         vmov     q3, q11
         b        1b
@@ -1426,6 +1429,7 @@ endfunc
         subs     r12, #1
         // copy c to a
         vmov.64  q0, q1
+        it       le
         bxle     r6
         // copy b to c
         vmov.64  q1, q2
@@ -1534,8 +1538,10 @@ endfunc
         vldr     d25, [r6, #-8]
         vstmia   r0, {q0-q3}
         vext.8   q3, q6, q7, #16 - \pb
+        it       le
         pople    {lr}
         vext.8   q2, q5, q6, #16 - \pb
+        it       le
         bxle     lr
         vext.8   q1, q4, q5, #16 - \pb
         add      r6, r6, r3
@@ -1731,8 +1737,10 @@ endfunc
         vldr     d24, [r6, #64]
         vstmia   r0, {q0-q3}
         vext.8   q0, q4, q5, #\pb
+        it       le
         pople    {lr}
         vext.8   q1, q5, q6, #\pb
+        it       le
         bxle     lr
         vext.8   q2, q6, q7, #\pb
         add      r6, r6, r3
