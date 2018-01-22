@@ -3434,9 +3434,7 @@ static void hls_decode_neighbour(const HEVCRpiContext * const s, HEVCRpiLocalCon
         (s->ps.pps->tile_id[ctb_addr_ts] == s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs+1 - s->ps.sps->ctb_width]]));
 }
 
-
-static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const jb)
-{
+static void rpi_execute_dblk_cmds_internal(HEVCRpiContext * const s, HEVCRpiJob * const jb, int phase) {
     const unsigned int ctb_size = 1 << s->ps.sps->log2_ctb_size;
     const unsigned int x0 = FFMAX(jb->bounds.x, ctb_size) - ctb_size;
     const unsigned int y0 = FFMAX(jb->bounds.y, ctb_size) - ctb_size;
@@ -3448,14 +3446,21 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     const unsigned int yb = bound_b - (y_end ? 0 : ctb_size);
     unsigned int x, y;
 #if RPI_GATE
-    gate_start(s->used_for_ref,s->decode_order);
+    gate_start(4,s->used_for_ref,s->decode_order);
 #endif
     for (y = y0; y < yb; y += ctb_size ) {
+#if RPI_PASSES==4
+        if ( ((y/ctb_size)&1) != phase)
+          continue;
+#endif
         for (x = x0; x < xr; x += ctb_size ) {
             ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
         }
     }
 
+#if RPI_PASSES==4
+  if (phase==1) {
+#endif
     // Flush (SAO)
     if (y > y0) {
         const int tile_end = y_end ||
@@ -3486,15 +3491,25 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     if (s->threads_type == FF_THREAD_FRAME && x_end && y0 > 0) {
         ff_hevc_rpi_progress_signal_recon(s, y_end ? INT_MAX : y0 - 1);
     }
-
     // Job done now
     // ? Move outside this fn
     job_free(s->jbc, jb);
+#if RPI_PASSES==4
+    }
+#endif
 #if RPI_GATE
-    gate_stop();
+    gate_stop(4,s->decode_order);
 #endif
 }
 
+static void rpi_execute_dblk_cmds2(HEVCRpiContext * const s, HEVCRpiJob * const jb) {
+  rpi_execute_dblk_cmds_internal(s, jb, 1);
+}
+
+static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const jb)
+{
+  rpi_execute_dblk_cmds_internal(s, jb, 0);
+}
 
 // I-pred, transform_and_add for all blocks types done here
 // All ARM
@@ -3504,7 +3519,7 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
     HEVCRpiIntraPredEnv * const iap = &jb->intra;
     const HEVCPredCmd *cmd = iap->cmds;
 #if RPI_GATE
-    gate_start(s->used_for_ref,s->decode_order);
+    gate_start(3,s->used_for_ref,s->decode_order);
 #endif
     for (i = iap->n; i > 0; i--, cmd++)
     {
@@ -3557,7 +3572,7 @@ static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
         }
     }
 #if RPI_GATE
-    gate_stop();
+    gate_stop(3,s->decode_order);
 #endif
     // Mark done
     iap->n = 0;
@@ -3862,11 +3877,7 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
         }
     }
 #if RPI_GATE
-    if (!s->offload_recon) {
-      // If not offloaded, this is being done in pass0
-      gate_stop();
-    }
-    gate_vpu_start(s->used_for_ref, s->decode_order);
+    gate_vpu_start(2,s->used_for_ref, s->decode_order);
 #endif
 
     vpu_qpu_job_finish(vqj);
@@ -3908,11 +3919,7 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     //   to the VPU Q on this thread but when I tried that it all went a bit slower
     vpu_qpu_wait(&sync_y);
 #if RPI_GATE    
-    gate_vpu_stop();
-    if (!s->offload_recon) {
-      // If not offloaded, this is being done in pass0
-      gate_start(s->used_for_ref,s->decode_order);
-    }
+    gate_vpu_stop(2,s->decode_order);
 #endif    
 
     rpi_cache_flush_finish(rfe);
@@ -4092,6 +4099,10 @@ static av_cold void hevc_init_worker(HEVCRpiContext * const s)
 #elif RPI_PASSES == 3
     pass_queue_init(s->passq + 2, s, rpi_execute_dblk_cmds, &s->jbc->sem_out, 2);
     pass_queue_init(s->passq + 1, s, rpi_execute_pred_cmds, &s->passq[2].sem_in, 1);
+#elif RPI_PASSES == 4
+    pass_queue_init(s->passq + 3, s, rpi_execute_dblk_cmds2, &s->jbc->sem_out, 3);
+    pass_queue_init(s->passq + 2, s, rpi_execute_dblk_cmds, &s->passq[3].sem_in, 2);
+    pass_queue_init(s->passq + 1, s, rpi_execute_pred_cmds, &s->passq[2].sem_in, 1);
 #else
 #error Passes confused
 #endif
@@ -4220,7 +4231,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
     int more_data = 1;
     int ctb_addr_ts = lc->ts;
 #if RPI_GATE    
-    gate_start(s->used_for_ref,s->decode_order);
+    gate_start(1,s->used_for_ref,s->decode_order);
 #endif
 #ifdef RPI_VPU_INTRA_PRED    
 // Decide whether we can use intra prediction on chroma
@@ -4250,6 +4261,9 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
 
         if (more_data < 0) {
             s->tab_slice_address[ctb_addr_rs] = -1;
+#if RPI_GATE    
+            gate_stop(1,s->decode_order);
+#endif
             return more_data;
         }
 
@@ -4307,7 +4321,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
     lc->unit_done = (more_data <= 0);
     lc->ts = ctb_addr_ts;
 #if RPI_GATE    
-    gate_stop();
+    gate_stop(1,s->decode_order);
 #endif    
     return 0;
 }

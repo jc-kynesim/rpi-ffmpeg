@@ -208,9 +208,9 @@ void gpu_unref(void);
 // Gating functions
 int gate_get_decode_order(void);
 void gate_init(void);
-void gate_start(int high_priority, int decode_order);
-void gate_stop(void);
-void gate_vpu_start(int high_priority, int decode_order);
-void gate_vpu_stop(void);
+void gate_start(int stage, int high_priority, int decode_order);
+void gate_stop(int stage, int decode_order);
+void gate_vpu_start(int stage, int high_priority, int decode_order);
+void gate_vpu_stop(int stage, int decode_order);
   
 #endif

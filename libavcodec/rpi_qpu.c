@@ -29,6 +29,12 @@
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
 #define RPI_TRACE_TIME_VPU_QPU_WAIT     0
 
+// Trace time spent in different pipeline stages (1=Yes, 0=No)
+#define RPI_TRACE_PIPELINE 0
+
+#define RPI_TRACE_START 100
+#define RPI_TRACE_COUNT 50000
+
 // Add profile flags to all QPU requests - generates output in "vcdbg log msg"
 // Beware this is expensive and will probably throw off all other timing by >10%
 #define RPI_TRACE_QPU_PROFILE_ALL       0
@@ -157,7 +163,7 @@ typedef struct gpu_env_s
 static pthread_mutex_t gpu_mutex = PTHREAD_MUTEX_INITIALIZER;
 static gpu_env_t * gpu = NULL;
 
-#if RPI_TRACE_TIME_VPU_QPU_WAIT
+#if RPI_TRACE_TIME_VPU_QPU_WAIT || RPI_TRACE_PIPELINE
 
 static int64_t ns_time(void)
 {
@@ -166,6 +172,9 @@ static int64_t ns_time(void)
     return (int64_t)ts.tv_sec * (int64_t)1000000000 + ts.tv_nsec;
 }
 
+#endif
+
+#if RPI_TRACE_TIME_VPU_QPU_WAIT
 
 #define WAIT_TIME_PRINT_PERIOD (int64_t)2000000000
 
@@ -942,9 +951,6 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
 #define ACTIVE_THREADS 5
 #define ACTIVE_VPU_THREADS 2
 
-// TODO worried about possible lock up if no threads are active?
-// TODO worried about implementation, may add too many semaphores?
-
 static int gate_active_count[2] = {0,0};
 static atomic_int gate_decode_order = 0;
 
@@ -961,14 +967,58 @@ int gate_get_decode_order(void) {
 static int priority[2][MAXWAITING];
 static int numwaiting[2];
 
+#if RPI_TRACE_PIPELINE
+static int log_count=0;
+static int log_history[RPI_TRACE_COUNT][6];
+static int64_t log_times[RPI_TRACE_COUNT];
+static void rpi_trace(int cmd,int stage,int decode_order,int chan) {
+  if (decode_order >= RPI_TRACE_START) {
+    if (log_count < RPI_TRACE_COUNT) {
+      log_history[log_count][0] = cmd;
+      log_history[log_count][1] = stage;
+      log_history[log_count][2] = decode_order;
+      log_history[log_count][3] = chan;
+      log_history[log_count][4] = gate_active_count[chan];
+      log_history[log_count][5] = numwaiting[chan];
+      log_times[log_count] = ns_time();
+      log_count++;
+      if (log_count == RPI_TRACE_COUNT) {
+        for(int i=0;i<RPI_TRACE_COUNT;i++) {
+          printf("TRACE %d %d %d %d %d %d %lld\n",log_history[i][0],
+                                            log_history[i][1],
+                                            log_history[i][2],
+                                            log_history[i][3],
+                                            log_history[i][4],
+                                            log_history[i][5],
+                                            log_times[i]);
+          
+        }
+      }
+    }
+  }
+}
+static void rpi_trace_wait(int stage,int decode_order,int chan) {
+  rpi_trace(0,stage,decode_order,chan);
+}
+static void rpi_trace_start(int stage,int decode_order,int chan) {
+  rpi_trace(1,stage,decode_order,chan);
+}
+static void rpi_trace_stop(int stage,int decode_order,int chan) {
+  rpi_trace(2,stage,decode_order,chan);
+}
+#endif
+
 // Call this function whenever an ARM thread is about to start some processing
 // The reference count is increased.
-static void priv_gate_start(int chan, int high_priority, int decode_order, int max_threads) {
+static void priv_gate_start(int stage, int chan, int high_priority, int decode_order, int max_threads) {
   int pri = (high_priority<<30) - (decode_order&0x3fffffff);
   pthread_mutex_lock(&gate_mutex);
   // Add us to the list
   av_assert0(numwaiting[chan] < MAXWAITING);
   priority[chan][numwaiting[chan]++] = pri;
+#if RPI_TRACE_PIPELINE
+  rpi_trace_wait(stage,decode_order,chan);
+#endif
   //printf("Waiting for %d\n",pri);
   while (1) {
     int i;
@@ -998,14 +1048,20 @@ static void priv_gate_start(int chan, int high_priority, int decode_order, int m
     pthread_cond_wait(&gate_cv[chan], &gate_mutex);
   }
   gate_active_count[chan]++;
+#if RPI_TRACE_PIPELINE
+  rpi_trace_start(stage,decode_order,chan);
+#endif
   pthread_mutex_unlock(&gate_mutex);
 }
 
 // Call this function before doing an operation that may sleep
 // The reference count is decreased
-static void priv_gate_stop(int chan, int max_threads) {
+static void priv_gate_stop(int stage, int decode_order, int chan, int max_threads) {
   pthread_mutex_lock(&gate_mutex);
   gate_active_count[chan]--;
+#if RPI_TRACE_PIPELINE
+  rpi_trace_stop(stage,decode_order,chan);
+#endif
   if (gate_active_count[chan] < max_threads) {
     pthread_cond_broadcast(&gate_cv[chan]);
   }
@@ -1013,12 +1069,12 @@ static void priv_gate_stop(int chan, int max_threads) {
 }
 
 
-void gate_start(int high_priority, int decode_order) {
-  priv_gate_start(0,high_priority,decode_order, ACTIVE_THREADS);
+void gate_start(int stage, int high_priority, int decode_order) {
+  priv_gate_start(stage, 0, high_priority, decode_order, ACTIVE_THREADS);
 }
 
-void gate_stop(void) {
-  priv_gate_stop(0, ACTIVE_THREADS);
+void gate_stop(int stage, int decode_order) {
+  priv_gate_stop(stage, decode_order, 0, ACTIVE_THREADS);
 }
 
 // Called once to initialize the semaphore
@@ -1029,15 +1085,27 @@ void gate_init() {
     pthread_mutex_init(&gate_mutex, NULL);
     pthread_cond_init (&gate_cv[0], NULL);
     pthread_cond_init (&gate_cv[1], NULL);
+    
+    // Run some timing experiment
+    /*for(int i=0;i<20;i++)
+    {
+      int64_t start,t;
+      start = ns_time();
+      t=start;
+      while(t==start) {
+        t=ns_time();
+      }
+      printf("%lld\n",t-start);
+    }*/
   }
 }
 
-void gate_vpu_start(int high_priority, int decode_order) {
-  priv_gate_start(1,high_priority,decode_order, ACTIVE_VPU_THREADS);
+void gate_vpu_start(int stage, int high_priority, int decode_order) {
+  priv_gate_start(stage, 1,high_priority,decode_order, ACTIVE_VPU_THREADS);
 }
 
-void gate_vpu_stop(void) {
-  priv_gate_stop(1, ACTIVE_VPU_THREADS);
+void gate_vpu_stop(int stage, int decode_order) {
+  priv_gate_stop(stage, decode_order, 1, ACTIVE_VPU_THREADS);
 }
 
 
