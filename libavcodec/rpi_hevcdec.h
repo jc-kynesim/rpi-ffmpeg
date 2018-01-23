@@ -95,6 +95,10 @@
 //#define RPI_PASSES 2
 #define RPI_PASSES              3
 
+#define RPI_DEBLOCK_THREADS     2
+
+#define RPI_VPU_THREADS     2
+
 // Print out various usage stats
 #define RPI_TSTATS              0
 
@@ -638,10 +642,14 @@ typedef struct HEVCRpiPassQueue
     volatile int terminate;
     sem_t sem_in;
     sem_t * psem_out;
+    int num_threads;
     unsigned int job_n;
+    unsigned int out_n;
     struct HEVCRpiContext * context; // Context pointer as we get to pass a single "void * this" to the thread
     HEVCRpiWorkerFn * worker;
-    pthread_t thread;
+    pthread_t thread[RPI_DEBLOCK_THREADS];
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
     uint8_t pass_n;  // Pass number - debug
     uint8_t started;
 } HEVCRpiPassQueue;
@@ -877,6 +885,9 @@ typedef struct HEVCRpiContext {
 #endif
 #if RPI_TSTATS
     HEVCRpiStats tstats;
+#endif
+#if RPI_DEBLOCK_THREADS > 1
+    sem_t deblock_sems[RPI_DEBLOCK_THREADS];
 #endif
 } HEVCRpiContext;
 

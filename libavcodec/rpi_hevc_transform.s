@@ -149,7 +149,7 @@ block_loop:
 
   # Save results - note there has been a transposition during the processing so we save columns
   vsth VX(0,32++)+r0, (r1 += r3) REP 16
-
+  
   # Move onto next block
   eor r0,r8
   add r1,r7

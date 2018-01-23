@@ -232,21 +232,39 @@ static inline unsigned int pass_queue_inc_job_n(HEVCRpiPassQueue * const pq)
     return x2;
 }
 
-static void pass_queue_init(HEVCRpiPassQueue * const pq, HEVCRpiContext * const s, HEVCRpiWorkerFn * const worker, sem_t * const psem_out, const int n)
+// returns pq->out_n++
+static inline unsigned int pass_queue_inc_out_n(HEVCRpiPassQueue * const pq)
+{
+    unsigned int const x2 = pq->out_n;
+    pq->out_n = utmod(x2 + 1, RPI_MAX_JOBS);
+    return x2;
+}
+
+static void pass_queue_init(HEVCRpiPassQueue * const pq, HEVCRpiContext * const s, HEVCRpiWorkerFn * const worker, sem_t * const psem_out, const int n, const int num_threads)
 {
     pq->terminate = 0;
     pq->job_n = 0;
+    pq->out_n = 0;
     pq->context = s;
     pq->worker = worker;
     pq->psem_out = psem_out;
     pq->pass_n = n;
+    pq->num_threads = num_threads;
     pq->started = 0;
     sem_init(&pq->sem_in, 0, 0);
+    if (num_threads>1) {
+      pthread_cond_init (&pq->cond, NULL);
+      pthread_mutex_init (&pq->lock, NULL);
+    }
 }
 
 static void pass_queue_kill(HEVCRpiPassQueue * const pq)
 {
     sem_destroy(&pq->sem_in);
+    if (pq->num_threads>1) {
+      pthread_cond_destroy (&pq->cond);
+      pthread_mutex_destroy (&pq->lock);
+    }
 }
 
 static inline void rpi_sem_wait(sem_t * const sem)
@@ -575,18 +593,36 @@ static void * pass_worker(void *arg)
 {
     HEVCRpiPassQueue *const pq = (HEVCRpiPassQueue *)arg;
     HEVCRpiContext *const s = pq->context;
-
+    int num=pq->num_threads;
+    int cjob;
     for (;;)
     {
         rpi_sem_wait(&pq->sem_in);
 
         if (pq->terminate)
             break;
-
-        pq->worker(s, s->jbc->offloadq[pass_queue_inc_job_n(pq)]);
+        
+        if (num>1) {
+          pthread_mutex_lock(&pq->lock);
+        }
+        cjob = pass_queue_inc_job_n(pq);
+        if (num>1) {
+          pthread_mutex_unlock(&pq->lock);
+        } 
+        pq->worker(s, s->jbc->offloadq[cjob]);
         // * should really set jb->passes_done here
-
+        if (num>1) {
+          pthread_mutex_lock(&pq->lock);
+          while (pq->out_n != cjob) {
+            pthread_cond_wait(&pq->cond, &pq->lock);
+          }
+          pass_queue_inc_out_n(pq);
+        }
         sem_post(pq->psem_out);
+        if (num>1) {
+          pthread_mutex_unlock(&pq->lock);
+          pthread_cond_broadcast(&pq->cond);
+        }
     }
     return NULL;
 }
@@ -598,7 +634,8 @@ static void pass_queues_start_all(HEVCRpiContext *const s)
 
     for (i = 0; i != RPI_PASSES; ++i)
     {
-        av_assert0(pthread_create(&pqs[i].thread, NULL, pass_worker, pqs + i) == 0);
+        for(int j=0;j<pqs[i].num_threads;j++)
+          av_assert0(pthread_create(&pqs[i].thread[j], NULL, pass_worker, pqs + i) == 0);
         pqs[i].started = 1;
     }
 }
@@ -613,12 +650,14 @@ static void pass_queues_term_all(HEVCRpiContext *const s)
     for (i = 0; i != RPI_PASSES; ++i)
     {
         if (pqs[i].started)
-            sem_post(&pqs[i].sem_in);
+            for(int j=0;j<pqs[i].num_threads;j++)
+              sem_post(&pqs[i].sem_in);
     }
     for (i = 0; i != RPI_PASSES; ++i)
     {
         if (pqs[i].started) {
-            pthread_join(pqs[i].thread, NULL);
+            for(int j=0;j<pqs[i].num_threads;j++)
+              pthread_join(pqs[i].thread[j], NULL);
             pqs[i].started = 0;
         }
     }
@@ -3434,7 +3473,7 @@ static void hls_decode_neighbour(const HEVCRpiContext * const s, HEVCRpiLocalCon
         (s->ps.pps->tile_id[ctb_addr_ts] == s->ps.pps->tile_id[s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs+1 - s->ps.sps->ctb_width]]));
 }
 
-static void rpi_execute_dblk_cmds_internal(HEVCRpiContext * const s, HEVCRpiJob * const jb, int phase) {
+static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const jb) {
     const unsigned int ctb_size = 1 << s->ps.sps->log2_ctb_size;
     const unsigned int x0 = FFMAX(jb->bounds.x, ctb_size) - ctb_size;
     const unsigned int y0 = FFMAX(jb->bounds.y, ctb_size) - ctb_size;
@@ -3445,22 +3484,51 @@ static void rpi_execute_dblk_cmds_internal(HEVCRpiContext * const s, HEVCRpiJob 
     const unsigned int xr = bound_r - (x_end ? 0 : ctb_size);
     const unsigned int yb = bound_b - (y_end ? 0 : ctb_size);
     unsigned int x, y;
+#if RPI_DEBLOCK_THREADS > 1
+    const int using_semaphores = s->offload_recon;
+#endif
 #if RPI_GATE
     gate_start(4,s->used_for_ref,s->decode_order);
 #endif
+
+/* When using multiple deblocking threads we need to ensure there is no overtaking.
+We logically have a semaphore for each CTU row except the last, but as we know
+the number of deblock threads we can reuse these semaphores in a circular manner.
+We need to grab if we are not the first row, and post if we are not the second.
+We also grab 2 ahead to allow for the use of top-right pixels */
+
     for (y = y0; y < yb; y += ctb_size ) {
-#if RPI_PASSES==4
-        if ( ((y/ctb_size)&1) != phase)
-          continue;
+#if RPI_DEBLOCK_THREADS > 1
+        int this_ctu_row = (y/ctb_size) % RPI_DEBLOCK_THREADS;
+        int last_ctu_row = (y/ctb_size - 1) % RPI_DEBLOCK_THREADS;
+        int on_last_row = y+ctb_size >= s->ps.sps->height;
+        if (using_semaphores && y>0) {
+          // Wait for row before us to have decoded 2 CTUs
+          rpi_sem_wait( &s->deblock_sems[last_ctu_row] );
+          rpi_sem_wait( &s->deblock_sems[last_ctu_row] );
+        }
 #endif
         for (x = x0; x < xr; x += ctb_size ) {
+#if RPI_DEBLOCK_THREADS > 1
+            if (using_semaphores && y>0) {
+                rpi_sem_wait( &s->deblock_sems[last_ctu_row] );
+            }
+#endif
             ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
+#if RPI_DEBLOCK_THREADS > 1
+            if (using_semaphores && !on_last_row) {
+                sem_post( &s->deblock_sems[this_ctu_row] );
+            }
+#endif
         }
+#if RPI_DEBLOCK_THREADS > 1
+        if (using_semaphores && !on_last_row) {
+            sem_post( &s->deblock_sems[this_ctu_row] );
+            sem_post( &s->deblock_sems[this_ctu_row] );
+        }
+#endif
     }
 
-#if RPI_PASSES==4
-  if (phase==1) {
-#endif
     // Flush (SAO)
     if (y > y0) {
         const int tile_end = y_end ||
@@ -3494,21 +3562,9 @@ static void rpi_execute_dblk_cmds_internal(HEVCRpiContext * const s, HEVCRpiJob 
     // Job done now
     // ? Move outside this fn
     job_free(s->jbc, jb);
-#if RPI_PASSES==4
-    }
-#endif
 #if RPI_GATE
     gate_stop(4,s->decode_order);
 #endif
-}
-
-static void rpi_execute_dblk_cmds2(HEVCRpiContext * const s, HEVCRpiJob * const jb) {
-  rpi_execute_dblk_cmds_internal(s, jb, 1);
-}
-
-static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const jb)
-{
-  rpi_execute_dblk_cmds_internal(s, jb, 0);
 }
 
 // I-pred, transform_and_add for all blocks types done here
@@ -3821,6 +3877,7 @@ static void worker_core2(HEVCRpiContext * const s, HEVCRpiJob * const jb)
 // Core execution tasks
 static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
 {
+#if 1
     const HEVCRpiContext * const s = s0;
     vpu_qpu_wait_h sync_y;
     int pred_y, pred_c;
@@ -3948,6 +4005,7 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
         
         jb->intra.vpu_n = 0; // Reset ready for next batch
     }
+#endif
 #endif
 }
 
@@ -4095,18 +4153,14 @@ fail:
 static av_cold void hevc_init_worker(HEVCRpiContext * const s)
 {
 #if RPI_PASSES == 2
-    pass_queue_init(s->passq + 1, s, worker_core2, &s->jbc->sem_out, 1);
+    pass_queue_init(s->passq + 1, s, worker_core2, &s->jbc->sem_out, 1, 1);
 #elif RPI_PASSES == 3
-    pass_queue_init(s->passq + 2, s, rpi_execute_dblk_cmds, &s->jbc->sem_out, 2);
-    pass_queue_init(s->passq + 1, s, rpi_execute_pred_cmds, &s->passq[2].sem_in, 1);
-#elif RPI_PASSES == 4
-    pass_queue_init(s->passq + 3, s, rpi_execute_dblk_cmds2, &s->jbc->sem_out, 3);
-    pass_queue_init(s->passq + 2, s, rpi_execute_dblk_cmds, &s->passq[3].sem_in, 2);
-    pass_queue_init(s->passq + 1, s, rpi_execute_pred_cmds, &s->passq[2].sem_in, 1);
+    pass_queue_init(s->passq + 2, s, rpi_execute_dblk_cmds, &s->jbc->sem_out, 2, RPI_DEBLOCK_THREADS);
+    pass_queue_init(s->passq + 1, s, rpi_execute_pred_cmds, &s->passq[2].sem_in, 1, 1);
 #else
 #error Passes confused
 #endif
-    pass_queue_init(s->passq + 0, s, worker_core, &s->passq[1].sem_in, 0);
+    pass_queue_init(s->passq + 0, s, worker_core, &s->passq[1].sem_in, 0, RPI_VPU_THREADS);
 
     pass_queues_start_all(s);
 }
@@ -4664,7 +4718,6 @@ static int bit_threads_kill(HEVCRpiContext * const s)
     return 0;
 }
 #endif
-
 
 static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 {
@@ -5439,6 +5492,10 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 #if RPI_EXTRA_BIT_THREADS
     bit_threads_kill(s);
 #endif
+#if RPI_DEBLOCK_THREADS > 1
+    for(i=0;i<RPI_DEBLOCK_THREADS;i++)
+      sem_destroy(&s->deblock_sems[i]);  
+#endif
 
     hevc_exit_worker(s);
     vpu_qpu_term();
@@ -5523,6 +5580,11 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     bt_lc_init(s, s->HEVClc, 0);
     job_lc_init(s->HEVClc);
+    
+#if RPI_DEBLOCK_THREADS > 1
+    for(i=0;i<RPI_DEBLOCK_THREADS;i++)
+      sem_init(&s->deblock_sems[i],0,0);  
+#endif
 
     for (i = 0; i != 2; ++i) {
         ff_hevc_rpi_progress_init_state(s->progress_states + i);
