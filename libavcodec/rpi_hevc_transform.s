@@ -132,6 +132,7 @@ block_loop:
   add r1,r7
   # Prefetch the next block
   vldh HX(0++,0)+r0,(r1 += r3) REP 16
+  ### vmov HX(0++,0)+r0,0 REP 16
   eor r0,r8
   sub r1,r7
 
@@ -251,9 +252,11 @@ trans32:
   # We can no longer afford the VRF space to do prefetching when doing 32x32
   # Fetch the even rows
   vldh HX(0++,0),(r1 += r3) REP 16
+  ### vmov HX(0++,0)+r0,0 REP 16
   # Fetch the odd rows
   vldh HX(16++,0),64(r1 += r3) REP 16 # First odd row is 32 shorts ahead of r1
-
+  ### vmov HX(16++,0)+r0,0 REP 16
+  
   # Transform the even rows using even matrix
   mov r0, 0 # Even rows
   bl col_trans_16

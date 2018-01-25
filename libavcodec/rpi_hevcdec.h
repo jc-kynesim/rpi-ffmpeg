@@ -96,6 +96,8 @@
 #define RPI_PASSES              3
 
 #define RPI_DEBLOCK_THREADS     2
+#define RPI_DEBLOCK_MAXROWS     64
+#define RPI_DEBLOCK_MAXCOLS     64
 
 #define RPI_VPU_THREADS     2
 
@@ -887,7 +889,10 @@ typedef struct HEVCRpiContext {
     HEVCRpiStats tstats;
 #endif
 #if RPI_DEBLOCK_THREADS > 1
-    sem_t deblock_sems[RPI_DEBLOCK_THREADS];
+    pthread_mutex_t deblock_lock;
+    pthread_cond_t deblock_cond;
+    int deblock_ctus_wide[RPI_DEBLOCK_MAXROWS]; // deblock_ctus_wide[r] says how many ctus across have been completed for CTU row r
+    int deblock_ctus_high[RPI_DEBLOCK_MAXCOLS]; // deblock_ctus_high[c] says how many ctus down have been completed for CTU column c
 #endif
 } HEVCRpiContext;
 

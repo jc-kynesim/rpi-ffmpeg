@@ -22,6 +22,8 @@
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
+ 
+#define _GNU_SOURCE
 
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
@@ -634,8 +636,12 @@ static void pass_queues_start_all(HEVCRpiContext *const s)
 
     for (i = 0; i != RPI_PASSES; ++i)
     {
-        for(int j=0;j<pqs[i].num_threads;j++)
+        for(int j=0;j<pqs[i].num_threads;j++) {
+          char name[100];
+          sprintf(name,"Thread %d/%d",i,j);
           av_assert0(pthread_create(&pqs[i].thread[j], NULL, pass_worker, pqs + i) == 0);
+          pthread_setname_np(pqs[i].thread[j],name);
+        }
         pqs[i].started = 1;
     }
 }
@@ -3490,43 +3496,50 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
 #if RPI_GATE
     gate_start(4,s->used_for_ref,s->decode_order);
 #endif
-
+    
 /* When using multiple deblocking threads we need to ensure there is no overtaking.
-We logically have a semaphore for each CTU row except the last, but as we know
+
+To do this we ensure that the CTU above us has already been run.
+
+(We logically have a semaphore for each CTU row except the last, but as we know
 the number of deblock threads we can reuse these semaphores in a circular manner.
-We need to grab if we are not the first row, and post if we are not the second.
-We also grab 2 ahead to allow for the use of top-right pixels */
+We need to grab if we are not the first row, and post if we are not the second.)
+
+We also need to ensure that the CTU to our left has been run.
+This can go wrong if we have two tiles because the right hand tile
+may start before the left hand tile has completed.
+For this we have another semaphore that is posted when not at the right edge,
+and waited when not at the left edge.  This can be optimized out of the inner x loop.
+*/
+
+
 
     for (y = y0; y < yb; y += ctb_size ) {
 #if RPI_DEBLOCK_THREADS > 1
-        int this_ctu_row = (y/ctb_size) % RPI_DEBLOCK_THREADS;
-        int last_ctu_row = (y/ctb_size - 1) % RPI_DEBLOCK_THREADS;
-        int on_last_row = y+ctb_size >= s->ps.sps->height;
-        if (using_semaphores && y>0) {
-          // Wait for row before us to have decoded 2 CTUs
-          rpi_sem_wait( &s->deblock_sems[last_ctu_row] );
-          rpi_sem_wait( &s->deblock_sems[last_ctu_row] );
-        }
+        int this_ctu_row = (y/ctb_size);
+        int this_ctu_col = (x0/ctb_size);
 #endif
         for (x = x0; x < xr; x += ctb_size ) {
 #if RPI_DEBLOCK_THREADS > 1
-            if (using_semaphores && y>0) {
-                rpi_sem_wait( &s->deblock_sems[last_ctu_row] );
+            if (using_semaphores && (this_ctu_col>s->deblock_ctus_wide[this_ctu_row] || this_ctu_row>s->deblock_ctus_high[this_ctu_col]) ) {
+                pthread_mutex_lock(&s->deblock_lock);
+                while( this_ctu_col>s->deblock_ctus_wide[this_ctu_row] ||
+                       this_ctu_row>s->deblock_ctus_high[this_ctu_col]) {
+                    pthread_cond_wait(&s->deblock_cond, &s->deblock_lock);
+                }
+                pthread_mutex_unlock(&s->deblock_lock);
             }
 #endif
             ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
 #if RPI_DEBLOCK_THREADS > 1
-            if (using_semaphores && !on_last_row) {
-                sem_post( &s->deblock_sems[this_ctu_row] );
+            if (using_semaphores) {
+                s->deblock_ctus_high[this_ctu_col]++;  // Only one thread can make progress on any row and any column at a time so safe to avoid mutex here
+                s->deblock_ctus_wide[this_ctu_row]++;
+                this_ctu_col++;
+                pthread_cond_broadcast(&s->deblock_cond);
             }
 #endif
         }
-#if RPI_DEBLOCK_THREADS > 1
-        if (using_semaphores && !on_last_row) {
-            sem_post( &s->deblock_sems[this_ctu_row] );
-            sem_post( &s->deblock_sems[this_ctu_row] );
-        }
-#endif
     }
 
     // Flush (SAO)
@@ -5397,6 +5410,10 @@ static int hevc_rpi_decode_frame(AVCodecContext *avctx, void *data, int *got_out
 #if RPI_GATE
     s->decode_order = gate_get_decode_order();
 #endif
+#if RPI_DEBLOCK_THREADS>1
+    memset(s->deblock_ctus_wide,0,sizeof(s->deblock_ctus_wide));
+    memset(s->deblock_ctus_high,0,sizeof(s->deblock_ctus_high));
+#endif
 
     if (!avpkt->size) {
         ret = ff_hevc_rpi_output_frame(s, data, 1);
@@ -5492,9 +5509,9 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 #if RPI_EXTRA_BIT_THREADS
     bit_threads_kill(s);
 #endif
-#if RPI_DEBLOCK_THREADS > 1
-    for(i=0;i<RPI_DEBLOCK_THREADS;i++)
-      sem_destroy(&s->deblock_sems[i]);  
+#if RPI_DEBLOCK_THREADS>1
+    pthread_cond_destroy (&s->deblock_cond);
+    pthread_mutex_destroy (&s->deblock_lock);
 #endif
 
     hevc_exit_worker(s);
@@ -5580,10 +5597,10 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     bt_lc_init(s, s->HEVClc, 0);
     job_lc_init(s->HEVClc);
-    
-#if RPI_DEBLOCK_THREADS > 1
-    for(i=0;i<RPI_DEBLOCK_THREADS;i++)
-      sem_init(&s->deblock_sems[i],0,0);  
+   
+#if RPI_DEBLOCK_THREADS>1
+    pthread_mutex_init(&s->deblock_lock, NULL);
+    pthread_cond_init (&s->deblock_cond, NULL);
 #endif
 
     for (i = 0; i != 2; ++i) {

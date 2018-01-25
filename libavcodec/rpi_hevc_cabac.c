@@ -1929,11 +1929,13 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
         {
             use_vpu = !special && log2_trafo_size >= 4;
             coeffs = rpi_alloc_coeff_buf(lc->jb0, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
+            //if (!use_vpu) {
 #if HAVE_NEON
             rpi_zap_coeff_vals_neon(coeffs, log2_trafo_size - 2);
 #else
             memset(coeffs, 0, ccount * sizeof(int16_t));
 #endif
+            //}
         }
     }
 
@@ -2116,12 +2118,15 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                     const xy_off_t * const xy_off = scan_xy_off + significant_coeff_flag_idx[0];
                     const int k = (int32_t)(coeff_sign_flag << 31) >> 31;
                     const unsigned int scale_m = blk_scale[xy_off->scale];
-
-                    blk_coeffs[xy_off->coeff] = trans_scale_sat(
+                    const int res = trans_scale_sat(
                         (trans_coeff_level ^ k) - k,  // Apply sign
                         scale,
                         i == 0 && xy_off->coeff == 0 ? dc_scale : scale_m,
                         shift);
+                    //if (use_vpu)
+                    //  coeffs[0] = res;
+                    //else
+                      blk_coeffs[xy_off->coeff] = res;
                 }
             }
             else
@@ -2212,12 +2217,15 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                             const xy_off_t * const xy_off = scan_xy_off +
                                 significant_coeff_flag_idx[m];
                             const int k = (int32_t)(coeff_sign_flags << m) >> 31;
-
-                            blk_coeffs[xy_off->coeff] = trans_scale_sat(
+                            const int res = trans_scale_sat(
                                 (levels[m] ^ k) - k,
                                 scale,
                                 blk_scale[xy_off->scale],
                                 shift);
+                            //if (use_vpu)
+                            //  coeffs[0] = res;
+                            //else
+                              blk_coeffs[xy_off->coeff] = res;
                         } while (--m >= 0);
                     }
                 }
