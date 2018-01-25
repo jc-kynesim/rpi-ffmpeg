@@ -273,13 +273,6 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 // ---------------------------------------------------------------------------
 //
 // CABAC_BY22 functions
-//
-// By and large these are (at best) no faster than their C equivalents - the
-// only one worth having is _peek where we do a slightly better job than the
-// compiler
-//
-// The others have been stashed here for reference in case larger scale asm
-// is attempted in which case they might be a useful base
 
 
 #define get_cabac_by22_start get_cabac_by22_start_arm
