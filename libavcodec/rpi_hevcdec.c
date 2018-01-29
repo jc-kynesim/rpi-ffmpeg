@@ -3533,10 +3533,12 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
             ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
 #if RPI_DEBLOCK_THREADS > 1
             if (using_semaphores) {
-                s->deblock_ctus_high[this_ctu_col]++;  // Only one thread can make progress on any row and any column at a time so safe to avoid mutex here
+                pthread_mutex_lock(&s->deblock_lock);
+                s->deblock_ctus_high[this_ctu_col]++;
                 s->deblock_ctus_wide[this_ctu_row]++;
                 this_ctu_col++;
                 pthread_cond_broadcast(&s->deblock_cond);
+                pthread_mutex_unlock(&s->deblock_lock);
             }
 #endif
         }
