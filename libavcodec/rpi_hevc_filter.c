@@ -40,6 +40,8 @@
 #include "rpi_zc.h"
 #include "libavutil/rpi_sand_fns.h"
 
+#include <pthread.h>
+
 #define LUMA 0
 #define CB 1
 #define CR 2
@@ -1258,6 +1260,11 @@ void ff_hevc_rpi_hls_filter(HEVCRpiContext * const s, const int x, const int y, 
 
     if (s->ps.sps->sao_enabled) {
         int y_end = y >= s->ps.sps->height - ctb_size;
+#if RPI_DEBLOCK_THREADS > 1
+        if (s->offload_recon) {
+            pthread_mutex_lock(&s->sao_lock);
+        }
+#endif
         if (y != 0 && x != 0)
             sao_filter_CTB(s, x - ctb_size, y - ctb_size);
         if (x != 0 && y_end)
@@ -1266,6 +1273,11 @@ void ff_hevc_rpi_hls_filter(HEVCRpiContext * const s, const int x, const int y, 
             sao_filter_CTB(s, x, y - ctb_size);
         if (x_end && y_end)
             sao_filter_CTB(s, x , y);
+#if RPI_DEBLOCK_THREADS > 1
+        if (s->offload_recon) {
+            pthread_mutex_unlock(&s->sao_lock);
+        }
+#endif
     }
 
 #ifdef RPI_DEBLOCK_VPU

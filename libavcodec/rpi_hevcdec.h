@@ -105,7 +105,7 @@
 #define RPI_TSTATS              0
 
 // Define RPI_GATE to 1 to use gating to try and improve scheduling of critical threads
-#define RPI_GATE                0
+#define RPI_GATE                1
 
 // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
 //#define RPI_DEBLOCK_VPU
@@ -890,7 +890,11 @@ typedef struct HEVCRpiContext {
 #endif
 #if RPI_DEBLOCK_THREADS > 1
     pthread_mutex_t deblock_lock;
+    pthread_mutex_t sao_lock;
+    pthread_mutex_t deblock_row_lock;
     pthread_cond_t deblock_cond;
+    sem_t deblock_sem;
+    int deblock_y; // y location that we have deblocked up to
     int deblock_ctus_wide[RPI_DEBLOCK_MAXROWS]; // deblock_ctus_wide[r] says how many ctus across have been completed for CTU row r
     int deblock_ctus_high[RPI_DEBLOCK_MAXCOLS]; // deblock_ctus_high[c] says how many ctus down have been completed for CTU column c
 #endif

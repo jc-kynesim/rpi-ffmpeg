@@ -3521,7 +3521,8 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
 #endif
         for (x = x0; x < xr; x += ctb_size ) {
 #if RPI_DEBLOCK_THREADS > 1
-            if (using_semaphores && (this_ctu_col>s->deblock_ctus_wide[this_ctu_row] || this_ctu_row>s->deblock_ctus_high[this_ctu_col]) ) {
+            if (using_semaphores && (this_ctu_col>s->deblock_ctus_wide[this_ctu_row] || 
+                                     this_ctu_row>s->deblock_ctus_high[this_ctu_col]) ) {
                 pthread_mutex_lock(&s->deblock_lock);
                 while( this_ctu_col>s->deblock_ctus_wide[this_ctu_row] ||
                        this_ctu_row>s->deblock_ctus_high[this_ctu_col]) {
@@ -3530,6 +3531,7 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
                 pthread_mutex_unlock(&s->deblock_lock);
             }
 #endif
+            printf("%d: %d,%d\n",s->decode_order,x,y);
             ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
 #if RPI_DEBLOCK_THREADS > 1
             if (using_semaphores) {
@@ -3543,6 +3545,17 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
 #endif
         }
     }
+    
+#if RPI_DEBLOCK_THREADS > 1
+    // Ensure rows are completed in order
+    if (using_semaphores && x_end && y0>0) {
+        pthread_mutex_lock(&s->deblock_row_lock);
+        while( y0>s->deblock_y ) {
+            pthread_cond_wait(&s->deblock_cond, &s->deblock_row_lock);
+        }
+        pthread_mutex_unlock(&s->deblock_row_lock);
+    }
+#endif
 
     // Flush (SAO)
     if (y > y0) {
@@ -3574,6 +3587,17 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
     if (s->threads_type == FF_THREAD_FRAME && x_end && y0 > 0) {
         ff_hevc_rpi_progress_signal_recon(s, y_end ? INT_MAX : y0 - 1);
     }
+    
+#if RPI_DEBLOCK_THREADS > 1
+    if (using_semaphores && x_end && yb>0) {
+        pthread_mutex_lock(&s->deblock_row_lock);
+        s->deblock_y = yb;
+        printf("deblock_y=%d\n",yb);
+        pthread_cond_broadcast(&s->deblock_cond);
+        pthread_mutex_unlock(&s->deblock_row_lock);
+    }
+#endif
+    
     // Job done now
     // ? Move outside this fn
     job_free(s->jbc, jb);
@@ -5415,6 +5439,7 @@ static int hevc_rpi_decode_frame(AVCodecContext *avctx, void *data, int *got_out
 #if RPI_DEBLOCK_THREADS>1
     memset(s->deblock_ctus_wide,0,sizeof(s->deblock_ctus_wide));
     memset(s->deblock_ctus_high,0,sizeof(s->deblock_ctus_high));
+    s->deblock_y = 0;
 #endif
 
     if (!avpkt->size) {
@@ -5513,7 +5538,10 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 #endif
 #if RPI_DEBLOCK_THREADS>1
     pthread_cond_destroy (&s->deblock_cond);
+    pthread_mutex_destroy (&s->sao_lock);
     pthread_mutex_destroy (&s->deblock_lock);
+    pthread_mutex_destroy (&s->deblock_row_lock);
+    sem_destroy (&s->deblock_sem);
 #endif
 
     hevc_exit_worker(s);
@@ -5601,8 +5629,11 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     job_lc_init(s->HEVClc);
    
 #if RPI_DEBLOCK_THREADS>1
+    pthread_mutex_init(&s->sao_lock, NULL);
     pthread_mutex_init(&s->deblock_lock, NULL);
+    pthread_mutex_init(&s->deblock_row_lock, NULL);
     pthread_cond_init (&s->deblock_cond, NULL);
+    sem_init(&s->deblock_sem, 0, 0);
 #endif
 
     for (i = 0; i != 2; ++i) {
