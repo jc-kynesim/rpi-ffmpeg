@@ -3531,7 +3531,7 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
                 pthread_mutex_unlock(&s->deblock_lock);
             }
 #endif
-            printf("%d: %d,%d\n",s->decode_order,x,y);
+            //printf("%d: %d,%d\n",s->decode_order,x,y);
             ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
 #if RPI_DEBLOCK_THREADS > 1
             if (using_semaphores) {
@@ -3592,7 +3592,7 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
     if (using_semaphores && x_end && yb>0) {
         pthread_mutex_lock(&s->deblock_row_lock);
         s->deblock_y = yb;
-        printf("deblock_y=%d\n",yb);
+        //printf("deblock_y=%d\n",yb);
         pthread_cond_broadcast(&s->deblock_cond);
         pthread_mutex_unlock(&s->deblock_row_lock);
     }
