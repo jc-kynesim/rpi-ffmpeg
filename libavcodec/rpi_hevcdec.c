@@ -3442,8 +3442,9 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
         const unsigned int yt = y0 > ctb_size ? y0 - ctb_size : 0;
         const unsigned int yb = (s->ps.pps->ctb_ts_flags[jb->ctu_ts_last] & CTB_TS_FLAGS_EOT) != 0 ?
             bound_b : y - ctb_size;
+        rpi_cache_buf_t cbuf;
 
-        rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
+        rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
         rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
           xl, yt, bound_r - xl, yb - yt,
           ctx_vshift(s, 1), 1, 1);
@@ -3734,9 +3735,10 @@ static unsigned int mc_terminate_add_emu(const HEVCRpiContext * const s,
 
 static void flush_frame(HEVCRpiContext *s,AVFrame *frame)
 {
-  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init();
-  rpi_cache_flush_add_frame(rfe, frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
-  rpi_cache_flush_finish(rfe);
+    rpi_cache_buf_t cbuf;
+    rpi_cache_flush_env_t * rfe = rpi_cache_flush_init(&cbuf);
+    rpi_cache_flush_add_frame(rfe, frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+    rpi_cache_flush_finish(rfe);
 }
 
 static void job_gen_bounds(const HEVCRpiContext * const s, HEVCRpiJob * const jb)
@@ -3770,8 +3772,10 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     const HEVCRpiContext * const s = s0;
     vpu_qpu_wait_h sync_y;
     int pred_y, pred_c;
-    const vpu_qpu_job_h vqj = vpu_qpu_job_new();
-    rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
+    vpu_qpu_job_env_t qvbuf;
+    const vpu_qpu_job_h vqj = vpu_qpu_job_init(&qvbuf);
+    rpi_cache_buf_t cbuf;
+    rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
 
     {
         const HEVCRpiCoeffsEnv * const cf = &jb->coeffs;

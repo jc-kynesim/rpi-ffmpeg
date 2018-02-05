@@ -953,7 +953,8 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
 // flushes and invalidates all pixel rows in [start,end-1]
 static void ff_hevc_rpi_flush_buffer_lines(HEVCRpiContext *s, int start, int end, int flush_luma, int flush_chroma)
 {
-    rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init();
+    rpi_cache_buf_t cbuf;
+    rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
     rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
       0, start, s->ps.sps->width, end - start, ctx_vshift(s, 1), flush_luma, flush_chroma);
     rpi_cache_flush_finish(rfe);
@@ -993,7 +994,8 @@ static void rpi_deblock(HEVCRpiContext *s, int y, int ctb_size)
   
   // Call VPU
   {
-      const vpu_qpu_job_h vqj = vpu_qpu_job_new();
+      vpu_qpu_job_env_t qvbuf;
+      const vpu_qpu_job_h vqj = vpu_qpu_job_init(&qvbuf);
       vpu_qpu_job_add_vpu(vqj, vpu_get_fn(s->ps.sps->bit_depth), s->dvq->vpu_cmds_vc, 3, 0, 0, 0, 5);  // 5 means to do all the commands
       vpu_qpu_job_add_sync_this(vqj, &s->dvq->cmd_id);
       vpu_qpu_job_finish(vqj);

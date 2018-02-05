@@ -1,6 +1,14 @@
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
 
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
+#include "interface/vmcs_host/vc_vchi_gpuserv.h"
+#pragma GCC diagnostic pop
+
+
 #define RPI_ONE_BUF 1
 
 typedef struct gpu_mem_ptr_s {
@@ -126,7 +134,9 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
 struct rpi_cache_flush_env_s;
 typedef struct rpi_cache_flush_env_s rpi_cache_flush_env_t;
 
-rpi_cache_flush_env_t * rpi_cache_flush_init(void);
+typedef struct {uint32_t t[33];} rpi_cache_buf_t;
+
+rpi_cache_flush_env_t * rpi_cache_flush_init(rpi_cache_buf_t * const buf);
 // Free env without flushing
 void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe);
 // Do the accumulated flush & clear but do not free the env
@@ -184,7 +194,16 @@ typedef struct vq_wait_s * vpu_qpu_wait_h;
 struct vpu_qpu_job_env_s;
 typedef struct vpu_qpu_job_env_s * vpu_qpu_job_h;
 
-vpu_qpu_job_h vpu_qpu_job_new(void);
+#define VPU_QPU_JOB_MAX 4
+struct vpu_qpu_job_env_s
+{
+  unsigned int n;
+  unsigned int mask;
+  struct gpu_job_s j[VPU_QPU_JOB_MAX];
+};
+typedef struct vpu_qpu_job_env_s vpu_qpu_job_env_t;
+
+vpu_qpu_job_h vpu_qpu_job_init(vpu_qpu_job_env_t * const buf);
 void vpu_qpu_job_delete(const vpu_qpu_job_h vqj);
 void vpu_qpu_job_add_vpu(const vpu_qpu_job_h vqj, const uint32_t vpu_code,
   const unsigned r0, const unsigned r1, const unsigned r2, const unsigned r3, const unsigned r4, const unsigned r5);

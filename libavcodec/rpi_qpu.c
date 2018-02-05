@@ -19,12 +19,6 @@
 #include "rpi_hevc_transform10.h"
 #include "libavutil/rpi_sand_fns.h"
 
-#pragma GCC diagnostic push
-// Many many redundant decls in the header files
-#pragma GCC diagnostic ignored "-Wredundant-decls"
-#include "interface/vmcs_host/vc_vchi_gpuserv.h"
-#pragma GCC diagnostic pop
-
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
 #define RPI_TRACE_TIME_VPU_QPU_WAIT     0
 
@@ -92,16 +86,7 @@ struct GPU
   short transMatrix2even[16*16*2];
 };
 
-#define CFE_ENTS_PER_A 8
-// If we have a sliced frame 2048 wide @ 64 per slice then there are 32 slices
-// in a line & we want to flush luma + chroma + a couple of bits so ents ~ 70
-// allow 128
-#define CFE_ENT_COUNT  128
-#define CFE_A_COUNT    (CFE_ENT_COUNT / CFE_ENTS_PER_A)
-
 struct rpi_cache_flush_env_s {
-//    unsigned int n;
-//    struct vcsm_user_clean_invalid_s a[CFE_A_COUNT];
   struct vcsm_user_clean_invalid2_s v;
 };
 
@@ -449,23 +434,18 @@ void gpu_unref(void)
 //
 // Cache flush functions
 
-#define CACHE_EL_MAX 16
+#define CACHE_EL_MAX ((sizeof(rpi_cache_buf_t) - sizeof (struct vcsm_user_clean_invalid2_s)) / sizeof (struct vcsm_user_clean_invalid2_block_s))
 
-rpi_cache_flush_env_t * rpi_cache_flush_init()
+rpi_cache_flush_env_t * rpi_cache_flush_init(rpi_cache_buf_t * const buf)
 {
-  rpi_cache_flush_env_t * const rfe = malloc(sizeof(rpi_cache_flush_env_t) +
-            sizeof(struct vcsm_user_clean_invalid2_block_s) * CACHE_EL_MAX);
-  if (rfe == NULL)
-    return NULL;
-
+  rpi_cache_flush_env_t * const rfe = (rpi_cache_flush_env_t *)buf;
   rfe->v.op_count = 0;
   return rfe;
 }
 
 void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe)
 {
-  if (rfe != NULL)
-    free(rfe);
+  // Nothing needed
 }
 
 int rpi_cache_flush_execute(rpi_cache_flush_env_t * const rfe)
@@ -486,7 +466,6 @@ int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
 {
   int rc = rpi_cache_flush_execute(rfe);;
 
-  free(rfe);
   return rc;
 }
 
@@ -616,7 +595,8 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
 // Call this to clean and invalidate a region of memory
 void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T *const p, const rpi_cache_flush_mode_t mode)
 {
-  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init();
+  rpi_cache_buf_t cbuf;
+  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init(&cbuf);
   rpi_cache_flush_add_gm_ptr(rfe, p, mode);
   rpi_cache_flush_finish(rfe);
 }
@@ -726,26 +706,22 @@ static void vq_wait_post(vq_wait_t * const wait)
 #define VPU_QPU_MASK_QPU  1
 #define VPU_QPU_MASK_VPU  2
 
-#define VPU_QPU_JOB_MAX 4
-struct vpu_qpu_job_env_s
-{
-  unsigned int n;
-  unsigned int mask;
-  struct gpu_job_s j[VPU_QPU_JOB_MAX];
-};
-
 typedef struct vpu_qpu_job_env_s vpu_qpu_job_env_t;
 
-vpu_qpu_job_env_t * vpu_qpu_job_new(void)
+vpu_qpu_job_env_t * vpu_qpu_job_init(vpu_qpu_job_env_t * const buf)
 {
-  vpu_qpu_job_env_t * vqj = calloc(1, sizeof(vpu_qpu_job_env_t));
+//  vpu_qpu_job_env_t * vqj = calloc(1, sizeof(vpu_qpu_job_env_t));
+  vpu_qpu_job_env_t * vqj = buf;
+//  memset(vqj, 0, sizeof(*vqj));
+  vqj->n = 0;
+  vqj->mask = 0;
   return vqj;
 }
 
 void vpu_qpu_job_delete(vpu_qpu_job_env_t * const vqj)
 {
-  memset(vqj, 0, sizeof(*vqj));
-  free(vqj);
+//  memset(vqj, 0, sizeof(*vqj));
+//  free(vqj);
 }
 
 static inline struct gpu_job_s * new_job(vpu_qpu_job_env_t * const vqj)
@@ -763,6 +739,8 @@ void vpu_qpu_job_add_vpu(vpu_qpu_job_env_t * const vqj, const uint32_t vpu_code,
     vqj->mask |= VPU_QPU_MASK_VPU;
 
     j->command = EXECUTE_VPU;
+    j->callback.func = 0;
+    j->callback.cookie = NULL;
     // The bottom two bits of the execute address contain no-flush flags
     // b0 will flush the VPU I-cache if unset so we nearly always want that set
     // as we never reload code
@@ -785,6 +763,9 @@ void vpu_qpu_job_add_qpu(vpu_qpu_job_env_t * const vqj, const unsigned int n, co
     vqj->mask |= VPU_QPU_MASK_QPU;
 
     j->command = EXECUTE_QPU;
+    j->callback.func = 0;
+    j->callback.cookie = NULL;
+
     j->u.q.jobs = n;
 #if RPI_TRACE_QPU_PROFILE_ALL
     j->u.q.noflush = QPU_FLAGS_NO_FLUSH_VPU | QPU_FLAGS_PROF_CLEAR_AND_ENABLE | QPU_FLAGS_PROF_OUTPUT_COUNTS;
