@@ -181,6 +181,7 @@
 @
 @ It also loads other common regs
 
+@ Beware that the offset read here overrreads by 6 bytes so source must be sized appropriately
 function band_load_y
         ldr       ip, [sp, #16]         @ &sao_offset_val[0]
         ldr       r4, [sp, #20]         @ sao_left_class
@@ -202,7 +203,7 @@ function band_load_y
         bx        lr
 endfunc
 
-
+@ Beware that offset reads here overrread by 6 bytes so source must be sized appropriately
 function band_load_c
         ldr       ip, [sp, #16]         @ &sao_offset_val1[0]
         ldr       r4, [sp, #20]         @ sao_left_class1

@@ -898,7 +898,7 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     s->bs_width  = (width  >> 2) + 1;
     s->bs_height = (height >> 2) + 1;
 
-    s->sao           = av_mallocz_array(ctb_count, sizeof(*s->sao));
+    s->sao           = av_mallocz(ctb_count * sizeof(*s->sao) + 8); // Our sao code overreads this array slightly
     s->deblock       = av_mallocz_array(ctb_count, sizeof(*s->deblock));
     if (!s->sao || !s->deblock)
         goto fail;
