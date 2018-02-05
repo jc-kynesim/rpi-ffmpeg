@@ -1695,6 +1695,11 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
     const xy_off_t * const scan_xy_off = off_xys[scan_idx][log2_trafo_size - 2];
 
     int use_vpu;
+#if RPI_COMPRESS_COEFFS                                
+    int num_nonzero = 0;
+    int use_compress = 0;
+    int *coeffs32;
+#endif
     int use_dc = 0;
     int16_t *coeffs;
     uint8_t significant_coeff_group_flag[9] = {0};  // Allow 1 final byte that is always zero
@@ -1915,7 +1920,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
 
     {
         const unsigned int ccount = 1 << (log2_trafo_size * 2);
-        const int special = trans_skip_or_bypass || lc->tu.cross_pf;  // These need special processinmg
+        const int special = lc->cu.cu_transquant_bypass_flag || trans_skip_or_bypass || lc->tu.cross_pf;  // These need special processinmg
         use_vpu = 0;
         use_dc = (num_coeff == 1) && !special &&
             !(lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2);
@@ -1928,8 +1933,20 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
         else
         {
             use_vpu = !special && log2_trafo_size >= 4;
+#if RPI_COMPRESS_COEFFS
+            use_compress = use_vpu && lc->jb0->coeffs.s[log2_trafo_size - 2].packed;
+            if (log2_trafo_size==5)
+              use_compress=0; // TODO
+            //if (c_idx==0 && log2_trafo_size==4) {
+            //  printf("x0=%d, y0=%d\n",x0,y0);
+            //}
+#endif
+          
             coeffs = rpi_alloc_coeff_buf(lc->jb0, !use_vpu ? 0 : log2_trafo_size - 2, ccount);
-            //if (!use_vpu) {
+#if RPI_COMPRESS_COEFFS
+            coeffs32 = (int*)coeffs;
+            if (!use_compress)
+#endif
 #if HAVE_NEON
             rpi_zap_coeff_vals_neon(coeffs, log2_trafo_size - 2);
 #else
@@ -2048,6 +2065,35 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                 nb_significant_coeff_flag++;
             }
         }
+        
+#if RPI_COMPRESS_COEFFS
+        //if (use_compress && num_nonzero) {
+        if (use_compress && (nb_significant_coeff_flag + num_nonzero + 1 >= (1<<(2*log2_trafo_size-1)))) { // Overflow when half-full!
+          int16_t temp[16*16];
+          const unsigned int ccount = 1 << (log2_trafo_size * 2);
+          // Would overflow the coefficient buffer.
+          // Need to allocate another buffer, move our coefficients across, then reset packed
+          // Could also cope with 1 or 2 per row by allowing a little more space?
+          
+          // Mark the amount that has been packed
+          lc->jb0->coeffs.s[log2_trafo_size - 2].packed = 0;
+          lc->jb0->coeffs.s[log2_trafo_size - 2].packed_n = lc->jb0->coeffs.s[log2_trafo_size - 2].n - ccount; // Don't want to unpack the last buffer
+          
+          // Fill in existing coefficients
+          // Note that residual has an optimization for UV where it assumes that V immediately follows U
+          memcpy(temp, coeffs, sizeof(int)*num_nonzero);
+          coeffs32 = (int *)temp;
+          memset(coeffs, 0, ccount * sizeof(int16_t));
+          num_nonzero--;
+          while (num_nonzero >= 0) {
+            const unsigned int res = coeffs32[num_nonzero];
+            const unsigned int offset = res & 0xffff;
+            coeffs[ offset ] = res >> 16;
+            num_nonzero--;
+          }
+          use_compress = 0;
+        }
+#endif            
 
         if (nb_significant_coeff_flag != 0) {
             const unsigned int gt1_idx_delta = (c_idx_nz << 2) |
@@ -2076,7 +2122,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             // extended_precision_processing_flag
             //    This can extend the required precision past 16bits
             //    so is probably tricky - also no example found yet
-
+            
 #if USE_N_END_1
             if (nb_significant_coeff_flag == 1) {
                 // There is a small gain to be had from special casing the single
@@ -2123,9 +2169,11 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                         scale,
                         i == 0 && xy_off->coeff == 0 ? dc_scale : scale_m,
                         shift);
-                    //if (use_vpu)
-                    //  coeffs[0] = res;
-                    //else
+#if RPI_COMPRESS_COEFFS                                
+                      if (use_compress)
+                        coeffs32[num_nonzero++] = (res<<16) + (&blk_coeffs[xy_off->coeff] - coeffs);
+                      else
+#endif
                       blk_coeffs[xy_off->coeff] = res;
                 }
             }
@@ -2203,8 +2251,14 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                     if (i == 0 && significant_coeff_flag_idx[m] == 0)
                     {
                         const int k = (int32_t)(coeff_sign_flags << m) >> 31;
-                        blk_coeffs[0] = trans_scale_sat(
+                        const int res = trans_scale_sat(
                             (levels[m] ^ k) - k, scale, dc_scale, shift);
+#if RPI_COMPRESS_COEFFS
+                      if (use_compress)
+                        coeffs32[num_nonzero++] = (res<<16) + (blk_coeffs - coeffs);
+                      else
+#endif
+                        blk_coeffs[0] = res;
                         --m;
                     }
 
@@ -2222,9 +2276,11 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                                 scale,
                                 blk_scale[xy_off->scale],
                                 shift);
-                            //if (use_vpu)
-                            //  coeffs[0] = res;
-                            //else
+#if RPI_COMPRESS_COEFFS
+                            if (use_compress) {
+                              coeffs32[num_nonzero++] = (res<<16) + (&blk_coeffs[xy_off->coeff] - coeffs);
+                            } else
+#endif
                               blk_coeffs[xy_off->coeff] = res;
                         } while (--m >= 0);
                     }
@@ -2295,8 +2351,33 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
         }
     }
 
-    if (!use_dc)
+    if (!use_dc) {
+#if RPI_COMPRESS_COEFFS                                
+        /*if (use_vpu) {
+          static int histogram[6][32*32];
+          static int count=0;
+          histogram[log2_trafo_size][num_nonzero]++;
+          if (count++>10000) {
+            int i;
+            int tsz;
+            count=0;
+            for(tsz=4;tsz<=5;tsz++) {
+              int num=1<<(tsz*2);
+              for(i=0;i<num;i++) {
+                printf("%d ",histogram[tsz][i]);
+              }
+              printf("\n");
+            }
+          }
+        }*/
+        if (use_compress) {
+          // Mark last coefficient
+          coeffs32[num_nonzero] = 0;
+        }
+#endif      
+
         rpi_add_residual(s, lc->jb0, log2_trafo_size, c_idx, x0, y0, coeffs);
+    }
 }
 
 #if !USE_BY22

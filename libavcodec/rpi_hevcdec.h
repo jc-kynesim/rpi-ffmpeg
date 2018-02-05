@@ -107,6 +107,9 @@
 // Define RPI_GATE to 1 to use gating to try and improve scheduling of critical threads
 #define RPI_GATE                0
 
+// Define RPI_COMPRESS_COEFFS to 1 to send coefficients in compressed form
+#define RPI_COMPRESS_COEFFS 1
+
 // Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
 //#define RPI_DEBLOCK_VPU
 
@@ -579,7 +582,11 @@ typedef struct HEVCRpiIntraPredEnv {
 #endif
 
 typedef struct HEVCRpiCoeffEnv {
-    unsigned int n;
+    unsigned int n;   // Number of 16-bit values to be transformed
+#if RPI_COMPRESS_COEFFS
+    unsigned int packed; // Equal to 1 if coefficients should be being packed
+    unsigned int packed_n; // Value of n when packed was set equal to 0 (i.e. the amount that is sent compressed).  Only valid if packed==0
+#endif
     int16_t * buf;
 } HEVCRpiCoeffEnv;
 
