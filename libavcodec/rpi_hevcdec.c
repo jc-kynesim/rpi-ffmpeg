@@ -1641,13 +1641,7 @@ static int hls_slice_header(HEVCRpiContext *s)
                 }
                 sh->entry_point_offset[i] = val_minus1 + 1; // +1 to get the size
             }
-            if (s->threads_number > 1 && (s->ps.pps->num_tile_rows > 1 || s->ps.pps->num_tile_columns > 1)) {
-                s->enable_parallel_tiles = 0; // TODO: you can enable tiles in parallel here
-                s->threads_number = 1;
-            } else
-                s->enable_parallel_tiles = 0;
-        } else
-            s->enable_parallel_tiles = 0;
+        }
     }
 
     if (s->ps.pps->slice_header_extension_present_flag) {
@@ -5572,7 +5566,6 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     hevc_init_worker(s);
 
-    s->enable_parallel_tiles = 0;
     s->sei.picture_timing.picture_struct = 0;
     s->eos = 1;
 

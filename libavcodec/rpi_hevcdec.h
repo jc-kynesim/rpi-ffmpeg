@@ -817,7 +817,6 @@ typedef struct HEVCRpiContext {
     uint16_t seq_decode;
     uint16_t seq_output;
 
-    int enable_parallel_tiles;
     atomic_int wpp_err;
 
     const uint8_t *data;
