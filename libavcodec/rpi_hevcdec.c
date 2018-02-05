@@ -3884,6 +3884,7 @@ static void job_delete(HEVCRpiJob * const jb)
     av_freep(&jb->intra.cmds);
     rpi_free_inter_pred(&jb->chroma_ip);
     rpi_free_inter_pred(&jb->luma_ip);
+    av_free(jb);
 }
 
 static void jbg_delete(HEVCRpiJobGlobal * const jbg)
