@@ -102,6 +102,7 @@ typedef struct RpiSliceHeader {
     int * offset;
     int * size;
     int num_entry_point_offsets;
+    int offsets_allocated;
 
     int8_t slice_qp;
 

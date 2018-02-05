@@ -792,6 +792,38 @@ static void ff_hevc_rpi_progress_kill_wait(HEVCRpiFrameProgressWait * const pwai
  * Section 5.7
  */
 
+// Realloc the entry point arrays
+static int alloc_entry_points(RpiSliceHeader * const sh, const int n)
+{
+    if (sh->entry_point_offset == NULL || n > sh->offsets_allocated || n == 0)
+    {
+        // Round up alloc to multiple of 32
+        int a = (n + 31) & ~31;
+
+        // We don't care about the previous contents so probably fastest to simply discard
+        av_freep(&sh->entry_point_offset);
+        av_freep(&sh->offset);
+        av_freep(&sh->size);
+
+        if (a != 0)
+        {
+            sh->entry_point_offset = av_malloc_array(a, sizeof(unsigned));
+            sh->offset = av_malloc_array(a, sizeof(int));
+            sh->size = av_malloc_array(a, sizeof(int));
+
+            if (!sh->entry_point_offset || !sh->offset || !sh->size) {
+                sh->num_entry_point_offsets = 0;
+                sh->offsets_allocated = 0;
+                return AVERROR(ENOMEM);
+            }
+        }
+
+        sh->offsets_allocated = a;
+    }
+
+    return 0;
+}
+
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCRpiContext *s)
 {
@@ -825,9 +857,7 @@ static void pic_arrays_free(HEVCRpiContext *s)
     av_freep(&s->horizontal_bs);
     av_freep(&s->vertical_bs);
 
-    av_freep(&s->sh.entry_point_offset);
-    av_freep(&s->sh.size);
-    av_freep(&s->sh.offset);
+    alloc_entry_points(&s->sh, 0);
 
     av_buffer_pool_uninit(&s->tab_mvf_pool);
     av_buffer_pool_uninit(&s->rpl_tab_pool);
@@ -1618,17 +1648,12 @@ static int hls_slice_header(HEVCRpiContext *s)
                 return AVERROR_INVALIDDATA;
             }
 
-            av_freep(&sh->entry_point_offset);
-            av_freep(&sh->offset);
-            av_freep(&sh->size);
-            sh->entry_point_offset = av_malloc_array(sh->num_entry_point_offsets, sizeof(unsigned));
-            sh->offset = av_malloc_array(sh->num_entry_point_offsets, sizeof(int));
-            sh->size = av_malloc_array(sh->num_entry_point_offsets, sizeof(int));
-            if (!sh->entry_point_offset || !sh->offset || !sh->size) {
-                sh->num_entry_point_offsets = 0;
+            if ((ret = alloc_entry_points(sh, sh->num_entry_point_offsets)) < 0)
+            {
                 av_log(s->avctx, AV_LOG_ERROR, "Failed to allocate memory\n");
-                return AVERROR(ENOMEM);
+                return ret;
             }
+
             for (i = 0; i < sh->num_entry_point_offsets; i++) {
                 uint32_t val_minus1 = get_bits_long(gb, offset_len);
                 if (val_minus1 > (1 << 28))
@@ -5351,10 +5376,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     s->ps.sps = NULL;
     s->ps.pps = NULL;
     s->ps.vps = NULL;
-
-    av_freep(&s->sh.entry_point_offset);
-    av_freep(&s->sh.offset);
-    av_freep(&s->sh.size);
 
     for (i = 1; i < s->threads_number; i++) {
         if (s->sList[i] != NULL) {
