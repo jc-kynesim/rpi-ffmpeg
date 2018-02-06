@@ -5360,7 +5360,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
         ff_hevc_rpi_progress_kill_state(s->progress_states + i);
     }
     job_lc_kill(s->HEVClc);
-    av_rpi_zc_uninit(avctx);
 
     av_freep(&s->sao_pixel_buffer_h[0]);  // [1] & [2] allocated with [0]
     av_freep(&s->sao_pixel_buffer_v[0]);
@@ -5394,6 +5393,11 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     s->HEVClc = NULL;  // Allocated as part of HEVClcList
 
     ff_h2645_packet_uninit(&s->pkt);
+
+    // This must be after we free off the DPB
+    // * If the outer code is still holding any frames hopefully it will
+    //   have its own ref to zc
+    av_rpi_zc_uninit(avctx);
 
     return 0;
 }

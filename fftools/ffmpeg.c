@@ -409,14 +409,14 @@ static void display_exit(rpi_display_env_t ** const pde)
         if (de->conn != NULL) {
             mmal_connection_destroy(de->conn);
         }
+        if (de->rpi_pool != NULL) {
+            mmal_port_pool_destroy(de->display->input[0], de->rpi_pool);
+        }
         if (de->isp != NULL) {
             mmal_component_destroy(de->isp);
         }
         if (de->display != NULL) {
             mmal_component_destroy(de->display);
-        }
-        if (de->rpi_pool != NULL) {
-            mmal_port_pool_destroy(de->display->input[0], de->rpi_pool);
         }
 
         av_free(de);
