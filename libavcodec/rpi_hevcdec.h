@@ -105,7 +105,7 @@
 #define RPI_TSTATS              0
 
 // Define RPI_GATE to 1 to use gating to try and improve scheduling of critical threads
-#define RPI_GATE                1
+#define RPI_GATE                0
 
 // Define RPI_COMPRESS_COEFFS to 1 to send coefficients in compressed form
 #define RPI_COMPRESS_COEFFS 1

@@ -347,11 +347,13 @@ hevc_trans_32x32:
 
   mov r3, 32*2*2 # Stride used to fetch alternate rows of our input coefficient buffer
   mov r7, 16*16*2 # Total block size
-  #sub sp,sp,32*32*2+64 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned) and another 32*32 for unpacking
+  
+  # Stack base allocation
+  sub sp,sp,32*32*4+64 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned) and another 32*32 for unpacking
   # set r8 to 32byte aligned stack pointer with 32 bytes of space before it
-  #add r8,sp,63
-  #lsr r8,5
-  #lsl r8,5
+  add r8,sp,63
+  lsr r8,5
+  lsl r8,5
 
 #:di
   .half 0x0005 #AUTOINSERTED
@@ -364,15 +366,15 @@ hevc_trans_32x32:
 #  cmp r8,r9
 #  bne try_again
 
-#:version r8
-  .half 0x00e8 #AUTOINSERTED
-  lsr r8,r8,16
-#:btest r8,1
-  .half 0x6c18 #AUTOINSERTED
-  add r8,pc,intermediate_results-$
-  beq on_vpu1
-  add r8,r8,32*32*2*2+16*2 # Move to secondary storage
-on_vpu1:
+## #:version r8
+##   .half 0x00e8 #AUTOINSERTED
+##   lsr r8,r8,16
+## #:btest r8,1
+##   .half 0x6c18 #AUTOINSERTED
+##   add r8,pc,intermediate_results-$
+##   beq on_vpu1
+##   add r8,r8,32*32*2*2+16*2 # Move to secondary storage
+## on_vpu1:
   mov r9,r8  # Backup of the temporary storage
   mov r10,r1 # Backup of the coefficient buffer
 block_loop32:
@@ -417,7 +419,7 @@ not_compressed_32:
   add r10, 32*32*2 # move onto next block of coefficients
   addcmpbgt r2,-1,0,block_loop32
 
-  #add sp,sp,32*32*2+64# Restore stack
+  add sp,sp,32*32*4+64# Restore stack
 
 #:ei
   .half 0x0004 #AUTOINSERTED
