@@ -3934,6 +3934,7 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
             const unsigned int csize = sizeof(cf->s[3].buf[0]);
             const unsigned int offset32 = ((cf->s[3].buf - cf->s[2].buf) - cf->s[3].n) * csize;
             unsigned int n16 = (cf->s[2].n >> 8);
+            unsigned int n32 = (cf->s[3].n >> 10);
 #if RPI_COMPRESS_COEFFS
             if (cf->s[2].packed) {
                 // All coefficients in packed mode
@@ -3942,6 +3943,14 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
                 const unsigned int npack16 = (cf->s[2].packed_n>>8);
                 n16 = n16 | (npack16<<16);
             }
+            if (cf->s[3].packed) {
+                // All coefficients in packed mode
+                n32 = n32 | (n32<<16);
+            } else {
+                const unsigned int npack32 = (cf->s[3].packed_n>>10);
+                n32 = n32 | (npack32<<16);
+            }
+            //printf("0x%x (%d)\n",n32,s->decode_order);
 #endif
             vpu_qpu_job_add_vpu(vqj,
                 vpu_get_fn(s->ps.sps->bit_depth),
@@ -3949,7 +3958,7 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
                 cf->gptr.vc,
                 n16,
                 cf->gptr.vc + offset32,
-                cf->s[3].n >> 10,
+                n32,
                 0);
 
             rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, 0, cf->s[2].n * csize);
@@ -4031,6 +4040,16 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
 #if RPI_GATE    
     gate_vpu_stop(2,s->decode_order);
 #endif    
+    /*{
+      const HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
+      const unsigned int csize = sizeof(cf->s[3].buf[0]);
+      const unsigned int offset32 = ((cf->s[3].buf - cf->s[2].buf) - cf->s[3].n) * csize;
+      char *buf = (char *)cf->s[2].buf;
+      int *coeffs32;
+      buf+=offset32;
+      coeffs32=(int*)buf;
+      printf("0x%x\n",coeffs32[0]);
+    }*/
 
     rpi_cache_flush_finish(rfe);
     

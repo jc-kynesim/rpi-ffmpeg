@@ -1935,8 +1935,8 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             use_vpu = !special && log2_trafo_size >= 4;
 #if RPI_COMPRESS_COEFFS
             use_compress = use_vpu && lc->jb0->coeffs.s[log2_trafo_size - 2].packed;
-            if (log2_trafo_size==5)
-              use_compress=0; // TODO
+            //if (log2_trafo_size==5)
+            //  use_compress=0; // TODO
             //if (c_idx==0 && log2_trafo_size==4) {
             //  printf("x0=%d, y0=%d\n",x0,y0);
             //}
@@ -2069,7 +2069,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
 #if RPI_COMPRESS_COEFFS
         //if (use_compress && num_nonzero) {
         if (use_compress && (nb_significant_coeff_flag + num_nonzero + 1 >= (1<<(2*log2_trafo_size-1)))) { // Overflow when half-full!
-          int16_t temp[16*16];
+          int16_t temp[32*32];
           const unsigned int ccount = 1 << (log2_trafo_size * 2);
           // Would overflow the coefficient buffer.
           // Need to allocate another buffer, move our coefficients across, then reset packed

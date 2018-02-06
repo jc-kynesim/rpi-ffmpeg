@@ -106,7 +106,27 @@ hevc_trans_16x16:
   beq hevc_uv_deblock_16x16_striped
   cmp r5,8
   beq hevc_residual
+  b do_transform
 
+  .balign 32
+packed_buffer:
+  .space 16*2
+intermediate_results:
+  .space 32*32*2
+unpacked_buffer:
+  .space 32*32*2
+
+packed_buffer2:
+  .space 16*2
+intermediate_results2:
+  .space 32*32*2
+unpacked_buffer2:
+  .space 32*32*2
+vpu_bank:
+  .word 0
+
+
+do_transform:
   push r6-r15, lr # TODO cut down number of used registers
 
 
@@ -127,9 +147,7 @@ hevc_trans_16x16:
   mov r4,64 # Constant used for rounding first pass
   mov r5,TRANS_RND2 # Constant used for rounding second pass
 
-#:sub sp,64+16*16*2 # Move on stack pointer in case interrupt occurs and uses stack
-  .half 0xb739 #AUTOINSERTED
-  .half 0xfdc0 #AUTOINSERTED
+  sub sp,sp,64+16*16*2 # Move on stack pointer in case interrupt occurs and uses stack
 
   add r11,sp,64 # Space for 32 bytes before, and rounding
   lsr r11,5
@@ -138,7 +156,7 @@ hevc_trans_16x16:
   lsr r10, r2, 16 # Number of compressed blocks stored in top short
 #:and r2,r2,0xffff
   .half 0x6f02 #AUTOINSERTED
-  
+
 
   # At start of block r0,r1 point to the current block (that has already been loaded)
 
@@ -199,63 +217,17 @@ not_compressed:
 
   addcmpbgt r2,-1,0,block_loop
 
-#:add sp,64+16*16*2 # Move on stack pointer in case interrupt occurs and uses stack
-  .half 0xb059 #AUTOINSERTED
-  .half 0x0240 #AUTOINSERTED
+  add sp,sp,64+16*16*2 # Move on stack pointer in case interrupt occurs and uses stack
 
   # Now go and do any 32x32 transforms
   b hevc_trans_32x32
 
   pop r6-r15, pc
 
-  .balign 32
-
-packed_data:
-  .short 1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-unpacked_data:
-  .short 2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-  .short 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-
-# TODO
-# Not threadsafe to have two VPUs accessing same data area!
-# Need to adjust stack instead
-
 # This returns a value in r6 that says where to load the data from.
 # We load data 16 shorts at a time from memory (uncached), and store to stack space to allow us to process it.
 unpack16x16:
-
-#  add r11,pc,unpacked_data-$
-#  # Clear out destination
+# Clear out destination
   vmov HX(0,0)+r0,0
   mov r6, r11
   vsth HX(0,0)+r0,(r6 += r3) REP 16
@@ -318,14 +290,54 @@ col_trans_odd_16_loop:
   sub r0,16  # put r0 back to its original value
   b lr
 
+# r1/r10 input pointer
+# r0,r4,r5,r6 free
+# r8/r9 output storage
+#
+# Store packed coefficients at r9-32
+# Store unpacked at r9+32*32 (because transform works on even/odd rows on input, but writes all rows)
+
+unpack32x32:
+# Clear out destination
+  vmov HX(0,0),0
+  add r0, r9, 32*32*2 # Unpacked buffer
+  mov r4, 32
+  vsth HX(0,0),(r0 += r4) REP 64
+unpack_outer_loop32:
+  # Loop until we find the end
+  vldh HX(0,0),(r1)  # TODO would prefetch help here while unpacking previous?
+  sub r6,r9,32
+  #add r6,pc,packed_data-$ # Packed data
+  vsth HX(0,0),(r6)  # Store into packed data
+  mov r8,0
+unpack_loop32:
+  ld r4,(r6)
+  add r6,r6,4
+  lsr r5,r4,16 # r5 is destination value
+  cmp r4,0 # {value,index}
+#:and r4,r4,0x3ff
+  .half 0x6ea4 #AUTOINSERTED
+  beq done_unpack
+  sth r5,(r0, r4)
+  addcmpblt r8,1,8,unpack_loop32
+#  # Read next 16
+  add r1,32
+  b unpack_outer_loop32
+done_unpack32:
+  b lr
+
 # hevc_trans_32x32(short *transMatrix2, short *coeffs, int num)
 # transMatrix2: address of the constant matrix (must be at 32 byte aligned address in Videocore memory) Even followed by odd
 # coeffs: address of the transform coefficients (must be at 32 byte aligned address in Videocore memory)
-# num: number of 16x16 transforms to be done
+# num: number of 16x16 transforms to be done in low 16, number of packed in high 16
 #
+# Note that the 32x32 transforms are stored in reverse order, this means that the unpacked ones appear first!
 hevc_trans_32x32:
   mov r1,r14 # coeffs
   mov r2,r15 # num
+  lsr r15,r15,16 # Number that are packed
+#:and r2,r2,0xffff # Total number
+  .half 0x6f02 #AUTOINSERTED
 
   # Fetch odd transform matrix
   #mov r3, 16*2 # Stride of transMatrix2 in bytes (and of coefficients)
@@ -335,22 +347,52 @@ hevc_trans_32x32:
 
   mov r3, 32*2*2 # Stride used to fetch alternate rows of our input coefficient buffer
   mov r7, 16*16*2 # Total block size
-  sub sp,sp,32*32*2+32 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned)
-  # set r8 to 32byte aligned stack pointer
-  add r8,sp,31
-  lsr r8,5
-  lsl r8,5
+  #sub sp,sp,32*32*2+64 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned) and another 32*32 for unpacking
+  # set r8 to 32byte aligned stack pointer with 32 bytes of space before it
+  #add r8,sp,63
+  #lsr r8,5
+  #lsl r8,5
+
+#:di
+  .half 0x0005 #AUTOINSERTED
+#try_again: 
+#  add r9,pc,vpu_bank-$
+#  ld r8,(r9)
+#  add r8,1
+#  st r8,(r9)
+#  ld r9,(r9)
+#  cmp r8,r9
+#  bne try_again
+
+#:version r8
+  .half 0x00e8 #AUTOINSERTED
+  lsr r8,r8,16
+#:btest r8,1
+  .half 0x6c18 #AUTOINSERTED
+  add r8,pc,intermediate_results-$
+  beq on_vpu1
+  add r8,r8,32*32*2*2+16*2 # Move to secondary storage
+on_vpu1:
   mov r9,r8  # Backup of the temporary storage
   mov r10,r1 # Backup of the coefficient buffer
 block_loop32:
+
+  # Transform the first 16 columns
+  mov r1,r10  # Input Coefficient buffer
+  mov r8,r9   # Output temporary storage
+
+  # Unpacked are first, so need to only do unpacking when r2(=num left) <= r15 (=num packed)
+  cmp r2,r15
+  bgt not_compressed_32
+  bl unpack32x32
+  add r1,r9,32*32*2   # Uncompressed into temporary storage
+  mov r8,r9           # Transform into here
+not_compressed_32:
 
   # COLUMN TRANSFORM
   mov r4, 64 # Constant used for rounding first pass
   mov r5, 9 # left shift used for rounding first pass
 
-  # Transform the first 16 columns
-  mov r1,r10  # Input Coefficient buffer
-  mov r8,r9   # Output temporary storage
   bl trans32
   # Transform the second 16 columns
   add r8,32*16*2
@@ -369,10 +411,16 @@ block_loop32:
   add r1,32
   bl trans32
 
+### :version r1
+#  st r1,(r10)
+
   add r10, 32*32*2 # move onto next block of coefficients
   addcmpbgt r2,-1,0,block_loop32
 
-  add sp,sp,32*32*2+32 # Restore stack
+  #add sp,sp,32*32*2+64# Restore stack
+
+#:ei
+  .half 0x0004 #AUTOINSERTED
 
   pop r6-r15, pc
 
