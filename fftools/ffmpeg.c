@@ -1325,7 +1325,9 @@ static void do_video_out(OutputFile *of,
     if (next_picture && ist != NULL)
     {
         if (rpi_display_env == NULL)
-            rpi_display_env = display_init(next_picture->format, 0, 0, next_picture->width, next_picture->height);
+            rpi_display_env = display_init(next_picture->format, 0, 0,
+                                           next_picture->width - next_picture->crop_right,
+                                           next_picture->height - next_picture->crop_bottom);
         display_frame(ist->dec_ctx, rpi_display_env, next_picture);
     }
 #endif
