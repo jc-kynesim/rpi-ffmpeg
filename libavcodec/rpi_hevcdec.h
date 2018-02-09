@@ -95,14 +95,34 @@
 //#define RPI_PASSES 2
 #define RPI_PASSES              3
 
+#define RPI_DEBLOCK_THREADS     2
+#define RPI_DEBLOCK_MAXROWS     64
+#define RPI_DEBLOCK_MAXCOLS     64
+
+#define RPI_VPU_THREADS     2
+
 // Print out various usage stats
 #define RPI_TSTATS              0
 
-// Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-// (currently slower than deblocking on the ARM)
-// #define RPI_DEBLOCK_VPU
+// Define RPI_GATE to 1 to use gating to try and improve scheduling of critical threads
+#define RPI_GATE                0
 
+// Define RPI_COMPRESS_COEFFS to 1 to send coefficients in compressed form
+#define RPI_COMPRESS_COEFFS 1
+
+// Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
+//#define RPI_DEBLOCK_VPU
+
+// Define RPI_USE_VPU_L2 to use the VPU's L2 cache for deblock/sao
+// NOTE This causes mismatches at the moment
+//#define RPI_USE_VPU_L2
+
+// Define RPI_VPU_DEBLOCK_CACHED to use ARM cache for setup instructions 
 #define RPI_VPU_DEBLOCK_CACHED 0
+
+// Define RPI_VPU_INTRA_PRED to use VPU for chroma intra pred
+// NOTE This causes mismatches at the moment
+//#define RPI_VPU_INTRA_PRED
 
 // Use ARM emulation of QPU pred
 // These are for debug only as the emulation makes only limited
@@ -547,17 +567,38 @@ typedef struct HEVCRpiInterPredEnv
 typedef struct HEVCRpiIntraPredEnv {
     unsigned int n;        // Number of commands
     HEVCPredCmd * cmds;
+#ifdef RPI_VPU_INTRA_PRED
+    unsigned int vpu_n; // Number of VPU commands
+    uint32_t *vpu_cmds; // Pointer to start of buffer the VPU cmds 
+    GPU_MEM_PTR_T gptr; // Memory descriptor for VPU commands
+#endif
 } HEVCRpiIntraPredEnv;
 
+#ifdef RPI_VPU_INTRA_PRED
+#define CODE_INTRA_PLANAR 0
+#define CODE_INTRA_DC 1
+#define CODE_INTRA_LEFT 10
+#define CODE_INTRA_DOWN 26
+#define CODE_INTRA_DIAGONAL 34
+#endif
+
 typedef struct HEVCRpiCoeffEnv {
-    unsigned int n;
+    unsigned int n;   // Number of 16-bit values to be transformed
+#if RPI_COMPRESS_COEFFS
+    unsigned int packed; // Equal to 1 if coefficients should be being packed
+    unsigned int packed_n; // Value of n when packed was set equal to 0 (i.e. the amount that is sent compressed).  Only valid if packed==0
+#endif
     int16_t * buf;
 } HEVCRpiCoeffEnv;
 
 typedef struct HEVCRpiCoeffsEnv {
     HEVCRpiCoeffEnv s[4];
     GPU_MEM_PTR_T gptr;
+#ifdef RPI_VPU_INTRA_PRED
+    // All coefficients allocated in VPU memory
+#else
     void * mptr;
+#endif
 } HEVCRpiCoeffsEnv;
 
 typedef struct HEVCRpiFrameProgressWait {
@@ -611,10 +652,14 @@ typedef struct HEVCRpiPassQueue
     volatile int terminate;
     sem_t sem_in;
     sem_t * psem_out;
+    int num_threads;
     unsigned int job_n;
+    unsigned int out_n;
     struct HEVCRpiContext * context; // Context pointer as we get to pass a single "void * this" to the thread
     HEVCRpiWorkerFn * worker;
-    pthread_t thread;
+    pthread_t thread[RPI_DEBLOCK_THREADS];
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
     uint8_t pass_n;  // Pass number - debug
     uint8_t started;
 } HEVCRpiPassQueue;
@@ -695,6 +740,7 @@ typedef struct HEVCRpiContext {
 
     char used_for_ref;  // rpi
     char offload_recon;
+    int decode_order; // Used to assign priority;
 
     HEVCRpiJobCtl * jbc;
 
@@ -708,6 +754,10 @@ typedef struct HEVCRpiContext {
     HEVCRpiQpu qpu;
 
     HEVCRpiFrameProgressState progress_states[2];
+    
+#ifdef RPI_VPU_INTRA_PRED
+    int rpi_vpu_intra_pred;
+#endif
 
 #ifdef RPI_DEBLOCK_VPU
 // With the new scheme of rpi_execute_dblk_cmds 
@@ -731,11 +781,14 @@ typedef struct HEVCRpiContext {
     {
         GPU_MEM_PTR_T deblock_vpu_gmem;
 
-        uint8_t (*y_setup_arm)[2][2][2][4];
-        uint8_t (*y_setup_vc)[2][2][2][4];
+        uint8_t (*uv_setup_arm)[2][2][4];  // [V=0][U/V][Edge=0..3] or [H=1][top/bottom][u/v][edge=0..1]
+        uint8_t (*uv_setup_vc)[2][2][4];
 
-        uint8_t (*uv_setup_arm)[2][2][2][4];
-        uint8_t (*uv_setup_vc)[2][2][2][4];
+        uint8_t *uv_sao_line_arm;
+        uint8_t *uv_sao_line_vc;
+
+        uint32_t (*uv_sao_setup_arm)[2]; // 2 entries for U/V values
+        uint32_t (*uv_sao_setup_vc)[2];
 
         int (*vpu_cmds_arm)[6]; // r0-r5 for each command
         int vpu_cmds_vc;
@@ -847,6 +900,16 @@ typedef struct HEVCRpiContext {
 #if RPI_TSTATS
     HEVCRpiStats tstats;
 #endif
+#if RPI_DEBLOCK_THREADS > 1
+    pthread_mutex_t deblock_lock;
+    pthread_mutex_t sao_lock;
+    pthread_mutex_t deblock_row_lock;
+    pthread_cond_t deblock_cond;
+    sem_t deblock_sem;
+    int deblock_y; // y location that we have deblocked up to
+    int deblock_ctus_wide[RPI_DEBLOCK_MAXROWS]; // deblock_ctus_wide[r] says how many ctus across have been completed for CTU row r
+    int deblock_ctus_high[RPI_DEBLOCK_MAXCOLS]; // deblock_ctus_high[c] says how many ctus down have been completed for CTU column c
+#endif
 } HEVCRpiContext;
 
 /**
@@ -945,6 +1008,10 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                                 const int x0, const int y0,
                                 const int log2_trafo_size, const enum ScanType scan_idx,
                                 const int c_idx);
+                                
+#ifdef RPI_VPU_INTRA_PRED
+int choose_intra_cached(int addr);
+#endif
 
 void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cabac_overflow(const HEVCRpiLocalContext * const lc);

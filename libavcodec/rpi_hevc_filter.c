@@ -40,6 +40,8 @@
 #include "rpi_zc.h"
 #include "libavutil/rpi_sand_fns.h"
 
+#include <pthread.h>
+
 #define LUMA 0
 #define CB 1
 #define CR 2
@@ -366,6 +368,170 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
             break;
         }
 
+#ifdef RPI_DEBLOCK_VPU
+        /*if (c_idx == 1) {
+            printf("x=%d y=%d idx=%d\n",x0,y0,sao->type_idx[c_idx]);
+        }*/
+        if (c_idx == 1 && s->enable_rpi_deblock) {
+            vert_edge[0] |= edges[0];
+            vert_edge[1] |= edges[2];
+            horiz_edge[0] |= edges[1];
+            horiz_edge[1] |= edges[3];
+            diag_edge[0] |= (edges[0] || edges[1]);
+            diag_edge[1] |= (edges[1] || edges[2]);
+            diag_edge[2] |= (edges[2] || edges[3]);
+            diag_edge[3] |= (edges[0] || edges[3]);
+        }
+        if (c_idx==1 && s->enable_rpi_deblock) {
+            // Need to prepare two 32bit words describing the deblocking for a 8x16 region
+            // x,y is luma position
+            // x0,y0 is chroma position
+            // width and height in chroma samples (at most one CTU)
+            //
+            // TODO avoid using this when in transquant bypass or in pcm
+            // May be able to set type to 0?  Not sure what pcm granularity is used?
+            //
+            // FFMPEG seems to set type to SAO_APPLIED to indicate which sections have been done
+            //  copy_CTB_to_hv used to copy horizontal and vertical context into a buffer (only if SAO is applied)
+            //  looks like this allows the code to fetch original values when the filter has been applied.
+            //
+
+            // vert_edge and horz_edge and diag_edge mark which bits of the surrounding image are available (when restore==1)
+            // edges mark which bits of the surrounding image are available (when restore==0)
+            //
+            // The setup needs to contain flags specifying which parts of the boundary to replace
+            // This depends on availability and direction of filtering.
+
+            int typ = sao->type_idx[c_idx];  // BAND=1, EDGE=2
+            uint32_t (*setup)[2] = s->dvq->uv_sao_setup_arm;
+            int16_t *vals = sao->offset_val[1];
+            uint32_t packedval = ((vals[1]&63)<<18) +((vals[2]&63)<<12) +((vals[3]&63)<<6) +(vals[4]&63);
+            int16_t *valsv = sao->offset_val[2];
+            uint32_t packedvalv = ((valsv[1]&63)<<18) +((valsv[2]&63)<<12) +((valsv[3]&63)<<6) +(valsv[4]&63);
+            uint32_t leftClass;
+            uint32_t eoClass;
+            int lasti = ((height+15)>>4) - 1; // i ranges from 0 to lasti inclusive
+            int lastj = ((width+7)>>3) - 1; // j ranges from 0 to lastj inclusive
+            setup += s->uv_setup_width * (y0 >> 4) + (x0 >> 3);
+            switch (typ) {
+                case SAO_BAND:
+                    // Pack the values into 4 bits each, also need left class
+                    sao->type_idx[c_idx] = SAO_APPLIED;
+                    leftClass = sao->band_position[1];
+                    packedval += (1<<30) + (leftClass<<24); // type 1
+                    leftClass = sao->band_position[2];
+                    packedvalv += (leftClass<<24);
+                    for(int i = 0; i <= lasti ; i++) {
+                        for(int j = 0; j <= lastj; j++) {
+                            setup[ i * s->uv_setup_width + j ][0] = packedval;
+                            setup[ i * s->uv_setup_width + j ][1] = packedvalv;
+                        }
+                    }
+                    break;
+                case SAO_EDGE:
+                    sao->type_idx[c_idx] = SAO_APPLIED;
+#define LEFTFLAG (16+8)
+#define TOPFLAG (17+8)
+#define RIGHTFLAG (18+8)
+#define BOTTOMFLAG (19+8)
+#define TOPLEFTFLAG (20+8)
+#define TOPRIGHTFLAG (21+8)
+#define BOTTOMLEFTFLAG (22+8)
+#define BOTTOMRIGHTFLAG (23+8)
+                    eoClass = sao->eo_class[c_idx];
+                    packedval += (2<<30) + (eoClass<<24); // type 2
+                    if (eoClass == 0) {
+                        // Use left and right pixels
+                        for(int j = 0; j <= lastj; j++) {
+                            uint32_t v = packedvalv;
+                            if (j==0 && vert_edge[0]) v |= (1<<TOPLEFTFLAG) | (1<<LEFTFLAG) | (1<<BOTTOMLEFTFLAG);
+                            if (j==lastj && vert_edge[1]) v |= (1<<TOPRIGHTFLAG) | (1<<RIGHTFLAG) | (1<<BOTTOMRIGHTFLAG);
+                            for(int i = 0; i <= lasti ; i++) {
+                              setup[ i * s->uv_setup_width + j ][0] = packedval;
+                              setup[ i * s->uv_setup_width + j ][1] = v;
+                            }
+                        }
+                    } else if (eoClass == 1) {
+                        // up and down pixels
+                        for(int i = 0; i <= lasti ; i++) {
+                            uint32_t v = packedvalv;
+                            if (i==0 && horiz_edge[0]) v |= (1<<TOPLEFTFLAG) | (1<<TOPFLAG) | (1<<TOPRIGHTFLAG);
+                            if (i==lasti && horiz_edge[1]) v |= (1<<BOTTOMLEFTFLAG) | (1<<BOTTOMFLAG) | (1<<BOTTOMRIGHTFLAG);
+                            for(int j = 0; j <= lastj; j++) {
+                                setup[ i * s->uv_setup_width + j ][0] = packedval;
+                                setup[ i * s->uv_setup_width + j ][1] = v;
+                            }
+                        }
+                    } else if (eoClass == 2) {
+                        // top-left and bottom-right
+                        for(int i = 0; i <= lasti ; i++) {
+                            uint32_t v = packedvalv;
+                            if (i==0 && horiz_edge[0]) v |= (1<<TOPFLAG) | (1<<TOPRIGHTFLAG);
+                            if (i==lasti && horiz_edge[1]) v |= (1<<BOTTOMFLAG) | (1<<BOTTOMLEFTFLAG);
+                            for(int j = 0; j <= lastj; j++) {
+                                uint32_t v2 = v;
+                                if (i==0) {
+                                    if (j==0) v2 |= diag_edge[0] << TOPLEFTFLAG;
+                                    else v2 |= horiz_edge[0] << TOPLEFTFLAG;
+                                } else {
+                                    if (j==0) v2 |= vert_edge[0] << TOPLEFTFLAG;
+                                }
+                                if (j==0 && vert_edge[0]) v2 |= (1<<LEFTFLAG) | (1<<BOTTOMLEFTFLAG);
+                                if (j==lastj && vert_edge[1]) v2 |= (1 << RIGHTFLAG) | (1<<TOPRIGHTFLAG);
+
+                                if (i==lasti) {
+                                    if (j==lastj) v2 |= diag_edge[2] << BOTTOMRIGHTFLAG;
+                                    else v2 |= horiz_edge[1] << BOTTOMRIGHTFLAG;
+                                } else {
+                                    if (j==lastj) v2 |= vert_edge[1] << BOTTOMRIGHTFLAG;
+                                }
+                                setup[ i * s->uv_setup_width + j ][0] = packedval;
+                                setup[ i * s->uv_setup_width + j ][1] = v2;
+                            }
+                        }
+                    } else {
+                        // top-right and bottom-left
+                        for(int i = 0; i <= lasti ; i++) {
+                            uint32_t v = packedvalv;
+                            if (i==0 && horiz_edge[0]) v |= (1<<TOPFLAG) | (1<<TOPLEFTFLAG);
+                            if (i==lasti && horiz_edge[1]) v |= (1<<BOTTOMFLAG) | (1<<BOTTOMRIGHTFLAG);
+                            for(int j = 0; j <= lastj; j++) {
+                                uint32_t v2 = v;
+                                if (i==0) {
+                                    if (j==lastj) v2 |= diag_edge[1] << TOPRIGHTFLAG;
+                                    else v2 |= horiz_edge[0] << TOPRIGHTFLAG;
+                                } else {
+                                    if (j==lastj) v2 |= vert_edge[1] << TOPRIGHTFLAG;
+                                }
+                                if (j==0 && vert_edge[0]) v2 |= (1<<LEFTFLAG) | (1<<TOPLEFTFLAG);
+                                if (j==lastj && vert_edge[1]) v2 |= (1 << RIGHTFLAG) | (1 << BOTTOMRIGHTFLAG);
+
+                                if (i==lasti) {
+                                    if (j==0) v2 |= diag_edge[3] << BOTTOMLEFTFLAG;
+                                    else v2 |= horiz_edge[1] << BOTTOMLEFTFLAG;
+                                } else {
+                                    if (j==0) v2 |= vert_edge[0] << BOTTOMLEFTFLAG;
+                                }
+                                setup[ i * s->uv_setup_width + j ][0] = packedval;
+                                setup[ i * s->uv_setup_width + j ][1] = v2;
+                            }
+                        }
+                    }
+                    break;
+                default:
+                    for(int i = 0; i <= lasti ; i++) {
+                        for(int j = 0; j <= lastj; j++) {
+                            setup[ i * s->uv_setup_width + j ][0] = 0;  // May be more efficient to clear after use?
+                            setup[ i * s->uv_setup_width + j ][1] = 0;  // May be more efficient to clear after use?
+                        }
+                    }
+                    break;
+            }
+            continue;
+        }
+#endif
+
+
         switch (sao->type_idx[c_idx]) {
         case SAO_BAND:
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
@@ -686,19 +852,6 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                                                          frame_stride1(s->frame, LUMA),
                                                          beta, tc, no_p, no_q);
                 } else
-#ifdef RPI_DEBLOCK_VPU
-                if (s->enable_rpi_deblock) {
-                    uint8_t (*setup)[2][2][4];
-                    int num16 = (y>>4)*s->setup_width + (x>>4);
-                    int a = ((x>>3) & 1) << 1;
-                    int b = (y>>3) & 1;
-                    setup = s->dvq->y_setup_arm[num16];
-                    setup[1][b][0][a] = beta;
-                    setup[1][b][0][a + 1] = beta;
-                    setup[1][b][1][a] = tc[0];
-                    setup[1][b][1][a + 1] = tc[1];
-                } else
-#endif
                     s->hevcdsp.hevc_h_loop_filter_luma(src,
                                                        frame_stride1(s->frame, LUMA),
                                                        beta, tc, no_p, no_q);
@@ -727,6 +880,29 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                     const uint32_t tc4 =
                         ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, cur_tc_offset) | (chroma_tc(s, qp0, 2, cur_tc_offset) << 16)) |
                         ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
+
+#ifdef RPI_DEBLOCK_VPU
+
+                        if (s->enable_rpi_deblock) {
+                            // Vertical filtering [v/h][uv][edge=0..3]
+                            uint8_t (*setup)[2][4];
+                            int xc = x>>s->ps.sps->hshift[1];
+                            int yc = y>>s->ps.sps->vshift[1];
+                            int num8 = (yc>>4)*s->uv_setup_width + (xc>>3);
+                            int a = ((yc>>3) & 1) << 1;
+                            setup = s->dvq->uv_setup_arm[num8];
+                            //printf("xc=%d yc=%d uv_s=%d num8=%d s=%p\n",xc,yc,s->uv_setup_width,num8,setup);
+                            if (bs0==2) {
+                              setup[0][0][a] = chroma_tc(s, qp0, 1, cur_tc_offset);
+                              setup[0][1][a] = chroma_tc(s, qp0, 2, cur_tc_offset);
+                            }
+                            if (bs1==2) {
+                              setup[0][0][a + 1] = chroma_tc(s, qp1, 1, cur_tc_offset);
+                              setup[0][1][a + 1] = chroma_tc(s, qp1, 2, cur_tc_offset);
+                            }
+                            continue;
+                        }
+#endif
 
                     if (tc4 == 0)
                         continue;
@@ -772,6 +948,26 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                         ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
                     unsigned int no_f = !demi_x ? 0 : 2 | 8;
 
+#ifdef RPI_DEBLOCK_VPU
+                        if (s->enable_rpi_deblock) {
+                            uint8_t (*setup)[2][4]; // [h/v][top/bot][u/v][edge=0..1]
+                            int xc = x>>s->ps.sps->hshift[1];
+                            int yc = y>>s->ps.sps->vshift[1];
+                            int num16 = (yc>>4)*s->uv_setup_width + (xc>>3);
+                            int b = (yc>>3) & 1;
+                            setup = s->dvq->uv_setup_arm[num16];
+                            if (bs0==2) {
+                              setup[1][b][0] = chroma_tc(s, qp0, 1, tc_offset);  // u0
+                              setup[1][b][2] = chroma_tc(s, qp0, 2, tc_offset);  // v0
+                            }
+                            if (bs1==2) {
+                              setup[1][b][1] = chroma_tc(s, qp1, 1, cur_tc_offset); // u1
+                              setup[1][b][3] = chroma_tc(s, qp1, 2, cur_tc_offset); // v1
+                            }
+                            continue;
+                        }
+#endif
+
                     if (tc4 == 0)
                         continue;
 
@@ -791,7 +987,6 @@ static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
                                                      tc4, no_f);
                 }
             }
-            // **** VPU deblock code gone from here....
         }
     }
 }
@@ -960,50 +1155,86 @@ static void ff_hevc_rpi_flush_buffer_lines(HEVCRpiContext *s, int start, int end
     rpi_cache_flush_finish(rfe);
 }
 
+// Set top bits so that image buffer goes via the L2 cache
+static int choose_cached(int addr) {
+#ifdef RPI_USE_VPU_L2
+  return (addr&0x3fffffff) | 
+              (0x40000000);
+#else
+  return addr;
+#endif
+}
+
 /* rpi_deblock deblocks an entire row of ctbs using the VPU */
-static void rpi_deblock(HEVCRpiContext *s, int y, int ctb_size)
+static void rpi_deblock(HEVCRpiContext *s, int y, int deblock_h, int sao_y, int sao_h)
 {
-  int num16high = (ctb_size+15)>>4;  // May go over bottom of the image, but setup will be zero for these so should have no effect.
+  int num16high = (deblock_h+15)>>4;  // May go over bottom of the image, but setup will be zero for these so should have no effect.
+  int num16highchroma = (num16high + 1) >> s->ps.sps->vshift[1];
+  int saonum16highchroma = ( (sao_h >> s->ps.sps->vshift[1]) + 15 ) >> 4;
+  int cmd=0;
   // TODO check that image allocation is large enough for this to be okay as well.
   
+  if (!av_rpi_is_sand_frame(s->frame)) {
+      printf("Wrong format, VPU deblock disabled\n");
+      return; // TODO: When might this happen?
+  }
+
   // Flush image, 4 lines above to bottom of ctb stripe
-  ff_hevc_rpi_flush_buffer_lines(s, FFMAX(y-4,0), y+ctb_size, 1, 1);
+  // TODO no need to flush luma (similarly, no need to flush chroma later on when rpi_deblock in use)
+#ifdef RPI_VPU_INTRA_PRED
+  ff_hevc_rpi_flush_buffer_lines(s, FFMAX(y-4,0), y+deblock_h, 1, !s->rpi_vpu_intra_pred); 
+#else
+  ff_hevc_rpi_flush_buffer_lines(s, FFMAX(y-4,0), y+deblock_h, 1, 1);
+#endif
   // TODO flush buffer of beta/tc setup when it becomes cached
 
-  // Prepare three commands at once to avoid calling overhead
-  s->dvq->vpu_cmds_arm[0][0] = get_vc_address_y(s->frame) + s->frame->linesize[0] * y;
-  s->dvq->vpu_cmds_arm[0][1] = s->frame->linesize[0];
-  s->dvq->vpu_cmds_arm[0][2] = s->setup_width;
-  s->dvq->vpu_cmds_arm[0][3] = (int) ( s->dvq->y_setup_vc + s->setup_width * (y>>4) );
-  s->dvq->vpu_cmds_arm[0][4] = num16high;
-  s->dvq->vpu_cmds_arm[0][5] = 2;
+  // Prepare multiple commands at once to avoid calling overhead
+  s->dvq->vpu_cmds_arm[cmd][0] = choose_cached( (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y >> s->ps.sps->vshift[1]) ) );
+  s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[3] * 128;
+  s->dvq->vpu_cmds_arm[cmd][2] = s->uv_setup_width;  // number of 8x16 blocks to process
+  //s->dvq->vpu_cmds_arm[cmd][2] = 1;  // number of 8x16 blocks to process
+  s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
+  s->dvq->vpu_cmds_arm[cmd][4] = num16highchroma;
+  s->dvq->vpu_cmds_arm[cmd][5] = 7;
+  cmd++;
 
-  s->dvq->vpu_cmds_arm[1][0] = get_vc_address_u(s->frame) + s->frame->linesize[1] * (y>> s->ps.sps->vshift[1]);
-  s->dvq->vpu_cmds_arm[1][1] = s->frame->linesize[1];
-  s->dvq->vpu_cmds_arm[1][2] = s->uv_setup_width;
-  s->dvq->vpu_cmds_arm[1][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
-  s->dvq->vpu_cmds_arm[1][4] = (num16high + 1) >> s->ps.sps->vshift[1];
-  s->dvq->vpu_cmds_arm[1][5] = 3;
+  // TODO worried about bottom line of this, presumably bottom pixels won't be available yet?
 
-  s->dvq->vpu_cmds_arm[2][0] = get_vc_address_v(s->frame) + s->frame->linesize[2] * (y>> s->ps.sps->vshift[2]);
-  s->dvq->vpu_cmds_arm[2][1] = s->frame->linesize[2];
-  s->dvq->vpu_cmds_arm[2][2] = s->uv_setup_width;
-  s->dvq->vpu_cmds_arm[2][3] = (int) ( s->dvq->uv_setup_vc + s->uv_setup_width * ((y>>4)>> s->ps.sps->vshift[1]) );
-  s->dvq->vpu_cmds_arm[2][4] = (num16high + 1) >> s->ps.sps->vshift[1];
-  s->dvq->vpu_cmds_arm[2][5] = 4;
-  
+  // Also prepare a SAO command for each 16x16 row of chroma
+
+  if (s->ps.sps->sao_enabled && sao_h > 0) {
+      for(int i=0;i<saonum16highchroma;i++) {
+          int y0 = (sao_y >> s->ps.sps->vshift[1]) + 16 * i;
+          int h2 = FFMIN(16, (sao_h >> s->ps.sps->vshift[1]) - 16 * i);
+          //int h2 = (sao_h >> s->ps.sps->vshift[1]) - 16 * i;
+          int w2 = s->ps.sps->width >> s->ps.sps->hshift[1];
+          s->dvq->vpu_cmds_arm[cmd][0] = choose_cached( (int) (get_vc_address_u(s->frame) + av_rpi_sand_frame_off_c(s->frame, 0, y0 ) ) );
+          s->dvq->vpu_cmds_arm[cmd][1] = s->frame->linesize[3] * 128;  // stride
+          s->dvq->vpu_cmds_arm[cmd][2] = (int) s->dvq->uv_sao_line_vc;    // line buffer
+          s->dvq->vpu_cmds_arm[cmd][3] = (int) ( s->dvq->uv_sao_setup_vc + s->uv_setup_width * (y0>>4) ); // sao_data
+          s->dvq->vpu_cmds_arm[cmd][4] = (h2<<16) + w2; // h_w
+          s->dvq->vpu_cmds_arm[cmd][5] = 6; // SAO command
+          cmd++;
+          /*printf("SAO %d %dx%d\n",y0,w2,h2);
+          for(int k=0;k<8;k++){
+            printf("%d->%x,%x ",k,s->dvq->uv_sao_setup_arm[s->uv_setup_width * (y0>>4) + k][0], s->dvq->uv_sao_setup_arm[s->uv_setup_width * (y0>>4) + k][1]);
+          }
+          printf("\n");*/
+      }
+  }
+
   // Call VPU
   {
       vpu_qpu_job_env_t qvbuf;
       const vpu_qpu_job_h vqj = vpu_qpu_job_init(&qvbuf);
-      vpu_qpu_job_add_vpu(vqj, vpu_get_fn(s->ps.sps->bit_depth), s->dvq->vpu_cmds_vc, 3, 0, 0, 0, 5);  // 5 means to do all the commands
+      vpu_qpu_job_add_vpu(vqj, vpu_get_fn(s->ps.sps->bit_depth), s->dvq->vpu_cmds_vc, cmd, 0, 0, 0, 5);  // 5 means to do all the commands
       vpu_qpu_job_add_sync_this(vqj, &s->dvq->cmd_id);
       vpu_qpu_job_finish(vqj);
   }
 
   s->dvq_n = (s->dvq_n + 1) & (RPI_DEBLOCK_VPU_Q_COUNT - 1);
   s->dvq = s->dvq_ents + s->dvq_n;
-
+  
   vpu_qpu_wait(&s->dvq->cmd_id);
 }
 
@@ -1013,24 +1244,29 @@ void ff_hevc_rpi_hls_filter(HEVCRpiContext * const s, const int x, const int y, 
 {
     const int x_end = x >= s->ps.sps->width  - ctb_size;
 
-    if (s->avctx->skip_loop_filter < AVDISCARD_ALL)
-        deblocking_filter_CTB(s, x, y);
-
 #ifdef RPI_DEBLOCK_VPU
-    if (s->enable_rpi_deblock && x_end)
-    {
-      int y_at_end = y >= s->ps.sps->height - ctb_size;
-      int height = 64;  // Deblock in units 64 high to avoid too many VPU calls
-      int y_start = y&~63;
-      if (y_at_end) height = s->ps.sps->height - y_start;
-      if ((((y+ctb_size)&63)==0) || y_at_end) {
-        rpi_deblock(s, y_start, height);
-      }
+    if (s->enable_rpi_deblock && s->ps.pps->transquant_bypass_enable_flag) {
+        // SAO does not support transquant bypass
+        // TODO move this higher
+        s->enable_rpi_deblock = 0;
+        printf("Disabling RPI deblock due to transquant bypass\n");
+    }
+    if (s->enable_rpi_deblock && !av_rpi_is_sand_frame(s->frame)) {
+        s->enable_rpi_deblock = 0;
+        printf("Disabling RPI deblock due to wrong image format (probably too large an image)\n");
     }
 #endif
 
+    if (s->avctx->skip_loop_filter < AVDISCARD_ALL)
+        deblocking_filter_CTB(s, x, y);
+
     if (s->ps.sps->sao_enabled) {
         int y_end = y >= s->ps.sps->height - ctb_size;
+#if RPI_DEBLOCK_THREADS > 1
+        if (s->offload_recon) {
+            pthread_mutex_lock(&s->sao_lock);
+        }
+#endif
         if (y != 0 && x != 0)
             sao_filter_CTB(s, x - ctb_size, y - ctb_size);
         if (x != 0 && y_end)
@@ -1039,7 +1275,30 @@ void ff_hevc_rpi_hls_filter(HEVCRpiContext * const s, const int x, const int y, 
             sao_filter_CTB(s, x, y - ctb_size);
         if (x_end && y_end)
             sao_filter_CTB(s, x , y);
+#if RPI_DEBLOCK_THREADS > 1
+        if (s->offload_recon) {
+            pthread_mutex_unlock(&s->sao_lock);
+        }
+#endif
     }
+
+#ifdef RPI_DEBLOCK_VPU
+    if (s->enable_rpi_deblock && x_end)
+    {
+      int y_at_end = y >= s->ps.sps->height - ctb_size;
+      int height = 64;  // Deblock in units 64 high to avoid too many VPU calls
+      int y_start = y&~63;
+      int sao_y_start = FFMAX(0, y_start - ctb_size);
+      int sao_y_end = y_start + 64 - ctb_size;
+      if (y_at_end) {
+        height = s->ps.sps->height - y_start;
+        sao_y_end = s->ps.sps->height;
+      }
+      if ((((y+ctb_size)&63)==0) || y_at_end) {
+        rpi_deblock(s, y_start, height, sao_y_start, sao_y_end-sao_y_start );
+      }
+    }
+#endif
 }
 
 void ff_hevc_rpi_hls_filters(HEVCRpiContext *s, int x_ctb, int y_ctb, int ctb_size)
