@@ -3616,13 +3616,15 @@ and waited when not at the left edge.  This can be optimized out of the inner x 
 #else
         const int flush_chroma = 1;
 #endif
-        if (flush_chroma) {
-          rpi_cache_buf_t cbuf;
-          rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
-          rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-            xl, yt, bound_r - xl, yb - yt,
-            ctx_vshift(s, 1), 1, flush_chroma);
-          rpi_cache_flush_finish(rfe);
+
+        if (flush_chroma && yb > yt && bound_r > xl)
+        {
+            rpi_cache_buf_t cbuf;
+            rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
+            rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+              xl, yt, bound_r - xl, yb - yt,
+              ctx_vshift(s, 1), 1, 1);
+            rpi_cache_flush_finish(rfe);
         }
     }
 
