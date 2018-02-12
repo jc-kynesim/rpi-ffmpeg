@@ -3442,13 +3442,16 @@ static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const j
         const unsigned int yt = y0 > ctb_size ? y0 - ctb_size : 0;
         const unsigned int yb = (s->ps.pps->ctb_ts_flags[jb->ctu_ts_last] & CTB_TS_FLAGS_EOT) != 0 ?
             bound_b : y - ctb_size;
-        rpi_cache_buf_t cbuf;
 
-        rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
-        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-          xl, yt, bound_r - xl, yb - yt,
-          ctx_vshift(s, 1), 1, 1);
-        rpi_cache_flush_finish(rfe);
+        if (yb > yt && bound_r > xl)
+        {
+            rpi_cache_buf_t cbuf;
+            rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
+            rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+              xl, yt, bound_r - xl, yb - yt,
+              ctx_vshift(s, 1), 1, 1);
+            rpi_cache_flush_finish(rfe);
+        }
     }
 
     // Signal
