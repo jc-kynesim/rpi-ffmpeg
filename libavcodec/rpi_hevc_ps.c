@@ -71,14 +71,14 @@ static const AVRational vui_sar[] = {
     {  2,   1 },
 };
 
-static void remove_pps(HEVCRpiParamSets *s, int id)
+static void remove_pps(HEVCRpiParamSets * const s, const int id)
 {
     if (s->pps_list[id] && s->pps == (const HEVCRpiPPS*)s->pps_list[id]->data)
         s->pps = NULL;
     av_buffer_unref(&s->pps_list[id]);
 }
 
-static void remove_sps(HEVCRpiParamSets *s, int id)
+static void remove_sps(HEVCRpiParamSets * const s, const int id)
 {
     int i;
     if (s->sps_list[id]) {
@@ -95,7 +95,7 @@ static void remove_sps(HEVCRpiParamSets *s, int id)
     av_buffer_unref(&s->sps_list[id]);
 }
 
-static void remove_vps(HEVCRpiParamSets *s, int id)
+static void remove_vps(HEVCRpiParamSets * const s, const int id)
 {
     int i;
     if (s->vps_list[id]) {
@@ -109,8 +109,8 @@ static void remove_vps(HEVCRpiParamSets *s, int id)
     av_buffer_unref(&s->vps_list[id]);
 }
 
-int ff_hevc_rpi_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,
-                                  ShortTermRPS *rps, const HEVCRpiSPS *sps, int is_slice_header)
+int ff_hevc_rpi_decode_short_term_rps(GetBitContext * const gb, AVCodecContext * const avctx,
+                                  ShortTermRPS * const rps, const HEVCRpiSPS * const sps, const int is_slice_header)
 {
     uint8_t rps_predict = 0;
     int delta_poc;
@@ -255,8 +255,8 @@ int ff_hevc_rpi_decode_short_term_rps(GetBitContext *gb, AVCodecContext *avctx,
 }
 
 
-static int decode_profile_tier_level(GetBitContext *gb, AVCodecContext *avctx,
-                                      PTLCommon *ptl)
+static int decode_profile_tier_level(GetBitContext * const gb, AVCodecContext * const avctx,
+                                      PTLCommon * const ptl)
 {
     int i;
 
@@ -295,8 +295,8 @@ static int decode_profile_tier_level(GetBitContext *gb, AVCodecContext *avctx,
     return 0;
 }
 
-static int parse_ptl(GetBitContext *gb, AVCodecContext *avctx,
-                      PTL *ptl, int max_num_sub_layers)
+static int parse_ptl(GetBitContext * const gb, AVCodecContext * const avctx,
+                      PTL * const ptl, const int max_num_sub_layers)
 {
     int i;
     if (decode_profile_tier_level(gb, avctx, &ptl->general_ptl) < 0 ||
@@ -335,8 +335,8 @@ static int parse_ptl(GetBitContext *gb, AVCodecContext *avctx,
     return 0;
 }
 
-static void decode_sublayer_hrd(GetBitContext *gb, unsigned int nb_cpb,
-                                int subpic_params_present)
+static void decode_sublayer_hrd(GetBitContext * const gb, const unsigned int nb_cpb,
+                                const int subpic_params_present)
 {
     int i;
 
@@ -352,8 +352,8 @@ static void decode_sublayer_hrd(GetBitContext *gb, unsigned int nb_cpb,
     }
 }
 
-static int decode_hrd(GetBitContext *gb, int common_inf_present,
-                       int max_sublayers)
+static int decode_hrd(GetBitContext * const gb, const int common_inf_present,
+                      const int max_sublayers)
 {
     int nal_params_present = 0, vcl_params_present = 0;
     int subpic_params_present = 0;
@@ -414,8 +414,8 @@ static int decode_hrd(GetBitContext *gb, int common_inf_present,
     return 0;
 }
 
-int ff_hevc_rpi_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,
-                           HEVCRpiParamSets *ps)
+int ff_hevc_rpi_decode_nal_vps(GetBitContext * const gb, AVCodecContext * const avctx,
+                           HEVCRpiParamSets * const ps)
 {
     int i,j;
     int vps_id = 0;
@@ -548,10 +548,10 @@ err:
     return AVERROR_INVALIDDATA;
 }
 
-static void decode_vui(GetBitContext *gb, AVCodecContext *avctx,
-                       int apply_defdispwin, HEVCRpiSPS *sps)
+static void decode_vui(GetBitContext * const gb, AVCodecContext * const avctx,
+                       const int apply_defdispwin, HEVCRpiSPS * const sps)
 {
-    VUI backup_vui, *vui = &sps->vui;
+    VUI backup_vui, * const vui = &sps->vui;
     GetBitContext backup;
     int sar_present, alt = 0;
 
@@ -713,7 +713,7 @@ timing_info:
     }
 }
 
-static void set_default_scaling_list_data(ScalingList *sl)
+static void set_default_scaling_list_data(ScalingList * const sl)
 {
     int matrixId;
 
@@ -743,7 +743,8 @@ static void set_default_scaling_list_data(ScalingList *sl)
     memcpy(sl->sl[3][5], default_scaling_list_inter, 64);
 }
 
-static int scaling_list_data(GetBitContext *gb, AVCodecContext *avctx, ScalingList *sl, HEVCRpiSPS *sps)
+static int scaling_list_data(GetBitContext * const gb, AVCodecContext * const avctx, ScalingList * const sl,
+                             const HEVCRpiSPS * const sps)
 {
     uint8_t scaling_list_pred_mode_flag;
     int32_t scaling_list_dc_coef[2][6];
@@ -842,8 +843,8 @@ static int map_pixel_format(HEVCRpiSPS * const sps)
     return 0;
 }
 
-int ff_hevc_rpi_parse_sps(HEVCRpiSPS *sps, GetBitContext *gb, unsigned int *sps_id,
-                      int apply_defdispwin, AVBufferRef **vps_list, AVCodecContext *avctx)
+static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const gb, unsigned int * const sps_id,
+                      const int apply_defdispwin, AVBufferRef * const * const vps_list, AVCodecContext * const avctx)
 {
     HEVCWindow *ow;
     int ret = 0;
@@ -1271,8 +1272,8 @@ static void hevc_pps_free(void *opaque, uint8_t *data)
     av_freep(&pps);
 }
 
-static int pps_range_extensions(GetBitContext *gb, AVCodecContext *avctx,
-                                HEVCRpiPPS *pps, HEVCRpiSPS *sps) {
+static int pps_range_extensions(GetBitContext * const gb, AVCodecContext * const avctx,
+                                HEVCRpiPPS * const pps, const HEVCRpiSPS * const sps) {
     int i;
 
     if (pps->transform_skip_enabled_flag) {
@@ -1301,14 +1302,27 @@ static int pps_range_extensions(GetBitContext *gb, AVCodecContext *avctx,
             }
         }
     }
-    pps->log2_sao_offset_scale_luma = get_ue_golomb_long(gb);
-    pps->log2_sao_offset_scale_chroma = get_ue_golomb_long(gb);
+
+    {
+        const unsigned int max_offset = sps->bit_depth > 10 ? sps->bit_depth - 10 : 0;
+
+        pps->log2_sao_offset_scale_luma = get_ue_golomb_long(gb);
+        if (pps->log2_sao_offset_scale_luma > max_offset) {
+            av_log(avctx, AV_LOG_ERROR, "log2_sao_offset_scale_luma invalid");
+            return AVERROR_INVALIDDATA;
+        }
+        pps->log2_sao_offset_scale_chroma = get_ue_golomb_long(gb);
+        if (pps->log2_sao_offset_scale_chroma > max_offset) {
+            av_log(avctx, AV_LOG_ERROR, "log2_sao_offset_scale_chroma invalid");
+            return AVERROR_INVALIDDATA;
+        }
+    }
 
     return(0);
 }
 
-static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
-                            HEVCRpiPPS *pps, HEVCRpiSPS *sps)
+static inline int setup_pps(AVCodecContext * const avctx,
+                            HEVCRpiPPS * const pps, const HEVCRpiSPS * const sps)
 {
     int log2_diff;
     int pic_area_in_ctbs;
@@ -1486,10 +1500,10 @@ static inline int setup_pps(AVCodecContext *avctx, GetBitContext *gb,
     return 0;
 }
 
-int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
-                           HEVCRpiParamSets *ps)
+int ff_hevc_rpi_decode_nal_pps(GetBitContext * const gb, AVCodecContext * const avctx,
+                           HEVCRpiParamSets * const ps)
 {
-    HEVCRpiSPS      *sps = NULL;
+    const HEVCRpiSPS *sps = NULL;
     int i, ret = 0;
     unsigned int pps_id = 0;
     ptrdiff_t nal_size;
@@ -1560,7 +1574,17 @@ int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
     pps->cabac_init_present_flag = get_bits1(gb);
 
     pps->num_ref_idx_l0_default_active = get_ue_golomb_long(gb) + 1;
+    if (pps->num_ref_idx_l0_default_active < 1 || pps->num_ref_idx_l0_default_active > 15) {
+        av_log(avctx, AV_LOG_ERROR, "pps->num_ref_idx_l0_default_active invalid\n");
+        ret = AVERROR_INVALIDDATA;
+        goto err;
+    }
     pps->num_ref_idx_l1_default_active = get_ue_golomb_long(gb) + 1;
+    if (pps->num_ref_idx_l1_default_active < 1 || pps->num_ref_idx_l1_default_active > 15) {
+        av_log(avctx, AV_LOG_ERROR, "pps->num_ref_idx_l1_default_active invalid\n");
+        ret = AVERROR_INVALIDDATA;
+        goto err;
+    }
 
     pps->pic_init_qp_minus26 = get_se_golomb(gb);
     if (pps->pic_init_qp_minus26 > 25 || pps->pic_init_qp_minus26 < -(26 + sps->qp_bd_offset)) {
@@ -1720,7 +1744,7 @@ int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
         }
     }
 
-    ret = setup_pps(avctx, gb, pps, sps);
+    ret = setup_pps(avctx, pps, sps);
     if (ret < 0)
         goto err;
 
