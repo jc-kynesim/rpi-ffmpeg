@@ -1840,23 +1840,23 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
         if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded) {
             lc->tu.cu_qp_delta = ff_hevc_rpi_cu_qp_delta_abs(lc);
             if (lc->tu.cu_qp_delta != 0)
+            {
                 if (ff_hevc_rpi_cu_qp_delta_sign_flag(lc) == 1)
                     lc->tu.cu_qp_delta = -lc->tu.cu_qp_delta;
-            lc->tu.is_cu_qp_delta_coded = 1;
 
-// Was:
-//            if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset / 2) ||
-//                if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset / 2) ||
-// 2016 standard says:
-            if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset) ||
-                lc->tu.cu_qp_delta > 25) {
-                av_log(s->avctx, AV_LOG_ERROR,
-                       "The cu_qp_delta %d is outside the valid range "
-                       "[%d, %d].\n",
-                       lc->tu.cu_qp_delta,
-                       -(26 + s->ps.sps->qp_bd_offset), 25);
-                return AVERROR_INVALIDDATA;
+                if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset/2) ||
+                    lc->tu.cu_qp_delta >  (25 + s->ps.sps->qp_bd_offset/2))
+                {
+                    av_log(s->avctx, AV_LOG_ERROR,
+                           "The cu_qp_delta %d is outside the valid range "
+                           "[%d, %d].\n",
+                           lc->tu.cu_qp_delta,
+                           -(26 + s->ps.sps->qp_bd_offset/2),
+                            (25 + s->ps.sps->qp_bd_offset/2));
+                    return AVERROR_INVALIDDATA;
+                }
             }
+            lc->tu.is_cu_qp_delta_coded = 1;
 
             ff_hevc_rpi_set_qPy(s, lc, cb_xBase, cb_yBase, log2_cb_size);
         }

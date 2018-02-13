@@ -1563,6 +1563,15 @@ int ff_hevc_rpi_decode_nal_pps(GetBitContext *gb, AVCodecContext *avctx,
     pps->num_ref_idx_l1_default_active = get_ue_golomb_long(gb) + 1;
 
     pps->pic_init_qp_minus26 = get_se_golomb(gb);
+    if (pps->pic_init_qp_minus26 > 25 || pps->pic_init_qp_minus26 < -(26 + sps->qp_bd_offset)) {
+        av_log(avctx, AV_LOG_ERROR,
+               "init_qp_minus26 %d is outside the valid range "
+               "[%d, %d].\n",
+               pps->pic_init_qp_minus26,
+               -(26 + sps->qp_bd_offset), 25);
+        ret = AVERROR_INVALIDDATA;
+        goto err;
+    }
 
     pps->constrained_intra_pred_flag = get_bits1(gb);
     pps->transform_skip_enabled_flag = get_bits1(gb);
