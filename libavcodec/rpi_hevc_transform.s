@@ -6,8 +6,10 @@
 # Author : Peter de Rivaz
 # ******************************************************************************
 
+# Lines that fail to assemble start with #:
+# The script insert_magic_opcodes.sh inserts the machine code directly for these.
 # HEVC VPU Transform
-#             fe
+#
 # Transform matrix can be thought of as
 #   output row vector = input row vector * transMatrix2
 #
@@ -89,15 +91,17 @@
 hevc_trans_16x16:
   cmp r5,1
   beq memclear16
-  cmp r5,2
-  beq hevc_deblock_16x16
-  cmp r5,3
-  beq hevc_uv_deblock_16x16
-  cmp r5,4
-  beq hevc_uv_deblock_16x16_with_clear
+  #cmp r5,2
+  #beq hevc_deblock_16x16
+  #cmp r5,3
+  #beq hevc_uv_deblock_16x16
+  #cmp r5,4
+  #beq hevc_uv_deblock_16x16_with_clear
   cmp r5,5
   beq hevc_run_command_list
 
+
+do_transform:
   push r6-r15, lr # TODO cut down number of used registers
   mov r14,r3 # coeffs32
   mov r15,r4 # num32
@@ -113,18 +117,53 @@ hevc_trans_16x16:
   mov r3,16*2 # Stride of coefficients in bytes (TODO remove)
   mov r7,16*16*2 # Total block size
   mov r8,64*16 # Value used to swap from current to next VRF location
-  vldh HX(0++,0)+r0,(r1 += r3) REP 16
   mov r4,64 # Constant used for rounding first pass
   mov r5,TRANS_RND2 # Constant used for rounding second pass
 
+  sub sp,sp,64+16*16*2 # Move on stack pointer in case interrupt occurs and uses stack
+
+  add r11,sp,64 # Space for 32 bytes before, and rounding
+  lsr r11,5
+  lsl r11,5 # Make sure r11 is rounded to multiple of 2**5==32
+
+  lsr r10, r2, 16 # Number of compressed blocks stored in top short
+#:and r2,r2,0xffff
+  .half 0x6f02 #AUTOINSERTED
   # At start of block r0,r1 point to the current block (that has already been loaded)
+  # r0 VRF location of current block
+  # r1 address of current block
+  # r2 number of 16*16 transforms to do
+  # r3 Stride of coefficients (==32)
+  # r4 TRANS_RND1 (64)
+  # r5 TRANS_RND2
+  # r6 temporary used inside col_trans16
+  # r7 16*16*2 total bytes in block
+  # r8 64*16 VRF switch locations
+  # r9 temporary in unpack_coeff for index
+  # r10 number of 16x16 transforms using compression
+  # r11 unpacked data buffer (16*16 shorts) (preceded by 16 shorts of packed data buffer)
+  # r12 temporary counter in unpack_coeff
+  # r13
+  # r14 Save information for 32 bit transform (coeffs location)
+  # r15 Save information for 32 bit transform (number of transforms)
 block_loop:
-  eor r0,r8
-  add r1,r7
+  # With compressed coefficients, we don't use prefetch as we don't want to issue unnecessary memory requests
+  cmp r10,0
+  mov r6, r1
+  beq not_compressed
+  sub r10, 1
+  bl unpack16x16
+not_compressed:
+  #mov r6,r1 # DEBUG without compress
+  vldh HX(0++,0)+r0,(r6 += r3) REP 16
+  #eor r0,r8
+  #add r1,r7
   # Prefetch the next block
-  vldh HX(0++,0)+r0,(r1 += r3) REP 16
-  eor r0,r8
-  sub r1,r7
+  #bl unpack16x16
+  #vldh HX(0++,0)+r0,(r6 += r3) REP 16
+  #vmov HX(0++,0)+r0,0 REP 16  # DEBUG
+  #eor r0,r8
+  #sub r1,r7
 
   # Transform the current block
   bl col_trans_16
@@ -147,10 +186,48 @@ block_loop:
 
   addcmpbgt r2,-1,0,block_loop
 
+  add sp,sp,64+16*16*2 # Move on stack pointer in case interrupt occurs and uses stack
   # Now go and do any 32x32 transforms
   b hevc_trans_32x32
 
   pop r6-r15, pc
+# This returns a value in r6 that says where to load the data from.
+# We load data 16 shorts at a time from memory (uncached), and store to stack space to allow us to process it.
+unpack16x16:
+# Clear out destination
+  vmov HX(0,0)+r0,0
+  mov r6, r11
+  vsth HX(0,0)+r0,(r6 += r3) REP 16
+  mov r5, r1 # Moving pointer to input coefficients
+unpack_outer_loop:
+  # Loop until we find the end
+  vldh HX(0,0)+r0,(r5)  # TODO would prefetch help here while unpacking previous?
+  sub r6,r11,32
+  #add r6,pc,packed_data-$ # Packed data
+  vsth HX(0,0)+r0,(r6)  # Store into packed data
+  mov r12,0
+unpack_loop:
+  ld r4,(r6)
+  add r6,r6,4
+  lsr r9,r4,16 # r9 is destination value
+  cmp r4,0 # {value,index}
+#:and r4,r4,0xff
+  .half 0x6e84 #AUTOINSERTED
+  beq done_unpack
+  sth r9,(r11, r4)
+  addcmpblt r12,1,8,unpack_loop
+#  # Read next 16
+  add r5,32
+  b unpack_outer_loop
+done_unpack:
+#  # Set new load location
+  mov r6, r11
+  #add r6,pc,unpacked_data-$
+#  # Restore constants
+  mov r4,64
+  mov r5,TRANS_RND2
+#  pop r6-r15, pc
+  b lr
 
 # r1,r2,r3 r7,r8 should be preserved
 # HX(0++,0)+r0 is the block to be transformed
@@ -179,14 +256,52 @@ col_trans_odd_16_loop:
   sub r0,16  # put r0 back to its original value
   b lr
 
+# r1/r10 input pointer
+# r0,r4,r5,r6 free
+# r8/r9 output storage
+#
+# Store packed coefficients at r9-32
+# Store unpacked at r9+32*32 (because transform works on even/odd rows on input, but writes all rows)
+unpack32x32:
+# Clear out destination
+  vmov HX(0,0),0
+  add r0, r9, 32*32*2 # Unpacked buffer
+  mov r4, 32
+  vsth HX(0,0),(r0 += r4) REP 64
+unpack_outer_loop32:
+  # Loop until we find the end
+  vldh HX(0,0),(r1)  # TODO would prefetch help here while unpacking previous?
+  sub r6,r9,32
+  #add r6,pc,packed_data-$ # Packed data
+  vsth HX(0,0),(r6)  # Store into packed data
+  mov r8,0
+unpack_loop32:
+  ld r4,(r6)
+  add r6,r6,4
+  lsr r5,r4,16 # r5 is destination value
+  cmp r4,0 # {value,index}
+#:and r4,r4,0x3ff
+  .half 0x6ea4 #AUTOINSERTED
+  beq done_unpack
+  sth r5,(r0, r4)
+  addcmpblt r8,1,8,unpack_loop32
+#  # Read next 16
+  add r1,32
+  b unpack_outer_loop32
+done_unpack32:
+  b lr
 # hevc_trans_32x32(short *transMatrix2, short *coeffs, int num)
 # transMatrix2: address of the constant matrix (must be at 32 byte aligned address in Videocore memory) Even followed by odd
 # coeffs: address of the transform coefficients (must be at 32 byte aligned address in Videocore memory)
-# num: number of 16x16 transforms to be done
+# num: number of 16x16 transforms to be done in low 16, number of packed in high 16
 #
+# Note that the 32x32 transforms are stored in reverse order, this means that the unpacked ones appear first!
 hevc_trans_32x32:
   mov r1,r14 # coeffs
   mov r2,r15 # num
+  lsr r15,r15,16 # Number that are packed
+#:and r2,r2,0xffff # Total number
+  .half 0x6f02 #AUTOINSERTED
 
   # Fetch odd transform matrix
   #mov r3, 16*2 # Stride of transMatrix2 in bytes (and of coefficients)
@@ -196,22 +311,30 @@ hevc_trans_32x32:
 
   mov r3, 32*2*2 # Stride used to fetch alternate rows of our input coefficient buffer
   mov r7, 16*16*2 # Total block size
-  sub sp,sp,32*32*2+32 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned)
-  # set r8 to 32byte aligned stack pointer
-  add r8,sp,31
+  # Stack base allocation
+  sub sp,sp,32*32*4+64 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned) and another 32*32 for unpacking
+  # set r8 to 32byte aligned stack pointer with 32 bytes of space before it
+  add r8,sp,63
   lsr r8,5
   lsl r8,5
   mov r9,r8  # Backup of the temporary storage
   mov r10,r1 # Backup of the coefficient buffer
 block_loop32:
 
+  # Transform the first 16 columns
+  mov r1,r10  # Input Coefficient buffer
+  mov r8,r9   # Output temporary storage
+  # Unpacked are first, so need to only do unpacking when r2(=num left) <= r15 (=num packed)
+  cmp r2,r15
+  bgt not_compressed_32
+  bl unpack32x32
+  add r1,r9,32*32*2   # Uncompressed into temporary storage
+  mov r8,r9           # Transform into here
+not_compressed_32:
   # COLUMN TRANSFORM
   mov r4, 64 # Constant used for rounding first pass
   mov r5, 9 # left shift used for rounding first pass
 
-  # Transform the first 16 columns
-  mov r1,r10  # Input Coefficient buffer
-  mov r8,r9   # Output temporary storage
   bl trans32
   # Transform the second 16 columns
   add r8,32*16*2
@@ -233,7 +356,7 @@ block_loop32:
   add r10, 32*32*2 # move onto next block of coefficients
   addcmpbgt r2,-1,0,block_loop32
 
-  add sp,sp,32*32*2+32 # Restore stack
+  add sp,sp,32*32*4+64# Restore stack
 
   pop r6-r15, pc
 

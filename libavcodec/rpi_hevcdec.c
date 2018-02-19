@@ -685,6 +685,10 @@ static void worker_pic_reset(HEVCRpiCoeffsEnv * const cf)
     unsigned int i;
     for (i = 0; i != 4; ++i) {
         cf->s[i].n = 0;
+#if RPI_COMPRESS_COEFFS        
+        cf->s[i].packed = 1;
+        cf->s[i].packed_n = 0;
+#endif
     }
 }
 
@@ -3786,13 +3790,29 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
         {
             const unsigned int csize = sizeof(cf->s[3].buf[0]);
             const unsigned int offset32 = ((cf->s[3].buf - cf->s[2].buf) - cf->s[3].n) * csize;
+            unsigned int n16 = (cf->s[2].n >> 8);
+            unsigned int n32 = (cf->s[3].n >> 10);
+#if RPI_COMPRESS_COEFFS
+            if (cf->s[2].packed) {
+                n16 = n16 | (n16<<16);
+            } else {
+                const unsigned int npack16 = (cf->s[2].packed_n>>8);
+                n16 = n16 | (npack16<<16);
+            }
+            if (cf->s[3].packed) {
+                n32 = n32 | (n32<<16);
+            } else {
+                const unsigned int npack32 = (cf->s[3].packed_n>>10);
+                n32 = n32 | (npack32<<16);
+            }
+#endif
             vpu_qpu_job_add_vpu(vqj,
                 vpu_get_fn(s->ps.sps->bit_depth),
                 vpu_get_constants(),
                 cf->gptr.vc,
-                cf->s[2].n >> 8,
+                n16,
                 cf->gptr.vc + offset32,
-                cf->s[3].n >> 10,
+                n32,
                 0);
 
             rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, 0, cf->s[2].n * csize);
