@@ -121,101 +121,58 @@ function JOIN(ff_hevc_rpi_transform_luma_4x4_neon_, BIT_DEPTH), export=1
         bx lr
 endfunc
 
-
-
 function JOIN(ff_hevc_rpi_transform_8x8_neon_, BIT_DEPTH), export=1
-        push   {r4-r8}
-        vpush {d8-d15}
-        mov    r5, #16
+        add      r2, r0, #16
+        adrl     r3, tr4f
+        vpush    {d8-d15}
+        vld1.16  {d0, d1}, [r3]
+        mov      r3, #32
 
-        adrl      r3, tr4f
-        vld1.16   {d0, d1}, [r3]
+        tr8_vert  d16, d17, d18, d19, d24, d25, d26, d27, q8,  q9,  \
+            "sub      r0, r0, #128-8",                              \
+            "sub      r2, r2, #128-8",                              \
+            "cmp      r1, #4"
+        ble      2f
 
-        // left half
-        vld1.16 {d24}, [r0], r5
-        vld1.16 {d25}, [r0], r5
-        vld1.16 {d26}, [r0], r5
-        vld1.16 {d27}, [r0], r5
-        vld1.16 {d28}, [r0], r5
-        vld1.16 {d29}, [r0], r5
-        vld1.16 {d30}, [r0], r5
-        vld1.16 {d31}, [r0], r5
-        sub      r0, #128
-        tr8_begin d25, d27, d29, d31
-        tr4       d24, d26, d28, d30
-        tr8_end   #7
-        vst1.16 {d2}, [r0], r5
-        vst1.16 {d3}, [r0], r5
-        vst1.16 {d4}, [r0], r5
-        vst1.16 {d5}, [r0], r5
-        vst1.16 {d6}, [r0], r5
-        vst1.16 {d7}, [r0], r5
-        vst1.16 {d8}, [r0], r5
-        vst1.16 {d9}, [r0], r5
-        sub      r0, #128
-        //skip right half if col_limit in r1 is less than 4
-        cmp      r1, #4
-        blt      1f
-        //right half
-        add      r0, #8
-        vld1.16 {d24}, [r0], r5
-        vld1.16 {d25}, [r0], r5
-        vld1.16 {d26}, [r0], r5
-        vld1.16 {d27}, [r0], r5
-        vld1.16 {d28}, [r0], r5
-        vld1.16 {d29}, [r0], r5
-        vld1.16 {d30}, [r0], r5
-        vld1.16 {d31}, [r0], r5
-        sub      r0, #128
-        tr8_begin d25, d27, d29, d31
-        tr4       d24, d26, d28, d30
-        tr8_end   #7
-        vst1.16 {d2}, [r0], r5
-        vst1.16 {d3}, [r0], r5
-        vst1.16 {d4}, [r0], r5
-        vst1.16 {d5}, [r0], r5
-        vst1.16 {d6}, [r0], r5
-        vst1.16 {d7}, [r0], r5
-        vst1.16 {d8}, [r0], r5
-        vst1.16 {d9}, [r0], r5
-        sub      r0, #136
+        tr8_vert  d20, d21, d22, d23, d28, d29, d30, d31, q10, q11, \
+            "sub      r0, r0, #128+8",                              \
+            "sub      r2, r2, #128+8+16-32",                        \
+            "mov      r3, #64"
+
+        vzip.16  d16, d17
+        vzip.16  d18, d19
+
+        vzip.16  d20, d21
+        vzip.16  d22, d23
+        vzip.16  d28, d29
+        vzip.16  d30, d31
+        vzip.32  q10, q11
+        vzip.32  q14, q15
 1:
-        // top half
-        vldm r0, {q12-q15} // coeffs
-        transpose_16b_4x4 d24, d26, d28, d30
-        transpose_16b_4x4 d25, d27, d29, d31
-        tr8_begin d26, d30, d27, d31
-        tr4 d24, d28, d25, d29
-        tr8_end #(TRN_SHIFT)
-        transpose_16b_4x4 d2, d3, d4, d5
-        transpose_16b_4x4 d6, d7, d8, d9
-        vswp     d7, d5
-        vswp     d7, d8
-        vswp     d3, d6
-        vswp     d6, d4
-        vstm r0!, {q1-q4}
+        vzip.16  d24, d25
+        vzip.16  d26, d27
+        vzip.32  q8, q9
+        vzip.32  q12, q13
 
-        // bottom half
-        vldm r0, {q12-q15} // coeffs
-        transpose_16b_4x4 d24, d26, d28, d30
-        transpose_16b_4x4 d25, d27, d29, d31
-        tr8_begin d26, d30, d27, d31
-        tr4 d24, d28, d25, d29
-        tr8_end #(TRN_SHIFT)
-        transpose_16b_4x4 d2, d3, d4, d5
-        transpose_16b_4x4 d6, d7, d8, d9
-        vswp     d7, d5
-        vswp     d7, d8
-        vswp     d3, d6
-        vswp     d6, d4
-        //vstm     r0, {q1-q4}
-        vst1.16 {q1-q2}, [r0]
-        add     r0, #32
-        vst1.16 {q3-q4}, [r0]
-        sub     r0, #32
-        vpop {d8-d15}
-        pop {r4-r8}
-        bx lr
+        tr8_horiz d16, d17, d18, d19, d20, d21, d22, d23, q8,  q9,  TRN_SHIFT
+        tr8_horiz d24, d25, d26, d27, d28, d29, d30, d31, q12, q13, TRN_SHIFT
+
+        vpop     {d8-d15}
+        bx       lr
+
+2:      vmov.i64 q10, #0
+        sub      r0, r0, #8
+        vmov.i64 q11, #0
+        sub      r2, r2, #8+16-32
+        vmov.i64 q14, #0
+        mov      r3, #64
+        vmov.i64 q15, #0
+
+        vzip.16  d16, d17
+        vzip.16  d18, d19
+
+        b        1b
+
 endfunc
 
 #undef DC_SHIFT
