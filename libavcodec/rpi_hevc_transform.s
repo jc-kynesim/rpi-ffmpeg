@@ -8,7 +8,7 @@
 
 # USE_STACK = 1 means temporary data stored on the stack (requires build with larger stack)
 # USE_STACK = 0 means temporary data stored in fixed per-VPU data buffers (requires modifications to vasm to handle instruction encoding for PC relative instructions)
-.set USE_STACK, 1
+.set USE_STACK, 0
 
 # Lines that fail to assemble start with #:
 # The script insert_magic_opcodes.sh inserts the machine code directly for these.
@@ -149,8 +149,7 @@ do_transform:
   lsl r11,5 # Make sure r11 is rounded to multiple of 2**5==32
 
   lsr r10, r2, 16 # Number of compressed blocks stored in top short
-#:and r2,r2,0xffff
-  .half 0x6f02 #AUTOINSERTED
+  extu r2,16
   # At start of block r0,r1 point to the current block (that has already been loaded)
   # r0 VRF location of current block
   # r1 address of current block
@@ -233,8 +232,7 @@ unpack_loop:
   add r6,r6,4
   lsr r9,r4,16 # r9 is destination value
   cmp r4,0 # {value,index}
-#:and r4,r4,0xff
-  .half 0x6e84 #AUTOINSERTED
+  extu r4,8
   beq done_unpack
   sth r9,(r11, r4)
   addcmpblt r12,1,8,unpack_loop
@@ -302,8 +300,7 @@ unpack_loop32:
   add r6,r6,4
   lsr r5,r4,16 # r5 is destination value
   cmp r4,0 # {value,index}
-#:and r4,r4,0x3ff
-  .half 0x6ea4 #AUTOINSERTED
+  extu r4,10
   beq done_unpack
   sth r5,(r0, r4)
   addcmpblt r8,1,8,unpack_loop32
@@ -322,8 +319,7 @@ hevc_trans_32x32:
   mov r1,r14 # coeffs
   mov r2,r15 # num
   lsr r15,r15,16 # Number that are packed
-#:and r2,r2,0xffff # Total number
-  .half 0x6f02 #AUTOINSERTED
+  extu r2,16 # Total number
 
   # Fetch odd transform matrix
   #mov r3, 16*2 # Stride of transMatrix2 in bytes (and of coefficients)
@@ -344,9 +340,10 @@ hevc_trans_32x32:
 .else
 #:version r8
   .half 0x00e8 #AUTOINSERTED
-#:btest r8,16
-  .half 0x6d08 #AUTOINSERTED
-  add r8,pc,intermediate_results-$
+  btst r8,16
+#:add r8,pc,intermediate_results-$
+  .half 0xbfe8
+  .half intermediate_results-($-2)
   beq on_vpu1
   add r8,r8,32*32*2*2+16*2 # Move to secondary storage
 on_vpu1:
