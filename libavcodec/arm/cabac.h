@@ -27,26 +27,6 @@
 #include "libavcodec/cabac.h"
 
 
-#if UNCHECKED_BITSTREAM_READER
-#define LOAD_16BITS_BEHI\
-        "ldrh       %[tmp]        , [%[ptr]]    , #2            \n\t"\
-        "rev        %[tmp]        , %[tmp]                      \n\t"
-#elif CONFIG_THUMB
-#define LOAD_16BITS_BEHI\
-        "ldr        %[tmp]        , [%[c], %[end]]              \n\t"\
-        "cmp        %[tmp]        , %[ptr]                      \n\t"\
-        "it         cs                                          \n\t"\
-        "ldrhcs     %[tmp]        , [%[ptr]]    , #2            \n\t"\
-        "rev        %[tmp]        , %[tmp]                      \n\t"
-#else
-#define LOAD_16BITS_BEHI\
-        "ldr        %[tmp]        , [%[c], %[end]]              \n\t"\
-        "cmp        %[tmp]        , %[ptr]                      \n\t"\
-        "ldrcsh     %[tmp]        , [%[ptr]]    , #2            \n\t"\
-        "rev        %[tmp]        , %[tmp]                      \n\t"
-#endif
-
-
 #define get_cabac_inline get_cabac_inline_arm
 static av_always_inline int get_cabac_inline_arm(CABACContext *c,
                                                  uint8_t *state)
@@ -128,33 +108,56 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
 #define get_cabac_bypass get_cabac_bypass_arm
 static inline int get_cabac_bypass_arm(CABACContext * const c)
 {
-    int rv = 0;
-    unsigned int tmp;
-    __asm (
-        "lsl        %[low]        , #1                          \n\t"
-        "cmp        %[low]        , %[range]    , lsl #17       \n\t"
-        "adc        %[rv]         , %[rv]       , #0            \n\t"
-        "it         cs                                          \n\t"
-        "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-        "lsls       %[tmp]        , %[low]      , #16           \n\t"
-        "bne        1f                                          \n\t"
-        LOAD_16BITS_BEHI
-        "add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
-        "movw       %[tmp]        , #0xFFFF                     \n\t"
-        "sub        %[low]        , %[low]      , %[tmp]        \n\t"
-        "1:                                                     \n\t"
-        : // Outputs
-              [rv]"+r"(rv),
-             [low]"+r"(c->low),
-             [tmp]"=r"(tmp),
-             [ptr]"+r"(c->bytestream)
-        : // Inputs
+    uint32_t low = c->low, range, ptr, tmp;
+    int rv;
+    __asm volatile (
+        "ldr        %[range] , [%[c], %[range_off]] \n\t"
+        "mov        %[rv]    , #0                   \n\t"
+        "ldr        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "lsl        %[low]   , #1                   \n\t"
 #if !UNCHECKED_BITSTREAM_READER
-                 [c]"r"(c),
-               [end]"M"(offsetof(CABACContext, bytestream_end)),
+        "ldr        %[tmp]   , [%[c], %[end_off]]   \n\t"
 #endif
-             [range]"r"(c->range)
-        : "cc"
+        "cmp        %[low]   , %[range], lsl #17    \n\t"
+        "it         cs                              \n\t"
+        "subcs      %[low]   , %[range], lsl #17    \n\t"
+        "it         cs                              \n\t"
+        "movcs      %[rv]    , #1                   \n\t"
+#if UNCHECKED_BITSTREAM_READER
+        "ldrh       %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "cmp        %[tmp]   , %[ptr]               \n\t"
+#if CONFIG_THUMB
+        "it         cs                              \n\t"
+        "ldrhcs     %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "ldrcsh     %[tmp]   , [%[ptr]], #2         \n\t"
+#endif
+#endif
+        "lsls       %[range] , %[low], #16          \n\t"
+        "bne        1f                              \n\t"
+
+        "str        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "rev        %[tmp]   , %[tmp]               \n\t"
+        "add        %[low]   , %[tmp], lsr #15      \n\t"
+        "movw       %[tmp]   , 0xFFFF               \n\t"
+        "sub        %[low]   , %[tmp]               \n\t"
+        "1:                                         \n\t"
+        "str        %[low]   , [%[c], %[low_off]]   \n\t"
+        : // Outputs
+               [rv]"=&r"(rv),
+              [low]"+r"(low),
+            [range]"=&r"(range),
+              [ptr]"=&r"(ptr),
+              [tmp]"=&r"(tmp)
+        : // Inputs
+                    [c]"r"(c),
+              [low_off]"J"(offsetof(CABACContext, low)),
+            [range_off]"J"(offsetof(CABACContext, range)),
+              [ptr_off]"J"(offsetof(CABACContext, bytestream)),
+              [end_off]"J"(offsetof(CABACContext, bytestream_end))
+        : // Clobbers
+            "memory", "cc"
     );
     return rv;
 }
@@ -163,32 +166,54 @@ static inline int get_cabac_bypass_arm(CABACContext * const c)
 #define get_cabac_bypass_sign get_cabac_bypass_sign_arm
 static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
 {
-    unsigned int tmp;
-    __asm (
-        "lsl        %[low]        , #1                          \n\t"
-        "cmp        %[low]        , %[range]    , lsl #17       \n\t"
-        "ite        cc                                          \n\t"
-        "rsbcc      %[rv]         , %[rv]       , #0            \n\t"
-        "subcs      %[low]        , %[low]      , %[range], lsl #17 \n\t"
-        "lsls       %[tmp]        , %[low]      , #16           \n\t"
-        "bne        1f                                          \n\t"
-        LOAD_16BITS_BEHI
-        "add        %[low]        , %[low]      , %[tmp], lsr #15 \n\t"
-        "movw       %[tmp]        , #0xFFFF                     \n\t"
-        "sub        %[low]        , %[low]      , %[tmp]        \n\t"
-        "1:                                                     \n\t"
-        : // Outputs
-              [rv]"+r"(rv),
-             [low]"+r"(c->low),
-             [tmp]"=r"(tmp),
-             [ptr]"+r"(c->bytestream)
-        : // Inputs
+    uint32_t low = c->low, range, ptr, tmp;
+    __asm volatile (
+        "ldr        %[range] , [%[c], %[range_off]] \n\t"
+        "ldr        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "lsl        %[low]   , #1                   \n\t"
 #if !UNCHECKED_BITSTREAM_READER
-                 [c]"r"(c),
-               [end]"M"(offsetof(CABACContext, bytestream_end)),
+        "ldr        %[tmp]   , [%[c], %[end_off]]   \n\t"
 #endif
-             [range]"r"(c->range)
-        : "cc"
+        "cmp        %[low]   , %[range], lsl #17    \n\t"
+        "it         cs                              \n\t"
+        "subcs      %[low]   , %[range], lsl #17    \n\t"
+        "it         cc                              \n\t"
+        "rsbcc      %[rv]    , %[rv], #0            \n\t"
+#if UNCHECKED_BITSTREAM_READER
+        "ldrh       %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "cmp        %[tmp]   , %[ptr]               \n\t"
+#if CONFIG_THUMB
+        "it         cs                              \n\t"
+        "ldrhcs     %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "ldrcsh     %[tmp]   , [%[ptr]], #2         \n\t"
+#endif
+#endif
+        "lsls       %[range] , %[low], #16          \n\t"
+        "bne        1f                              \n\t"
+
+        "str        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "rev        %[tmp]   , %[tmp]               \n\t"
+        "add        %[low]   , %[tmp], lsr #15      \n\t"
+        "movw       %[tmp]   , 0xFFFF               \n\t"
+        "sub        %[low]   , %[tmp]               \n\t"
+        "1:                                         \n\t"
+        "str        %[low]   , [%[c], %[low_off]]   \n\t"
+        : // Outputs
+               [rv]"+r"(rv),
+              [low]"+r"(low),
+            [range]"=&r"(range),
+              [ptr]"=&r"(ptr),
+              [tmp]"=&r"(tmp)
+        : // Inputs
+                    [c]"r"(c),
+              [low_off]"J"(offsetof(CABACContext, low)),
+            [range_off]"J"(offsetof(CABACContext, range)),
+              [ptr_off]"J"(offsetof(CABACContext, bytestream)),
+              [end_off]"J"(offsetof(CABACContext, bytestream_end))
+        : // Clobbers
+            "memory", "cc"
     );
     return rv;
 }

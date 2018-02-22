@@ -273,14 +273,64 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 // ---------------------------------------------------------------------------
 //
 // CABAC_BY22 functions
-//
-// By and large these are (at best) no faster than their C equivalents - the
-// only one worth having is _peek where we do a slightly better job than the
-// compiler
-//
-// The others have been stashed here for reference in case larger scale asm
-// is attempted in which case they might be a useful base
 
+
+#define get_cabac_by22_start get_cabac_by22_start_arm
+static const uint32_t cabac_by22_inv_range[256];
+static inline void get_cabac_by22_start_arm(CABACContext * const c)
+{
+    const uint8_t *ptr = c->bytestream;
+    register uint32_t low __asm__("r1"), range __asm__("r2");
+    uint32_t inv, m, range8, bits;
+    av_assert0(offsetof (CABACContext, low) == 0);
+    av_assert0(offsetof (CABACContext, range) == 4);
+    av_assert0(offsetof (CABACContext, by22.range) == offsetof (CABACContext, by22.bits) + 2);
+    __asm__ (
+        "ldmia   %[c], {%[low], %[range]}                         \n\t"
+#if !USE_BY22_DIV
+        "movw    %[inv], #:lower16:cabac_by22_inv_range           \n\t"
+        "movt    %[inv], #:upper16:cabac_by22_inv_range           \n\t"
+#endif
+        "ldr     %[m], [%[ptr]], #-("AV_STRINGIFY(CABAC_BITS)"/8) \n\t"
+#if !USE_BY22_DIV
+        "uxtb    %[range8], %[range]                              \n\t"
+#endif
+        "rbit    %[bits], %[low]                                  \n\t"
+        "lsl     %[low], %[low], #22 - "AV_STRINGIFY(CABAC_BITS)" \n\t"
+        "clz     %[bits], %[bits]                                 \n\t"
+        "str     %[ptr], [%[c], %[ptr_off]]                       \n\t"
+        "rev     %[m], %[m]                                       \n\t"
+        "rsb     %[ptr], %[bits], #9 + "AV_STRINGIFY(CABAC_BITS)" \n\t"
+        "eor     %[m], %[m], #0x80000000                          \n\t"
+#if !USE_BY22_DIV
+        "ldr     %[inv], [%[inv], %[range8], lsl #2]              \n\t"
+        "pkhbt   %[range], %[bits], %[range], lsl #16             \n\t"
+        "str     %[range], [%[c], %[bits_off]]                    \n\t"
+#else
+        "strh    %[bits], [%[c], %[bits_off]]                     \n\t"
+#endif
+        "eor     %[range], %[low], %[m], lsr %[ptr]               \n\t"
+        : // Outputs
+               [ptr]"+r"(ptr),
+               [low]"=&r"(low),
+             [range]"=&r"(range),
+               [inv]"=&r"(inv),
+                 [m]"=&r"(m),
+            [range8]"=&r"(range8),
+              [bits]"=&r"(bits)
+        : // Inputs
+                   [c]"r"(c),
+            [bits_off]"J"(offsetof (CABACContext, by22.bits)),
+             [ptr_off]"J"(offsetof (CABACContext, bytestream)),
+                [cbir]"X"(cabac_by22_inv_range)
+        : // Clobbers
+            "memory"
+    );
+    c->low = range;
+#if !USE_BY22_DIV
+    c->range = inv;
+#endif
+}
 
 #define get_cabac_by22_peek get_cabac_by22_peek_arm
 static inline uint32_t get_cabac_by22_peek_arm(const CABACContext *const c)

@@ -190,6 +190,19 @@ typedef struct ipe_init_info_s
     ipe_chan_info_t chroma;
 } ipe_init_info_t;
 
+static void *small_memset(void *s, int c, size_t n)
+{
+    if (n == 1)
+        *(int8_t *) s = c;
+    else if (n == 2)
+        *(int16_t *) s = c * 0x0101;
+    else if (n == 4)
+        *(int32_t *) s = c * 0x01010101;
+    else
+        return memset(s, c, n);
+    return s;
+}
+
 static const ipe_init_info_t ipe_init_infos[9] = {  // Alloc for bit depths of 8-16
    {  // 8
       .luma =   {8, QPU_MC_PRED_N_Y8, inter_pred_setup_y_qpu, inter_pred_sync_qpu, inter_pred_exit_y_qpu},
@@ -3014,7 +3027,7 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
     if (!size_in_pus)
         size_in_pus = 1;
     for (i = 0; i < size_in_pus; i++) {
-        memset(&s->tab_ipm[(y_pu + i) * min_pu_width + x_pu],
+        small_memset(&s->tab_ipm[(y_pu + i) * min_pu_width + x_pu],
                intra_pred_mode, size_in_pus);
 
         for (j = 0; j < size_in_pus; j++) {
@@ -3034,7 +3047,7 @@ static av_always_inline void set_ct_depth(const HEVCRpiContext * const s, int x0
     int y;
 
     for (y = 0; y < length; y++)
-        memset(&s->tab_ct_depth[(y_cb + y) * s->ps.sps->min_cb_width + x_cb],
+        small_memset(&s->tab_ct_depth[(y_cb + y) * s->ps.sps->min_cb_width + x_cb],
                ct_depth, length);
 }
 
@@ -3124,7 +3137,7 @@ static void intra_prediction_unit_default_value(const HEVCRpiContext * const s, 
     if (size_in_pus == 0)
         size_in_pus = 1;
     for (j = 0; j < size_in_pus; j++)
-        memset(&s->tab_ipm[(y_pu + j) * min_pu_width + x_pu], INTRA_DC, size_in_pus);
+        small_memset(&s->tab_ipm[(y_pu + j) * min_pu_width + x_pu], INTRA_DC, size_in_pus);
     if (lc->cu.pred_mode == MODE_INTRA)
         for (j = 0; j < size_in_pus; j++)
             for (k = 0; k < size_in_pus; k++)
@@ -3164,14 +3177,14 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
 
         x = y_cb * min_cb_width + x_cb;
         for (y = 0; y < length; y++) {
-            memset(&s->skip_flag[x], skip_flag, length);
+            small_memset(&s->skip_flag[x], skip_flag, length);
             x += min_cb_width;
         }
         lc->cu.pred_mode = skip_flag ? MODE_SKIP : MODE_INTER;
     } else {
         x = y_cb * min_cb_width + x_cb;
         for (y = 0; y < length; y++) {
-            memset(&s->skip_flag[x], 0, length);
+            small_memset(&s->skip_flag[x], 0, length);
             x += min_cb_width;
         }
     }
@@ -3281,7 +3294,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
 
     x = y_cb * min_cb_width + x_cb;
     for (y = 0; y < length; y++) {
-        memset(&s->qp_y_tab[x], lc->qp_y, length);
+        small_memset(&s->qp_y_tab[x], lc->qp_y, length);
         x += min_cb_width;
     }
 

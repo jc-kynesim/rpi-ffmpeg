@@ -642,6 +642,7 @@ int ff_hevc_rpi_cabac_overflow(const HEVCRpiLocalContext * const lc)
 // Must be called before _by22_peek is used as it sets the CABAC environment
 // into the correct state.  _by22_finish must be called to return to 'normal'
 // (i.e. non-bypass) cabac decoding
+#ifndef get_cabac_by22_start
 static inline void get_cabac_by22_start(CABACContext * const c)
 {
     const unsigned int bits = __builtin_ctz(c->low);
@@ -659,6 +660,7 @@ static inline void get_cabac_by22_start(CABACContext * const c)
 #endif
     c->low = x;
 }
+#endif
 
 // Bypass block finish
 // Must be called at the end of the bypass block to return to normal operation

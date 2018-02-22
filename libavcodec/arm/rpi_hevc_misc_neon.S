@@ -6,57 +6,21 @@
 @   unsigned int log_n_m2)   [r1]
 
 function rpi_zap_coeff_vals_neon, export=1
-        vmov.i64 q8, #0
-        adr     r12, zc_tab
-        vmov.i64 q9, #0
-        tst     r0, #63
-        vmov.i64 q10, #0
-        add     r0, #63
-        vmov.i64 q11, #0
-        and     r0, #~63
-        ldr     pc, [r12, r1, lsl #2]
+        mov      ip, #1
+        vmov.i64 q0, #0
+        teq      r1, #0
+        vmov.i64 q1, #0
+        beq      2f
 
-zc_tab:
-        .word   zc_lc2
-        .word   zc_lc3
-        .word   zc_lc4
-        .word   zc_lc5
+        lsl      ip, r1    @ 2, 4 or 8
+        add      r2, r0, #32
+        lsl      ip, r1    @ 4, 16 or 64 = number of 32-byte blocks to zero
+        mov      r3, #64
+1:      vst1.8   {q0,q1}, [r0:256], r3
+        subs     ip, #2
+        vst1.8   {q0,q1}, [r2:256], r3
+        bne      1b
+        bx       lr
 
-@ 4*4*2: "32 bytes" 64 or 0 depending on dst address
-zc_lc2:
-        it eq
-        vstmeq  r0, {q8-q11}
-        bx      lr
-
-@ 16*16*2 = 512 = 64 * 8
-zc_lc4:
-        vstm    r0!, {q8-q11}
-        vstm    r0!, {q8-q11}
-        vstm    r0!, {q8-q11}
-        vstm    r0!, {q8-q11}
-        vstm    r0!, {q8-q11}
-        vstm    r0!, {q8-q11}
-@ 8*8*2 = 128
-zc_lc3:
-        vstm    r0!, {q8-q11}
-        vstm    r0,  {q8-q11}
-        bx      lr
-
-@ 32*32*2 = 2048 = 128 * 16
-zc_lc5:
-        vmov.i64 q12, #0
-        vmov.i64 q13, #0
-        vmov.i64 q14, #0
-        vmov.i64 q15, #0
-        mov     r2, #4
-1:
-        vstm    r0!, {q8-q15}
-        subs    r2, #1
-        vstm    r0!, {q8-q15}
-        vstm    r0!, {q8-q15}
-        vstm    r0!, {q8-q15}
-        bne     1b
-        bx      lr
-
-endfunc
-
+2:      vst1.8   {q0,q1}, [r0:256]
+        bx       lr
