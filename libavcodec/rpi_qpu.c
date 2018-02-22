@@ -39,7 +39,7 @@
 
 // Size in 32bit words
 #define QPU_CODE_SIZE 4098
-#define VPU_CODE_SIZE 2048
+#define VPU_CODE_SIZE 16384
 
 static const short rpi_transMatrix2even[32][16] = { // Even rows first
 {64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64},

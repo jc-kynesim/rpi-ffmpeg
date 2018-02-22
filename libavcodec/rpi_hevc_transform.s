@@ -6,6 +6,10 @@
 # Author : Peter de Rivaz
 # ******************************************************************************
 
+# USE_STACK = 1 means temporary data stored on the stack (requires build with larger stack)
+# USE_STACK = 0 means temporary data stored in fixed per-VPU data buffers (requires modifications to vasm to handle instruction encoding for PC relative instructions)
+.set USE_STACK, 1
+
 # Lines that fail to assemble start with #:
 # The script insert_magic_opcodes.sh inserts the machine code directly for these.
 # HEVC VPU Transform
@@ -100,6 +104,24 @@ hevc_trans_16x16:
   cmp r5,5
   beq hevc_run_command_list
 
+.if USE_STACK==0
+  b do_transform
+
+  .balign 32
+packed_buffer:
+  .space 16*2
+intermediate_results:
+  .space 32*32*2
+unpacked_buffer:
+  .space 32*32*2
+
+packed_buffer2:
+  .space 16*2
+intermediate_results2:
+  .space 32*32*2
+unpacked_buffer2:
+  .space 32*32*2
+.endif
 
 do_transform:
   push r6-r15, lr # TODO cut down number of used registers
@@ -311,14 +333,27 @@ hevc_trans_32x32:
 
   mov r3, 32*2*2 # Stride used to fetch alternate rows of our input coefficient buffer
   mov r7, 16*16*2 # Total block size
+
+.if USE_STACK
   # Stack base allocation
   sub sp,sp,32*32*4+64 # Allocate some space on the stack for us to store 32*32 shorts as temporary results (needs to be aligned) and another 32*32 for unpacking
   # set r8 to 32byte aligned stack pointer with 32 bytes of space before it
   add r8,sp,63
   lsr r8,5
   lsl r8,5
+.else
+#:version r8
+  .half 0x00e8 #AUTOINSERTED
+#:btest r8,16
+  .half 0x6d08 #AUTOINSERTED
+  add r8,pc,intermediate_results-$
+  beq on_vpu1
+  add r8,r8,32*32*2*2+16*2 # Move to secondary storage
+on_vpu1:
+.endif
   mov r9,r8  # Backup of the temporary storage
   mov r10,r1 # Backup of the coefficient buffer
+
 block_loop32:
 
   # Transform the first 16 columns
@@ -356,7 +391,9 @@ not_compressed_32:
   add r10, 32*32*2 # move onto next block of coefficients
   addcmpbgt r2,-1,0,block_loop32
 
+.if USE_STACK
   add sp,sp,32*32*4+64# Restore stack
+.endif
 
   pop r6-r15, pc
 
