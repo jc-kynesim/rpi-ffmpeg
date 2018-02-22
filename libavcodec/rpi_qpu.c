@@ -80,7 +80,7 @@ static const short rpi_transMatrix2even[32][16] = { // Even rows first
 // Code/constants on GPU
 struct GPU
 {
-  unsigned int qpu_code[QPU_CODE_SIZE];
+//  unsigned int qpu_code[QPU_CODE_SIZE];
   unsigned int vpu_code8[VPU_CODE_SIZE];
   unsigned int vpu_code10[VPU_CODE_SIZE];
   short transMatrix2even[16*16*2];
@@ -130,7 +130,9 @@ typedef struct gpu_env_s
   int init_count;
   int mb;
   int vpu_i_cache_flushed;
+  GPU_MEM_PTR_T qpu_code_gm_ptr;
   GPU_MEM_PTR_T code_gm_ptr;
+  GPU_MEM_PTR_T dummy_gm_ptr;
   vq_wait_pool_t wait_pool;
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
   trace_time_wait_t ttw;
@@ -219,6 +221,20 @@ static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_
   return 0;
 }
 
+static int gpu_malloc_vccached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
+  p->numbytes = numbytes;
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC , (char *)"VPU code" );
+  av_assert0(p->vcsm_handle);
+  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
+  av_assert0(p->vc_handle);
+  p->arm = vcsm_lock(p->vcsm_handle);
+  av_assert0(p->arm);
+  p->vc = mbox_mem_lock(mb, p->vc_handle) & 0x3fffffff;  // ??? If I want caching then lose the top 2 bits
+  av_assert0(p->vc);
+//  printf("***** %s, %d\n", __func__, numbytes);
+  return 0;
+}
+
 static int gpu_malloc_uncached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
   p->numbytes = numbytes;
   p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE | 0x80, (char *)"Video Frame" );
@@ -254,6 +270,8 @@ static void gpu_term(void)
   vc_gpuserv_deinit();
 
   gpu_free_internal(ge->mb, &ge->code_gm_ptr);
+  gpu_free_internal(ge->mb, &ge->qpu_code_gm_ptr);
+  gpu_free_internal(ge->mb, &ge->dummy_gm_ptr);
 
   vcsm_exit();
 
@@ -281,19 +299,22 @@ static int gpu_init(gpu_env_t ** const gpu) {
 
   vcsm_init();
 
-  gpu_malloc_uncached_internal(ge->mb, sizeof(struct GPU), &ge->code_gm_ptr);
+  // Now copy over the QPU code into GPU memory
+  gpu_malloc_uncached_internal(ge->mb, QPU_CODE_SIZE*4, &ge->qpu_code_gm_ptr);
+
+  {
+    int num_bytes = (char *)mc_end - (char *)ff_hevc_rpi_shader;
+    av_assert0(num_bytes<=QPU_CODE_SIZE*sizeof(unsigned int));
+    memcpy(ge->qpu_code_gm_ptr.arm, ff_hevc_rpi_shader, num_bytes);
+    memset(ge->qpu_code_gm_ptr.arm + num_bytes, 0, QPU_CODE_SIZE*4 - num_bytes);
+  }
+
+  // And the VPU code
+  gpu_malloc_vccached_internal(ge->mb, sizeof(struct GPU), &ge->code_gm_ptr);
   ptr = (volatile struct GPU*)ge->code_gm_ptr.arm;
 
   // Zero everything so we have zeros between the code bits
   memset((void *)ptr, 0, sizeof(*ptr));
-
-  // Now copy over the QPU code into GPU memory
-  {
-    int num_bytes = (char *)mc_end - (char *)ff_hevc_rpi_shader;
-    av_assert0(num_bytes<=QPU_CODE_SIZE*sizeof(unsigned int));
-    memcpy((void*)ptr->qpu_code, ff_hevc_rpi_shader, num_bytes);
-  }
-  // And the VPU code
   {
     int num_bytes = sizeof(rpi_hevc_transform8);
     av_assert0(num_bytes<=VPU_CODE_SIZE*sizeof(unsigned int));
@@ -306,6 +327,11 @@ static int gpu_init(gpu_env_t ** const gpu) {
   }
   // And the transform coefficients
   memcpy((void*)ptr->transMatrix2even, rpi_transMatrix2even, sizeof(rpi_transMatrix2even));
+
+  // Generate a dummy "frame" & fill with 0x80
+  // * Could reset to 1 <<bit_depth?
+  gpu_malloc_uncached_internal(ge->mb, 0x4000, &ge->dummy_gm_ptr);
+  memset(ge->dummy_gm_ptr.arm, 0x80, 0x4000);
 
   *gpu = ge;
   return 0;
@@ -394,22 +420,26 @@ void gpu_free(GPU_MEM_PTR_T * const p) {
 }
 
 unsigned int vpu_get_fn(const unsigned int bit_depth) {
+  uint32_t a = 0;
+
   // Make sure that the gpu is initialized
   av_assert0(gpu != NULL);
   switch (bit_depth){
     case 8:
-      return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code8);
+      a = gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code8);
+      break;
     case 10:
-      return gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code10);
+      a = gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code10);
+      break;
     default:
       av_assert0(0);
   }
-  return 0;
+  return a;
 }
 
 unsigned int vpu_get_constants(void) {
   av_assert0(gpu != NULL);
-  return gpu->code_gm_ptr.vc + offsetof(struct GPU,transMatrix2even);
+  return (gpu->code_gm_ptr.vc + offsetof(struct GPU,transMatrix2even));
 }
 
 int gpu_get_mailbox(void)
@@ -878,9 +908,13 @@ void vpu_qpu_term()
 
 uint32_t qpu_fn(const int * const mc_fn)
 {
-  return gpu->code_gm_ptr.vc + ((const char *)mc_fn - (const char *)ff_hevc_rpi_shader) + offsetof(struct GPU, qpu_code);
+  return gpu->qpu_code_gm_ptr.vc + ((const char *)mc_fn - (const char *)ff_hevc_rpi_shader);
 }
 
+uint32_t qpu_dummy(void)
+{
+  return gpu->dummy_gm_ptr.vc;
+}
 
 int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
 {

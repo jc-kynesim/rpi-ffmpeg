@@ -5468,7 +5468,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     }
 #endif
 #if !RPI_QPU_EMU_Y || !RPI_QPU_EMU_C
-    s->qpu_dummy_frame_qpu = qpu_fn(mc_start);  // Use our code as a dummy frame
+    s->qpu_dummy_frame_qpu = qpu_dummy();
 #endif
 
     bt_lc_init(s, s->HEVClc, 0);

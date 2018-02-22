@@ -180,6 +180,7 @@ typedef struct HEVCRpiQpu {
 int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth);
 
 uint32_t qpu_fn(const int * const mc_fn);
+uint32_t qpu_dummy(void);
 
 #define QPU_N_GRP    4
 #define QPU_N_MAX    12
