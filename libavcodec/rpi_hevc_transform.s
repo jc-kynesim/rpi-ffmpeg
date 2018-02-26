@@ -167,6 +167,8 @@ do_transform:
   # r13
   # r14 Save information for 32 bit transform (coeffs location)
   # r15 Save information for 32 bit transform (number of transforms)
+  cmp r2,0
+  beq done16x16s
 block_loop:
   # With compressed coefficients, we don't use prefetch as we don't want to issue unnecessary memory requests
   cmp r10,0
@@ -206,6 +208,7 @@ not_compressed:
   add r1,r7
 
   addcmpbgt r2,-1,0,block_loop
+done16x16s:
 
   add sp,sp,64+16*16*2 # Move on stack pointer in case interrupt occurs and uses stack
   # Now go and do any 32x32 transforms
@@ -351,6 +354,8 @@ on_vpu1:
   mov r9,r8  # Backup of the temporary storage
   mov r10,r1 # Backup of the coefficient buffer
 
+  cmp r2,0
+  beq done32x32s
 block_loop32:
 
   # Transform the first 16 columns
@@ -387,6 +392,7 @@ not_compressed_32:
 
   add r10, 32*32*2 # move onto next block of coefficients
   addcmpbgt r2,-1,0,block_loop32
+done32x32s:
 
 .if USE_STACK
   add sp,sp,32*32*4+64# Restore stack
