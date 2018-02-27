@@ -276,18 +276,24 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
 
 
 #define get_cabac_by22_start get_cabac_by22_start_arm
-static const uint32_t cabac_by22_inv_range[256];
 static inline void get_cabac_by22_start_arm(CABACContext * const c)
 {
     const uint8_t *ptr = c->bytestream;
     register uint32_t low __asm__("r1"), range __asm__("r2");
-    uint32_t inv, m, range8, bits;
-    av_assert0(offsetof (CABACContext, low) == 0);
-    av_assert0(offsetof (CABACContext, range) == 4);
-    av_assert0(offsetof (CABACContext, by22.range) == offsetof (CABACContext, by22.bits) + 2);
+    uint32_t m, range8, bits;
+#if !USE_BY22_DIV
+#if CONFIG_PIC
+    uint32_t inv = cabac_by22_inv_range;
+#else
+    uint32_t inv;
+#endif
+#endif
+    av_assert2(offsetof (CABACContext, low) == 0);
+    av_assert2(offsetof (CABACContext, range) == 4);
+    av_assert2(offsetof (CABACContext, by22.range) == offsetof (CABACContext, by22.bits) + 2);
     __asm__ (
         "ldmia   %[c], {%[low], %[range]}                         \n\t"
-#if !USE_BY22_DIV
+#if !USE_BY22_DIV && !CONFIG_PIC
         "movw    %[inv], #:lower16:cabac_by22_inv_range           \n\t"
         "movt    %[inv], #:upper16:cabac_by22_inv_range           \n\t"
 #endif
@@ -314,7 +320,13 @@ static inline void get_cabac_by22_start_arm(CABACContext * const c)
                [ptr]"+r"(ptr),
                [low]"=&r"(low),
              [range]"=&r"(range),
+#if !USE_BY22_DIV
+#if CONFIG_PIC
+               [inv]"+&r"(inv),
+#else
                [inv]"=&r"(inv),
+#endif
+#endif
                  [m]"=&r"(m),
             [range8]"=&r"(range8),
               [bits]"=&r"(bits)
@@ -322,7 +334,7 @@ static inline void get_cabac_by22_start_arm(CABACContext * const c)
                    [c]"r"(c),
             [bits_off]"J"(offsetof (CABACContext, by22.bits)),
              [ptr_off]"J"(offsetof (CABACContext, bytestream)),
-                [cbir]"X"(cabac_by22_inv_range)
+                [cbir]"X"(cabac_by22_inv_range)  // If we don't have this then link fails! (cabac_by22_inv_range optimized out as unused!?)
         : // Clobbers
             "memory"
     );

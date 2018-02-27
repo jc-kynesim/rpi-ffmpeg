@@ -60,10 +60,6 @@
 #define CABAC_BY22_PEEK_BITS  23
 #endif
 
-#if ARCH_ARM
-#include "arm/rpi_hevc_cabac.h"
-#endif
-
 #define CABAC_MAX_BIN 31
 
 
@@ -101,6 +97,10 @@ static const uint32_t cabac_by22_inv_range[256] = {
 };
 #undef I
 #endif  // USE_BY22
+
+#if ARCH_ARM
+#include "arm/rpi_hevc_cabac.h"
+#endif
 
 /**
  * number of bin by SyntaxElement.
