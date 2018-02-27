@@ -1,7 +1,7 @@
 echo "Configure for Pi2/3"
 
 RPI_TOOLROOT=`pwd`/../tools/arm-bcm2708/arm-rpi-4.9.3-linux-gnueabihf
-RPI_OPT_VC=`pwd`/../firmware/opt/vc
+RPI_OPT_VC=`pwd`/../firmware/hardfp/opt/vc
 
 RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
 RPI_LIBDIRS="-L$RPI_TOOLROOT/lib -L$RPI_OPT_VC/lib"
