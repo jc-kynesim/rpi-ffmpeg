@@ -2454,7 +2454,7 @@ rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
 
 #if RPI_TSTATS
             {
-                HEVCRpiStats *const ts = &s->tstats;
+                HEVCRpiStats *const ts = (HEVCRpiStats *)&s->tstats;
                 ++ts->y_pred1_x0y0;
 
                 if (nPbW > 8)
@@ -2510,7 +2510,7 @@ rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
             jb->last_y8_l1 = NULL;
             start_x = bw;
 #if RPI_TSTATS
-            ++s->tstats.y_pred1_y8_merge;
+            ++((HEVCRpiStats *)&s->tstats)->y_pred1_y8_merge;
 #endif
         }
 #endif
@@ -2524,7 +2524,7 @@ rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
             qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
 #if RPI_TSTATS
             {
-                HEVCRpiStats *const ts = &s->tstats;
+                HEVCRpiStats *const ts = (HEVCRpiStats *)&s->tstats;
                 if (mx == 0 && my == 0)
                     ++ts->y_pred1_x0y0;
                 else if (mx == 0)
@@ -2631,7 +2631,7 @@ rpi_pred_y_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
             qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
 #if RPI_TSTATS
             {
-                HEVCRpiStats *const ts = &s->tstats;
+                HEVCRpiStats *const ts = (HEVCRpiStats *)&s->tstats;
                 ++ts->y_pred2_x0y0;
 
                 if (nPbH > 16)
@@ -2676,7 +2676,7 @@ rpi_pred_y_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
             qpu_mc_pred_y_p_t *const cmd_y = &yp->qpu_mc_curr->y.p;
 #if RPI_TSTATS
             {
-                HEVCRpiStats *const ts = &s->tstats;
+                HEVCRpiStats *const ts = (HEVCRpiStats *)&s->tstats;
                 const unsigned int mmx = mx | mx2;
                 const unsigned int mmy = my | my2;
                 if (mmx == 0 && mmy == 0)

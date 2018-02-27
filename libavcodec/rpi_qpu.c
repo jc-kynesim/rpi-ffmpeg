@@ -203,6 +203,8 @@ static void ttw_print(trace_time_wait_t * const ttw, const int64_t now)
 // GPU memory alloc fns (internal)
 
 // GPU_MEM_PTR_T alloc fns
+// The magic 0x80 on the cache type means: map all pages to arm memory now
+//   rather than demand page later
 static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
   p->numbytes = (numbytes + 255) & ~255;  // Round up
   p->vcsm_handle = vcsm_malloc_cache(p->numbytes, VCSM_CACHE_TYPE_HOST | 0x80, (char *)"Video Frame" );
@@ -216,22 +218,19 @@ static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_
   av_assert0(p->arm);
   p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
-//  printf("***** %s, %d\n", __func__, numbytes);
-
   return 0;
 }
 
 static int gpu_malloc_vccached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
   p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC , (char *)"VPU code" );
+  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_VC | 0x80, (char *)"VPU code" );
   av_assert0(p->vcsm_handle);
   p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
   av_assert0(p->vc_handle);
   p->arm = vcsm_lock(p->vcsm_handle);
   av_assert0(p->arm);
-  p->vc = mbox_mem_lock(mb, p->vc_handle) & 0x3fffffff;  // ??? If I want caching then lose the top 2 bits
+  p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
-//  printf("***** %s, %d\n", __func__, numbytes);
   return 0;
 }
 
@@ -245,7 +244,6 @@ static int gpu_malloc_uncached_internal(const int mb, const int numbytes, GPU_ME
   av_assert0(p->arm);
   p->vc = mbox_mem_lock(mb, p->vc_handle);
   av_assert0(p->vc);
-//  printf("***** %s, %d\n", __func__, numbytes);
   return 0;
 }
 
@@ -254,7 +252,6 @@ static void gpu_free_internal(const int mb, GPU_MEM_PTR_T * const p) {
   vcsm_unlock_ptr(p->arm);
   vcsm_free(p->vcsm_handle);
   memset(p, 0, sizeof(*p));  // Ensure we crash hard if we try and use this again
-//  printf("***** %s\n", __func__);
 }
 
 
