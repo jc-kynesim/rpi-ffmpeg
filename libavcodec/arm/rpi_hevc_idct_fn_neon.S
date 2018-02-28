@@ -71,26 +71,21 @@ endfunc
 
 
 function JOIN(ff_hevc_rpi_transform_4x4_neon_, BIT_DEPTH), export=1
-        vpush       {d8-d15}
-        vld1.16     {q14, q15}, [r0]  // coeffs
-        ldr         r3, =0x00240053 // 36 and 83
-        vmov.32     d0[0], r3
+        vldr.i32    s0, =0x00240053 // 36 and 83
+        vld1.16     {q14, q15}, [r0 :256]  // coeffs
 
-        tr4_shift d28, d29, d30, d31, #7
+        tr4_shift   #7
 
-        vtrn.16     d28, d29
-        vtrn.16     d30, d31
-        vtrn.32     q14, q15
+        vzip.16     d28, d29
+        vzip.16     d30, d31
+        vzip.32     q14, q15
 
-        tr4_shift d28, d29, d30, d31, #(TRN_SHIFT)
+        tr4_shift   #TRN_SHIFT
 
-        vtrn.16     d28, d29
-        vtrn.16     d30, d31
-        vtrn.32     q14, q15
-
-        vst1.16     {q14, q15}, [r0]
-        vpop        {d8-d15}
+        vst4.16     {q14, q15}, [r0 :256]
         bx lr
+
+        .ltorg
 endfunc
 
 

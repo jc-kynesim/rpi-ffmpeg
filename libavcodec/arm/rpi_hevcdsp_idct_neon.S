@@ -274,42 +274,25 @@ endfunc
         vqrshrn.s32   \r3, q5, \shift
 .endm
 
-/* uses registers q2 - q6 for temp values */
-.macro tr4 r0, r1, r2, r3
-        vmull.s16  q4, \r1, d0[0]   // 83 * src1
-        vmull.s16  q6, \r1, d0[1]   // 36 * src1
-        vshll.s16  q2, \r0, #6   // 64 * src0
-        vshll.s16  q3, \r2, #6   // 64 * src2
-        vadd.s32   q5, q2, q3    // 64 * (src0 + src2)     e0
-        vsub.s32   q2, q2, q3    // 64 * (src0 - src2)     e1
-        vmlal.s16  q4, \r3, d0[1]   // 83 * src1 + 36 * src3  o0
-        vmlsl.s16  q6, \r3, d0[0]   // 36 * src1 - 83 * src3  o1
+/* uses registers q8 - q11 for temp values */
+.macro tr4_shift shift
+        vmull.s16   q9, d29, d0[0]   // 83 * src1
+        vmull.s16   q8, d29, d0[1]   // 36 * src1
+        vshll.s16   q14, d28, #6     // 64 * src0
+        vshll.s16   q10, d30, #6     // 64 * src2
+        vmlal.s16   q9, d31, d0[1]   // 83 * src1 + 36 * src3  o0
+        vmlsl.s16   q8, d31, d0[0]   // 36 * src1 - 83 * src3  o1
+        vadd.s32    q11, q14, q10    // 64 * (src0 + src2)     e0
+        vsub.s32    q10, q14, q10    // 64 * (src0 - src2)     e1
+        vadd.s32    q14, q11, q9     // e0 + o0
+        vadd.s32    q15, q10, q8     // e1 + o1
+        vsub.s32    q8, q10, q8      // e1 - o1
+        vsub.s32    q9, q11, q9      // e0 - o0
 
-        vsub.s32   q3, q5, q4    // e0 - o0
-        vadd.s32   q4, q5, q4    // e0 + o0
-        vadd.s32   q5, q2, q6    // e1 + o1
-        vsub.s32   q6, q2, q6    // e1 - o1
-.endm
-
-.macro tr4_shift r0, r1, r2, r3, shift
-        vmull.s16  q4, \r1, d0[0]   // 83 * src1
-        vmull.s16  q6, \r1, d0[1]   // 36 * src1
-        vshll.s16  q2, \r0, #6   // 64 * src0
-        vshll.s16  q3, \r2, #6   // 64 * src2
-        vadd.s32   q5, q2, q3    // 64 * (src0 + src2)     e0
-        vsub.s32   q2, q2, q3    // 64 * (src0 - src2)     e1
-        vmlal.s16  q4, \r3, d0[1]   // 83 * src1 + 36 * src3  o0
-        vmlsl.s16  q6, \r3, d0[0]   // 36 * src1 - 83 * src3  o1
-
-        vsub.s32   q3, q5, q4    // e0 - o0
-        vadd.s32   q4, q5, q4    // e0 + o0
-        vadd.s32   q5, q2, q6    // e1 + o1
-        vsub.s32   q6, q2, q6    // e1 - o1
-
-        vqrshrn.s32   \r0, q4, \shift
-        vqrshrn.s32   \r1, q5, \shift
-        vqrshrn.s32   \r2, q6, \shift
-        vqrshrn.s32   \r3, q3, \shift
+        vqrshrn.s32 d28, q14, \shift
+        vqrshrn.s32 d29, q15, \shift
+        vqrshrn.s32 d30, q8, \shift
+        vqrshrn.s32 d31, q9, \shift
 .endm
 
 .macro tr8_process d0, d1, d2, d3, d4, d5, d6, d7,                         \
