@@ -93,27 +93,6 @@
 
 
 hevc_trans_16x16:
-
-.if USE_STACK==0
-  b do_transform
-
-  .balign 32
-packed_buffer:
-  .space 16*2
-intermediate_results:
-  .space 32*32*2
-unpacked_buffer:
-  .space 32*32*2
-
-packed_buffer2:
-  .space 16*2
-intermediate_results2:
-  .space 32*32*2
-unpacked_buffer2:
-  .space 32*32*2
-.endif
-
-do_transform:
   push r6-r15, lr # TODO cut down number of used registers
   mov r14,r3 # coeffs32
   mov r15,r4 # num32
@@ -437,4 +416,29 @@ trans32:
   add r0,r8,32
   vsth VX(48,32++),(r0+=r6) REP 16
   pop pc
+
+.if USE_STACK == 0
+  .balign 32
+
+# .space directives generate 0's in the bin so avoid unnecessary padding by
+# just setting to appropriate value
+.equ intermediate_results, $+16*2
+
+# Layout goes:
+#
+#packed_buffer:
+#  .space 16*2
+#intermediate_results:
+#  .space 32*32*2
+#unpacked_buffer:
+#  .space 32*32*2
+#
+#packed_buffer2:
+#  .space 16*2
+#intermediate_results2:
+#  .space 32*32*2
+#unpacked_buffer2:
+#  .space 32*32*2
+.endif
+
 
