@@ -100,11 +100,6 @@
 
 // Define RPI_COMPRESS_COEFFS to 1 to send coefficients in compressed form
 #define RPI_COMPRESS_COEFFS 1
-// Define RPI_DEBLOCK_VPU to perform deblocking on the VPUs
-// (currently slower than deblocking on the ARM)
-// #define RPI_DEBLOCK_VPU
-
-#define RPI_VPU_DEBLOCK_CACHED 0
 
 // Use ARM emulation of QPU pred
 // These are for debug only as the emulation makes only limited
@@ -466,11 +461,6 @@ typedef struct HEVCRpiLocalContext {
 // Sand only has 2 planes (Y/C)
 #define RPI_MAX_PRED_CMDS (2*(HEVC_MAX_CTB_SIZE/4)*2*(HEVC_RPI_MAX_WIDTH/4))
 
-#ifdef RPI_DEBLOCK_VPU
-// Worst case is 16x16 CTUs
-#define RPI_MAX_DEBLOCK_CMDS (HEVC_RPI_MAX_WIDTH*4/16)
-#endif
-
 // Command for intra prediction and transform_add of predictions to coefficients
 enum rpi_pred_cmd_e
 {
@@ -714,44 +704,6 @@ typedef struct HEVCRpiContext {
     HEVCRpiQpu qpu;
 
     HEVCRpiFrameProgressState progress_states[2];
-
-#ifdef RPI_DEBLOCK_VPU
-// With the new scheme of rpi_execute_dblk_cmds 
-// it looks like ff_hevc_rpi_hls_filter is no longer called in raster order.
-// This causes trouble if RPI_DEBLOCK_VPU_Q_COUNT > 1 because we prepare setup
-// data for more than one row at a time before triggering the deblocker for one row.
-// This means that the deblock of the final row can use the wrong setup buffer.
-// 
-// Also concerned that the thread progress and waiting for job completion is
-// not done correctly with RPI_DEBLOCK_VPU at the end of the frame, or for small CTU sizes.
-#define RPI_DEBLOCK_VPU_Q_COUNT 1
-
-    int enable_rpi_deblock;
-
-    int uv_setup_width;
-    int uv_setup_height;
-    int setup_width; // Number of 16x16 blocks across the image
-    int setup_height; // Number of 16x16 blocks down the image
-
-    struct dblk_vpu_q_s
-    {
-        GPU_MEM_PTR_T deblock_vpu_gmem;
-
-        uint8_t (*y_setup_arm)[2][2][2][4];
-        uint8_t (*y_setup_vc)[2][2][2][4];
-
-        uint8_t (*uv_setup_arm)[2][2][2][4];
-        uint8_t (*uv_setup_vc)[2][2][2][4];
-
-        int (*vpu_cmds_arm)[6]; // r0-r5 for each command
-        int vpu_cmds_vc;
-
-        vpu_qpu_wait_h cmd_id;
-    } dvq_ents[RPI_DEBLOCK_VPU_Q_COUNT];
-
-    struct dblk_vpu_q_s * dvq;
-    unsigned int dvq_n;
-#endif
 
     HEVCRpiCabacState *cabac_save;
 

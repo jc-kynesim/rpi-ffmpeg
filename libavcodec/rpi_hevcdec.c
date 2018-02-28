@@ -844,19 +844,6 @@ static int alloc_entry_points(RpiSliceHeader * const sh, const int n)
 /* free everything allocated  by pic_arrays_init() */
 static void pic_arrays_free(HEVCRpiContext *s)
 {
-#ifdef RPI_DEBLOCK_VPU
-    {
-        int i;
-        for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i) {
-            struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
-
-            if (dvq->vpu_cmds_arm) {
-                gpu_free(&dvq->deblock_vpu_gmem);
-              dvq->vpu_cmds_arm = 0;
-            }
-        }
-    }
-#endif
     av_freep(&s->sao);
     av_freep(&s->deblock);
 
@@ -890,57 +877,6 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
                            ((height >> log2_min_cb_size) + 1);
     int ctb_count        = sps->ctb_width * sps->ctb_height;
     int min_pu_size      = sps->min_pu_width * sps->min_pu_height;
-
-#ifdef RPI_DEBLOCK_VPU
-    {
-        int i;
-        s->enable_rpi_deblock = !sps->sao_enabled;
-        s->setup_width = (sps->width+15) / 16;
-        s->setup_height = (sps->height+15) / 16;
-        s->uv_setup_width = ( (sps->width >> ctx_hshift(s, 1)) + 15) / 16;
-        s->uv_setup_height = ( (sps->height >> ctx_vshift(s, 1)) + 15) / 16;
-
-        for (i = 0; i != RPI_DEBLOCK_VPU_Q_COUNT; ++i)
-        {
-            struct dblk_vpu_q_s * const dvq = s->dvq_ents + i;
-            const unsigned int cmd_size = (sizeof(*dvq->vpu_cmds_arm) * 3 + 15) & ~15;
-            const unsigned int y_size = (sizeof(*dvq->y_setup_arm) * s->setup_width * s->setup_height + 15) & ~15;
-            const unsigned int uv_size = (sizeof(*dvq->uv_setup_arm) * s->uv_setup_width * s->uv_setup_height + 15) & ~15;
-            const unsigned int total_size =- cmd_size + y_size + uv_size;
-            int p_vc;
-            uint8_t * p_arm;
-#if RPI_VPU_DEBLOCK_CACHED
-            gpu_malloc_cached(total_size, &dvq->deblock_vpu_gmem);
-#else
-            gpu_malloc_uncached(total_size, &dvq->deblock_vpu_gmem);
-#endif
-            p_vc = dvq->deblock_vpu_gmem.vc;
-            p_arm = dvq->deblock_vpu_gmem.arm;
-
-            // Zap all
-            memset(p_arm, 0, dvq->deblock_vpu_gmem.numbytes);
-
-            // Subdivide
-            dvq->vpu_cmds_arm = (void*)p_arm;
-            dvq->vpu_cmds_vc = p_vc;
-
-            p_arm += cmd_size;
-            p_vc += cmd_size;
-
-            dvq->y_setup_arm = (void*)p_arm;
-            dvq->y_setup_vc = (void*)p_vc;
-
-            p_arm += y_size;
-            p_vc += y_size;
-
-            dvq->uv_setup_arm = (void*)p_arm;
-            dvq->uv_setup_vc = (void*)p_vc;
-        }
-
-        s->dvq_n = 0;
-        s->dvq = s->dvq_ents + s->dvq_n;
-    }
-#endif
 
     s->bs_width  = (width  >> 2) + 1;
     s->bs_height = (height >> 2) + 1;
