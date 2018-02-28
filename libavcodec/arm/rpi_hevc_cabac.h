@@ -282,21 +282,25 @@ static inline void get_cabac_by22_start_arm(CABACContext * const c)
     register uint32_t low __asm__("r1"), range __asm__("r2");
     uint32_t m, range8, bits;
 #if !USE_BY22_DIV
-#if CONFIG_PIC
-    uint32_t inv = cabac_by22_inv_range;
-#else
-    uint32_t inv;
+    uintptr_t inv;
 #endif
-#endif
+
     av_assert2(offsetof (CABACContext, low) == 0);
     av_assert2(offsetof (CABACContext, range) == 4);
     av_assert2(offsetof (CABACContext, by22.range) == offsetof (CABACContext, by22.bits) + 2);
-    __asm__ (
+    __asm__ volatile (
         "ldmia   %[c], {%[low], %[range]}                         \n\t"
-#if !USE_BY22_DIV && !CONFIG_PIC
-        "movw    %[inv], #:lower16:cabac_by22_inv_range           \n\t"
-        "movt    %[inv], #:upper16:cabac_by22_inv_range           \n\t"
+        : // Outputs
+               [low]"=r"(low),
+             [range]"=r"(range)
+        : // Inputs
+                 [c]"r"(c)
+        : // Clobbers
+    );
+#if !USE_BY22_DIV
+    inv = (uintptr_t)cabac_by22_inv_range;
 #endif
+    __asm__ volatile (
         "ldr     %[m], [%[ptr]], #-("AV_STRINGIFY(CABAC_BITS)"/8) \n\t"
 #if !USE_BY22_DIV
         "uxtb    %[range8], %[range]                              \n\t"
@@ -317,15 +321,11 @@ static inline void get_cabac_by22_start_arm(CABACContext * const c)
 #endif
         "eor     %[range], %[low], %[m], lsr %[ptr]               \n\t"
         : // Outputs
-               [ptr]"+r"(ptr),
-               [low]"=&r"(low),
-             [range]"=&r"(range),
+               [ptr]"+&r"(ptr),
+               [low]"+&r"(low),
+             [range]"+&r"(range),
 #if !USE_BY22_DIV
-#if CONFIG_PIC
                [inv]"+&r"(inv),
-#else
-               [inv]"=&r"(inv),
-#endif
 #endif
                  [m]"=&r"(m),
             [range8]"=&r"(range8),
@@ -333,8 +333,7 @@ static inline void get_cabac_by22_start_arm(CABACContext * const c)
         : // Inputs
                    [c]"r"(c),
             [bits_off]"J"(offsetof (CABACContext, by22.bits)),
-             [ptr_off]"J"(offsetof (CABACContext, bytestream)),
-                [cbir]"X"(cabac_by22_inv_range)  // If we don't have this then link fails! (cabac_by22_inv_range optimized out as unused!?)
+             [ptr_off]"J"(offsetof (CABACContext, bytestream))
         : // Clobbers
             "memory"
     );
