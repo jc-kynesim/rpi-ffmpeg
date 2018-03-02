@@ -17,55 +17,48 @@ endfunc
 
 function JOIN(ff_hevc_rpi_idct_8x8_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
+        add         r2, r0, #32
+        mov         r3, #64
         add         r1, #DC_ADD
         asr         r1, #DC_SHIFT
         vdup.16     q8, r1
         vdup.16     q9, r1
-        vmov.16     q10, q8
-        vmov.16     q11, q8
-        vmov.16     q12, q8
-        vmov.16     q13, q8
-        vmov.16     q14, q8
-        vmov.16     q15, q8
-        vstm        r0, {q8-q15}
+        vst1.16     {q8, q9}, [r0], r3
+        vst1.16     {q8, q9}, [r2], r3
+        vst1.16     {q8, q9}, [r0]
+        vst1.16     {q8, q9}, [r2]
         bx lr
 endfunc
 
 function JOIN(ff_hevc_rpi_idct_16x16_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
+        add         r2, r0, #32
+        mov         r3, #64
         add         r1, #DC_ADD
+        mov         ip, #16*16
         asr         r1, #DC_SHIFT
         vdup.16     q8, r1
         vdup.16     q9, r1
-        vmov.16     q10, q8
-        vmov.16     q11, q8
-        vmov.16     q12, q8
-        vmov.16     q13, q8
-        vmov.16     q14, q8
-        vmov.16     q15, q8
-        vstm        r0!, {q8-q15}
-        vstm        r0!, {q8-q15}
-        vstm        r0!, {q8-q15}
-        vstm        r0, {q8-q15}
+1:      vst1.16     {q8, q9}, [r0], r3
+        subs        ip, ip, #32
+        vst1.16     {q8, q9}, [r2], r3
+        bhi         1b
         bx lr
 endfunc
 
 function JOIN(ff_hevc_rpi_idct_32x32_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
+        add         r2, r0, #32
+        mov         r3, #64
         add         r1, #DC_ADD
+        mov         ip, #32*32
         asr         r1, #DC_SHIFT
-        mov         r3, #16
         vdup.16     q8, r1
         vdup.16     q9, r1
-        vmov.16     q10, q8
-        vmov.16     q11, q8
-        vmov.16     q12, q8
-        vmov.16     q13, q8
-        vmov.16     q14, q8
-        vmov.16     q15, q8
-1:      subs        r3, #1
-        vstm        r0!, {q8-q15}
-        bne         1b
+1:      vst1.16     {q8, q9}, [r0], r3
+        subs        ip, ip, #32
+        vst1.16     {q8, q9}, [r2], r3
+        bhi         1b
         bx lr
 endfunc
 
