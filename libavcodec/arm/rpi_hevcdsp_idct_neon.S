@@ -217,30 +217,6 @@ endfunc
 
 
 
-.macro  transpose_16b_8x8   r0, r1, r2, r3, r4, r5, r6, r7
-        vtrn.64         \r0, \r4
-        vtrn.64         \r1, \r5
-        vtrn.64         \r2, \r6
-        vtrn.64         \r3, \r7
-        vtrn.32         \r0, \r2
-        vtrn.32         \r1, \r3
-        vtrn.32         \r4, \r6
-        vtrn.32         \r5, \r7
-        vtrn.16         \r0, \r1
-        vtrn.16         \r2, \r3
-        vtrn.16         \r4, \r5
-        vtrn.16         \r6, \r7
-.endm
-
-// in 4 q regs
-// output 8 d regs
-.macro transpose_16b_4x4    r0, r1, r2, r3
-        vtrn.32         \r0, \r2
-        vtrn.32         \r1, \r3
-        vtrn.16         \r0, \r1
-        vtrn.16         \r2, \r3
-.endm
-
 /* uses registers q8 - q13 for temp values */
 .macro tr4_luma_shift shift
         vaddl.s16   q8, d28, d30    // c0 = src0 + src2
