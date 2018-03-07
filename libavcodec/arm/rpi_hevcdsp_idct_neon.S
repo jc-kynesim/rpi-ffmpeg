@@ -22,74 +22,129 @@
 #include "neon.S"
 
 function ff_hevc_rpi_add_residual_4x4_neon_8, export=1
-        vldm        r1, {q0-q1}
+        add         ip, r0, r2
+        vld1.16     {q0, q1}, [r1]
+        lsl         r2, #1
         vld1.32     d4[0], [r0], r2
-        vld1.32     d4[1], [r0], r2
-        vld1.32     d5[0], [r0], r2
-        vld1.32     d5[1], [r0], r2
-        sub         r0, r0, r2, lsl #2
+        rsb         r3, r2, #0
+        vld1.32     d4[1], [ip], r2
+        vld1.32     d5[0], [r0], r3
+        vld1.32     d5[1], [ip], r3
         vmovl.u8    q8, d4
         vmovl.u8    q9, d5
-        vqadd.s16   q0, q0, q8
-        vqadd.s16   q1, q1, q9
+        vqadd.s16   q0, q8
+        vqadd.s16   q1, q9
         vqmovun.s16 d0, q0
         vqmovun.s16 d1, q1
         vst1.32     d0[0], [r0], r2
-        vst1.32     d0[1], [r0], r2
-        vst1.32     d1[0], [r0], r2
-        vst1.32     d1[1], [r0], r2
+        vst1.32     d0[1], [ip], r2
+        vst1.32     d1[0], [r0]
+        vst1.32     d1[1], [ip]
         bx          lr
 endfunc
 
 function ff_hevc_rpi_add_residual_8x8_neon_8, export=1
-        mov         r3,   #8
-1:      subs        r3,   #1
-        vld1.16     {q0}, [r1]!
-        vld1.8      d16,  [r0]
-        vmovl.u8    q8,   d16
-        vqadd.s16   q0,   q8
-        vqmovun.s16 d0,   q0
-        vst1.32     d0,   [r0], r2
+        push        {r4, lr}
+        vld1.16     {q0, q1}, [r1]!
+        add         ip, r0, r2
+        vld1.8      {d6}, [r0]
+        add         r4, r0, r2, lsl #1
+        vld1.8      {d7}, [ip]
+        add         lr, ip, r2, lsl #1
+        lsl         r2, #1
+        mov         r3, #8-2
+        vmovl.u8    q2, d6
+        vmovl.u8    q3, d7
+        vqadd.s16   q2, q0
+        vqadd.s16   q3, q1
+1:
+          vld1.16     {q0, q1}, [r1]!
+        subs        r3, #2
+        vqmovun.s16 d4, q2
+        vqmovun.s16 d5, q3
+          vld1.8      {d6}, [r4], r2
+          vld1.8      {d7}, [lr], r2
+        vst1.8      {d4}, [r0], r2
+        vst1.8      {d5}, [ip], r2
+          vmovl.u8    q2, d6
+          vmovl.u8    q3, d7
+          vqadd.s16   q2, q0
+          vqadd.s16   q3, q1
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d4, q2
+          vqmovun.s16 d5, q3
+          vst1.8      {d4}, [r0]
+          vst1.8      {d5}, [ip]
+          pop         {r4, pc}
 endfunc
 
 function ff_hevc_rpi_add_residual_16x16_neon_8, export=1
-        mov         r3,   #16
-1:      subs        r3,   #1
         vld1.16     {q0, q1}, [r1]!
-        vld1.8      {q8},  [r0]
-        vmovl.u8    q9,  d16
-        vmovl.u8    q10, d17
-        vqadd.s16   q0,  q9
-        vqadd.s16   q1,  q10
-        vqmovun.s16 d0,  q0
-        vqmovun.s16 d1,  q1
-        vst1.8      {q0},   [r0], r2
+        add         ip, r0, r2
+        vld1.8      {q3}, [r0]
+        mov         r3, #16-1
+        vmovl.u8    q2, d6
+        vmovl.u8    q3, d7
+        vqadd.s16   q2, q0
+        vqadd.s16   q3, q1
+1:
+          vld1.16     {q0, q1}, [r1]!
+        subs        r3, #1
+        vqmovun.s16 d4, q2
+        vqmovun.s16 d5, q3
+          vld1.8      {q3}, [ip], r2
+        vst1.8      {q2}, [r0], r2
+          vmovl.u8    q2, d6
+          vmovl.u8    q3, d7
+          vqadd.s16   q2, q0
+          vqadd.s16   q3, q1
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d4, q2
+          vqmovun.s16 d5, q3
+          vst1.8      {q2}, [r0]
+          bx          lr
 endfunc
 
 function ff_hevc_rpi_add_residual_32x32_neon_8, export=1
-        mov         r3,   #32
-1:      subs        r3,   #1
         vldm        r1!, {q0-q3}
-        vld1.8      {q8, q9},  [r0]
+        vld1.8      {q8, q9}, [r0]
+        add         ip, r0, r2
         vmovl.u8    q10, d16
+        mov         r3, #32-1
         vmovl.u8    q11, d17
         vmovl.u8    q12, d18
         vmovl.u8    q13, d19
-        vqadd.s16   q0,  q10
-        vqadd.s16   q1,  q11
-        vqadd.s16   q2,  q12
-        vqadd.s16   q3,  q13
-        vqmovun.s16 d0,  q0
-        vqmovun.s16 d1,  q1
-        vqmovun.s16 d2,  q2
-        vqmovun.s16 d3,  q3
-        vst1.8     {q0, q1},   [r0], r2
-        bne         1b
-        bx          lr
+        vqadd.s16   q10, q0
+        vqadd.s16   q11, q1
+        vqadd.s16   q12, q2
+        vqadd.s16   q13, q3
+1:
+          vldm        r1!, {q0-q3}
+        vqmovun.s16 d20, q10
+        vqmovun.s16 d21, q11
+        vqmovun.s16 d22, q12
+        vqmovun.s16 d23, q13
+          vld1.8      {q8, q9}, [ip], r2
+        subs        r3, #1
+        vst1.8      {q10, q11}, [r0], r2
+          vmovl.u8    q10, d16
+          vmovl.u8    q11, d17
+          vmovl.u8    q12, d18
+          vmovl.u8    q13, d19
+          vqadd.s16   q10, q0
+          vqadd.s16   q11, q1
+          vqadd.s16   q12, q2
+          vqadd.s16   q13, q3
+        bne     1b
+
+          vqmovun.s16 d20, q10
+          vqmovun.s16 d21, q11
+          vqmovun.s16 d22, q12
+          vqmovun.s16 d23, q13
+          vst1.8      {q10, q11}, [r0]
+          bx          lr
 endfunc
 
 
@@ -99,21 +154,22 @@ endfunc
 @   int dc)                     // [r2]
 
 function ff_hevc_rpi_add_residual_4x4_dc_neon_8, export=1
+        add         ip, r0, r1
         vdup.16     q15, r2
-
+        lsl         r1, #1
         vld1.32     d4[0], [r0], r1
-        vld1.32     d4[1], [r0], r1
-        vld1.32     d5[0], [r0], r1
-        vld1.32     d5[1], [r0], r1
-        sub         r0, r0, r1, lsl #2
+        rsb         r3, r1, #0
+        vld1.32     d4[1], [ip], r1
+        vld1.32     d5[0], [r0], r3
+        vld1.32     d5[1], [ip], r3
         vaddw.u8    q0, q15, d4
         vaddw.u8    q1, q15, d5
         vqmovun.s16 d0, q0
         vqmovun.s16 d1, q1
         vst1.32     d0[0], [r0], r1
-        vst1.32     d0[1], [r0], r1
-        vst1.32     d1[0], [r0], r1
-        vst1.32     d1[1], [r0], r1
+        vst1.32     d0[1], [ip], r1
+        vst1.32     d1[0], [r0]
+        vst1.32     d1[1], [ip]
         bx          lr
 endfunc
 
@@ -124,8 +180,8 @@ endfunc
 @   int dc)                     // [r2]
 
 function ff_hevc_rpi_add_residual_4x4_dc_c_neon_8, export=1
+        mov         r3,  #4-2
         vdup.32     q15, r2
-        mov         r3,  #4
         b           1f
 endfunc
 
@@ -136,15 +192,33 @@ endfunc
 
 function ff_hevc_rpi_add_residual_8x8_dc_neon_8, export=1
         vdup.16     q15, r2
-        mov         r3,  #8
-
-1:      subs        r3,   #1
-        vld1.8      d16,  [r0]
-        vaddw.u8    q0,   q15, d16
-        vqmovun.s16 d0,   q0
-        vst1.32     d0,   [r0], r1
+        mov         r3, #8-2
+1:      vld1.8      d16, [r0]
+        add         ip, r0, r1
+        push        {r4, lr}
+        vld1.8      d17, [ip]
+        add         r4, r0, r1, lsl #1
+        vaddw.u8    q0, q15, d16
+        lsl         r1, #1
+        vaddw.u8    q1, q15, d17
+        add         lr, ip, r1
+1:
+          vld1.8      {d16}, [r4], r1
+          vld1.8      {d17}, [lr], r1
+        subs        r3, #2
+        vqmovun.s16 d4, q0
+        vqmovun.s16 d5, q1
+          vaddw.u8    q0, q15, d16
+          vaddw.u8    q1, q15, d17
+        vst1.8      {d4}, [r0], r1
+        vst1.8      {d5}, [ip], r1
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d4, q0
+          vqmovun.s16 d5, q1
+          vst1.8      {d4}, [r0]
+          vst1.8      {d5}, [ip]
+          pop         {r4, pc}
 endfunc
 
 
@@ -154,8 +228,8 @@ endfunc
 @   int dc)                     // [r2]
 
 function ff_hevc_rpi_add_residual_8x8_dc_c_neon_8, export=1
+        mov         r3,  #8-1
         vdup.32     q15, r2
-        mov         r3,  #8
         b           1f
 endfunc
 
@@ -166,17 +240,25 @@ endfunc
 
 function ff_hevc_rpi_add_residual_16x16_dc_neon_8, export=1
         vdup.16     q15, r2
-        mov         r3,  #16
-
-1:      subs        r3,   #1
-        vld1.8      {q8},  [r0]
-        vaddw.u8    q0,  q15, d16
-        vaddw.u8    q1,  q15, d17
-        vqmovun.s16 d0,  q0
-        vqmovun.s16 d1,  q1
-        vst1.8      {q0},   [r0], r1
+        mov         r3,  #16-1
+1:      vld1.8      {q8}, [r0]
+        add         ip, r0, r1
+        vaddw.u8    q0, q15, d16
+        vaddw.u8    q1, q15, d17
+1:
+          vld1.8      {q8}, [ip], r1
+        subs        r3, #1
+        vqmovun.s16 d4, q0
+        vqmovun.s16 d5, q1
+          vaddw.u8    q0, q15, d16
+          vaddw.u8    q1, q15, d17
+        vst1.8      {q2}, [r0], r1
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d4, q0
+          vqmovun.s16 d5, q1
+          vst1.8      {q2}, [r0]
+          bx          lr
 endfunc
 
 
@@ -186,8 +268,8 @@ endfunc
 @   int dc)                     // [r2]
 
 function ff_hevc_rpi_add_residual_16x16_dc_c_neon_8, export=1
+        mov         r3,  #16-1
         vdup.32     q15, r2
-        mov         r3,  #16
         b           1f
 endfunc
 
@@ -198,21 +280,33 @@ endfunc
 
 function ff_hevc_rpi_add_residual_32x32_dc_neon_8, export=1
         vdup.16     q15, r2
-        mov         r3,  #32
+        mov         r3, #32-1
+1:      vld1.8      {q8, q9}, [r0]
+        add         ip, r0, r1
+        vaddw.u8    q0, q15, d16
+        vaddw.u8    q1, q15, d17
+        vaddw.u8    q2, q15, d18
+        vaddw.u8    q3, q15, d19
+1:
+        vqmovun.s16 d20, q0
+        vqmovun.s16 d21, q1
+        vqmovun.s16 d22, q2
+        vqmovun.s16 d23, q3
+          vld1.8      {q8, q9}, [ip], r1
+        subs        r3, #1
+          vaddw.u8    q0, q15, d16
+          vaddw.u8    q1, q15, d17
+          vaddw.u8    q2, q15, d18
+          vaddw.u8    q3, q15, d19
+        vst1.8      {q10, q11}, [r0], r1
+        bne     1b
 
-1:      subs        r3,   #1
-        vld1.8      {q8, q9},  [r0]
-        vaddw.u8    q0,  q15, d16
-        vaddw.u8    q1,  q15, d17
-        vaddw.u8    q2,  q15, d18
-        vaddw.u8    q3,  q15, d19
-        vqmovun.s16 d0,  q0
-        vqmovun.s16 d1,  q1
-        vqmovun.s16 d2,  q2
-        vqmovun.s16 d3,  q3
-        vst1.8     {q0, q1},   [r0], r1
-        bne         1b
-        bx          lr
+          vqmovun.s16 d20, q0
+          vqmovun.s16 d21, q1
+          vqmovun.s16 d22, q2
+          vqmovun.s16 d23, q3
+          vst1.8      {q10, q11}, [r0]
+          bx          lr
 endfunc
 
 
