@@ -1,6 +1,8 @@
 #include "libavutil/arm/asm.S"
 #include "neon.S"
 
+ .arch_extension mp @ enable PLDW
+
 @ General notes:
 @
 @ Residual is generally only guaranteed to be clipped to 16 bits.
@@ -60,6 +62,7 @@ function ff_hevc_rpi_add_residual_8x8_neon_8, export=1
         vst1.8      {d4}, [r0], r2
         vst1.8      {d5}, [ip], r2
           vmovl.u8    q2, d6
+            pldw        [r4]
           vmovl.u8    q3, d7
           vqadd.s16   q2, q0
           vqadd.s16   q3, q1
@@ -89,6 +92,7 @@ function ff_hevc_rpi_add_residual_16x16_neon_8, export=1
           vld1.8      {q3}, [ip], r2
         vst1.8      {q2}, [r0], r2
           vmovl.u8    q2, d6
+            pldw        [ip]
           vmovl.u8    q3, d7
           vqadd.s16   q2, q0
           vqadd.s16   q3, q1
@@ -123,6 +127,7 @@ function ff_hevc_rpi_add_residual_32x32_neon_8, export=1
         subs        r3, #1
         vst1.8      {q10, q11}, [r0], r2
           vmovl.u8    q10, d16
+            pldw        [ip]
           vmovl.u8    q11, d17
           vmovl.u8    q12, d18
           vmovl.u8    q13, d19
@@ -314,15 +319,18 @@ endfunc
 @   int dc_v)             [r3]
 
 function ff_hevc_rpi_add_residual_4x4_u_neon_8, export=1
-        vld1.8      {d16}, [r0, :64], r2
-        vld1.8      {d17}, [r0, :64], r2
-        vld1.8      {d18}, [r0, :64], r2
-        vld1.8      {d19}, [r0, :64], r2
+        add         ip, r0, r2
         vld1.16     {q0, q1}, [r1]
+        lsl         r2, #1
+        vld1.8      {d16}, [r0 :64], r2
+        vld1.8      {d17}, [ip :64], r2
+        vld1.8      {d18}, [r0 :64]
+        sub         r0, r2
+        vld1.8      {d19}, [ip :64]
+        sub         ip, r2
         vdup.16     q2, r3
         vdup.16     q3, r3
         vmovl.u8    q10, d16
-        sub         r0, r0, r2, lsl #2
         vmovl.u8    q11, d17
         vmovl.u8    q12, d18
         vmovl.u8    q13, d19
@@ -336,10 +344,10 @@ function ff_hevc_rpi_add_residual_4x4_u_neon_8, export=1
         vqmovun.s16 d1,  q2
         vqmovun.s16 d2,  q1
         vqmovun.s16 d3,  q3
-        vst1.8      {d0}, [r0, :64], r2
-        vst1.8      {d1}, [r0, :64], r2
-        vst1.8      {d2}, [r0, :64], r2
-        vst1.8      {d3}, [r0, :64]
+        vst1.8      {d0}, [r0 :64], r2
+        vst1.8      {d1}, [ip :64], r2
+        vst1.8      {d2}, [r0 :64]
+        vst1.8      {d3}, [ip :64]
         bx          lr
 endfunc
 
@@ -350,28 +358,48 @@ endfunc
 @   int dc_v)             [r3]
 
 function ff_hevc_rpi_add_residual_8x8_u_neon_8, export=1
-        mov         r12,    #4
         vdup.16     q15, r3
-1:
-        vld2.8      {d16, d17}, [r0, :128], r2
-        vld2.8      {d18, d19}, [r0, :128]
-        vld1.16     {q0, q1}, [r1, :256]!
-        subs        r12, #1
+        add         ip, r0, r2
+        push        {r4, lr}
+        vld2.8      {d16, d17}, [r0 :128]
+        lsl         r2, #1
+        vld2.8      {d18, d19}, [ip :128]
+        mov         r3, #8-2
+        vld1.16     {q0, q1}, [r1 :256]!
+        add         r4, r0, r2
         vmovl.u8    q10, d16
-        sub         r0, r2
+        add         lr, ip, r2
         vmovl.u8    q11, d18
         vqadd.s16   q0,  q10
         vaddw.u8    q2,  q15, d17
         vqadd.s16   q1,  q11
         vaddw.u8    q3,  q15, d19
-        vqmovun.s16 d16,  q0
-        vqmovun.s16 d17,  q2
-        vqmovun.s16 d18,  q1
-        vqmovun.s16 d19,  q3
-        vst2.8      {d16, d17}, [r0, :128], r2
-        vst2.8      {d18, d19}, [r0, :128], r2
+1:
+        vqmovun.s16 d20,  q0
+        vqmovun.s16 d21,  q2
+          vld2.8      {d16, d17}, [r4 :128], r2
+        subs        r3, #2
+        vqmovun.s16 d22,  q1
+        vqmovun.s16 d23,  q3
+        vst2.8      {d20, d21}, [r0 :128], r2
+          vld2.8      {d18, d19}, [lr :128], r2
+        vst2.8      {d22, d23}, [ip :128], r2
+          vld1.16     {q0, q1}, [r1 :256]!
+          vmovl.u8    q10, d16
+          vmovl.u8    q11, d18
+          vqadd.s16   q0,  q10
+          vaddw.u8    q2,  q15, d17
+          vqadd.s16   q1,  q11
+          vaddw.u8    q3,  q15, d19
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d20,  q0
+          vqmovun.s16 d21,  q2
+          vqmovun.s16 d22,  q1
+          vqmovun.s16 d23,  q3
+          vst2.8      {d20, d21}, [r0 :128]
+          vst2.8      {d22, d23}, [ip :128]
+          pop         {r4, pc}
 endfunc
 
 @ add_residual16x16_u(
@@ -381,25 +409,41 @@ endfunc
 @   int dc_v)             [r3]
 
 function ff_hevc_rpi_add_residual_16x16_u_neon_8, export=1
-        mov         r12,    #16
         vdup.16     q15, r3
+        add         ip, r0, r2
+        vld2.8      {q8, q9}, [r0 :256]
+        mov         r3, #16-1
+        vld1.16     {q0, q1}, [r1 :256]!
+        vmovl.u8    q11, d16
+        vmovl.u8    q12, d17
+        vqadd.s16   q0,  q11
+        vaddw.u8    q11, q15, d18
+        vqadd.s16   q1,  q12
+        vaddw.u8    q12, q15, d19
 1:
-        vld2.8      {q8, q9}, [r0, :256]
-        vld1.16     {q0, q1}, [r1, :256]!
-        subs        r12,   #1
-        vmovl.u8    q10, d16
-        vmovl.u8    q11, d17
-        vqadd.s16   q0,  q10
-        vqadd.s16   q1,  q11
-        vaddw.u8    q2,  q15, d18
-        vaddw.u8    q3,  q15, d19
-        vqmovun.s16 d16, q0
-        vqmovun.s16 d17, q1
-        vqmovun.s16 d18, q2
-        vqmovun.s16 d19, q3
-        vst2.8      {q8, q9}, [r0, :256], r2
+          vld2.8      {q8, q9}, [ip :256], r2
+        subs        r3, #1
+        vqmovun.s16 d20, q0
+        vqmovun.s16 d22, q11
+        vqmovun.s16 d21, q1
+        vqmovun.s16 d23, q12
+          vld1.16     {q0, q1}, [r1 :256]!
+        vst2.8      {q10, q11}, [r0 :256], r2
+          vmovl.u8    q11, d16
+            pldw        [ip]
+          vmovl.u8    q12, d17
+          vqadd.s16   q0,  q11
+          vaddw.u8    q11, q15, d18
+          vqadd.s16   q1,  q12
+          vaddw.u8    q12, q15, d19
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d20, q0
+          vqmovun.s16 d22, q11
+          vqmovun.s16 d21, q1
+          vqmovun.s16 d23, q12
+          vst2.8      {q10, q11}, [r0 :256]
+          bx          lr
 endfunc
 
 @ ============================================================================
@@ -411,15 +455,18 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 
 function ff_hevc_rpi_add_residual_4x4_v_neon_8, export=1
-        vld1.8      {d16}, [r0, :64], r2
-        vld1.8      {d17}, [r0, :64], r2
-        vld1.8      {d18}, [r0, :64], r2
-        vld1.8      {d19}, [r0, :64], r2
+        add         ip, r0, r2
         vld1.16     {q2, q3}, [r1]
+        lsl         r2, #1
+        vld1.8      {d16}, [r0 :64], r2
+        vld1.8      {d17}, [ip :64], r2
+        vld1.8      {d18}, [r0 :64]
+        sub         r0, r2
+        vld1.8      {d19}, [ip :64]
+        sub         ip, r2
         vdup.16     q0, r3
         vdup.16     q1, r3
         vmovl.u8    q10, d16
-        sub         r0, r0, r2, lsl #2
         vmovl.u8    q11, d17
         vmovl.u8    q12, d18
         vmovl.u8    q13, d19
@@ -433,10 +480,10 @@ function ff_hevc_rpi_add_residual_4x4_v_neon_8, export=1
         vqmovun.s16 d1,  q2
         vqmovun.s16 d2,  q1
         vqmovun.s16 d3,  q3
-        vst1.8      {d0}, [r0, :64], r2
-        vst1.8      {d1}, [r0, :64], r2
-        vst1.8      {d2}, [r0, :64], r2
-        vst1.8      {d3}, [r0, :64]
+        vst1.8      {d0}, [r0 :64], r2
+        vst1.8      {d1}, [ip :64], r2
+        vst1.8      {d2}, [r0 :64]
+        vst1.8      {d3}, [ip :64]
         bx          lr
 endfunc
 
@@ -446,28 +493,48 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 
 function ff_hevc_rpi_add_residual_8x8_v_neon_8, export=1
-        mov         r12,    #4
         vdup.16     q15, r3
-1:
-        vld2.8      {d16, d17}, [r0, :128], r2
-        vld2.8      {d18, d19}, [r0, :128]
-        vld1.16     {q0, q1}, [r1, :256]!
-        subs        r12, #1
+        add         ip, r0, r2
+        push        {r4, lr}
+        vld2.8      {d16, d17}, [r0 :128]
+        lsl         r2, #1
+        vld2.8      {d18, d19}, [ip :128]
+        mov         r3, #8-2
+        vld1.16     {q0, q1}, [r1 :256]!
+        add         r4, r0, r2
         vmovl.u8    q10, d17
-        sub         r0, r2
+        add         lr, ip, r2
         vmovl.u8    q11, d19
         vqadd.s16   q0,  q10
-        vqadd.s16   q1,  q11
         vaddw.u8    q2,  q15, d16
+        vqadd.s16   q1,  q11
         vaddw.u8    q3,  q15, d18
-        vqmovun.s16 d17,  q0
-        vqmovun.s16 d16,  q2
-        vqmovun.s16 d19,  q1
-        vqmovun.s16 d18,  q3
-        vst2.8      {d16, d17}, [r0, :128], r2
-        vst2.8      {d18, d19}, [r0, :128], r2
+1:
+        vqmovun.s16 d20,  q2
+        vqmovun.s16 d21,  q0
+          vld2.8      {d16, d17}, [r4 :128], r2
+        subs        r3, #2
+        vqmovun.s16 d22,  q3
+        vqmovun.s16 d23,  q1
+        vst2.8      {d20, d21}, [r0 :128], r2
+          vld2.8      {d18, d19}, [lr :128], r2
+        vst2.8      {d22, d23}, [ip :128], r2
+          vld1.16     {q0, q1}, [r1 :256]!
+          vmovl.u8    q10, d17
+          vmovl.u8    q11, d19
+          vqadd.s16   q0,  q10
+          vaddw.u8    q2,  q15, d16
+          vqadd.s16   q1,  q11
+          vaddw.u8    q3,  q15, d18
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d20,  q2
+          vqmovun.s16 d21,  q0
+          vqmovun.s16 d22,  q3
+          vqmovun.s16 d23,  q1
+          vst2.8      {d20, d21}, [r0 :128]
+          vst2.8      {d22, d23}, [ip :128]
+          pop         {r4, pc}
 endfunc
 
 @ add_residual16x16_v(
@@ -476,25 +543,41 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 
 function ff_hevc_rpi_add_residual_16x16_v_neon_8, export=1
-        mov         r12,    #16
         vdup.16     q15, r3
+        add         ip, r0, r2
+        vld2.8      {q8, q9}, [r0 :256]
+        mov         r3, #16-1
+        vld1.16     {q0, q1}, [r1 :256]!
+        vmovl.u8    q11, d18
+        vmovl.u8    q12, d19
+        vqadd.s16   q0,  q11
+        vaddw.u8    q11, q15, d16
+        vqadd.s16   q1,  q12
+        vaddw.u8    q12, q15, d17
 1:
-        vld2.8      {q8, q9}, [r0, :256]
-        vld1.16     {q0, q1}, [r1, :256]!
-        subs        r12,   #1
-        vmovl.u8    q10, d18
-        vmovl.u8    q11, d19
-        vaddw.u8    q2,  q15, d16
-        vaddw.u8    q3,  q15, d17
-        vqadd.s16   q0,  q10
-        vqadd.s16   q1,  q11
-        vqmovun.s16 d16, q2
-        vqmovun.s16 d17, q3
-        vqmovun.s16 d18, q0
-        vqmovun.s16 d19, q1
-        vst2.8      {q8, q9}, [r0, :256], r2
+          vld2.8      {q8, q9}, [ip :256], r2
+        subs        r3, #1
+        vqmovun.s16 d20, q11
+        vqmovun.s16 d22, q0
+        vqmovun.s16 d21, q12
+        vqmovun.s16 d23, q1
+          vld1.16     {q0, q1}, [r1 :256]!
+        vst2.8      {q10, q11}, [r0 :256], r2
+          vmovl.u8    q11, d18
+            pldw        [ip]
+          vmovl.u8    q12, d19
+          vqadd.s16   q0,  q11
+          vaddw.u8    q11, q15, d16
+          vqadd.s16   q1,  q12
+          vaddw.u8    q12, q15, d17
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d20, q11
+          vqmovun.s16 d22, q0
+          vqmovun.s16 d21, q12
+          vqmovun.s16 d23, q1
+          vst2.8      {q10, q11}, [r0 :256]
+          bx          lr
 endfunc
 
 @ ============================================================================
@@ -506,13 +589,16 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 
 function ff_hevc_rpi_add_residual_4x4_c_neon_8, export=1
-        vld1.8      {d16}, [r0, :64], r2
-        vld1.8      {d17}, [r0, :64], r2
-        vld1.8      {d18}, [r0, :64], r2
-        vld1.8      {d19}, [r0, :64], r2
-        vldm        r1, {q0-q3}           @ Q0/1 gets all of U, Q2/3 gets all of V
+        add         ip, r0, r2
+        vld1.16     {q0, q1}, [r1]!       @ all of U
+        lsl         r2, #1
+        vld1.8      {d16}, [r0 :64], r2
+        rsb         r3, r2, #0
+        vld1.8      {d17}, [ip :64], r2
+        vld1.16     {q2, q3}, [r1]        @ all of V
+        vld1.8      {d18}, [r0 :64], r3
+        vld1.8      {d19}, [ip :64], r3
         vmovl.u8    q10, d16
-        sub         r0, r0, r2, lsl #2
         vmovl.u8    q11, d17
         vmovl.u8    q12, d18
         vmovl.u8    q13, d19
@@ -526,10 +612,10 @@ function ff_hevc_rpi_add_residual_4x4_c_neon_8, export=1
         vqmovun.s16 d1,  q2
         vqmovun.s16 d2,  q1
         vqmovun.s16 d3,  q3
-        vst1.8      {d0}, [r0, :64], r2
-        vst1.8      {d1}, [r0, :64], r2
-        vst1.8      {d2}, [r0, :64], r2
-        vst1.8      {d3}, [r0, :64]
+        vst1.8      {d0}, [r0 :64], r2
+        vst1.8      {d1}, [ip :64], r2
+        vst1.8      {d2}, [r0 :64]
+        vst1.8      {d3}, [ip :64]
         bx          lr
 endfunc
 
@@ -539,22 +625,36 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 
 function ff_hevc_rpi_add_residual_8x8_c_neon_8, export=1
-        mov         r12,    #8
+        vld2.8      {d16, d17}, [r0 :128]
         add         r3, r1, #(8*8*2)  @ Offset to V
-1:
-        vld2.8      {d16, d17}, [r0, :128]
-        vld1.16     {q0}, [r1, :128]!
-        vld1.16     {q1}, [r3, :128]!
-        subs        r12, #1
+        vld1.16     {q0}, [r1 :128]!
+        add         ip, r0, r2
+        vld1.16     {q1}, [r3 :128]!
         vmovl.u8    q10, d16
-        vmovl.u8    q11, d17
-        vqadd.s16   q0,  q10
-        vqadd.s16   q1,  q11
-        vqmovun.s16 d0,  q0
-        vqmovun.s16 d1,  q1
-        vst2.8      {d0, d1}, [r0, :128], r2
+        push        {lr}
+        vmovl.u8    q8,  d17
+        mov         lr, #8-1
+        vqadd.s16   q10, q0
+        vqadd.s16   q1,  q8
+1:
+          vld2.8      {d16, d17}, [ip :128], r2
+        subs        lr, #1
+          vld1.16     {q0}, [r1 :128]!
+        vqmovun.s16 d20, q10
+        vqmovun.s16 d21, q1
+          vld1.16     {q1}, [r3 :128]!
+        vst2.8      {d20, d21}, [r0 :128], r2
+          vmovl.u8    q10, d16
+            pldw        [ip]
+          vmovl.u8    q8,  d17
+          vqadd.s16   q10, q0
+          vqadd.s16   q1,  q8
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d20, q10
+          vqmovun.s16 d21, q1
+          vst2.8      {d20, d21}, [r0 :128]
+          pop         {pc}
 endfunc
 
 @ add_residual16x16_c(
@@ -563,28 +663,48 @@ endfunc
 @   ptrdiff_t stride)     [r2]
 
 function ff_hevc_rpi_add_residual_16x16_c_neon_8, export=1
-        mov         r12,    #16
+        vld2.8      {q8, q9}, [r0 :256]
         add         r3, r1, #(16*16*2)  @ Offset to V
-1:
-        vld2.8      {q8, q9}, [r0, :256]
-        vld1.16     {q0, q1}, [r1, :256]!
-        vld1.16     {q2, q3}, [r3, :256]!
-        subs        r12,   #1
+        vld1.16     {q0, q1}, [r1 :256]!
+        add         ip, r0, r2
+        vld1.16     {q2, q3}, [r3 :256]!
         vmovl.u8    q10, d16
-        vmovl.u8    q11, d17
-        vmovl.u8    q12, d18
-        vmovl.u8    q13, d19
+        push        {lr}
+        vmovl.u8    q8,  d17
+        mov         lr, #16-1
+        vmovl.u8    q11, d18
+        vmovl.u8    q9,  d19
         vqadd.s16   q0,  q10
-        vqadd.s16   q1,  q11
-        vqadd.s16   q2,  q12
-        vqadd.s16   q3,  q13
-        vqmovun.s16 d0,  q0
-        vqmovun.s16 d1,  q1
-        vqmovun.s16 d2,  q2
-        vqmovun.s16 d3,  q3
-        vst2.8      {q0, q1}, [r0, :256], r2
+        vqadd.s16   q1,  q8
+        vqadd.s16   q2,  q11
+        vqadd.s16   q3,  q9
+1:
+          vld2.8      {q8, q9}, [ip :256], r2
+        subs        lr, #1
+        vqmovun.s16 d20, q0
+        vqmovun.s16 d22, q2
+        vqmovun.s16 d21, q1
+        vqmovun.s16 d23, q3
+          vld1.16     {q0, q1}, [r1 :256]!
+        vst2.8      {d20-d23}, [r0 :256], r2
+          vld1.16     {q2, q3}, [r3 :256]!
+          vmovl.u8    q10, d16
+            pldw        [ip]
+          vmovl.u8    q8,  d17
+          vmovl.u8    q11, d18
+          vmovl.u8    q9,  d19
+          vqadd.s16   q0,  q10
+          vqadd.s16   q1,  q8
+          vqadd.s16   q2,  q11
+          vqadd.s16   q3,  q9
         bne         1b
-        bx          lr
+
+          vqmovun.s16 d20, q0
+          vqmovun.s16 d22, q2
+          vqmovun.s16 d21, q1
+          vqmovun.s16 d23, q3
+          vst2.8      {d20-d23}, [r0 :256]
+          pop         {pc}
 endfunc
 
 @ 32x32 chroma never occurs so NIF
