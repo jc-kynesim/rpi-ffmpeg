@@ -965,7 +965,7 @@ static inline void ff_hevc_rpi_progress_set_all_done(HEVCFrame * const ref)
 {
     if (ref->tf.progress != NULL)
     {
-        int * const p = (int *)&ref->tf.progress->data;
+        int * const p = (int *)ref->tf.progress->data;
         p[0] = INT_MAX;
         p[1] = INT_MAX;
     }
