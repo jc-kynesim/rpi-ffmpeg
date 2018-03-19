@@ -281,7 +281,7 @@
         vcgt.s16   q5, q1, q5
         vmov       r7, s12
         cmp        r7, #0
-        beq        bypasswrite
+        beq        .Lbypasswrite
 
         vpadd.i32  d0, d14, d12
         vpadd.i32  d1, d15, d13
@@ -486,7 +486,7 @@ function ff_hevc_rpi_v_loop_filter_luma2_neon_8, export=1
         push     {r4-r10,lr}       @ 8 regs = 32 bytes
 
         ldr      r4, [sp, #40]
-        b        v_loop_luma_common
+        b        .Lv_loop_luma_common
 endfunc
 
 
@@ -504,7 +504,7 @@ function ff_hevc_rpi_v_loop_filter_luma_neon, export=1
         push     {r4-r10,lr}
 
         sub      r4, r0, #4
-v_loop_luma_common:
+.Lv_loop_luma_common:
         vpush    {d8-d15}
 
         @ Uses slightly fewer instructions to do laned loads than unlaned
@@ -572,7 +572,7 @@ v_loop_luma_common:
         vst4.8  {d20[1],d21[1],d22[1],d23[1]}, [r2:32], r1
         vst4.8  {d20[0],d21[0],d22[0],d23[0]}, [r2:32]
 1:
-bypasswrite:
+.Lbypasswrite:
         vpop     {d8-d15}
         pop      {r4-r10,pc}
 endfunc
@@ -1453,7 +1453,7 @@ function ff_hevc_rpi_v_loop_filter_luma2_neon_10, export=1
         push     {r4-r10,lr}       @ 8 regs = 32 bytes
 
         ldr      r4, [sp, #40]
-        b        v_loop_luma_common_10
+        b        .Lv_loop_luma_common_10
 endfunc
 
 function ff_hevc_rpi_v_loop_filter_luma_neon_10, export=1
@@ -1461,7 +1461,7 @@ function ff_hevc_rpi_v_loop_filter_luma_neon_10, export=1
         push     {r4-r10,lr}
 
         sub      r4, r0, #8
-v_loop_luma_common_10:
+.Lv_loop_luma_common_10:
         m_filter_v_luma_common_16 10
 endfunc
 

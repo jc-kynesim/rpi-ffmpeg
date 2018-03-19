@@ -17,107 +17,87 @@ endfunc
 
 function JOIN(ff_hevc_rpi_idct_8x8_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
+        add         r2, r0, #32
+        mov         r3, #64
         add         r1, #DC_ADD
         asr         r1, #DC_SHIFT
         vdup.16     q8, r1
         vdup.16     q9, r1
-        vmov.16     q10, q8
-        vmov.16     q11, q8
-        vmov.16     q12, q8
-        vmov.16     q13, q8
-        vmov.16     q14, q8
-        vmov.16     q15, q8
-        vstm        r0, {q8-q15}
+        vst1.16     {q8, q9}, [r0], r3
+        vst1.16     {q8, q9}, [r2], r3
+        vst1.16     {q8, q9}, [r0]
+        vst1.16     {q8, q9}, [r2]
         bx lr
 endfunc
 
 function JOIN(ff_hevc_rpi_idct_16x16_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
+        add         r2, r0, #32
+        mov         r3, #64
         add         r1, #DC_ADD
+        mov         ip, #16*16
         asr         r1, #DC_SHIFT
         vdup.16     q8, r1
         vdup.16     q9, r1
-        vmov.16     q10, q8
-        vmov.16     q11, q8
-        vmov.16     q12, q8
-        vmov.16     q13, q8
-        vmov.16     q14, q8
-        vmov.16     q15, q8
-        vstm        r0!, {q8-q15}
-        vstm        r0!, {q8-q15}
-        vstm        r0!, {q8-q15}
-        vstm        r0, {q8-q15}
+1:      vst1.16     {q8, q9}, [r0], r3
+        subs        ip, ip, #32
+        vst1.16     {q8, q9}, [r2], r3
+        bhi         1b
         bx lr
 endfunc
 
 function JOIN(ff_hevc_rpi_idct_32x32_dc_neon_, BIT_DEPTH), export=1
         ldrsh       r1, [r0]
+        add         r2, r0, #32
+        mov         r3, #64
         add         r1, #DC_ADD
+        mov         ip, #32*32
         asr         r1, #DC_SHIFT
-        mov         r3, #16
         vdup.16     q8, r1
         vdup.16     q9, r1
-        vmov.16     q10, q8
-        vmov.16     q11, q8
-        vmov.16     q12, q8
-        vmov.16     q13, q8
-        vmov.16     q14, q8
-        vmov.16     q15, q8
-1:      subs        r3, #1
-        vstm        r0!, {q8-q15}
-        bne         1b
+1:      vst1.16     {q8, q9}, [r0], r3
+        subs        ip, ip, #32
+        vst1.16     {q8, q9}, [r2], r3
+        bhi         1b
         bx lr
 endfunc
 
 
 function JOIN(ff_hevc_rpi_transform_4x4_neon_, BIT_DEPTH), export=1
-        vpush       {d8-d15}
-        vld1.16     {q14, q15}, [r0]  // coeffs
-        ldr         r3, =0x00240053 // 36 and 83
-        vmov.32     d0[0], r3
+        vldr.i32    s0, =0x00240053 // 36 and 83
+        vld1.16     {q14, q15}, [r0 :256]  // coeffs
 
-        tr4_shift d28, d29, d30, d31, #7
+        tr4_shift   #7
 
-        vtrn.16     d28, d29
-        vtrn.16     d30, d31
-        vtrn.32     q14, q15
+        vzip.16     d28, d29
+        vzip.16     d30, d31
+        vzip.32     q14, q15
 
-        tr4_shift d28, d29, d30, d31, #(TRN_SHIFT)
+        tr4_shift   #TRN_SHIFT
 
-        vtrn.16     d28, d29
-        vtrn.16     d30, d31
-        vtrn.32     q14, q15
-
-        vst1.16     {q14, q15}, [r0]
-        vpop        {d8-d15}
+        vst4.16     {q14, q15}, [r0 :256]
         bx lr
+
+        .ltorg
 endfunc
 
 
 
 function JOIN(ff_hevc_rpi_transform_luma_4x4_neon_, BIT_DEPTH), export=1
-        vpush       {d8-d15}
-        vld1.16     {q14, q15}, [r0]  // coeffs
-        ldr         r3, =0x4a  // 74
-        vmov.32     d0[0], r3
-        ldr         r3, =0x1d  // 29
-        vmov.32     d0[1], r3
-        ldr         r3, =0x37  // 55
-        vmov.32     d1[0], r3
+        vmov.i32    d0, #0x4a  // 74
+        vld1.16     {q14, q15}, [r0 :256]  // coeffs
+        vmov.i32    d1, #0x1d  // 29
+        vmov.i32    d2, #0x37  // 55
 
-        tr4_luma_shift d28, d29, d30, d31, #7
+        tr4_luma_shift #7
 
-        vtrn.16     d28, d29
-        vtrn.16     d30, d31
-        vtrn.32     q14, q15
+        vzip.16     d28, d29
+        vzip.16     d30, d31
+        vzip.32     q14, q15
 
-        tr4_luma_shift d28, d29, d30, d31, #(TRN_SHIFT)
+        tr4_luma_shift #TRN_SHIFT
 
-        vtrn.16     d28, d29
-        vtrn.16     d30, d31
-        vtrn.32     q14, q15
-        vst1.16     {q14, q15}, [r0]
-        vpop        {d8-d15}
+        vst4.16     {q14, q15}, [r0 :256]
         bx lr
 endfunc
 

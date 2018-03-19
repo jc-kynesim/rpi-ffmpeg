@@ -217,99 +217,53 @@ endfunc
 
 
 
-.macro  transpose_16b_8x8   r0, r1, r2, r3, r4, r5, r6, r7
-        vtrn.64         \r0, \r4
-        vtrn.64         \r1, \r5
-        vtrn.64         \r2, \r6
-        vtrn.64         \r3, \r7
-        vtrn.32         \r0, \r2
-        vtrn.32         \r1, \r3
-        vtrn.32         \r4, \r6
-        vtrn.32         \r5, \r7
-        vtrn.16         \r0, \r1
-        vtrn.16         \r2, \r3
-        vtrn.16         \r4, \r5
-        vtrn.16         \r6, \r7
+/* uses registers q8 - q13 for temp values */
+.macro tr4_luma_shift shift
+        vaddl.s16   q8, d28, d30    // c0 = src0 + src2
+        vaddl.s16   q9, d30, d31    // c1 = src2 + src3
+        vsubl.s16   q10, d28, d31   // c2 = src0 - src3
+        vaddl.s16   q11, d28, d31   // src0 + src3
+
+        vmul.i32    q12, q8, d1[0]  // 29 * c0
+        vmul.i32    q13, q10, d2[0] // 55 * c2
+        vmul.i32    q8, q8, d2[0]   // 55 * c0
+        vmull.s16   q14, d29, d0[0] // c3 = 74 * src1
+
+        vsubw.s16   q11, q11, d30   // src0 - src2 + src3
+        vmla.i32    q12, q9, d2[0]  // 29 * c0 + 55 * c1
+        vmls.i32    q13, q9, d1[0]  // 55 * c2 - 29 * c1
+        vmla.i32    q8, q10, d1[0]  // 55 * c0 + 29 * c2
+
+        vmul.i32    q11, q11, d0[0] // dst2 = 74 * (src0 - src2 + src3)
+        vadd.i32    q12, q12, q14   // dst0 = 29 * c0 + 55 * c1 + c3
+        vadd.i32    q13, q13, q14   // dst1 = 55 * c2 - 29 * c1 + c3
+        vsub.i32    q8, q8, q14     // dst3 = 55 * c0 + 29 * c2 - c3
+
+        vqrshrn.s32 d28, q12, \shift
+        vqrshrn.s32 d29, q13, \shift
+        vqrshrn.s32 d30, q11, \shift
+        vqrshrn.s32 d31, q8, \shift
 .endm
 
-// in 4 q regs
-// output 8 d regs
-.macro transpose_16b_4x4    r0, r1, r2, r3
-        vtrn.32         \r0, \r2
-        vtrn.32         \r1, \r3
-        vtrn.16         \r0, \r1
-        vtrn.16         \r2, \r3
-.endm
+/* uses registers q8 - q11 for temp values */
+.macro tr4_shift shift
+        vmull.s16   q9, d29, d0[0]   // 83 * src1
+        vmull.s16   q8, d29, d0[1]   // 36 * src1
+        vshll.s16   q14, d28, #6     // 64 * src0
+        vshll.s16   q10, d30, #6     // 64 * src2
+        vmlal.s16   q9, d31, d0[1]   // 83 * src1 + 36 * src3  o0
+        vmlsl.s16   q8, d31, d0[0]   // 36 * src1 - 83 * src3  o1
+        vadd.s32    q11, q14, q10    // 64 * (src0 + src2)     e0
+        vsub.s32    q10, q14, q10    // 64 * (src0 - src2)     e1
+        vadd.s32    q14, q11, q9     // e0 + o0
+        vadd.s32    q15, q10, q8     // e1 + o1
+        vsub.s32    q8, q10, q8      // e1 - o1
+        vsub.s32    q9, q11, q9      // e0 - o0
 
-/* uses registers q2 - q9 for temp values */
-/* TODO: reorder */
-.macro tr4_luma_shift r0, r1, r2, r3, shift
-        vaddl.s16   q5, \r0, \r2    // c0 = src0 + src2
-        vaddl.s16   q2, \r2, \r3    // c1 = src2 + src3
-        vsubl.s16   q4, \r0, \r3    // c2 = src0 - src3
-        vmull.s16   q6, \r1, d0[0]  // c3 = 74 * src1
-
-        vaddl.s16   q7, \r0, \r3    // src0 + src3
-        vsubw.s16   q7, q7, \r2     // src0 - src2 + src3
-        vmul.s32    q7, q7, d0[0]   // dst2 = 74 * (src0 - src2 + src3)
-
-        vmul.s32    q8, q5, d0[1]   // 29 * c0
-        vmul.s32    q9, q2, d1[0]   // 55 * c1
-        vadd.s32    q8, q9          // 29 * c0 + 55 * c1
-        vadd.s32    q8, q6          // dst0 = 29 * c0 + 55 * c1 + c3
-
-        vmul.s32    q2, q2, d0[1]   // 29 * c1
-        vmul.s32    q9, q4, d1[0]   // 55 * c2
-        vsub.s32    q9, q2          // 55 * c2 - 29 * c1
-        vadd.s32    q9, q6          // dst1 = 55 * c2 - 29 * c1 + c3
-
-        vmul.s32    q5, q5, d1[0]   // 55 * c0
-        vmul.s32    q4, q4, d0[1]   // 29 * c2
-        vadd.s32    q5, q4          // 55 * c0 + 29 * c2
-        vsub.s32    q5, q6          // dst3 = 55 * c0 + 29 * c2 - c3
-
-        vqrshrn.s32   \r0, q8, \shift
-        vqrshrn.s32   \r1, q9, \shift
-        vqrshrn.s32   \r2, q7, \shift
-        vqrshrn.s32   \r3, q5, \shift
-.endm
-
-/* uses registers q2 - q6 for temp values */
-.macro tr4 r0, r1, r2, r3
-        vmull.s16  q4, \r1, d0[0]   // 83 * src1
-        vmull.s16  q6, \r1, d0[1]   // 36 * src1
-        vshll.s16  q2, \r0, #6   // 64 * src0
-        vshll.s16  q3, \r2, #6   // 64 * src2
-        vadd.s32   q5, q2, q3    // 64 * (src0 + src2)     e0
-        vsub.s32   q2, q2, q3    // 64 * (src0 - src2)     e1
-        vmlal.s16  q4, \r3, d0[1]   // 83 * src1 + 36 * src3  o0
-        vmlsl.s16  q6, \r3, d0[0]   // 36 * src1 - 83 * src3  o1
-
-        vsub.s32   q3, q5, q4    // e0 - o0
-        vadd.s32   q4, q5, q4    // e0 + o0
-        vadd.s32   q5, q2, q6    // e1 + o1
-        vsub.s32   q6, q2, q6    // e1 - o1
-.endm
-
-.macro tr4_shift r0, r1, r2, r3, shift
-        vmull.s16  q4, \r1, d0[0]   // 83 * src1
-        vmull.s16  q6, \r1, d0[1]   // 36 * src1
-        vshll.s16  q2, \r0, #6   // 64 * src0
-        vshll.s16  q3, \r2, #6   // 64 * src2
-        vadd.s32   q5, q2, q3    // 64 * (src0 + src2)     e0
-        vsub.s32   q2, q2, q3    // 64 * (src0 - src2)     e1
-        vmlal.s16  q4, \r3, d0[1]   // 83 * src1 + 36 * src3  o0
-        vmlsl.s16  q6, \r3, d0[0]   // 36 * src1 - 83 * src3  o1
-
-        vsub.s32   q3, q5, q4    // e0 - o0
-        vadd.s32   q4, q5, q4    // e0 + o0
-        vadd.s32   q5, q2, q6    // e1 + o1
-        vsub.s32   q6, q2, q6    // e1 - o1
-
-        vqrshrn.s32   \r0, q4, \shift
-        vqrshrn.s32   \r1, q5, \shift
-        vqrshrn.s32   \r2, q6, \shift
-        vqrshrn.s32   \r3, q3, \shift
+        vqrshrn.s32 d28, q14, \shift
+        vqrshrn.s32 d29, q15, \shift
+        vqrshrn.s32 d30, q8, \shift
+        vqrshrn.s32 d31, q9, \shift
 .endm
 
 .macro tr8_process d0, d1, d2, d3, d4, d5, d6, d7,                         \
