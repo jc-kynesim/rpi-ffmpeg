@@ -296,7 +296,7 @@ typedef struct HEVCRpiSPS {
     int height;
     int ctb_width;
     int ctb_height;
-    int ctb_size;
+    int ctb_size;   // Pic size in CTBs not size of a CTB
     int min_cb_width;
     int min_cb_height;
     int min_tb_width;
@@ -315,12 +315,12 @@ typedef struct HEVCRpiSPS {
 } HEVCRpiSPS;
 
 #define CTB_TS_FLAGS_SOTL       (1U << 0)       // X start of tile line
-#define CTB_TS_FLAGS_EOTL       (1U << 1)
-#define CTB_TS_FLAGS_EOL        (1U << 2)
-#define CTB_TS_FLAGS_EOT        (1U << 3)
+#define CTB_TS_FLAGS_EOTL       (1U << 1)       // Last CTB of a tile line
+#define CTB_TS_FLAGS_EOL        (1U << 2)       // Last CTB of a complete line
+#define CTB_TS_FLAGS_EOT        (1U << 3)       // Last CTB of a tile
 #define CTB_TS_FLAGS_CSAVE      (1U << 4)
-#define CTB_TS_FLAGS_CIREQ      (1U << 5)     // Cabac init request
-#define CTB_TS_FLAGS_TOT        (1U << 6)
+#define CTB_TS_FLAGS_CIREQ      (1U << 5)       // Cabac init request
+#define CTB_TS_FLAGS_TOT        (1U << 6)       // CTB on top row of a tile
 #define CTB_TS_FLAGS_CLOAD      (1U << 7)
 
 typedef struct HEVCRpiPPS {
@@ -352,6 +352,7 @@ typedef struct HEVCRpiPPS {
     uint8_t tiles_enabled_flag;
     uint8_t entropy_coding_sync_enabled_flag;
 
+    uint8_t tile_wpp_inter_disable;
     int num_tile_columns;   ///< num_tile_columns_minus1 + 1
     int num_tile_rows;      ///< num_tile_rows_minus1 + 1
     uint8_t uniform_spacing_flag;

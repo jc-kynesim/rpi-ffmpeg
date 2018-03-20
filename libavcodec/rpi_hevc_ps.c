@@ -1354,9 +1354,22 @@ static inline int setup_pps(AVCodecContext * const avctx,
         }
     }
 
-    pps->col_bd[0] = 0;
-    for (i = 0; i < pps->num_tile_columns; i++)
-        pps->col_bd[i + 1] = pps->col_bd[i] + pps->column_width[i];
+    {
+        const unsigned int td_mask = 63 >> (sps->log2_ctb_size + sps->pixel_shift);
+        pps->col_bd[0] = 0;
+        pps->tile_wpp_inter_disable = 0;
+        for (i = 0; i < pps->num_tile_columns; i++)
+        {
+            pps->col_bd[i + 1] = pps->col_bd[i] + pps->column_width[i];
+
+            // Avoid trying tile parallel if the columns don't fall on cache boundries
+            // (this causes too much pain syncing flushes with the QPU)
+            // Ignore the final (RHS of pic) tile boundry
+            if ((pps->col_bd[i] & td_mask) != 0) {
+                pps->tile_wpp_inter_disable = 1;
+            }
+        }
+    }
 
     pps->row_bd[0] = 0;
     for (i = 0; i < pps->num_tile_rows; i++)

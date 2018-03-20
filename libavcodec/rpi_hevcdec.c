@@ -4569,6 +4569,7 @@ static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #if RPI_EXTRA_BIT_THREADS > 0
 
     if (s->sh.num_entry_point_offsets != 0 &&
+        (!s->ps.pps->tile_wpp_inter_disable || s->sh.slice_type == HEVC_SLICE_I) &&
         s->ps.pps->num_tile_columns > 1)
     {
         unsigned int slice_row = 0;
