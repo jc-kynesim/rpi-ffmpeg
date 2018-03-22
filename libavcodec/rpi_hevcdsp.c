@@ -326,6 +326,7 @@ void ff_hevc_rpi_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
     hevcdsp->add_residual_dc_c[3]   = FUNC(add_residual32x32_dc_c, depth);       \
     hevcdsp->put_pcm_c              = FUNC(put_pcm_c, depth)
 #define SLICED_LOOP_FILTERS(depth)\
+    hevcdsp->hevc_h_loop_filter_luma2 = FUNC(hevc_h_loop_filter_luma2, depth); \
     hevcdsp->hevc_v_loop_filter_luma2 = FUNC(hevc_v_loop_filter_luma2, depth); \
     hevcdsp->hevc_h_loop_filter_uv    = FUNC(hevc_h_loop_filter_uv, depth);    \
     hevcdsp->hevc_v_loop_filter_uv2   = FUNC(hevc_v_loop_filter_uv2, depth)

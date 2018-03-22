@@ -71,6 +71,89 @@ static const AVRational vui_sar[] = {
     {  2,   1 },
 };
 
+
+// pps_cb_qp_offset: -12,+12
+// slice_cb_qp_offset: -12,+12 also
+//   "The value of pps_cb_qp_offset + slice_cb_qp_offset shall be in the range of -12 to +12, inclusive."
+// cr_qp_offset_list[n]: -12,+12
+// So worst case total offset: -24,+24
+
+#define T(n) ((((48+(n))/6-10)<<3) | (48+(n))%6)
+#define C(B,n) T(B*6+(n) < 0 ? -B*6 : (n) > 51 ? 51 : (n))
+#define M(B,n) C(B,(-n))
+
+// Sizeof the QP_START_BLOCK
+#define QP_OFFSET_0 (8*6 + 12*2)
+#define QP_START(B) \
+    M(B,48), M(B,48), M(B,48), M(B,48), M(B,48), M(B,48),\
+    M(B,48), M(B,48), M(B,48), M(B,48), M(B,48), M(B,48),\
+    M(B,48), M(B,48), M(B,48), M(B,48), M(B,48), M(B,48),\
+    M(B,48), M(B,48), M(B,48), M(B,48), M(B,48), M(B,48),\
+\
+    M(B,48), M(B,47), M(B,46), M(B,45), M(B,44), M(B,43),\
+    M(B,42), M(B,41), M(B,40), M(B,39), M(B,38), M(B,37),\
+    M(B,36), M(B,35), M(B,34), M(B,33), M(B,32), M(B,31),\
+    M(B,30), M(B,29), M(B,28), M(B,27), M(B,26), M(B,25),\
+    M(B,24), M(B,23), M(B,22), M(B,21), M(B,20), M(B,19),\
+    M(B,18), M(B,17), M(B,16), M(B,15), M(B,14), M(B,13),\
+    M(B,12), M(B,11), M(B,10), M(B, 9), M(B, 8), M(B, 7),\
+    M(B, 6), M(B, 5), M(B, 4), M(B, 3), M(B, 2), M(B, 1)
+#define QP_END(B) \
+    C(B,51), C(B,51), C(B,51), C(B,51), C(B,51), C(B,51),\
+    C(B,51), C(B,51), C(B,51), C(B,51), C(B,51), C(B,51),\
+    C(B,51), C(B,51), C(B,51), C(B,51), C(B,51), C(B,51)
+
+#define T1(B)\
+{\
+    QP_START(B),\
+    C(B, 0), C(B, 1), C(B, 2), C(B, 3), C(B, 4), C(B, 5), C(B, 6), C(B, 7), C(B, 8), C(B, 9),\
+    C(B,10), C(B,11), C(B,12), C(B,13), C(B,14), C(B,15), C(B,16), C(B,17), C(B,18), C(B,19),\
+    C(B,20), C(B,21), C(B,22), C(B,23), C(B,24), C(B,25), C(B,26), C(B,27), C(B,28), C(B,29),\
+    C(B,29), C(B,30), C(B,31), C(B,32), C(B,33), C(B,33), C(B,34), C(B,34), C(B,35), C(B,35),\
+    C(B,36), C(B,36), C(B,37), C(B,37), C(B,38), C(B,39), C(B,40), C(B,41), C(B,42), C(B,43),\
+    C(B,44), C(B,45),\
+    C(B,46), C(B,47), C(B,48), C(B,49), C(B,50), C(B,51),\
+    QP_END(B)\
+}
+#define T0(B)\
+{\
+    QP_START(B),\
+    C(B, 0), C(B, 1), C(B, 2), C(B, 3), C(B, 4), C(B, 5), C(B, 6), C(B, 7), C(B, 8), C(B, 9),\
+    C(B,10), C(B,11), C(B,12), C(B,13), C(B,14), C(B,15), C(B,16), C(B,17), C(B,18), C(B,19),\
+    C(B,20), C(B,21), C(B,22), C(B,23), C(B,24), C(B,25), C(B,26), C(B,27), C(B,28), C(B,29),\
+    C(B,30), C(B,31), C(B,32), C(B,33), C(B,34), C(B,35), C(B,36), C(B,37), C(B,38), C(B,39),\
+    C(B,40), C(B,41), C(B,42), C(B,43), C(B,44), C(B,45), C(B,46), C(B,47), C(B,48), C(B,49),\
+    C(B,50), C(B,51),\
+    C(B,51), C(B,51), C(B,51), C(B,51), C(B,51), C(B,51),\
+    QP_END(B)\
+}
+
+#define QP_TABLE_SIZE (QP_OFFSET_0 + 52 + 12*2)
+
+static const int8_t qp_c_bd_0[8][QP_TABLE_SIZE] = {T0(0),T0(1),T0(2),T0(3),T0(4),T0(5),T0(6),T0(7)};
+static const int8_t qp_c_bd_1[8][QP_TABLE_SIZE] = {T1(0),T1(1),T1(2),T1(3),T1(4),T1(5),T1(6),T1(7)};
+
+#undef T
+#undef C
+#undef QP_END
+
+#define C(B,n) ((n)<0?0:(n)>51?51:(n))
+// We do need a lot of -ve padding to cope with high bit depths that give -ve qps
+#define QP_DBLK_OFFSET_0 QP_OFFSET_0
+#define QP_END(B)\
+ 51, 51, 51, 51, 51, 51
+
+// These don't need all the padding we have here (12 top/bottom would be enough)
+static const uint8_t qp_c_dblk_0[] = T0(0);
+static const uint8_t qp_c_dblk_1[] = T1(0);
+
+#undef T
+#undef M
+#undef C
+#undef QP_END
+#undef QP_START
+
+
 static void remove_pps(HEVCRpiParamSets * const s, const int id)
 {
     if (s->pps_list[id] && s->pps == (const HEVCRpiPPS*)s->pps_list[id]->data)
@@ -1006,6 +1089,20 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
         return AVERROR_INVALIDDATA;
     }
 
+    {
+        const unsigned int CtbLog2SizeY = sps->log2_min_cb_size + sps->log2_diff_max_min_coding_block_size;
+        // Not a bitstream limitation, but all profiles
+        if (CtbLog2SizeY < 4 || CtbLog2SizeY > 6) {
+            av_log(avctx, AV_LOG_ERROR, "Invalid value %d for CtbLog2SizeY", CtbLog2SizeY);
+            return AVERROR_INVALIDDATA;
+        }
+
+        if (sps->log2_max_trafo_size > FFMIN(5, CtbLog2SizeY)) {
+            av_log(avctx, AV_LOG_ERROR, "Invalid value %d for MaxTbLog2SizeY", sps->log2_max_trafo_size);
+            return AVERROR_INVALIDDATA;
+        }
+    }
+
     sps->max_transform_hierarchy_depth_inter = get_ue_golomb_long(gb);
     sps->max_transform_hierarchy_depth_intra = get_ue_golomb_long(gb);
 
@@ -1023,8 +1120,14 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
     sps->amp_enabled_flag = get_bits1(gb);
     sps->sao_enabled      = get_bits1(gb);
 
-    sps->pcm_enabled_flag = get_bits1(gb);
-    if (sps->pcm_enabled_flag) {
+    // Set pcm defaults (0) so we don't have to test _enabled when we
+    // want to use them
+    memset(&sps->pcm, 0, sizeof(sps->pcm));
+
+    if (get_bits1(gb))  // pcm_enabled_flag
+    {
+        const unsigned int limit_max_pcm = FFMIN(5,
+            sps->log2_min_cb_size + sps->log2_diff_max_min_coding_block_size);
         sps->pcm.bit_depth   = get_bits(gb, 4) + 1;
         sps->pcm.bit_depth_chroma = get_bits(gb, 4) + 1;
         sps->pcm.log2_min_pcm_cb_size = get_ue_golomb_long(gb) + 3;
@@ -1036,9 +1139,20 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
                    sps->pcm.bit_depth, sps->pcm.bit_depth_chroma, sps->bit_depth);
             return AVERROR_INVALIDDATA;
         }
+        if (sps->pcm.log2_min_pcm_cb_size < sps->log2_min_cb_size ||
+            sps->pcm.log2_max_pcm_cb_size > limit_max_pcm) {
+            av_log(avctx, AV_LOG_ERROR, "Bad PCM CB min/max size (%d->%d)",
+                   sps->pcm.log2_min_pcm_cb_size, sps->pcm.log2_max_pcm_cb_size);
+            return AVERROR_INVALIDDATA;
+        }
 
         sps->pcm.loop_filter_disable_flag = get_bits1(gb);
     }
+
+    // Could be based on min_pcm_cb_size but much easier logic if we just stick
+    // with 8 (and costs us little)
+    sps->pcm_width = (sps->width + 63) >> 6;  // 8 for min size, 8 bits per byte - round up
+    sps->pcm_height = (sps->height + 7) >> 3;
 
     sps->nb_st_rps = get_ue_golomb_long(gb);
     if (sps->nb_st_rps > HEVC_MAX_SHORT_TERM_RPS_COUNT) {
@@ -1272,16 +1386,31 @@ static void hevc_pps_free(void *opaque, uint8_t *data)
     av_freep(&pps);
 }
 
-static int pps_range_extensions(GetBitContext * const gb, AVCodecContext * const avctx,
-                                HEVCRpiPPS * const pps, const HEVCRpiSPS * const sps) {
-    int i;
+static int get_offset_list(GetBitContext * const gb, AVCodecContext * const avctx, unsigned int n_minus_1, int8_t * offsets)
+{
+    do
+    {
+        const int offset = get_se_golomb_long(gb);
+        if (offset < -12 || offset > 12) {
+            av_log(avctx, AV_LOG_ERROR, "qp_offset_list[]: %d out of range\n", offset);
+            return AVERROR_INVALIDDATA;
+        }
+        *offsets++ = offset;
+    } while (n_minus_1-- != 0);
+    return 0;
+}
 
+static int pps_range_extensions(GetBitContext * const gb, AVCodecContext * const avctx,
+                                HEVCRpiPPS * const pps, const HEVCRpiSPS * const sps)
+{
     if (pps->transform_skip_enabled_flag) {
         pps->log2_max_transform_skip_block_size = get_ue_golomb_long(gb) + 2;
     }
     pps->cross_component_prediction_enabled_flag = get_bits1(gb);
     pps->chroma_qp_offset_list_enabled_flag = get_bits1(gb);
     if (pps->chroma_qp_offset_list_enabled_flag) {
+        int err;
+
         pps->diff_cu_chroma_qp_offset_depth = get_ue_golomb_long(gb);
         pps->chroma_qp_offset_list_len_minus1 = get_ue_golomb_long(gb);
         if (pps->chroma_qp_offset_list_len_minus1 > 5) {
@@ -1289,18 +1418,11 @@ static int pps_range_extensions(GetBitContext * const gb, AVCodecContext * const
                    "chroma_qp_offset_list_len_minus1 shall be in the range [0, 5].\n");
             return AVERROR_INVALIDDATA;
         }
-        for (i = 0; i <= pps->chroma_qp_offset_list_len_minus1; i++) {
-            pps->cb_qp_offset_list[i] = get_se_golomb_long(gb);
-            if (pps->cb_qp_offset_list[i]) {
-                av_log(avctx, AV_LOG_WARNING,
-                       "cb_qp_offset_list not tested yet.\n");
-            }
-            pps->cr_qp_offset_list[i] = get_se_golomb_long(gb);
-            if (pps->cr_qp_offset_list[i]) {
-                av_log(avctx, AV_LOG_WARNING,
-                       "cb_qp_offset_list not tested yet.\n");
-            }
-        }
+        av_log(avctx, AV_LOG_WARNING, "cb_qp_offset_list not tested yet.\n");
+
+        if ((err = get_offset_list(gb, avctx, pps->chroma_qp_offset_list_len_minus1, pps->cb_qp_offset_list)) != 0 ||
+            (err = get_offset_list(gb, avctx, pps->chroma_qp_offset_list_len_minus1, pps->cr_qp_offset_list)) != 0)
+            return err;
     }
 
     {
@@ -1329,6 +1451,28 @@ static inline int setup_pps(AVCodecContext * const avctx,
     int i, j, x, y, ctb_addr_rs, tile_id;
 
     // Inferred parameters
+
+    // qp_y -> qp_u/qp_v tables
+    // The tables have at least -24,+24 overrun after adding offset here
+    // which should allow for clipless offseting
+
+    pps->qp_dblk_x[0] = qp_c_dblk_0 + QP_DBLK_OFFSET_0;  // No offset for luma, but may be useful for general code
+    pps->qp_bd_x[0] = qp_c_bd_0[sps->bit_depth - 8] + QP_OFFSET_0;
+
+    if (sps->chroma_format_idc == 1) {
+        pps->qp_dblk_x[1] = qp_c_dblk_1 + pps->cb_qp_offset + QP_DBLK_OFFSET_0;
+        pps->qp_bd_x[1] = qp_c_bd_1[sps->bit_depth - 8] + pps->cb_qp_offset + QP_OFFSET_0;
+        pps->qp_dblk_x[2] = qp_c_dblk_1 + pps->cr_qp_offset + QP_DBLK_OFFSET_0;
+        pps->qp_bd_x[2] = qp_c_bd_1[sps->bit_depth - 8] + pps->cr_qp_offset + QP_OFFSET_0;
+    }
+    else
+    {
+        pps->qp_dblk_x[1] = qp_c_dblk_0 + pps->cb_qp_offset + QP_DBLK_OFFSET_0;
+        pps->qp_bd_x[1] = qp_c_bd_0[sps->bit_depth - 8] + pps->cb_qp_offset + QP_OFFSET_0;
+        pps->qp_dblk_x[2] = qp_c_dblk_0 + pps->cr_qp_offset + QP_DBLK_OFFSET_0;
+        pps->qp_bd_x[2] = qp_c_bd_0[sps->bit_depth - 8] + pps->cr_qp_offset + QP_OFFSET_0;
+    }
+
     pps->col_bd   = av_malloc_array(pps->num_tile_columns + 1, sizeof(*pps->col_bd));
     pps->row_bd   = av_malloc_array(pps->num_tile_rows + 1,    sizeof(*pps->row_bd));
     pps->col_idxX = av_malloc_array(sps->ctb_width,    sizeof(*pps->col_idxX));

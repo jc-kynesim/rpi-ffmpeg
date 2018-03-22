@@ -109,7 +109,7 @@
 1,HEVC_v1/SAO_G_Canon_3,SAO_G_Canon_3.bit,SAO_G_Canon_3.md5
 1,HEVC_v1/SAO_H_Parabola_1,SAO_H_Parabola_1.bit,SAO_H_Parabola_1.md5
 1,HEVC_v1/SAODBLK_A_MainConcept_4,SAODBLK_A_MainConcept_4.bin,SAODBLK_A_MainConcept_4_md5.txt
-2,HEVC_v1/SAODBLK_B_MainConcept_4,SAODBLK_B_MainConcept_4.bin,SAODBLK_B_MainConcept_4_md5.txt
+1,HEVC_v1/SAODBLK_B_MainConcept_4,SAODBLK_B_MainConcept_4.bin,SAODBLK_B_MainConcept_4_md5.txt
 1,HEVC_v1/SDH_A_Orange_4,SDH_A_Orange_4.bit,SDH_A_Orange_4_yuv.md5
 1,HEVC_v1/SLICES_A_Rovi_3,SLICES_A_Rovi_3.bin,SLICES_A_Rovi_3.md5
 1,HEVC_v1/SLIST_A_Sony_5,SLIST_A_Sony_5.bin,SLIST_A_Sony_5_yuv.md5
@@ -190,4 +190,4 @@
 0,RExt/WAVETILES_RExt_Sony_2,WAVETILES_RExt_Sony_2.bit,WAVETILES_RExt_Sony_2.md5
 1,local/sao_cu16_mobile_344x280,sao_cu16_mobile_344x280.265,sao_cu16_mobile_344x280.md5
 1,local/dblk_cu16_mobile_344x280,dblk_cu16_mobile_344x280.265,dblk_cu16_mobile_344x280.md5
-2,local/dblksao_cu16_mobile_344x280,dblksao_cu16_mobile_344x280.265,dblksao_cu16_mobile_344x280.md5
+1,local/dblksao_cu16_mobile_344x280,dblksao_cu16_mobile_344x280.265,dblksao_cu16_mobile_344x280.md5

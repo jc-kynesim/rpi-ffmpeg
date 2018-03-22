@@ -621,7 +621,7 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
 #endif
 #if BIT_DEPTH <= 9 || BIT_DEPTH == 32
 static void FUNC(sao_edge_restore_0)(uint8_t *_dst, uint8_t *_src,
-                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
+                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, RpiSAOParams *sao,
                                     int *borders, int _width, int _height,
                                     int c_idx, uint8_t *vert_edge,
                                     uint8_t *horiz_edge, uint8_t *diag_edge)
@@ -666,7 +666,7 @@ static void FUNC(sao_edge_restore_0)(uint8_t *_dst, uint8_t *_src,
 }
 
 static void FUNC(sao_edge_restore_1)(uint8_t *_dst, uint8_t *_src,
-                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, SAOParams *sao,
+                                    ptrdiff_t stride_dst, ptrdiff_t stride_src, RpiSAOParams *sao,
                                     int *borders, int _width, int _height,
                                     int c_idx, uint8_t *vert_edge,
                                     uint8_t *horiz_edge, uint8_t *diag_edge)
@@ -2082,8 +2082,7 @@ static void FUNC(hevc_v_loop_filter_luma)(uint8_t *pix, ptrdiff_t stride,
 // This is identical to hevc_loop_filter_luma except that the P/Q
 // components are on separate pointers
 static void FUNC(hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
-                                 unsigned int _stride, unsigned int beta, const int32_t _tc[2],
-                                 const uint8_t _no_p[2], const uint8_t _no_q[2],
+                                 unsigned int _stride, unsigned int beta, unsigned int tc2, unsigned int no_f,
                                  uint8_t * _pix_l)
 {
     int d, j;
@@ -2101,9 +2100,9 @@ static void FUNC(hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
         const int dq3  = abs(TQ2 - 2 * TQ1 + TQ0);
         const int d0   = dp0 + dq0;
         const int d3   = dp3 + dq3;
-        const int tc   = _tc[j]   << (BIT_DEPTH - 8);
-        const int no_p = _no_p[j];
-        const int no_q = _no_q[j];
+        const int tc   = ((tc2 >> (j << 4)) & 0xffff) << (BIT_DEPTH - 8);
+        const int no_p = no_f & 1;
+        const int no_q = no_f & 2;
 
         if (d0 + d3 >= beta) {
             pix_l += 4 * ystride;
@@ -2179,6 +2178,16 @@ static void FUNC(hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
             }
         }
     }
+}
+
+static void FUNC(hevc_h_loop_filter_luma2)(uint8_t * _pix_r,
+                                 unsigned int _stride, unsigned int beta, unsigned int tc2, unsigned int no_f)
+{
+    // Just call the non-2 function having massaged the parameters
+    int32_t tc[2] = {tc2 & 0xffff, tc2 >> 16};
+    uint8_t no_p[2] = {no_f & 1, no_f & 1};
+    uint8_t no_q[2] = {no_f & 2, no_f & 2};
+    FUNC(hevc_h_loop_filter_luma)(_pix_r, _stride, beta, tc, no_p, no_q);
 }
 
 #undef TP3

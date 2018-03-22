@@ -44,45 +44,40 @@
 #define CB 1
 #define CR 2
 
-static const uint8_t tctable[54] = {
+// tcoffset: -12,12; qp: 0,51; (bs-1)*2: 0,2
+// so -12,75 overall
+static const uint8_t tctablex[] = {
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  // -ve quant padding
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,                          // -12..-1
     0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 0, 0, 1, // QP  0...18
     1, 1, 1, 1, 1, 1, 1,  1,  2,  2,  2,  2,  3,  3,  3,  3, 4, 4, 4, // QP 19...37
-    5, 5, 6, 6, 7, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 24           // QP 38...53
+    5, 5, 6, 6, 7, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 24,          // QP 38...53
+    24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24                    // 54..75
 };
+#define tctable (tctablex + 12 + 6*8)
 
-static const uint8_t betatable[52] = {
+static const uint8_t betatablex[] = {
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  // -ve quant padding
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,
+
+    0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,                          // -12..-1
      0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  6,  7,  8, // QP 0...18
      9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, // QP 19...37
-    38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64                      // QP 38...51
+    38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64,                      // QP 38...51
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64                    // 52..73
 };
+#define betatable (betatablex + 12 + 6*8)
 
-static int chroma_tc(HEVCRpiContext *s, int qp_y, int c_idx, int tc_offset)
+static inline int chroma_tc(const HEVCRpiContext * const s, const int qp_y,
+                            const int c_idx, const int tc_offset)
 {
-    static const int qp_c[] = {
-        29, 30, 31, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37
-    };
-    int qp, qp_i, offset, idxt;
-
-    // slice qp offset is not used for deblocking
-    if (c_idx == 1)
-        offset = s->ps.pps->cb_qp_offset;
-    else
-        offset = s->ps.pps->cr_qp_offset;
-
-    qp_i = av_clip(qp_y + offset, 0, 57);
-    if (ctx_cfmt(s) == 1) {
-        if (qp_i < 30)
-            qp = qp_i;
-        else if (qp_i > 43)
-            qp = qp_i - 6;
-        else
-            qp = qp_c[qp_i - 30];
-    } else {
-        qp = av_clip(qp_i, 0, 51);
-    }
-
-    idxt = av_clip(qp + DEFAULT_INTRA_TC_OFFSET + tc_offset, 0, 53);
-    return tctable[idxt];
+    return tctable[(int)s->ps.pps->qp_dblk_x[c_idx][qp_y] + tc_offset + 2];
 }
 
 static inline int get_qPy_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
@@ -112,19 +107,12 @@ void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * c
     const int qp_y = get_qPy_pred(s, lc, xBase, yBase, log2_cb_size);
 
     if (lc->tu.cu_qp_delta != 0) {
+        // ?? I suspect that the -bd_offset here leads to us adding it elsewhere
         int off = s->ps.sps->qp_bd_offset;
         lc->qp_y = FFUMOD(qp_y + lc->tu.cu_qp_delta + 52 + 2 * off,
                                  52 + off) - off;
     } else
         lc->qp_y = qp_y;
-}
-
-static int get_qPy(const HEVCRpiContext * const s, const int xC, const int yC)
-{
-    const int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
-    const int x                 = xC >> log2_min_cb_size;
-    const int y                 = yC >> log2_min_cb_size;
-    return s->qp_y_tab[x + y * s->ps.sps->min_cb_width];
 }
 
 static inline unsigned int pixel_shift(const HEVCRpiContext * const s, const unsigned int c_idx)
@@ -223,37 +211,49 @@ static void copy_CTB_to_hv(const HEVCRpiContext * const s, const uint8_t * const
 }
 
 // N.B. Src & dst are swapped as this is a restore!
+// x0 & y0 are in luma coords
+// Width & height are in Y/C pels as appropriate
+// * Clear scope for optimsation here but not used enough to be worth it
 static void restore_tqb_pixels(const HEVCRpiContext * const s,
                                uint8_t *src1, const uint8_t *dst1,
-                               ptrdiff_t stride_src, ptrdiff_t stride_dst,
-                               int x0, int y0, int width, int height, int c_idx)
+                               const ptrdiff_t stride_src, const ptrdiff_t stride_dst,
+                               const unsigned int x0, const unsigned int y0,
+                               const unsigned int width, const int height,
+                               const int c_idx)
 {
-    if ( s->ps.pps->transquant_bypass_enable_flag ||
-            (s->ps.sps->pcm.loop_filter_disable_flag && s->ps.sps->pcm_enabled_flag)) {
-        int x, y;
-        int min_pu_size  = 1 << s->ps.sps->log2_min_pu_size;
-        const unsigned int hshift = ctx_hshift(s, c_idx);
-        const unsigned int vshift = ctx_vshift(s, c_idx);
-        int x_min        = ((x0         ) >> s->ps.sps->log2_min_pu_size);
-        int y_min        = ((y0         ) >> s->ps.sps->log2_min_pu_size);
-        int x_max        = ((x0 + width ) >> s->ps.sps->log2_min_pu_size);
-        int y_max        = ((y0 + height) >> s->ps.sps->log2_min_pu_size);
-        const unsigned int sh = pixel_shift(s, c_idx);
-        int len          = (min_pu_size >> hshift) << sh;
-        for (y = y_min; y < y_max; y++) {
-            for (x = x_min; x < x_max; x++) {
-                if (s->is_pcm[y * s->ps.sps->min_pu_width + x]) {
-                    int n;
-                    uint8_t *src = src1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_src + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << sh);
-                    const uint8_t *dst = dst1 + (((y << s->ps.sps->log2_min_pu_size) - y0) >> vshift) * stride_dst + ((((x << s->ps.sps->log2_min_pu_size) - x0) >> hshift) << sh);
-                    for (n = 0; n < (min_pu_size >> vshift); n++) {
-                        memcpy(src, dst, len);
-                        src += stride_src;
-                        dst += stride_dst;
+    if (s->ps.pps->transquant_bypass_enable_flag ||
+        s->ps.sps->pcm.loop_filter_disable_flag)
+    {
+        const uint8_t *pcm = s->is_pcm + (x0 >> 6) + (y0 >> 3) * s->ps.sps->pcm_width;
+        int blks_y = height >> (c_idx == 0 ? 3 : 2);
+        const unsigned int bwidth = 8 << s->ps.sps->pixel_shift;  // Y & C have the same width in sand
+        const unsigned int bheight = (c_idx == 0) ? 8 : 4;
+        const unsigned int sh = ((x0 >> 3) & 7);
+        const unsigned int mask = (1 << (width >> (c_idx == 0 ? 3 : 2))) - 1;
+
+        do {
+            unsigned int m = (*pcm >> sh) & mask;
+            uint8_t * bd = src1;
+            const uint8_t * bs = dst1;
+            while (m != 0) {
+                if ((m & 1) != 0) {
+                    unsigned int i;
+                    uint8_t * d = bd;
+                    const uint8_t * s = bs;
+                    for (i = 0; i != bheight; ++i) {
+                        memcpy(d, s, bwidth);
+                        d += stride_src;
+                        s += stride_dst;
                     }
                 }
+                m >>= 1;
+                bs += bwidth;
+                bd += bwidth;
             }
-        }
+            src1 += stride_src * bheight;
+            dst1 += stride_dst * bheight;
+            pcm += s->ps.sps->pcm_width;
+        } while (--blks_y > 0);
     }
 }
 
@@ -274,7 +274,7 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
     int y_ctb                = y >> s->ps.sps->log2_ctb_size;
     int ctb_addr_rs          = y_ctb * s->ps.sps->ctb_width + x_ctb;
     int ctb_addr_ts          = s->ps.pps->ctb_addr_rs_to_ts[ctb_addr_rs];
-    SAOParams *sao           = &CTB(s->sao, x_ctb, y_ctb);
+    RpiSAOParams *sao           = &CTB(s->sao, x_ctb, y_ctb);
     // flags indicating unfilterable edges
     uint8_t vert_edge[]      = { 0, 0 };
     uint8_t horiz_edge[]     = { 0, 0 };
@@ -336,9 +336,9 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
         const int x0 = x >> hshift;
         const int y0 = y >> vshift;
         const ptrdiff_t stride_src = frame_stride1(s->frame, c_idx);
-        int ctb_size_h = (1 << (s->ps.sps->log2_ctb_size)) >> hshift;
-        int ctb_size_v = (1 << (s->ps.sps->log2_ctb_size)) >> vshift;
-        int width    = FFMIN(ctb_size_h, (s->ps.sps->width  >> hshift) - x0);
+        const int ctb_size_h = (1 << (s->ps.sps->log2_ctb_size)) >> hshift;
+        const int ctb_size_v = (1 << (s->ps.sps->log2_ctb_size)) >> vshift;
+        const int width    = FFMIN(ctb_size_h, (s->ps.sps->width  >> hshift) - x0);
         const int height = FFMIN(ctb_size_v, (s->ps.sps->height >> vshift) - y0);
         int tab      = sao_tab[(FFALIGN(width, 8) >> 3) - 1];
         ptrdiff_t stride_dst;
@@ -366,12 +366,16 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
             break;
         }
 
+//        if (c_idx == 1)
+//            printf("%d: %dx%d %d,%d: lr=%d\n", c_idx, width, height, x0, y0, wants_lr);
+
         switch (sao->type_idx[c_idx]) {
         case SAO_BAND:
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
                            x_ctb, y_ctb);
             if (s->ps.pps->transquant_bypass_enable_flag ||
-                (s->ps.sps->pcm.loop_filter_disable_flag && s->ps.sps->pcm_enabled_flag)) {
+                s->ps.sps->pcm.loop_filter_disable_flag)
+            {
                 // Can't use the edge buffer here as it may be in use by the foreground
                 DECLARE_ALIGNED(64, uint8_t, dstbuf)
                     [2*MAX_PB_SIZE*MAX_PB_SIZE];
@@ -557,228 +561,248 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
 #endif
 }
 
-// Returns 2 or 0.
-static int get_pcm(HEVCRpiContext *s, int x, int y)
+static inline uint32_t pcm4(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y)
 {
-    int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
-    int x_pu, y_pu;
-
-    if (x < 0 || y < 0)
-        return 2;
-
-    x_pu = x >> log2_min_pu_size;
-    y_pu = y >> log2_min_pu_size;
-
-    if (x_pu >= s->ps.sps->min_pu_width || y_pu >= s->ps.sps->min_pu_height)
-        return 2;
-    return s->is_pcm[y_pu * s->ps.sps->min_pu_width + x_pu];
+    const uint8_t * const pcm = s->is_pcm + (x >> 6) + (y >> 3) * s->ps.sps->pcm_width;
+    return (pcm[0] |
+        (pcm[1] << 8) |
+        (pcm[s->ps.sps->pcm_width] << 16) |
+        (pcm[s->ps.sps->pcm_width + 1] << 24)) >> ((x >> 3) & 7);
 }
 
-#define TC_CALC(qp, bs)                                                 \
-    tctable[av_clip((qp) + DEFAULT_INTRA_TC_OFFSET * ((bs) - 1) +       \
-                    (tc_offset & -2),                                   \
-                    0, MAX_QP + DEFAULT_INTRA_TC_OFFSET)]
-
-static void deblocking_filter_CTB(HEVCRpiContext *s, int x0, int y0)
+static inline uint32_t pcm2(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y)
 {
-    uint8_t *src;
-    int x, y;
-    int beta;
-    int32_t tc[2];
-    uint8_t no_p[2] = { 0 };
-    uint8_t no_q[2] = { 0 };
+    const uint8_t * const pcm = s->is_pcm + (x >> 6) + (y >> 3) * s->ps.sps->pcm_width;
+    return (pcm[0] | (pcm[1] << 8)) >> ((x >> 3) & 7);
+}
 
-    int log2_ctb_size = s->ps.sps->log2_ctb_size;
-    int x_end, x_end2, y_end;
-    int ctb_size        = 1 << log2_ctb_size;
-    int ctb             = (x0 >> log2_ctb_size) +
-                          (y0 >> log2_ctb_size) * s->ps.sps->ctb_width;
-    int cur_tc_offset   = s->deblock[ctb].tc_offset;
-    int cur_beta_offset = s->deblock[ctb].beta_offset;
-    int left_tc_offset, left_beta_offset;
-    int tc_offset, beta_offset;
-    int pcmf = (s->ps.sps->pcm_enabled_flag &&
-                s->ps.sps->pcm.loop_filter_disable_flag) ||
-               s->ps.pps->transquant_bypass_enable_flag;
 
-#ifdef DISABLE_DEBLOCK_NONREF
-    if (!s->used_for_ref)
-      return; // Don't deblock non-reference frames
-#endif
-#ifdef DISABLE_DEBLOCK
-    return;
-#endif
-    if (!s->used_for_ref && s->avctx->skip_loop_filter >= AVDISCARD_NONREF)
-        return;
-    if (x0) {
-        left_tc_offset   = s->deblock[ctb - 1].tc_offset;
-        left_beta_offset = s->deblock[ctb - 1].beta_offset;
-    } else {
-        left_tc_offset   = 0;
-        left_beta_offset = 0;
-    }
+static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int end_x, const int end_y)
+{
+    const unsigned int log2_ctb_size = s->ps.sps->log2_ctb_size;
+    const unsigned int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
+    const unsigned int ctb_size = (1 << log2_ctb_size);
+    const unsigned int cb_r = FFMIN(bounds.x + bounds.w, s->ps.sps->width) - (end_x ? 0 :  1);
+    const unsigned int ctb_n = (bounds.x + bounds.y * s->ps.sps->ctb_width) >> log2_ctb_size;
+    const DBParams * cb_dbp = s->deblock + ctb_n;
+    const unsigned int b_b = FFMIN(bounds.y + bounds.h, s->ps.sps->height) - (end_y ? 0 : 8);
 
-    x_end = x0 + ctb_size;
-    if (x_end > s->ps.sps->width)
-        x_end = s->ps.sps->width;
-    y_end = y0 + ctb_size;
-    if (y_end > s->ps.sps->height)
-        y_end = s->ps.sps->height;
+    unsigned int cb_x;
 
-    tc_offset   = cur_tc_offset;
-    beta_offset = cur_beta_offset;
+    // Do in CTB-shaped blocks
+    for (cb_x = bounds.x; cb_x < cb_r; cb_x += ctb_size, ++cb_dbp)
+    {
+        const unsigned int bv_r = FFMIN(cb_x + ctb_size, cb_r);
+        const unsigned int bv_l = FFMAX(cb_x, 8);
+        const unsigned int bh_r = cb_x + ctb_size >= cb_r ? cb_r - 8 : cb_x + ctb_size - 9;
+        const unsigned int bh_l = bv_l - 8;
+        unsigned int y;
 
-    x_end2 = x_end;
-    if (x_end2 != s->ps.sps->width)
-        x_end2 -= 8;
-    for (y = y0; y < y_end; y += 8) {
-        // vertical filtering luma
-        for (x = x0 ? x0 : 8; x < x_end; x += 8) {
-            const int bs0 = s->vertical_bs[(x +  y      * s->bs_width) >> 2];
-            const int bs1 = s->vertical_bs[(x + (y + 4) * s->bs_width) >> 2];
-            if (bs0 || bs1) {
-                const int qp = (get_qPy(s, x - 1, y)     + get_qPy(s, x, y)     + 1) >> 1;
+        // Main body
+        for (y = (bounds.y == 0 ? 0 : bounds.y - 8); y < b_b; y += 8)
+        {
+            const DBParams * const dbp = y < bounds.y ? cb_dbp - s->ps.sps->ctb_width : cb_dbp;
+            const int8_t * const qta = s->qp_y_tab + ((y - 1) >> log2_min_cb_size) * s->ps.sps->min_cb_width;
+            const int8_t * const qtb = s->qp_y_tab + (y >> log2_min_cb_size) * s->ps.sps->min_cb_width;
 
-                beta = betatable[av_clip(qp + beta_offset, 0, MAX_QP)];
+            {
+                const uint8_t * const tcv = tctable + dbp->tc_offset;
+                const uint8_t * const betav = betatable + dbp->beta_offset;
+                unsigned int pcmfa = pcm2(s, bv_l - 1, y);
+                const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
+                unsigned int x;
 
-                tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
-                tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                if (pcmf) {
-                    no_p[0] = get_pcm(s, x - 1, y);
-                    no_p[1] = get_pcm(s, x - 1, y + 4);
-                    no_q[0] = get_pcm(s, x, y);
-                    no_q[1] = get_pcm(s, x, y + 4);
-                }
+                for (x = bv_l; x < bv_r; x += 8)
+                {
+                    const unsigned int pcmf_v = pcmfa & 3;
+                    const unsigned int bs0 = vbs[0];
+                    const unsigned int bs1 = vbs[1];
 
-                // This copes properly with no_p/no_q
-                s->hevcdsp.hevc_v_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
-                                                 frame_stride1(s->frame, LUMA),
-                                                 beta, tc, no_p, no_q,
-                                                 av_rpi_sand_frame_pos_y(s->frame, x - 4, y));
-                // *** VPU deblock lost here
-            }
-        }
-
-        if(!y)
-             continue;
-
-        // horizontal filtering luma
-        for (x = x0 ? x0 - 8 : 0; x < x_end2; x += 8) {
-            const int bs0 = s->horizontal_bs[( x      + y * s->bs_width) >> 2];
-            const int bs1 = s->horizontal_bs[((x + 4) + y * s->bs_width) >> 2];
-            if (bs0 || bs1) {
-                const int qp = (get_qPy(s, x, y - 1)     + get_qPy(s, x, y)     + 1) >> 1;
-
-                tc_offset   = x >= x0 ? cur_tc_offset : left_tc_offset;
-                beta_offset = x >= x0 ? cur_beta_offset : left_beta_offset;
-
-                beta = betatable[av_clip(qp + beta_offset, 0, MAX_QP)];
-                tc[0]   = bs0 ? TC_CALC(qp, bs0) : 0;
-                tc[1]   = bs1 ? TC_CALC(qp, bs1) : 0;
-                src = av_rpi_sand_frame_pos_y(s->frame, x, y);
-
-                if (pcmf) {
-                    no_p[0] = get_pcm(s, x, y - 1);
-                    no_p[1] = get_pcm(s, x + 4, y - 1);
-                    no_q[0] = get_pcm(s, x, y);
-                    no_q[1] = get_pcm(s, x + 4, y);
-                    s->hevcdsp.hevc_h_loop_filter_luma_c(src,
+                    if ((bs0 | bs1) != 0 && pcmf_v != 3)
+                    {
+                        const int qp = (qtb[(x - 1) >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
+                        s->hevcdsp.hevc_v_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
                                                          frame_stride1(s->frame, LUMA),
-                                                         beta, tc, no_p, no_q);
-                } else
-                    s->hevcdsp.hevc_h_loop_filter_luma(src,
-                                                       frame_stride1(s->frame, LUMA),
-                                                       beta, tc, no_p, no_q);
-            }
-        }
-    }
-
-    if (ctx_cfmt(s) != 0) {
-        const int v = 2;
-        const int h = 2;
-
-        // vertical filtering chroma
-        for (y = y0; y < y_end; y += 8 * v) {
-//                const int demi_y = y + 4 * v >= s->ps.sps->height;
-            const int demi_y = 0;
-            for (x = x0 ? x0 : 8 * h; x < x_end; x += 8 * h) {
-                const int bs0 = s->vertical_bs[(x +  y          * s->bs_width) >> 2];
-                const int bs1 = s->vertical_bs[(x + (y + 4 * v) * s->bs_width) >> 2];
-
-                if ((bs0 == 2) || (bs1 == 2)) {
-                    const int qp0 = (get_qPy(s, x - 1, y)         + get_qPy(s, x, y)         + 1) >> 1;
-                    const int qp1 = (get_qPy(s, x - 1, y + 4 * v) + get_qPy(s, x, y + 4 * v) + 1) >> 1;
-                    unsigned int no_f = !demi_y ? 0 : 2 | 8;
-
-                    // tc_offset here should be set to cur_tc_offset I think
-                    const uint32_t tc4 =
-                        ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, cur_tc_offset) | (chroma_tc(s, qp0, 2, cur_tc_offset) << 16)) |
-                        ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
-
-                    if (tc4 == 0)
-                        continue;
-
-                    if (pcmf) {
-                        no_f =
-                            (get_pcm(s, x - 1, y) ? 1 : 0) |
-                            (get_pcm(s, x - 1, y + 4 * v) ? 2 : 0) |
-                            (get_pcm(s, x, y) ? 4 : 0) |
-                            (get_pcm(s, x, y + 4 * v) ? 8 : 0);
-                        if (no_f == 0xf)
-                            continue;
+                                                         betav[qp],
+                                                         (bs0 == 0 ? 0 : tcv[qp + (int)(bs0 & 2)]) |
+                                                          ((bs1 == 0 ? 0 : tcv[qp + (int)(bs1 & 2)]) << 16),
+                                                         pcmf_v,
+                                                         av_rpi_sand_frame_pos_y(s->frame, x - 4, y));
                     }
 
+                    pcmfa >>= 1;
+                    vbs += s->bs_height;
+                }
+            }
+
+            if (y != 0)
+            {
+                unsigned int x;
+                unsigned int pcmfa = pcm4(s, bh_l, y - 1);
+                const uint8_t * hbs = s->horizontal_bs + (y >> 3) * s->bs_width + (bh_l >> 2);
+
+                for (x = bh_l; x <= bh_r; x += 8)
+                {
+                    const unsigned int pcmf_h = (pcmfa & 1) | ((pcmfa & 0x10000) >> 15);
+                    const unsigned int bs0 = hbs[0];
+                    const unsigned int bs1 = hbs[1];
+
+                    if ((bs0 | bs1) != 0 && pcmf_h != 3)
+                    {
+                        const int qp = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
+                        const DBParams * const dbph = (x < cb_x ? dbp - 1 : dbp);
+                        const uint8_t * const tc = tctable + dbph->tc_offset + qp;
+                        s->hevcdsp.hevc_h_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
+                                                             frame_stride1(s->frame, LUMA),
+                                                             betatable[qp + dbph->beta_offset],
+                                                             (bs0 == 0 ? 0 : tc[bs0 & 2]) |
+                                                                ((bs1 == 0 ? 0 : tc[bs1 & 2]) << 16),
+                                                             pcmf_h);
+                    }
+
+                    pcmfa >>= 1;
+                    hbs += 2;
+                }
+            }
+
+        }
+    }
+}
+
+#define TL 1
+#define TR 2
+#define BL 4
+#define BR 8
+
+static av_always_inline int q2h(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y)
+{
+    const unsigned int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
+    const int8_t * const qt = s->qp_y_tab + (y >> log2_min_cb_size) * s->ps.sps->min_cb_width;
+    return (qt[(x - 1) >> log2_min_cb_size] + qt[x >> log2_min_cb_size] + 1) >> 1;
+}
+
+static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int end_x, const int end_y)
+{
+    const unsigned int log2_ctb_size = s->ps.sps->log2_ctb_size;
+    const unsigned int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
+    const unsigned int ctb_size = (1 << log2_ctb_size);
+    const unsigned int cb_r = FFMIN(bounds.x + bounds.w, s->ps.sps->width) - (end_x ? 0 :  8);
+    const unsigned int ctb_n = (bounds.x + bounds.y * s->ps.sps->ctb_width) >> log2_ctb_size;
+    const DBParams * dbp = s->deblock + ctb_n;
+    const unsigned int b_b = FFMIN(bounds.y + bounds.h, s->ps.sps->height) - (end_y ? 0 : 8);
+    const uint8_t * const tcq_u = s->ps.pps->qp_dblk_x[1];
+    const uint8_t * const tcq_v = s->ps.pps->qp_dblk_x[2];
+
+    unsigned int cb_x;
+
+    av_assert1((bounds.x & (ctb_size - 1)) == 0);
+    av_assert1((bounds.y & (ctb_size - 1)) == 0);
+    av_assert1(bounds.h <= ctb_size);
+
+//    printf("%s: %d,%d (%d,%d) cb_r=%d, b_b=%d\n", __func__, bounds.x, bounds.y, bounds.w, bounds.h, cb_r, b_b);
+
+    // Do in CTB-shaped blocks
+    for (cb_x = bounds.x; cb_x < cb_r; cb_x += ctb_size, ++dbp) {
+        const unsigned int bv_r = FFMIN(cb_x + ctb_size, cb_r);
+        const unsigned int bv_l = FFMAX(cb_x, 16);
+        unsigned int y;
+
+        // V above
+        if (bounds.y != 0) {
+            // Deblock V up 8
+            // CTB above current
+            // Top-half only (tc4 & ~0xffff == 0) is special cased in asm
+            unsigned int x;
+            const unsigned int y = bounds.y - 8;
+
+            unsigned int pcmfa = pcm2(s, bv_l - 1, y);
+            const uint8_t * const tc = tctable + 2 + (dbp - s->ps.sps->ctb_width)->tc_offset;
+            const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
+
+            for (x = bv_l; x < bv_r; x += 16)
+            {
+                const unsigned int pcmf_v = (pcmfa & 3);
+                if ((vbs[0] & 2) != 0 && pcmf_v != 3)
+                {
+                    const int qp0 = q2h(s, x, y);
                     s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
                                                    frame_stride1(s->frame, 1),
-                                                   tc4,
+                                                   tc[tcq_u[qp0]] | (tc[tcq_v[qp0]] << 8),
                                                    av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
-                                                   no_f);
+                                                   pcmf_v);
                 }
+                pcmfa >>= 2;
+                vbs += s->bs_height * 2;
             }
+        }
 
-            if (y == 0)
-                continue;
+        for (y = bounds.y; y < b_b; y += 16)
+        {
+            // V
+            {
+                unsigned int x;
+                unsigned int pcmfa = pcm4(s, bv_l - 1, y);
+                const unsigned int pcmf_or = (y + 16 <= b_b) ? 0 : BL | BR;
+                const uint8_t * const tc = tctable + 2 + dbp->tc_offset;
+                const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
 
-            // horizontal filtering chroma
-            tc_offset = x0 ? left_tc_offset : cur_tc_offset;
-            x_end2 = x_end;
-            if (x_end != s->ps.sps->width)
-                x_end2 = x_end - 8 * h;
+                for (x = bv_l; x < bv_r; x += 16)
+                {
+                    const unsigned int pcmf_v = pcmf_or | (pcmfa & 3) | ((pcmfa >> 14) & 0xc);
+                    const unsigned int bs0 = (~pcmf_v & (TL | TR)) == 0 ? 0 : vbs[0] & 2;
+                    const unsigned int bs1 = (~pcmf_v & (BL | BR)) == 0 ? 0 : vbs[2] & 2;
 
-            for (x = x0 ? x0 - 8 * h: 0; x < x_end2; x += 8 * h) {
-//                    const int demi_x = x + 4 * v >= s->ps.sps->width;
-                const int demi_x = 0;
-
-                const int bs0 = s->horizontal_bs[( x          + y * s->bs_width) >> 2];
-                const int bs1 = s->horizontal_bs[((x + 4 * h) + y * s->bs_width) >> 2];
-                if ((bs0 == 2) || (bs1 == 2)) {
-                    const int qp0 = bs0 == 2 ? (get_qPy(s, x,         y - 1) + get_qPy(s, x,         y) + 1) >> 1 : 0;
-                    const int qp1 = bs1 == 2 ? (get_qPy(s, x + 4 * h, y - 1) + get_qPy(s, x + 4 * h, y) + 1) >> 1 : 0;
-                    const uint32_t tc4 =
-                        ((bs0 != 2) ? 0 : chroma_tc(s, qp0, 1, tc_offset) | (chroma_tc(s, qp0, 2, tc_offset) << 16)) |
-                        ((bs1 != 2) ? 0 : ((chroma_tc(s, qp1, 1, cur_tc_offset) | (chroma_tc(s, qp1, 2, cur_tc_offset) << 16)) << 8));
-                    unsigned int no_f = !demi_x ? 0 : 2 | 8;
-
-                    if (tc4 == 0)
-                        continue;
-
-                    if (pcmf) {
-                        no_f =
-                            (get_pcm(s, x,         y - 1) ? 1 : 0) |
-                            (get_pcm(s, x + 4 * h, y - 1) ? 2 : 0) |
-                            (get_pcm(s, x,         y)     ? 4 : 0) |
-                            (get_pcm(s, x + 4 * h, y)     ? 8 : 0);
-
-                        if (no_f == 0xf)
-                            continue;
+                    if ((bs0 | bs1) != 0)
+                    {
+                        const int qp0 = q2h(s, x, y);
+                        const int qp1 = q2h(s, x, y + 8);
+                        s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                            frame_stride1(s->frame, 1),
+                            ((bs0 == 0) ? 0 : (tc[tcq_u[qp0]] << 0) | (tc[tcq_v[qp0]] << 8)) |
+                                ((bs1 == 0) ? 0 : (tc[tcq_u[qp1]] << 16) | (tc[tcq_v[qp1]] << 24)),
+                            av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
+                            pcmf_v);
                     }
 
-                    s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
-                                                     frame_stride1(s->frame, LUMA),
-                                                     tc4, no_f);
+                    pcmfa >>= 2;
+                    vbs += s->bs_height * 2;
                 }
             }
-            // **** VPU deblock code gone from here....
+
+            // H
+            if (y != 0)
+            {
+                unsigned int x;
+                const unsigned int bh_r = cb_x + ctb_size >= cb_r ? cb_r : cb_x + ctb_size - 16;
+                const unsigned int bh_l = bv_l - 16;
+                unsigned int pcmfa = pcm4(s, bh_l, y - 1);
+                const uint8_t * hbs = s->horizontal_bs + (y >> 3) * s->bs_width + (bh_l >> 2);
+                const int8_t * const qta = s->qp_y_tab + ((y - 1) >> log2_min_cb_size) * s->ps.sps->min_cb_width;
+                const int8_t * const qtb = s->qp_y_tab + (y >> log2_min_cb_size) * s->ps.sps->min_cb_width;
+
+                for (x = bh_l; x < bh_r; x += 16)
+                {
+                    const unsigned int pcmf_h = (x < bounds.x ? TL | BL : x + 16 > bh_r ? TR | BR : 0) |
+                        (pcmfa & 3) | ((pcmfa >> 14) & 0xc);
+                    const int bs0 = (~pcmf_h & (TL | BL)) == 0 ? 0 : hbs[0] & 2;
+                    const int bs1 = (~pcmf_h & (TR | BR)) == 0 ? 0 : hbs[2] & 2;
+
+                    if ((bs0 | bs1) != 0)
+                    {
+                        const int qp0 = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
+                        const int qp1 = (qta[(x + 8) >> log2_min_cb_size] + qtb[(x + 8) >> log2_min_cb_size] + 1) >> 1;
+                        const uint8_t * const tc = tctable + 2 + (x < cb_x ? dbp - 1 : dbp)->tc_offset;
+
+                        s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                            frame_stride1(s->frame, 1),
+                            ((bs0 == 0) ? 0 : (tc[tcq_u[qp0]] << 0) | (tc[tcq_v[qp0]] << 8)) |
+                                ((bs1 == 0) ? 0 : (tc[tcq_u[qp1]] << 16) | (tc[tcq_v[qp1]] << 24)),
+                            pcmf_h);
+                    }
+                    pcmfa >>= 2;
+                    hbs += 4;
+                }
+            }
         }
     }
 }
@@ -802,7 +826,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
     int x_pu             = x0 >> log2_min_pu_size;
     MvField *curr        = &tab_mvf[y_pu * min_pu_width + x_pu];
     int is_intra         = curr->pred_flag == PF_INTRA;
-    int inc              = log2_min_pu_size == 2 ? 2 : 1;
+    const int inc        = log2_min_pu_size == 2 ? 2 : 1;
     uint8_t *bs;
 
 #ifdef DISABLE_STRENGTHS
@@ -819,7 +843,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
           (y0 % (1 << s->ps.sps->log2_ctb_size)) == 0)))
         boundary_upper = 0;
 
-    bs = &s->horizontal_bs[(x0 + y0 * s->bs_width) >> 2];
+    bs = &s->horizontal_bs[(x0 >> 2) + (y0 >> 3) * s->bs_width];
 
     if (boundary_upper) {
         const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
@@ -860,7 +884,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
 
             curr += min_pu_width * inc;
             top = curr - min_pu_width;
-            bs += s->bs_width * inc << log2_min_pu_size >> 2;
+            bs += s->bs_width * ((inc << log2_min_pu_size) >> 3);
 
             s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                     min_pu_in_4pix, sizeof (MvField), 4 >> 2,
@@ -880,7 +904,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
         boundary_left = 0;
 
     curr = &tab_mvf[y_pu * min_pu_width + x_pu];
-    bs = &s->vertical_bs[(x0 + y0 * s->bs_width) >> 2];
+    bs = &s->vertical_bs[(x0 >> 3)* s->bs_height + (y0 >> 2)];
 
     if (boundary_left) {
         const RefPicList *rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
@@ -890,7 +914,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
 
         if (is_intra) {
             for (j = 0; j < (1 << log2_trafo_size); j += 4)
-                bs[j * s->bs_width >> 2] = 2;
+                bs[j >> 2] = 2;
 
         } else {
             int y_tu = y0 >> log2_min_tu_size;
@@ -899,7 +923,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
             uint8_t *left_cbf_luma = curr_cbf_luma - 1;
 
             s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                    min_pu_in_4pix, min_pu_width * sizeof (MvField), 4 * s->bs_width >> 2,
+                    min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
                     rpl[0].list, rpl[1].list, rpl_left[0].list, rpl_left[1].list,
                     curr, left, bs);
 
@@ -908,9 +932,9 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
                 int j_tu = j >> log2_min_tu_size;
 
                 if (left[j_pu * min_pu_width].pred_flag == PF_INTRA)
-                    bs[j * s->bs_width >> 2] = 2;
+                    bs[j >> 2] = 2;
                 else if (curr_cbf_luma[j_tu * min_tu_width] || left_cbf_luma[j_tu * min_tu_width])
-                    bs[j * s->bs_width >> 2] = 1;
+                    bs[j >> 2] = 1;
             }
         }
     }
@@ -921,10 +945,10 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
 
             curr += inc;
             left = curr - 1;
-            bs += inc << log2_min_pu_size >> 2;
+            bs += ((inc << log2_min_pu_size) >> 3) * s->bs_height;
 
             s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                    min_pu_in_4pix, min_pu_width * sizeof (MvField), 4 * s->bs_width >> 2,
+                    min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
                     rpl[0].list, rpl[1].list, rpl[0].list, rpl[1].list,
                     curr, left, bs);
         }
@@ -935,48 +959,94 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, H
 #undef CB
 #undef CR
 
-void ff_hevc_rpi_hls_filter(HEVCRpiContext * const s, const int x, const int y, const int ctb_size)
+static inline unsigned int ussub(const unsigned int a, const unsigned int b)
 {
-    const int x_end = x >= s->ps.sps->width  - ctb_size;
-
-    if (s->avctx->skip_loop_filter < AVDISCARD_ALL)
-        deblocking_filter_CTB(s, x, y);
-
-    if (s->ps.sps->sao_enabled) {
-        int y_end = y >= s->ps.sps->height - ctb_size;
-        if (y != 0 && x != 0)
-            sao_filter_CTB(s, x - ctb_size, y - ctb_size);
-        if (x != 0 && y_end)
-            sao_filter_CTB(s, x - ctb_size, y);
-        if (y != 0 && x_end)
-            sao_filter_CTB(s, x, y - ctb_size);
-        if (x_end && y_end)
-            sao_filter_CTB(s, x , y);
-    }
+    return a < b ? 0 : a - b;
 }
 
-void ff_hevc_rpi_hls_filters(HEVCRpiContext *s, int x_ctb, int y_ctb, int ctb_size)
+static inline int cache_boundry(const AVFrame * const frame, const unsigned int x)
 {
-    // * This can break strict L->R then U->D ordering - mostly it doesn't matter
-    // Never called if rpi_enabled so no need for cache flush ops
-    const int x_end = x_ctb >= s->ps.sps->width  - ctb_size;
-    const int y_end = y_ctb >= s->ps.sps->height - ctb_size;
-    if (y_ctb && x_ctb)
-        ff_hevc_rpi_hls_filter(s, x_ctb - ctb_size, y_ctb - ctb_size, ctb_size);
-    if (y_ctb && x_end)
-    {
-        ff_hevc_rpi_hls_filter(s, x_ctb, y_ctb - ctb_size, ctb_size);
-        // Signal progress - this is safe for SAO
-        if (s->threads_type == FF_THREAD_FRAME && y_ctb > ctb_size)
-            ff_hevc_rpi_progress_signal_recon(s, y_ctb - ctb_size - 1);
-    }
-    if (x_ctb && y_end)
-        ff_hevc_rpi_hls_filter(s, x_ctb - ctb_size, y_ctb, ctb_size);
-    if (x_end && y_end)
-    {
-        ff_hevc_rpi_hls_filter(s, x_ctb, y_ctb, ctb_size);
-        // All done - signal such
-        if (s->threads_type == FF_THREAD_FRAME)
-            ff_hevc_rpi_progress_signal_recon(s, INT_MAX);
-    }
+    return ((x >> av_rpi_sand_frame_xshl(frame)) & ~63) == 0;
 }
+
+int ff_hevc_rpi_hls_filter_blk(HEVCRpiContext * const s, const RpiBlk bounds, const int eot)
+{
+    const int ctb_size = (1 << s->ps.sps->log2_ctb_size);
+    int x, y;
+
+    const unsigned int br = FFMIN(bounds.x + bounds.w, s->ps.sps->width);
+    const unsigned int bb = FFMIN(bounds.y + bounds.h, s->ps.sps->height);
+
+    const int x_end = (br >= s->ps.sps->width);
+    const int y_end = (bb >= s->ps.sps->height);
+
+    // Deblock may not touch the edges of the bound as they are still needed
+    // for Intra pred
+
+    deblock_y_blk(s, bounds, x_end, y_end);
+    deblock_uv_blk(s, bounds, x_end, y_end);
+
+    // SAO needs
+    // (a) CTB alignment
+    // (b) Valid pixels all the way around the CTB in particular it needs the DR pixel
+    {
+        const unsigned int xo = bounds.x - ((bounds.x - 16) & ~(ctb_size - 1));
+        const unsigned int yo = bounds.y - ((bounds.y - 16) & ~(ctb_size - 1));
+        const unsigned int yt = ussub(bounds.y, yo);
+        const unsigned int yb = y_end ? bb : ussub(bb, yo);
+        const unsigned int xl = ussub(bounds.x, xo);
+        const unsigned int xr = x_end ? br : ussub(br, xo);
+
+        for (y = yt; y < yb; y += ctb_size) {
+            for (x = xl; x < xr; x += ctb_size) {
+                sao_filter_CTB(s, x, y);
+            }
+        }
+
+        // Cache invalidate
+        y = 0;
+        if (xr != 0 && yb != 0)
+        {
+            const unsigned int llen =
+                (av_rpi_sand_frame_stride1(s->frame) >> av_rpi_sand_frame_xshl(s->frame));
+            const unsigned int mask = ~(llen - 1);
+            const unsigned int il = (xl == 0) ? 0 : (xl - 1) & mask;
+            const unsigned int ir = x_end || !cache_boundry(s->frame, br) ? br : (xr - 1) & mask;
+            const unsigned int it = ussub(yt, 1);
+            const unsigned int ib = y_end ? bb : yb - 1;
+
+            if (il < ir) {
+                rpi_cache_buf_t cbuf;
+                rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
+                rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+                  il, it, ir - il, ib - it,
+                  ctx_vshift(s, 1), 1, 1);
+
+                // *** Tiles where V tile boundries aren't on cache boundries
+                // We have a race condition between ARM side recon in the tlle
+                // on the left & QPU pred in the tile on the right
+                // The code below ameliorates it as does turning off WPP in
+                // these cases but it still exists :-(
+
+                // If we have to commit the right hand tile boundry due to
+                // cache boundry considerations then at EoTile we must commit
+                // that boundry to bottom of tile (bounds)
+                if (ib != bb && ir == br && eot) {
+                    rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
+                      br - 1, ib, 1, bb - ib,
+                      ctx_vshift(s, 1), 1, 1);
+                }
+
+                rpi_cache_flush_finish(rfe);
+
+                if (x_end)
+                    y = y_end ? INT_MAX : ib;
+
+//                printf("Flush: %4d,%4d -> %4d,%4d: signal: %d\n", il, it, ir, ib, y - 1);
+            }
+        }
+    }
+
+    return y;
+}
+

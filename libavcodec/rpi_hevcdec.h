@@ -92,7 +92,7 @@
 // Number of separate threads/passes in worker
 // 2 and 3 are the currently valid numbers
 // At the moment 3 seems fractionally faster
-//#define RPI_PASSES 2
+//#define RPI_PASSES              2
 #define RPI_PASSES              3
 
 // Print out various usage stats
@@ -291,7 +291,7 @@ typedef struct RefPicListTab {
     RefPicList refPicList[2];
 } RefPicListTab;
 
-typedef struct CodingUnit {
+typedef struct RpiCodingUnit {
     int x;
     int y;
 
@@ -302,7 +302,7 @@ typedef struct CodingUnit {
     uint8_t intra_split_flag;   ///< IntraSplitFlag
     uint8_t max_trafo_depth;    ///< MaxTrafoDepth
     uint8_t cu_transquant_bypass_flag;
-} CodingUnit;
+} RpiCodingUnit;
 
 typedef struct RpiNeighbourAvailable {
     char cand_bottom_left;
@@ -332,10 +332,11 @@ typedef struct TransformUnit {
     int intra_pred_mode_c;
     int chroma_mode_c;
     uint8_t is_cu_qp_delta_coded;
-    uint8_t is_cu_chroma_qp_offset_coded;
-    int8_t  cu_qp_offset_cb;
-    int8_t  cu_qp_offset_cr;
+    uint8_t cu_chroma_qp_offset_wanted;
+//    int8_t  cu_qp_offset_cb;
+//    int8_t  cu_qp_offset_cr;
     uint8_t cross_pf;
+    const int8_t * qp_divmod6[3];
 } TransformUnit;
 
 typedef struct DBParams {
@@ -435,7 +436,7 @@ typedef struct HEVCRpiLocalContext {
     int     end_of_ctb_y;
 
     int ct_depth;
-    CodingUnit cu;
+    RpiCodingUnit cu;
     PredictionUnit pu;
 
 #define BOUNDARY_LEFT_SLICE     (1 << 0)
@@ -724,7 +725,7 @@ typedef struct HEVCRpiContext {
     RefPicList rps[5];
 
     RpiSliceHeader sh;
-    SAOParams *sao;
+    RpiSAOParams *sao;
     DBParams *deblock;
     enum HEVCNALUnitType nal_unit_type;
     int temporal_id;  ///< temporal_id_plus1 - 1
@@ -897,8 +898,7 @@ int ff_hevc_rpi_cu_qp_delta_sign_flag(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cu_qp_delta_abs(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cu_chroma_qp_offset_flag(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cu_chroma_qp_offset_idx(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc);
-void ff_hevc_rpi_hls_filter(HEVCRpiContext * const s, const int x, const int y, const int ctb_size);
-void ff_hevc_rpi_hls_filters(HEVCRpiContext *s, int x_ctb, int y_ctb, int ctb_size);
+int ff_hevc_rpi_hls_filter_blk(HEVCRpiContext * const s, const RpiBlk bounds, const int eot);
 void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                                 const int x0, const int y0,
                                 const int log2_trafo_size, const enum ScanType scan_idx,

@@ -1609,8 +1609,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
     int explicit_rdpcm_dir_flag;
 
     int i;
-    int qp,shift,scale;
-    static const uint8_t const level_scale[] = { 40, 45, 51, 57, 64, 72 };
+    int shift,scale;
     const uint8_t *scale_matrix = NULL;
     uint8_t dc_scale;
     const int c_idx_nz = (c_idx != 0);
@@ -1620,22 +1619,6 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
 
     // Derive QP for dequant
     if (!lc->cu.cu_transquant_bypass_flag) {
-        static const uint8_t qp_c[] = { 29, 30, 31, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37 };
-        static const uint8_t rem6[51 + 4 * 6 + 1] = {
-            0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2,
-            3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5,
-            0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3,
-            4, 5, 0, 1, 2, 3, 4, 5, 0, 1
-        };
-
-        static const uint8_t div6[51 + 4 * 6 + 1] = {
-            0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3,  3,  3,
-            3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6,  6,  6,
-            7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10,
-            10, 10, 11, 11, 11, 11, 11, 11, 12, 12
-        };
-        int qp_y = lc->qp_y;
-
         may_hide_sign = s->ps.pps->sign_data_hiding_flag;
 
         if (s->ps.pps->transform_skip_enabled_flag &&
@@ -1651,53 +1634,29 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             }
         }
 
-        if (c_idx == 0) {
-            qp = qp_y + s->ps.sps->qp_bd_offset;
-        } else {
-            int qp_i, offset;
+        {
+            static const uint8_t level_scale[8] = {
+                40, 45, 51, 57, 64, 72, 0, 0  // Pad to 8
+            };
+            const int qp6 = (int8_t)lc->tu.qp_divmod6[c_idx][lc->qp_y];
 
-            if (c_idx == 1)
-                offset = s->ps.pps->cb_qp_offset + s->sh.slice_cb_qp_offset +
-                         lc->tu.cu_qp_offset_cb;
-            else
-                offset = s->ps.pps->cr_qp_offset + s->sh.slice_cr_qp_offset +
-                         lc->tu.cu_qp_offset_cr;
+            // Shift is set to one less than will actually occur as the scale
+            // and saturate step adds 1 and then shifts right again
+            scale = level_scale[qp6 & 7];
+//            shift = s->ps.sps->bit_depth + log2_trafo_size - (int)(qp6 >> 3);
+            shift = log2_trafo_size - (qp6 >> 3);
 
-            qp_i = av_clip(qp_y + offset, - s->ps.sps->qp_bd_offset, 57);
-            if (ctx_cfmt(s) == 1) {
-                if (qp_i < 30)
-                    qp = qp_i;
-                else if (qp_i > 43)
-                    qp = qp_i - 6;
-                else
-                    qp = qp_c[qp_i - 30];
-            } else {
-                if (qp_i > 51)
-                    qp = 51;
-                else
-                    qp = qp_i;
+            if (shift < 0) {
+                scale <<= -shift;
+                shift = 0;
             }
-
-            qp += s->ps.sps->qp_bd_offset;
-        }
-
-        // Shift is set to one less than will actually occur as the scale
-        // and saturate step adds 1 and then shifts right again
-        shift = s->ps.sps->bit_depth + log2_trafo_size - 6;
-        scale = level_scale[rem6[qp]];
-        if (div6[qp] >= shift) {
-            scale <<= (div6[qp] - shift);
-            shift = 0;
-        } else {
-            shift -= div6[qp];
         }
 
         if (s->ps.sps->scaling_list_enable_flag && !(trans_skip_or_bypass && log2_trafo_size > 2)) {
-            const ScalingList *sl = s->ps.pps->scaling_list_data_present_flag ?
+            const ScalingList * const sl = s->ps.pps->scaling_list_data_present_flag ?
                 &s->ps.pps->scaling_list : &s->ps.sps->scaling_list;
-            int matrix_id = lc->cu.pred_mode != MODE_INTRA;
-
-            matrix_id = 3 * matrix_id + c_idx;
+            const unsigned int matrix_id =
+                lc->cu.pred_mode != MODE_INTRA ? 3 + c_idx : c_idx;
 
             scale_matrix = sl->sl[log2_trafo_size - 2][matrix_id];
             dc_scale = scale_matrix[0];

@@ -88,8 +88,8 @@ typedef struct RpiSliceHeader {
     unsigned int collocated_ref_idx;
 
     int slice_qp_delta;
-    int slice_cb_qp_offset;
-    int slice_cr_qp_offset;
+    int slice_cb_qp_offset;  // -12, +12
+    int slice_cr_qp_offset;  // -12, +12
 
     uint8_t cu_chroma_qp_offset_enabled_flag;
 
@@ -236,7 +236,6 @@ typedef struct HEVCRpiSPS {
     enum AVPixelFormat pix_fmt;
 
     unsigned int log2_max_poc_lsb;
-    int pcm_enabled_flag;
 
     int max_sub_layers;
     struct {
@@ -245,9 +244,6 @@ typedef struct HEVCRpiSPS {
         int max_latency_increase;
     } temporal_layer[HEVC_MAX_SUB_LAYERS];
     uint8_t temporal_id_nesting_flag;
-
-    VUI vui;
-    PTL ptl;
 
     uint8_t scaling_list_enable_flag;
     ScalingList scaling_list;
@@ -266,16 +262,16 @@ typedef struct HEVCRpiSPS {
     struct {
         uint8_t bit_depth;
         uint8_t bit_depth_chroma;
-        unsigned int log2_min_pcm_cb_size;
-        unsigned int log2_max_pcm_cb_size;
+        uint8_t log2_min_pcm_cb_size;
+        uint8_t log2_max_pcm_cb_size;
         uint8_t loop_filter_disable_flag;
     } pcm;
     uint8_t sps_temporal_mvp_enabled_flag;
     uint8_t sps_strong_intra_smoothing_enable_flag;
 
-    unsigned int log2_min_cb_size;
+    unsigned int log2_min_cb_size;  // 3..6
     unsigned int log2_diff_max_min_coding_block_size;
-    unsigned int log2_min_tb_size;
+    unsigned int log2_min_tb_size;  // 2..5
     unsigned int log2_max_trafo_size;
     unsigned int log2_ctb_size;
     unsigned int log2_min_pu_size;
@@ -303,6 +299,8 @@ typedef struct HEVCRpiSPS {
     int min_tb_height;
     int min_pu_width;
     int min_pu_height;
+    int pcm_width;
+    int pcm_height;
     int tb_mask;
 
     int hshift[3];
@@ -312,6 +310,9 @@ typedef struct HEVCRpiSPS {
 
     uint8_t data[4096];
     int data_size;
+
+    VUI vui;
+    PTL ptl;
 } HEVCRpiSPS;
 
 #define CTB_TS_FLAGS_SOTL       (1U << 0)       // X start of tile line
@@ -340,8 +341,11 @@ typedef struct HEVCRpiPPS {
     uint8_t cu_qp_delta_enabled_flag;
     int diff_cu_qp_delta_depth;
 
-    int cb_qp_offset;
-    int cr_qp_offset;
+    int cb_qp_offset;   // -12..12
+    int cr_qp_offset;   // -12..12
+    const uint8_t * qp_dblk_x[3];
+    const int8_t * qp_bd_x[3];
+
     uint8_t pic_slice_level_chroma_qp_offsets_present_flag;
     uint8_t weighted_pred_flag;
     uint8_t weighted_bipred_flag;

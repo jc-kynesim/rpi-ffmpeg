@@ -30,17 +30,14 @@
 
 #define MAX_PB_SIZE 64
 
-typedef struct SAOParams {
-//    int offset_abs[3][4];   ///< sao_offset_abs
-//    int offset_sign[3][4];  ///< sao_offset_sign
+typedef struct RpiSAOParams {
+    uint8_t band_position[3];   ///< sao_band_position (Y,U,V)
+    uint8_t eo_class[3];        ///< sao_eo_class      (Y,U=V)
+    uint8_t type_idx[3];        ///< sao_type_idx      (Y,U=V)
 
-    uint8_t band_position[3];   ///< sao_band_position
-    uint8_t eo_class[3];        ///< sao_eo_class
-    uint8_t type_idx[3];    ///< sao_type_idx
+    int16_t offset_val[3][5];   ///<SaoOffsetVal       (Y,U,V)
 
-    int16_t offset_val[3][5];   ///<SaoOffsetVal
-
-} SAOParams;
+} RpiSAOParams;
 
 typedef struct Mv {
     int16_t x;  ///< horizontal component of motion vector
@@ -98,10 +95,10 @@ typedef struct HEVCDSPContext {
                                const int16_t *sao_offset_val_u, const int16_t *sao_offset_val_v, int sao_eo_class, int width, int height);
 
     void (*sao_edge_restore[2])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
-                                struct SAOParams *sao, int *borders, int _width, int _height, int c_idx,
+                                struct RpiSAOParams *sao, int *borders, int _width, int _height, int c_idx,
                                 uint8_t *vert_edge, uint8_t *horiz_edge, uint8_t *diag_edge);
     void (*sao_edge_restore_c[2])(uint8_t *_dst, uint8_t *_src, ptrdiff_t _stride_dst, ptrdiff_t _stride_src,
-                                struct SAOParams *sao, int *borders, int _width, int _height, int c_idx,
+                                struct RpiSAOParams *sao, int *borders, int _width, int _height, int c_idx,
                                 uint8_t *vert_edge, uint8_t *horiz_edge, uint8_t *diag_edge);
 
     void (*put_hevc_qpel[10][2][2])(int16_t *dst, uint8_t *src, ptrdiff_t srcstride,
@@ -155,9 +152,10 @@ typedef struct HEVCDSPContext {
     void (*hevc_v_loop_filter_chroma_c)(uint8_t *pix, ptrdiff_t stride,
                                         int32_t *tc, uint8_t *no_p,
                                         uint8_t *no_q);
+    void (*hevc_h_loop_filter_luma2)(uint8_t * _pix_r,
+                                 unsigned int _stride, unsigned int beta, unsigned int tc2, unsigned int no_f);
     void (*hevc_v_loop_filter_luma2)(uint8_t * _pix_r,
-                                 unsigned int _stride, unsigned int beta, const int32_t tc[2],
-                                 const uint8_t no_p[2], const uint8_t no_q[2],
+                                 unsigned int _stride, unsigned int beta, unsigned int tc2, unsigned int no_f,
                                  uint8_t * _pix_l);
     void (*hevc_h_loop_filter_uv)(uint8_t * src, unsigned int stride, uint32_t tc4,
                                  unsigned int no_f);
