@@ -4348,6 +4348,7 @@ static int rpi_run_one_line(HEVCRpiContext *const s, HEVCRpiLocalContext * const
 #endif
             sem_post(lc->bt_psem_out);
         }
+        // The wait for loop_n == 0 has been done in bit_thread
         if (!is_first && loop_n != 0)
         {
 #if TRACE_WPP
@@ -4580,6 +4581,18 @@ static int bit_threads_kill(HEVCRpiContext * const s)
 #endif
 
 
+// If we are at EoT and the row is shorter than the number of jobs
+// we can Q we have to wait for it finish otherwise we risk cache/QPU
+// disasters
+static inline int tile_needs_wait(const HEVCRpiContext * const s, const int n)
+{
+    return
+        s->ps.pps->tile_wpp_inter_disable >= 2 &&
+        s->sh.slice_type != HEVC_SLICE_I &&
+        n >= 0 &&
+        (s->ps.pps->ctb_ts_flags[n] & (CTB_TS_FLAGS_EOT | CTB_TS_FLAGS_EOL)) == CTB_TS_FLAGS_EOT;
+}
+
 static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 {
     HEVCRpiContext * const s  = avctxt->priv_data;
@@ -4692,6 +4705,10 @@ static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
                 goto fail;
 
             worker_submit_job(s, lc);
+
+            if (tile_needs_wait(s, lc->ts - 1))
+                worker_wait(s, lc);
+
         } while (!lc->unit_done);
 
 #if TRACE_WPP
@@ -4699,10 +4716,10 @@ static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 #endif
     }
 
-    // If we have reached the end of the frame then wait for the worker to finish all its jobs
-    if (lc->ts >= s->ps.sps->ctb_size) {
+    // If we have reached the end of the frame or
+    // then wait for the worker to finish all its jobs
+    if (lc->ts >= s->ps.sps->ctb_size)
         worker_wait(s, lc);
-    }
 
 #if RPI_TSTATS
     {

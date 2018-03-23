@@ -1513,6 +1513,20 @@ static inline int setup_pps(AVCodecContext * const avctx,
                 pps->tile_wpp_inter_disable = 1;
             }
         }
+
+        // If we can start the next row before finishing the first line of
+        // this one then we must wait at the end of the tile
+        // * if this happens a lot then there are better but more complicated
+        //   conditions that we could apply
+        if (pps->tile_wpp_inter_disable) {
+            for (i = 0; i < pps->num_tile_rows; i++)
+            {
+                if (pps->row_height[i] <= RPI_MAX_JOBS) {
+                    pps->tile_wpp_inter_disable = 2;
+                    break;
+                }
+            }
+        }
     }
 
     pps->row_bd[0] = 0;
