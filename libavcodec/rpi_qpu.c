@@ -344,7 +344,7 @@ static void gpu_unlock(void) {
 static gpu_env_t * gpu_lock(void) {
   pthread_mutex_lock(&gpu_mutex);
 
-  av_assert0(gpu != NULL);
+  av_assert1(gpu != NULL);
   return gpu;
 }
 
@@ -374,7 +374,7 @@ static void gpu_unlock_unref(gpu_env_t * const ge)
 
 static inline gpu_env_t * gpu_ptr(void)
 {
-  av_assert0(gpu != NULL);
+  av_assert1(gpu != NULL);
   return gpu;
 }
 
@@ -420,7 +420,7 @@ unsigned int vpu_get_fn(const unsigned int bit_depth) {
   uint32_t a = 0;
 
   // Make sure that the gpu is initialized
-  av_assert0(gpu != NULL);
+  av_assert1(gpu != NULL);
   switch (bit_depth){
     case 8:
       a = gpu->code_gm_ptr.vc + offsetof(struct GPU, vpu_code8);
@@ -435,13 +435,13 @@ unsigned int vpu_get_fn(const unsigned int bit_depth) {
 }
 
 unsigned int vpu_get_constants(void) {
-  av_assert0(gpu != NULL);
+  av_assert1(gpu != NULL);
   return (gpu->code_gm_ptr.vc + offsetof(struct GPU,transMatrix2even));
 }
 
 int gpu_get_mailbox(void)
 {
-  av_assert0(gpu);
+  av_assert1(gpu);
   return gpu->mb;
 }
 
@@ -501,7 +501,7 @@ inline void rpi_cache_flush_add_gm_blocks(rpi_cache_flush_env_t * const rfe, con
 {
   struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
 
-  av_assert0(rfe->v.op_count <= CACHE_EL_MAX);
+  av_assert1(rfe->v.op_count <= CACHE_EL_MAX);
 
   b->invalidate_mode = mode;
   b->block_count = blocks;
@@ -517,9 +517,9 @@ void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_M
   if (gm == NULL || size == 0)
     return;
 
-  av_assert0(offset <= gm->numbytes);
-  av_assert0(size <= gm->numbytes);
-  av_assert0(offset + size <= gm->numbytes);
+  av_assert1(offset <= gm->numbytes);
+  av_assert1(size <= gm->numbytes);
+  av_assert1(offset + size <= gm->numbytes);
 
   rpi_cache_flush_add_gm_blocks(rfe, gm, mode, offset, size, 1, 0);
 }
@@ -596,7 +596,7 @@ void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AV
     const unsigned int xshl = av_rpi_sand_frame_xshl(frame);
     const unsigned int xleft = x0 & ~((stride1 >> xshl) - 1);
     const unsigned int block_count = (((x0 + width - xleft) << xshl) + stride1 - 1) / stride1;  // Same for Y & C
-    av_assert0(rfe->v.op_count + do_chroma + do_luma < CACHE_EL_MAX);
+    av_assert1(rfe->v.op_count + do_chroma + do_luma < CACHE_EL_MAX);
 
     if (do_chroma)
     {
@@ -754,7 +754,7 @@ void vpu_qpu_job_delete(vpu_qpu_job_env_t * const vqj)
 static inline struct gpu_job_s * new_job(vpu_qpu_job_env_t * const vqj)
 {
   struct gpu_job_s * const j = vqj->j + vqj->n++;
-  av_assert0(vqj->n <= VPU_QPU_JOB_MAX);
+  av_assert1(vqj->n <= VPU_QPU_JOB_MAX);
   return j;
 }
 
@@ -810,6 +810,12 @@ static void vpu_qpu_job_callback_wait(void * v)
   vq_wait_post(v);
 }
 
+// Poke a user-supplied sem
+static void vpu_qpu_job_callback_sem(void * v)
+{
+  sem_post((sem_t *)v);
+}
+
 void vpu_qpu_job_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * const wait_h)
 {
   vq_wait_t * wait;
@@ -827,7 +833,7 @@ void vpu_qpu_job_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * c
   if (vqj->n == 1 || vqj->mask == VPU_QPU_MASK_QPU)
   {
     struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
-    av_assert0(j->callback.func == 0);
+    av_assert1(j->callback.func == 0);
 
     j->callback.func = vpu_qpu_job_callback_wait;
     j->callback.cookie = wait;
@@ -846,9 +852,44 @@ void vpu_qpu_job_add_sync_this(vpu_qpu_job_env_t * const vqj, vpu_qpu_wait_h * c
   *wait_h = wait;
 }
 
+// Returns 0 if no sync added ('cos Q empty), 1 if sync added
+int vpu_qpu_job_add_sync_sem(vpu_qpu_job_env_t * const vqj, sem_t * const sem)
+{
+  // If nothing on q then just return
+  if (vqj->mask == 0)
+    return 0;
+
+  // There are 2 VPU Qs & 1 QPU Q so we can collapse sync
+  // If we only posted one thing or only QPU jobs
+  if (vqj->n == 1 || vqj->mask == VPU_QPU_MASK_QPU)
+  {
+    struct gpu_job_s * const j = vqj->j + (vqj->n - 1);
+    av_assert1(j->callback.func == 0);
+
+    j->callback.func = vpu_qpu_job_callback_sem;
+    j->callback.cookie = sem;
+  }
+  else
+  {
+    struct gpu_job_s *const j = new_job(vqj);
+
+    j->command = EXECUTE_SYNC;
+    j->u.s.mask = vqj->mask;
+    j->callback.func = vpu_qpu_job_callback_sem;
+    j->callback.cookie = sem;
+  }
+
+  vqj->mask = 0;
+  return 1;
+}
+
+
 int vpu_qpu_job_start(vpu_qpu_job_env_t * const vqj)
 {
-  return vqj->n == 0 ? 0 : vc_gpuserv_execute_code(vqj->n, vqj->j);
+  if (vqj->n == 0)
+    return 0;
+
+  return vc_gpuserv_execute_code(vqj->n, vqj->j);
 }
 
 // Simple wrapper of start + delete

@@ -969,7 +969,7 @@ static inline int cache_boundry(const AVFrame * const frame, const unsigned int 
     return ((x >> av_rpi_sand_frame_xshl(frame)) & ~63) == 0;
 }
 
-int ff_hevc_rpi_hls_filter_blk(HEVCRpiContext * const s, const RpiBlk bounds, const int eot)
+int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int eot)
 {
     const int ctb_size = (1 << s->ps.sps->log2_ctb_size);
     int x, y;

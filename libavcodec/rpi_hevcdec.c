@@ -3384,71 +3384,34 @@ static void hls_decode_neighbour(const HEVCRpiContext * const s, HEVCRpiLocalCon
 }
 
 
-static void rpi_execute_dblk_cmds(HEVCRpiContext * const s, HEVCRpiJob * const jb)
+static void rpi_execute_dblk_cmds(const HEVCRpiContext * const s, HEVCRpiJob * const jb)
 {
-#if 1
     int y = ff_hevc_rpi_hls_filter_blk(s, jb->bounds,
         (s->ps.pps->ctb_ts_flags[jb->ctu_ts_last] & CTB_TS_FLAGS_EOT) != 0);
 
     // Signal
     if (s->threads_type == FF_THREAD_FRAME && y > 0) {
-        ff_hevc_rpi_progress_signal_recon(s, y - 1);
+        // Cast away const as progress is held in s, but this really shouldn't confuse anything
+        ff_hevc_rpi_progress_signal_recon((HEVCRpiContext *)s, y - 1);
     }
-#else
-    const unsigned int ctb_size = 1 << s->ps.sps->log2_ctb_size;
-    const unsigned int x0 = FFMAX(jb->bounds.x, ctb_size) - ctb_size;
-    const unsigned int y0 = FFMAX(jb->bounds.y, ctb_size) - ctb_size;
-    const unsigned int bound_r = jb->bounds.x + jb->bounds.w;
-    const unsigned int bound_b = jb->bounds.y + jb->bounds.h;
-    const int x_end = (bound_r >= s->ps.sps->width);
-    const int y_end = (bound_b >= s->ps.sps->height);
-    const unsigned int xr = bound_r - (x_end ? 0 : ctb_size);
-    const unsigned int yb = bound_b - (y_end ? 0 : ctb_size);
-    unsigned int x, y;
-
-    for (y = y0; y < yb; y += ctb_size ) {
-        for (x = x0; x < xr; x += ctb_size ) {
-            ff_hevc_rpi_hls_filter(s, x, y, ctb_size);
-        }
-    }
-
-    // Flush (SAO)
-    if (y > y0) {
-        const unsigned int xl = x0 > ctb_size ? x0 - ctb_size : 0;
-        const unsigned int yt = y0 > ctb_size ? y0 - ctb_size : 0;
-        const unsigned int yb = (s->ps.pps->ctb_ts_flags[jb->ctu_ts_last] & CTB_TS_FLAGS_EOT) != 0 ?
-            bound_b : y - ctb_size;
-
-        if (yb > yt && bound_r > xl)
-        {
-            rpi_cache_buf_t cbuf;
-            rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
-            rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE,
-              xl, yt, bound_r - xl, yb - yt,
-              ctx_vshift(s, 1), 1, 1);
-            rpi_cache_flush_finish(rfe);
-        }
-    }
-
-    // Signal
-    if (s->threads_type == FF_THREAD_FRAME && x_end && y0 > 0) {
-        ff_hevc_rpi_progress_signal_recon(s, y_end ? INT_MAX : y0 - 1);
-    }
-#endif
 
     // Job done now
     // ? Move outside this fn
     job_free(s->jbc, jb);
 }
 
-
 // I-pred, transform_and_add for all blocks types done here
 // All ARM
-static void rpi_execute_pred_cmds(HEVCRpiContext * const s, HEVCRpiJob * const jb)
+static void rpi_execute_pred_cmds(const HEVCRpiContext * const s, HEVCRpiJob * const jb)
 {
     unsigned int i;
     HEVCRpiIntraPredEnv * const iap = &jb->intra;
     const HEVCPredCmd *cmd = iap->cmds;
+
+#if !RPI_WORKER_WAIT_PASS_0
+    rpi_sem_wait(&jb->sem);
+    rpi_cache_flush_execute(jb->rfe);  // Invalidate data set up in pass1
+#endif
 
     for (i = iap->n; i > 0; i--, cmd++)
     {
@@ -3745,17 +3708,15 @@ static void worker_core2(HEVCRpiContext * const s, HEVCRpiJob * const jb)
 }
 #endif
 
-
 // Core execution tasks
-static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
+static void worker_core(const HEVCRpiContext * const s, HEVCRpiJob * const jb)
 {
-    const HEVCRpiContext * const s = s0;
-    vpu_qpu_wait_h sync_y;
     int pred_y, pred_c;
     vpu_qpu_job_env_t qvbuf;
     const vpu_qpu_job_h vqj = vpu_qpu_job_init(&qvbuf);
-    rpi_cache_buf_t cbuf;
-    rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
+#if RPI_WORKER_WAIT_PASS_0
+    int do_wait;
+#endif
 
     {
         const HEVCRpiCoeffsEnv * const cf = &jb->coeffs;
@@ -3788,21 +3749,27 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
                 n32,
                 0);
 
-            rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, 0, cf->s[2].n * csize);
-            rpi_cache_flush_add_gm_range(rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, offset32, cf->s[3].n * csize);
+            rpi_cache_flush_add_gm_range(jb->rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, 0, cf->s[2].n * csize);
+            rpi_cache_flush_add_gm_range(jb->rfe, &cf->gptr, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE, offset32, cf->s[3].n * csize);
         }
     }
 
-    pred_c = mc_terminate_add_c(s, vqj, rfe, &jb->chroma_ip);
+    pred_c = mc_terminate_add_c(s, vqj, jb->rfe, &jb->chroma_ip);
 
 // We could take a sync here and try to locally overlap QPU processing with ARM
 // but testing showed a slightly negative benefit with noticable extra complexity
 
-    pred_y = mc_terminate_add_y(s, vqj, rfe, &jb->luma_ip);
+    pred_y = mc_terminate_add_y(s, vqj, jb->rfe, &jb->luma_ip);
 
-    vpu_qpu_job_add_sync_this(vqj, &sync_y);
+    // Returns 0 if nothing to do, 1 if sync added
+#if RPI_WORKER_WAIT_PASS_0
+    do_wait = vpu_qpu_job_add_sync_sem(vqj, &jb->sem);
+#else
+    if (vpu_qpu_job_add_sync_sem(vqj, &jb->sem) == 0)
+        sem_post(&jb->sem);
+#endif
 
-    rpi_cache_flush_execute(rfe);
+    rpi_cache_flush_execute(jb->rfe);
 
     // Await progress as required
     // jb->waited will only be clear if we have already tested the progress values
@@ -3822,7 +3789,7 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     // We always work on a rectangular block
     if (pred_y || pred_c)
     {
-        rpi_cache_flush_add_frame_block(rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
+        rpi_cache_flush_add_frame_block(jb->rfe, s->frame, RPI_CACHE_FLUSH_MODE_INVALIDATE,
                                         jb->bounds.x, jb->bounds.y, jb->bounds.w, jb->bounds.h,
                                         ctx_vshift(s, 1), pred_y, pred_c);
     }
@@ -3851,12 +3818,11 @@ static void worker_core(HEVCRpiContext * const s0, HEVCRpiJob * const jb)
     }
 #endif
 
-    // Wait for transform completion
-    // ? Could/should be moved to next pass which would let us add more jobs
-    //   to the VPU Q on this thread but when I tried that it all went a bit slower
-    vpu_qpu_wait(&sync_y);
-
-    rpi_cache_flush_finish(rfe);
+#if RPI_WORKER_WAIT_PASS_0
+    if (do_wait)
+        rpi_sem_wait(&jb->sem);
+    rpi_cache_flush_execute(jb->rfe);
+#endif
 }
 
 
@@ -3870,6 +3836,8 @@ static HEVCRpiJob * job_new(void)
 {
     HEVCRpiJob * const jb = av_mallocz(sizeof(HEVCRpiJob));
 
+    sem_init(&jb->sem, 0, 0);
+    jb->rfe = rpi_cache_flush_init(&jb->flush_buf);
     ff_hevc_rpi_progress_init_wait(&jb->progress_wait);
 
     jb->intra.n = 0;
@@ -3903,6 +3871,8 @@ static void job_delete(HEVCRpiJob * const jb)
     av_freep(&jb->intra.cmds);
     rpi_free_inter_pred(&jb->chroma_ip);
     rpi_free_inter_pred(&jb->luma_ip);
+    rpi_cache_flush_finish(jb->rfe);  // Not really needed - should do nothing
+    sem_destroy(&jb->sem);
     av_free(jb);
 }
 

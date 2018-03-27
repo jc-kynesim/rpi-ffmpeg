@@ -99,7 +99,17 @@
 #define RPI_TSTATS              0
 
 // Define RPI_COMPRESS_COEFFS to 1 to send coefficients in compressed form
-#define RPI_COMPRESS_COEFFS 1
+#define RPI_COMPRESS_COEFFS     1
+
+// Wait for VPU/QPU to finish in worker pass 0
+// If 0 then the wait is in pass 1
+//
+// One might expect the better place to wait would be in pass 1 however
+// testing shows that pass 0 produces overall faster decode.
+// Interestingly it is QPU/VPU limited streams that seem to suffer
+// from pass 1 waits, CPU limited ones tend to show a very mild gain.
+// This define exists so it is easy to test this.
+#define RPI_WORKER_WAIT_PASS_0  1
 
 // Use ARM emulation of QPU pred
 // These are for debug only as the emulation makes only limited
@@ -589,6 +599,7 @@ typedef struct HEVCRpiJob {
 
     struct qpu_mc_pred_y_p_s * last_y8_p;
     struct qpu_mc_src_s * last_y8_l1;
+    rpi_cache_flush_env_t * rfe;
 
     HEVCRpiInterPredEnv chroma_ip;
     HEVCRpiInterPredEnv luma_ip;
@@ -596,11 +607,13 @@ typedef struct HEVCRpiJob {
     HEVCRpiIntraPredEnv intra;
     HEVCRpiCoeffsEnv coeffs;
     HEVCRpiFrameProgressWait progress_wait;
+    sem_t sem;
+    rpi_cache_buf_t flush_buf;
 } HEVCRpiJob;
 
 struct HEVCRpiContext;
 
-typedef void HEVCRpiWorkerFn(struct HEVCRpiContext * const s, HEVCRpiJob * const jb);
+typedef void HEVCRpiWorkerFn(const struct HEVCRpiContext * const s, HEVCRpiJob * const jb);
 
 typedef struct HEVCRpiPassQueue
 {
@@ -898,7 +911,7 @@ int ff_hevc_rpi_cu_qp_delta_sign_flag(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cu_qp_delta_abs(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cu_chroma_qp_offset_flag(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cu_chroma_qp_offset_idx(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_hls_filter_blk(HEVCRpiContext * const s, const RpiBlk bounds, const int eot);
+int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int eot);
 void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                                 const int x0, const int y0,
                                 const int log2_trafo_size, const enum ScanType scan_idx,
