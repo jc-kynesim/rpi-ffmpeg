@@ -103,7 +103,7 @@ endfunc
 
 function JOIN(ff_hevc_rpi_transform_8x8_neon_, BIT_DEPTH), export=1
         add      r2, r0, #16
-        adrl     r3, tr4f
+        adr      r3, tr4f
         vpush    {d8-d15}
         vld1.16  {d0, d1}, [r3]
         mov      r3, #32

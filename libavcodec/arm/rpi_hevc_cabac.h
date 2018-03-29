@@ -182,7 +182,12 @@ static inline uint8_t * get_cabac_sig_coeff_flag_idxs_arm(CABACContext * const c
     unsigned int reg_b, tmp, st, bit;
      __asm__ (
 // Get bin from map
+#if CONFIG_THUMB
+         "add        %[ctx_map]    , %[n]                        \n\t"
+         "ldrb       %[st]         , [%[ctx_map]]                \n\t"
+#else
          "ldrb       %[st]         , [%[ctx_map], %[n]]!         \n\t"
+#endif
          "1:                                                     \n\t"
 
 // Load state & ranges
@@ -319,7 +324,12 @@ static inline void get_cabac_by22_start_arm(CABACContext * const c)
 #else
         "strh    %[bits], [%[c], %[bits_off]]                     \n\t"
 #endif
+#if CONFIG_THUMB
+        "lsr     %[m], %[ptr]                                     \n\t"
+        "eor     %[range], %[low], %[m]                           \n\t"
+#else
         "eor     %[range], %[low], %[m], lsr %[ptr]               \n\t"
+#endif
         : // Outputs
                [ptr]"+&r"(ptr),
                [low]"+&r"(low),
@@ -374,13 +384,23 @@ static inline void get_cabac_by22_flush_arm(CABACContext *const c, const unsigne
         "ldrh    %[tmp2], [%[cc], %[range_off]]    \n\t"
         "lsr     %[tmp1], %[val], %[tmp1]          \n\t"
         "ldr     %[val], [%[cc], %[low_off]]       \n\t"
+#if CONFIG_THUMB
+        "add     %[ptr], %[ptr], %[bits], lsr #3   \n\t"
+        "ldr     %[ptr], [%[ptr]]                  \n\t"
+#else
         "ldr     %[ptr], [%[ptr], %[bits], lsr #3] \n\t"
+#endif
         "mul     %[tmp1], %[tmp2], %[tmp1]         \n\t"
         "and     %[tmp2], %[bits], #7              \n\t"
         "strh    %[bits], [%[cc], %[bits_off]]     \n\t"
         "rev     %[ptr], %[ptr]                    \n\t"
         "lsl     %[tmp1], %[tmp1], #23             \n\t"
+#if CONFIG_THUMB
+        "lsl     %[val], %[n]                      \n\t"
+        "sub     %[val], %[tmp1]                   \n\t"
+#else
         "rsb     %[val], %[tmp1], %[val], lsl %[n] \n\t"
+#endif
         "lsl     %[ptr], %[ptr], %[tmp2]           \n\t"
         "orr     %[val], %[val], %[ptr], lsr #9    \n\t"
         "str     %[val], [%[cc], %[low_off]]       \n\t"
@@ -414,6 +434,7 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext *cons
         "ldrh    %[tmp2], [%[cc], %[by22_bits_off]]           \n\t"
         "ldr     %[ptr], [%[cc], %[ptr_off]]                  \n\t"
         "cmp     %[prefix], #0                                \n\t"
+        "it      ne                                           \n\t"
         "umullne %[prefix], %[remain], %[prefix], %[remain]   \n\t"
         "ldrh    %[range], [%[cc], %[by22_range_off]]         \n\t"
         "lsl     %[remain], %[remain], #1                     \n\t"
@@ -434,10 +455,20 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext *cons
         "rsb     %[tmp2], %[rice], #31                        \n\t"
         "lsl     %[remain], %[remain], %[prefix]              \n\t"
         "lsl     %[n2], %[n2], #23                            \n\t"
+#if CONFIG_THUMB
+        "lsl     %[range], %[n1]                              \n\t"
+        "sub     %[range], %[n2]                              \n\t"
+#else
         "rsb     %[range], %[n2], %[range], lsl %[n1]         \n\t"
+#endif
         "rev     %[ptr], %[ptr]                               \n\t"
         "lsl     %[n2], %[prefix], %[rice]                    \n\t"
+#if CONFIG_THUMB
+        "lsr     %[remain], %[tmp2]                           \n\t"
+        "add     %[remain], %[n2]                             \n\t"
+#else
         "add     %[remain], %[n2], %[remain], lsr %[tmp2]     \n\t"
+#endif
         "b       3f                                           \n\t"
         "1:                                                   \n\t"
         "add     %[n2], %[rice], %[prefix], lsl #1            \n\t"
@@ -460,15 +491,30 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext *cons
         "rev     %[ptr], %[ptr]                               \n\t"
         "lsl     %[n2], %[n2], #23                            \n\t"
         "mov     %[range], #2                                 \n\t"
+#if CONFIG_THUMB
+        "lsl     %[tmp2], %[n1]                               \n\t"
+        "sub     %[tmp2], %[n2]                               \n\t"
+#else
         "rsb     %[tmp2], %[n2], %[tmp2], lsl %[n1]           \n\t"
+#endif
         "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
         "lsl     %[rice], %[range], %[rice]                   \n\t"
         "orr     %[range], %[tmp2], %[ptr], lsr #9            \n\t"
+#if CONFIG_THUMB
+        "lsr     %[remain], %[prefix]                         \n\t"
+        "add     %[remain], %[rice]                           \n\t"
+#else
         "add     %[remain], %[rice], %[remain], lsr %[prefix] \n\t"
+#endif
         "b       4f                                           \n\t"
         "2:                                                   \n\t"
         "add     %[n1], %[tmp2], %[prefix]                    \n\t"
+#if CONFIG_THUMB
+        "add     %[tmp2], %[ptr], %[n1], lsr #3               \n\t"
+        "ldr     %[tmp2], [%[tmp2]]                           \n\t"
+#else
         "ldr     %[tmp2], [%[ptr], %[n1], lsr #3]             \n\t"
+#endif
         "rsb     %[tmp1], %[prefix], #32                      \n\t"
         "push    {%[rice]}                                    \n\t"
         "and     %[rice], %[n1], #7                           \n\t"
@@ -481,16 +527,27 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext *cons
         "lsl     %[rice], %[tmp2], %[rice]                    \n\t"
         "sub     %[tmp2], %[n2], #2                           \n\t"
         "lsl     %[remain], %[remain], #23                    \n\t"
+#if CONFIG_THUMB
+        "lsl     %[ptr], %[prefix]                            \n\t"
+        "rsb     %[remain], %[ptr]                            \n\t"
+#else
         "rsb     %[remain], %[remain], %[ptr], lsl %[prefix]  \n\t"
+#endif
         "orr     %[remain], %[remain], %[rice], lsr #9        \n\t"
         "add     %[prefix], %[n1], %[tmp2]                    \n\t"
         "bic     %[n1], %[remain], #1                         \n\t"
         "ldr     %[ptr], [%[cc], %[ptr_off]]                  \n\t"
         "cmp     %[tmp1], #0                                  \n\t"
         "rsb     %[rice], %[tmp2], #32                        \n\t"
+        "it      ne                                           \n\t"
         "umullne %[tmp1], %[n1], %[tmp1], %[n1]               \n\t"
         "and     %[tmp1], %[prefix], #7                       \n\t"
+#if CONFIG_THUMB
+        "add     %[ptr], %[ptr], %[prefix], lsr #3            \n\t"
+        "ldr     %[ptr], [%[ptr]]                             \n\t"
+#else
         "ldr     %[ptr], [%[ptr], %[prefix], lsr #3]          \n\t"
+#endif
         "lsl     %[n1], %[n1], #1                             \n\t"
         "lsr     %[rice], %[n1], %[rice]                      \n\t"
         "rsb     %[n2], %[n2], #34                            \n\t"
@@ -501,9 +558,19 @@ static inline int coeff_abs_level_remaining_decode_bypass_arm(CABACContext *cons
         "strh    %[prefix], [%[cc], %[by22_bits_off]]         \n\t"
         "mov     %[prefix], #2                                \n\t"
         "lsl     %[range], %[range], #23                      \n\t"
+#if CONFIG_THUMB
+        "lsl     %[remain], %[tmp2]                           \n\t"
+        "rsb     %[range], %[remain]                          \n\t"
+#else
         "rsb     %[range], %[range], %[remain], lsl %[tmp2]   \n\t"
+#endif
         "lsl     %[remain], %[prefix], %[rice]                \n\t"
+#if CONFIG_THUMB
+        "lsr     %[n1], %[n2]                                 \n\t"
+        "add     %[remain], %[n1]                             \n\t"
+#else
         "add     %[remain], %[remain], %[n1], lsr %[n2]       \n\t"
+#endif
         "3:                                                   \n\t"
         "lsl     %[ptr], %[ptr], %[tmp1]                      \n\t"
         "orr     %[range], %[range], %[ptr], lsr #9           \n\t"

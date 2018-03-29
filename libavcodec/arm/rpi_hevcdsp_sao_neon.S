@@ -24,6 +24,10 @@
 
 .set EDGE_SRC_STRIDE, 160
 
+@ PIC jump tables are fractionally more expensive than absolute in our code
+.set jent_pic, CONFIG_PIC
+
+
 .macro sao_band_64b_8 XLAT0, XLAT1, Q_K128, I1, I2, I3, I4
         vshr.u8   q12, q8, #3
         \I1
@@ -1058,7 +1062,21 @@ endfunc
 @   int width,                        [sp, #sp_base + 4]
 @   int height)                       [sp, #sp_base + 8]
 
-.macro  edge_xxb_init, bit_depth, is_chroma, jump_tab, setup_64b = 0, setup_16b = 0, check_w4 = 0, do2 = 0
+@ Jumps via jump_tab with
+@   uint8_t *_dst,                    [r0]
+@   const uint8_t *_src,              [r1]
+@   ptrdiff_t stride_dst,             [r2]
+@   EDGE_SRC_STRIDE                   [r3]
+@   (1 << \bit_depth) - 1             [r4]
+@   * xlat_table                      [r5]  // setup_64b only
+@   int height                        [r12]
+@
+@   0                                 [q12] // > 8 bit
+@   2                                 [q14]
+@   128                               [q15] // = 8 bit
+@   r4                                [q15] // > 8 bit
+
+.macro  edge_xxb_init, bit_depth, is_chroma, jump_tab, setup_64b = 0, setup_16b = 0, check_w4 = 0, do2 = 0, xjump = 0
 
 @ Build translate registers
 @ As translate values can only be 0-4 we don't care about junk in the rest
@@ -1150,20 +1168,34 @@ endfunc
 @ For 16 bit width 64 (or chroma 32) we need to do this in 2 passes
 .if \do2
         push     {r0, r1, r6, r12}
+.if jent_pic
+        bl       98f
+.else
         blx      r6
+.endif
         pop      {r0, r1, r6, r12}
 
         add      r0, #64
         add      r1, #64
 .endif
 
+.if jent_pic
+        bl       98f
+.else
         blx      r6
+.endif
 
 @ Tidy up & return
 .if \setup_64b
         vpop     {q4-q8}        @ spurious but harmless load of q8
 .endif
         pop      {r4-r6, pc}
+
+.if jent_pic && !\xjump
+@ Magic label - used as 98b in jent macro
+98:
+        add      pc, r6
+.endif
 .endm
 
 
@@ -1171,8 +1203,8 @@ endfunc
         edge_xxb_init \bit_depth, \is_chroma, \jump_tab, check_w4=\check_w4, setup_16b=1
 .endm
 
-.macro  edge_64b_init, bit_depth, is_chroma, do2, jump_tab
-        edge_xxb_init \bit_depth, \is_chroma, \jump_tab, do2=\do2, setup_64b=1
+.macro  edge_64b_init, bit_depth, is_chroma, do2, jump_tab, xjump=0
+        edge_xxb_init \bit_depth, \is_chroma, \jump_tab, do2=\do2, setup_64b=1, xjump=\xjump
 .endm
 
 
@@ -1882,11 +1914,25 @@ endfunc
         edge_4bx4_e2 \body_fn, (-\pb)
 .endm
 
+@ Jump table entry - if in neon mode the bottom bit must be set
+@ ? There is probably a real asm instruction to do this but I haven't found it
+.macro jent lab
+.if jent_pic
+@ Could use .short here but due to A32 not supporting ldrh [lsl#1] it is
+@ simpler and clearer in the code to stick with .word
+T       .word  (0 + \lab) - (4 + 98b)
+A       .word  (0 + \lab) - (8 + 98b)
+.else
+T       .word   1 + \lab
+A       .word   \lab
+.endif
+.endm
+
 .macro edge_64b_bodies, body_fn, pb
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
+        jent    0f
+        jent    10f
+        jent    20f
+        jent    30f
 
 0:      edge_64b_e0     \body_fn, \pb
 10:     edge_64b_e1     \body_fn
@@ -1895,10 +1941,10 @@ endfunc
 .endm
 
 .macro edge_32bx2_bodies, body_fn, pb
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
+        jent    0f
+        jent    10f
+        jent    20f
+        jent    30f
 
 0:      edge_32bx2_e0   \body_fn, \pb
 10:     edge_32bx2_e1   \body_fn
@@ -1907,10 +1953,10 @@ endfunc
 .endm
 
 .macro edge_16b_bodies, body_fn, pb
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
+        jent    0f
+        jent    10f
+        jent    20f
+        jent    30f
 
 0:      edge_16b_e0     \body_fn, \pb
 10:     edge_16b_e1     \body_fn
@@ -1919,14 +1965,14 @@ endfunc
 .endm
 
 .macro edge_32bx2_16b_bodies, body_fn_64b, body_fn_16b, pb
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
-        .word   5f
-        .word   15f
-        .word   25f
-        .word   35f
+        jent    0f
+        jent    10f
+        jent    20f
+        jent    30f
+        jent    5f
+        jent    15f
+        jent    25f
+        jent    35f
 
 0:      edge_32bx2_e0   \body_fn_64b, \pb
 10:     edge_32bx2_e1   \body_fn_64b
@@ -1939,14 +1985,14 @@ endfunc
 .endm
 
 .macro edge_16b_8bx2_bodies, body_fn, pb
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
-        .word   5f
-        .word   15f
-        .word   25f
-        .word   35f
+        jent    0f
+        jent    10f
+        jent    20f
+        jent    30f
+        jent    5f
+        jent    15f
+        jent    25f
+        jent    35f
 
 0:      edge_16b_e0     \body_fn, \pb
 10:     edge_16b_e1     \body_fn
@@ -1959,14 +2005,14 @@ endfunc
 .endm
 
 .macro edge_8bx2_4bx4_bodies, body_fn, pb
-        .word   0f
-        .word   10f
-        .word   20f
-        .word   30f
-        .word   5f
-        .word   15f
-        .word   25f
-        .word   35f
+        jent    0f
+        jent    10f
+        jent    20f
+        jent    30f
+        jent    5f
+        jent    15f
+        jent    25f
+        jent    35f
 
 0:      edge_8bx2_e0    \body_fn, \pb
 10:     edge_8bx2_e1    \body_fn
@@ -2132,7 +2178,7 @@ endfunc
 @ about edge effects
 
 function ff_hevc_rpi_sao_edge_64_neon_10, export=1
-        edge_64b_init   10, 0, 1, 99f
+        edge_64b_init   10, 0, 1, 99f, xjump=1
 endfunc
 
 @ void ff_hevc_rpi_sao_edge_32_neon_10(
@@ -2177,7 +2223,7 @@ endfunc
 @   int height)                       [sp, #12]
 
 function ff_hevc_rpi_sao_edge_c_32_neon_10, export=1
-        edge_64b_init   10, 1, 1, 99f
+        edge_64b_init   10, 1, 1, 99f, xjump=1
 endfunc
 
 

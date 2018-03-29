@@ -159,6 +159,9 @@
         vst4.16    {\d4-\d7}, [r2 :128], r3
 .endm
 
+#define BIT_DEPTH 8
+#include "rpi_hevc_idct_fn_neon.S"
+
 .text
 
 .align 4
@@ -173,9 +176,6 @@ tr16:
 .word 0x00500046  // 80, d2[2] = 70
 .word 0x0039002b  // 57, d2[0] = 43
 .word 0x00190009  // 25, d2[2] = 9
-
-#define BIT_DEPTH 8
-#include "rpi_hevc_idct_fn_neon.S"
 
 #undef BIT_DEPTH
 #define BIT_DEPTH 10
