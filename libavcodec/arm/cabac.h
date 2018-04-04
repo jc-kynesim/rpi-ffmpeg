@@ -44,9 +44,11 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "sub     %[bit], %[bit], %[tmp2]                  \n\t"
         "mov     %[tmp1], %[bit]                          \n\t"
         "cmp     %[low], %[bit], lsl #17                  \n\t"
+        "itt     ge                                       \n\t"
         "movge   %[tmp1], %[tmp2]                         \n\t"
         "mvnge   %[ptr], %[ptr]                           \n\t"
         "clz     %[tmp2], %[tmp1]                         \n\t"
+        "it      ge                                       \n\t"
         "subge   %[low], %[low], %[bit], lsl #17          \n\t"
         "sub     %[tmp2], %[tmp2], #23                    \n\t"
         "and     %[bit], %[ptr], #1                       \n\t"
@@ -65,7 +67,12 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "strb    %[mlps_tables], [%[state]]               \n\t"
         "rbit    %[state], %[low]                         \n\t"
         "cmp     %[tmp1], %[ptr]                          \n\t"
+#if CONFIG_THUMB
+        "it      cs                                       \n\t"
+        "ldrhcs  %[tmp1], [%[ptr]], #2                    \n\t"
+#else
         "ldrcsh  %[tmp1], [%[ptr]], #2                    \n\t"
+#endif
 #endif
         "clz     %[state], %[state]                       \n\t"
         "movw    %[mlps_tables], #0xffff                  \n\t"
@@ -75,7 +82,12 @@ static av_always_inline int get_cabac_inline_arm(CABACContext *c,
         "str     %[ptr], [%[c], %[ptr_off]]               \n\t"
         "lsr     %[tmp1], %[tmp1], #15                    \n\t"
         "sub     %[tmp1], %[tmp1], %[mlps_tables]         \n\t"
+#if CONFIG_THUMB
+        "lsl     %[tmp1], %[tmp1], %[state]               \n\t"
+        "add     %[low], %[low], %[tmp1]                  \n\t"
+#else
         "add     %[low], %[low], %[tmp1], lsl %[state]    \n\t"
+#endif
         "str     %[low], [%[c], %[low_off]]               \n\t"
         "b       2f                                       \n\t"
         "1:                                               \n\t"
@@ -119,9 +131,8 @@ static inline int get_cabac_bypass_arm(CABACContext * const c)
         "ldr        %[tmp]   , [%[c], %[end_off]]   \n\t"
 #endif
         "cmp        %[low]   , %[range], lsl #17    \n\t"
-        "it         cs                              \n\t"
-        "subcs      %[low]   , %[range], lsl #17    \n\t"
-        "it         cs                              \n\t"
+        "itt         cs                              \n\t"
+        "subcs      %[low]   , %[low], %[range], lsl #17 \n\t"
         "movcs      %[rv]    , #1                   \n\t"
 #if UNCHECKED_BITSTREAM_READER
         "ldrh       %[tmp]   , [%[ptr]], #2         \n\t"
@@ -139,7 +150,7 @@ static inline int get_cabac_bypass_arm(CABACContext * const c)
 
         "str        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
         "rev        %[tmp]   , %[tmp]               \n\t"
-        "add        %[low]   , %[tmp], lsr #15      \n\t"
+        "add        %[low]   , %[low], %[tmp], lsr #15 \n\t"
         "movw       %[tmp]   , 0xFFFF               \n\t"
         "sub        %[low]   , %[tmp]               \n\t"
         "1:                                         \n\t"
@@ -176,7 +187,7 @@ static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
 #endif
         "cmp        %[low]   , %[range], lsl #17    \n\t"
         "it         cs                              \n\t"
-        "subcs      %[low]   , %[range], lsl #17    \n\t"
+        "subcs      %[low]   , %[low], %[range], lsl #17 \n\t"
         "it         cc                              \n\t"
         "rsbcc      %[rv]    , %[rv], #0            \n\t"
 #if UNCHECKED_BITSTREAM_READER
@@ -195,7 +206,7 @@ static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
 
         "str        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
         "rev        %[tmp]   , %[tmp]               \n\t"
-        "add        %[low]   , %[tmp], lsr #15      \n\t"
+        "add        %[low]   , %[low], %[tmp], lsr #15 \n\t"
         "movw       %[tmp]   , 0xFFFF               \n\t"
         "sub        %[low]   , %[tmp]               \n\t"
         "1:                                         \n\t"
