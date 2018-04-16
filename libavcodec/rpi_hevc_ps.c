@@ -806,21 +806,27 @@ static void set_default_scaling_list_data(ScalingList * const sl)
         sl->sl_dc[0][matrixId] = 16; // default for 16x16
         sl->sl_dc[1][matrixId] = 16; // default for 32x32
     }
+
     memcpy(sl->sl[1][0], default_scaling_list_intra, 64);
     memcpy(sl->sl[1][1], default_scaling_list_intra, 64);
     memcpy(sl->sl[1][2], default_scaling_list_intra, 64);
+
     memcpy(sl->sl[1][3], default_scaling_list_inter, 64);
     memcpy(sl->sl[1][4], default_scaling_list_inter, 64);
     memcpy(sl->sl[1][5], default_scaling_list_inter, 64);
+
     memcpy(sl->sl[2][0], default_scaling_list_intra, 64);
     memcpy(sl->sl[2][1], default_scaling_list_intra, 64);
     memcpy(sl->sl[2][2], default_scaling_list_intra, 64);
+
     memcpy(sl->sl[2][3], default_scaling_list_inter, 64);
     memcpy(sl->sl[2][4], default_scaling_list_inter, 64);
     memcpy(sl->sl[2][5], default_scaling_list_inter, 64);
+
     memcpy(sl->sl[3][0], default_scaling_list_intra, 64);
     memcpy(sl->sl[3][1], default_scaling_list_intra, 64);
     memcpy(sl->sl[3][2], default_scaling_list_intra, 64);
+
     memcpy(sl->sl[3][3], default_scaling_list_inter, 64);
     memcpy(sl->sl[3][4], default_scaling_list_inter, 64);
     memcpy(sl->sl[3][5], default_scaling_list_inter, 64);
@@ -1772,16 +1778,19 @@ int ff_hevc_rpi_decode_nal_pps(GetBitContext * const gb, AVCodecContext * const 
     pps->transform_skip_enabled_flag = get_bits1(gb);
 
     pps->cu_qp_delta_enabled_flag = get_bits1(gb);
-    pps->diff_cu_qp_delta_depth   = 0;
+    pps->log2_min_cu_qp_delta_size = sps->log2_ctb_size;
     if (pps->cu_qp_delta_enabled_flag)
-        pps->diff_cu_qp_delta_depth = get_ue_golomb_long(gb);
+    {
+        const unsigned int diff_cu_qp_delta_depth = get_ue_golomb_long(gb);
 
-    if (pps->diff_cu_qp_delta_depth < 0 ||
-        pps->diff_cu_qp_delta_depth > sps->log2_diff_max_min_coding_block_size) {
-        av_log(avctx, AV_LOG_ERROR, "diff_cu_qp_delta_depth %d is invalid\n",
-               pps->diff_cu_qp_delta_depth);
-        ret = AVERROR_INVALIDDATA;
-        goto err;
+        if (diff_cu_qp_delta_depth > sps->log2_diff_max_min_coding_block_size) {
+            av_log(avctx, AV_LOG_ERROR, "diff_cu_qp_delta_depth %d is invalid\n",
+                   diff_cu_qp_delta_depth);
+            ret = AVERROR_INVALIDDATA;
+            goto err;
+        }
+
+        pps->log2_min_cu_qp_delta_size = sps->log2_ctb_size - diff_cu_qp_delta_depth;
     }
 
     pps->cb_qp_offset = get_se_golomb(gb);

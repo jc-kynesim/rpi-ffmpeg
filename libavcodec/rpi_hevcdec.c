@@ -35,12 +35,12 @@
 
 #include "bswapdsp.h"
 #include "bytestream.h"
-#include "cabac_functions.h"
 #include "golomb.h"
 #include "hevc.h"
 #include "rpi_hevc_data.h"
 #include "rpi_hevc_parse.h"
 #include "rpi_hevcdec.h"
+#include "rpi_hevc_cabac_fns.h"
 #include "profiles.h"
 
 #include "rpi_qpu.h"
@@ -190,17 +190,89 @@ typedef struct ipe_init_info_s
     ipe_chan_info_t chroma;
 } ipe_init_info_t;
 
-static void *small_memset(void *s, int c, size_t n)
+static void set_bytes(uint8_t * b, const unsigned int stride, const unsigned int ln, unsigned int a)
 {
-    if (n == 1)
-        *(int8_t *) s = c;
-    else if (n == 2)
-        *(int16_t *) s = c * 0x0101;
-    else if (n == 4)
-        *(int32_t *) s = c * 0x01010101;
-    else
-        return memset(s, c, n);
-    return s;
+    switch (ln)
+    {
+        default:  // normally 0
+            *b = a;
+            break;
+        case 1:
+            a |= a << 8;
+            *(uint16_t *)b = a;
+            b += stride;
+            *(uint16_t *)b = a;
+            break;
+        case 2:
+            a |= a << 8;
+            a |= a << 16;
+            *(uint32_t *)b = a;
+            b += stride;
+            *(uint32_t *)b = a;
+            b += stride;
+            *(uint32_t *)b = a;
+            b += stride;
+            *(uint32_t *)b = a;
+            break;
+        case 3:
+        {
+            unsigned int i;
+            uint64_t d;
+            a |= a << 8;
+            a |= a << 16;
+            d = ((uint64_t)a << 32) | a;
+            for (i = 0; i != 8; ++i, b += stride)
+                *(uint64_t *)b = d;
+            break;
+        }
+        case 4:
+        {
+            unsigned int i;
+            uint64_t d;
+            a |= a << 8;
+            a |= a << 16;
+            d = ((uint64_t)a << 32) | a;
+            for (i = 0; i != 16; ++i, b += stride)
+            {
+                *(uint64_t *)b = d;
+                *(uint64_t *)(b + 8) = d;
+            }
+            break;
+        }
+    }
+}
+
+// Set a small square block of bits in a bitmap
+// Bits must be aligned on their size boundry (which will be true of all split CBs)
+static void set_bits(uint8_t * f, const unsigned int x, const unsigned int stride, const unsigned int ln)
+{
+    unsigned int n;
+    const unsigned int sh = (x & 7);
+
+    f += (x >> 3);
+    av_assert2(ln <= 3);
+    switch (ln)
+    {
+        case 0:  // 1
+            f[0] |= 1 << sh;
+            break;
+        case 1:  // 3 * 2
+            n = 3 << sh;
+            f[0] |= n;
+            f[stride] |= n;
+            break;
+        case 2:  // 0xf * 4
+            n = 0xf << sh;
+            f[0] |= n;
+            f[stride] |= n;
+            f[stride * 2] |= n;
+            f[stride * 3] |= n;
+            break;
+        default:  // 0xff * 8
+            for (n = 0; n != 8; ++n, f += stride)
+                *f = 0xff;
+            break;
+    }
 }
 
 static const ipe_init_info_t ipe_init_infos[9] = {  // Alloc for bit depths of 8-16
@@ -886,7 +958,8 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     if (!s->sao || !s->deblock)
         goto fail;
 
-    s->skip_flag    = av_malloc_array(sps->min_cb_height, sps->min_cb_width);
+    s->skip_flag_stride = (sps->min_cb_width + 7) >> 3;
+    s->skip_flag    = av_malloc_array(sps->min_cb_height, s->skip_flag_stride);
     s->tab_ct_depth = av_malloc_array(sps->min_cb_height, sps->min_cb_width);
     if (!s->skip_flag || !s->tab_ct_depth)
         goto fail;
@@ -1788,7 +1861,6 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                               int log2_cb_size, int log2_trafo_size,
                               int blk_idx, int cbf_luma, int *cbf_cb, int *cbf_cr)
 {
-//    const int log2_trafo_size_c = log2_trafo_size - s->ps.sps->hshift[1];
     const int log2_trafo_size_c = log2_trafo_size - ctx_hshift(s, 1);
     int i;
 
@@ -1806,28 +1878,24 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                          (ctx_cfmt(s) == 2 &&
                          (cbf_cb[1] || cbf_cr[1]));
 
-        if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded) {
-            lc->tu.cu_qp_delta = ff_hevc_rpi_cu_qp_delta_abs(lc);
-            if (lc->tu.cu_qp_delta != 0)
-            {
-                if (ff_hevc_rpi_cu_qp_delta_sign_flag(lc) == 1)
-                    lc->tu.cu_qp_delta = -lc->tu.cu_qp_delta;
-
-                if (lc->tu.cu_qp_delta < -(26 + s->ps.sps->qp_bd_offset/2) ||
-                    lc->tu.cu_qp_delta >  (25 + s->ps.sps->qp_bd_offset/2))
-                {
-                    av_log(s->avctx, AV_LOG_ERROR,
-                           "The cu_qp_delta %d is outside the valid range "
-                           "[%d, %d].\n",
-                           lc->tu.cu_qp_delta,
-                           -(26 + s->ps.sps->qp_bd_offset/2),
-                            (25 + s->ps.sps->qp_bd_offset/2));
-                    return AVERROR_INVALIDDATA;
-                }
-            }
+        if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded)
+        {
             lc->tu.is_cu_qp_delta_coded = 1;
+            lc->tu.cu_qp_delta = ff_hevc_rpi_cu_qp_delta(lc);
 
-            ff_hevc_rpi_set_qPy(s, lc, cb_xBase, cb_yBase, log2_cb_size);
+            if (lc->tu.cu_qp_delta < -(26 + (s->ps.sps->qp_bd_offset >> 1)) ||
+                lc->tu.cu_qp_delta >  (25 + (s->ps.sps->qp_bd_offset >> 1)))
+            {
+                av_log(s->avctx, AV_LOG_ERROR,
+                       "The cu_qp_delta %d is outside the valid range "
+                       "[%d, %d].\n",
+                       lc->tu.cu_qp_delta,
+                       -(26 + (s->ps.sps->qp_bd_offset >> 1)),
+                        (25 + (s->ps.sps->qp_bd_offset >> 1)));
+                return AVERROR_INVALIDDATA;
+            }
+
+            ff_hevc_rpi_set_qPy(s, lc, cb_xBase, cb_yBase);
         }
 
         if (lc->tu.cu_chroma_qp_offset_wanted && cbf_chroma &&
@@ -1988,18 +2056,9 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
     return 0;
 }
 
-static void set_deblocking_bypass(const HEVCRpiContext * const s, const int x0, const int y0, const int log2_cb_size)
+static inline void set_deblocking_bypass(const HEVCRpiContext * const s, const int x0, const int y0, const int log2_cb_size)
 {
-    uint8_t *pcm = s->is_pcm + (x0 >> 6) + (y0 >> 3) * s->ps.sps->pcm_width;
-    unsigned int i = 1 << (log2_cb_size - 3);
-    const unsigned int bits = ((1 << i) - 1) << ((x0 >> 3) & 7);
-
-    // Should always be on size boundries, max 8 bits so this is all very simple.
-    do
-    {
-        *pcm |= bits;
-        pcm += s->ps.sps->pcm_width;
-    } while (--i > 0);
+    set_bits(s->is_pcm + (y0 >> 3) * s->ps.sps->pcm_width, x0 >> 3, s->ps.sps->pcm_width, log2_cb_size - 3);
 }
 
 static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
@@ -2158,7 +2217,7 @@ static int hls_pcm_sample(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
         xyexp2(s->ps.sps->pcm.bit_depth_chroma, log2_cb_size - ctx_vshift(s, 1)) +
         xyexp2(s->ps.sps->pcm.bit_depth_chroma, log2_cb_size - ctx_vshift(s, 2));
 
-    const uint8_t * const pcm = skip_bytes(&lc->cc, (length + 7) >> 3);
+    const uint8_t * const pcm = ff_hevc_rpi_cabac_skip_bytes(&lc->cc, (length + 7) >> 3);
 
     if (!s->sh.disable_deblocking_filter_flag)
         ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size);
@@ -2798,7 +2857,6 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
 {
     HEVCRpiJob * const jb = lc->jb0;
 
-    int merge_idx = 0;
     struct MvField current_mv = {{{ 0 }}};
 
     int min_pu_width = s->ps.sps->min_pu_width;
@@ -2806,28 +2864,21 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
     MvField * const tab_mvf = s->ref->tab_mvf;
     const RefPicList  *const refPicList = s->ref->refPicList;
     const HEVCFrame *ref0 = NULL, *ref1 = NULL;
-    int log2_min_cb_size = s->ps.sps->log2_min_cb_size;
-    int min_cb_width     = s->ps.sps->min_cb_width;
-    int x_cb             = x0 >> log2_min_cb_size;
-    int y_cb             = y0 >> log2_min_cb_size;
     int x_pu, y_pu;
     int i, j;
-    const int skip_flag = SAMPLE_CTB(s->skip_flag, x_cb, y_cb);
 
-    if (!skip_flag)
+    if (lc->cu.pred_mode != MODE_SKIP)
         lc->pu.merge_flag = ff_hevc_rpi_merge_flag_decode(lc);
 
-    if (skip_flag || lc->pu.merge_flag) {
-        if (s->sh.max_num_merge_cand > 1)
-            merge_idx = ff_hevc_rpi_merge_idx_decode(s, lc);
-        else
-            merge_idx = 0;
+    if (lc->cu.pred_mode == MODE_SKIP || lc->pu.merge_flag) {
+        const unsigned int merge_idx = s->sh.max_num_merge_cand <= 1 ? 0 :
+            ff_hevc_rpi_merge_idx_decode(s, lc);
 
         ff_hevc_rpi_luma_mv_merge_mode(s, lc, x0, y0, nPbW, nPbH, log2_cb_size,
                                    partIdx, merge_idx, &current_mv);
     } else {
         hevc_luma_mv_mvp_mode(s, lc, x0, y0, nPbW, nPbH, log2_cb_size,
-                              partIdx, merge_idx, &current_mv);
+                              partIdx, 0, &current_mv);
     }
 
     x_pu = x0 >> s->ps.sps->log2_min_pu_size;
@@ -2904,145 +2955,155 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
     }
 }
 
+static void set_ipm(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                    const unsigned int x0, const unsigned int y0,
+                    const unsigned int log2_cb_size,
+                    const unsigned int ipm)
+{
+    const unsigned int min_pu_width     = s->ps.sps->min_pu_width;
+    const unsigned int x_pu             = x0 >> s->ps.sps->log2_min_pu_size;
+    const unsigned int y_pu             = y0 >> s->ps.sps->log2_min_pu_size;
+
+    set_bytes(s->tab_ipm + y_pu * min_pu_width + x_pu, min_pu_width, log2_cb_size - s->ps.sps->log2_min_pu_size, ipm);
+
+    if (lc->cu.pred_mode == MODE_INTRA)
+    {
+        unsigned int j, k;
+        MvField * tab_mvf     = s->ref->tab_mvf + y_pu * min_pu_width + x_pu;
+        const unsigned int size_in_pus = (1 << log2_cb_size) >> s->ps.sps->log2_min_pu_size;
+
+        if (size_in_pus <= 1)
+            tab_mvf[0].pred_flag = PF_INTRA;
+        else
+        {
+            for (j = 0; j < size_in_pus; j++, tab_mvf += min_pu_width)
+                for (k = 0; k < size_in_pus; k++)
+                    tab_mvf[k].pred_flag = PF_INTRA;
+        }
+    }
+}
+
+static void intra_prediction_unit_default_value(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                                                const unsigned int x0, const unsigned int y0,
+                                                const unsigned int log2_cb_size)
+{
+    set_ipm(s, lc, x0, y0, log2_cb_size, INTRA_DC);
+}
+
+
 /**
  * 8.4.1
  */
-static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int pu_size,
+static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                                int x0, int y0, int log2_pu_size,
                                 int prev_intra_luma_pred_flag)
 {
     int x_pu             = x0 >> s->ps.sps->log2_min_pu_size;
     int y_pu             = y0 >> s->ps.sps->log2_min_pu_size;
     int min_pu_width     = s->ps.sps->min_pu_width;
-    int size_in_pus      = pu_size >> s->ps.sps->log2_min_pu_size;
     int x0b              = av_mod_uintp2(x0, s->ps.sps->log2_ctb_size);
     int y0b              = av_mod_uintp2(y0, s->ps.sps->log2_ctb_size);
 
-    int cand_up   = (lc->ctb_up_flag || y0b) ?
-                    s->tab_ipm[(y_pu - 1) * min_pu_width + x_pu] : INTRA_DC;
-    int cand_left = (lc->ctb_left_flag || x0b) ?
-                    s->tab_ipm[y_pu * min_pu_width + x_pu - 1]   : INTRA_DC;
-
     int y_ctb = (y0 >> (s->ps.sps->log2_ctb_size)) << (s->ps.sps->log2_ctb_size);
 
-    MvField *tab_mvf = s->ref->tab_mvf;
-    int intra_pred_mode;
-    int candidate[3];
-    int i, j;
-
     // intra_pred_mode prediction does not cross vertical CTB boundaries
-    if ((y0 - 1) < y_ctb)
-        cand_up = INTRA_DC;
+    const unsigned int cand_up   = (lc->ctb_up_flag || y0b) && (y0 > y_ctb) ?
+                    s->tab_ipm[(y_pu - 1) * min_pu_width + x_pu] : INTRA_DC;
+    const unsigned int cand_left = (lc->ctb_left_flag || x0b) ?
+                    s->tab_ipm[y_pu * min_pu_width + x_pu - 1]   : INTRA_DC;
+
+    int intra_pred_mode;
+    int a, b, c;
 
     if (cand_left == cand_up) {
         if (cand_left < 2) {
-            candidate[0] = INTRA_PLANAR;
-            candidate[1] = INTRA_DC;
-            candidate[2] = INTRA_ANGULAR_26;
+            a = INTRA_PLANAR;
+            b = INTRA_DC;
+            c = INTRA_ANGULAR_26;
         } else {
-            candidate[0] = cand_left;
-            candidate[1] = 2 + ((cand_left - 2 - 1 + 32) & 31);
-            candidate[2] = 2 + ((cand_left - 2 + 1) & 31);
+            a = cand_left;
+            b = 2 + ((cand_left - 2 - 1 + 32) & 31);
+            c = 2 + ((cand_left - 2 + 1) & 31);
         }
     } else {
-        candidate[0] = cand_left;
-        candidate[1] = cand_up;
-        if (candidate[0] != INTRA_PLANAR && candidate[1] != INTRA_PLANAR) {
-            candidate[2] = INTRA_PLANAR;
-        } else if (candidate[0] != INTRA_DC && candidate[1] != INTRA_DC) {
-            candidate[2] = INTRA_DC;
-        } else {
-            candidate[2] = INTRA_ANGULAR_26;
-        }
+        a = cand_left;
+        b = cand_up;
+        c = (cand_left != INTRA_PLANAR && cand_up != INTRA_PLANAR) ?
+                INTRA_PLANAR :
+            (cand_left != INTRA_DC && cand_up != INTRA_DC) ?
+                INTRA_DC :
+                INTRA_ANGULAR_26;
     }
 
     if (prev_intra_luma_pred_flag) {
-        intra_pred_mode = candidate[lc->pu.mpm_idx];
+        intra_pred_mode = lc->pu.mpm_idx == 0 ? a : lc->pu.mpm_idx == 1 ? b : c;
     } else {
-        if (candidate[0] > candidate[1])
-            FFSWAP(uint8_t, candidate[0], candidate[1]);
-        if (candidate[0] > candidate[2])
-            FFSWAP(uint8_t, candidate[0], candidate[2]);
-        if (candidate[1] > candidate[2])
-            FFSWAP(uint8_t, candidate[1], candidate[2]);
+        // Sort lowest 1st
+        if (a > b)
+            FFSWAP(int, a, b);
+        if (a > c)
+            FFSWAP(int, a, c);
+        if (b > c)
+            FFSWAP(int, b, c);
 
         intra_pred_mode = lc->pu.rem_intra_luma_pred_mode;
-        for (i = 0; i < 3; i++)
-            if (intra_pred_mode >= candidate[i])
-                intra_pred_mode++;
+        if (intra_pred_mode >= a)
+            intra_pred_mode++;
+        if (intra_pred_mode >= b)
+            intra_pred_mode++;
+        if (intra_pred_mode >= c)
+            intra_pred_mode++;
     }
 
     /* write the intra prediction units into the mv array */
-    if (!size_in_pus)
-        size_in_pus = 1;
-    for (i = 0; i < size_in_pus; i++) {
-        small_memset(&s->tab_ipm[(y_pu + i) * min_pu_width + x_pu],
-               intra_pred_mode, size_in_pus);
 
-        for (j = 0; j < size_in_pus; j++) {
-            tab_mvf[(y_pu + j) * min_pu_width + x_pu + i].pred_flag = PF_INTRA;
-        }
-    }
-
+    set_ipm(s, lc, x0, y0, log2_pu_size, intra_pred_mode);
     return intra_pred_mode;
-}
-
-static av_always_inline void set_ct_depth(const HEVCRpiContext * const s, int x0, int y0,
-                                          int log2_cb_size, int ct_depth)
-{
-    int length = (1 << log2_cb_size) >> s->ps.sps->log2_min_cb_size;
-    int x_cb   = x0 >> s->ps.sps->log2_min_cb_size;
-    int y_cb   = y0 >> s->ps.sps->log2_min_cb_size;
-    int y;
-
-    for (y = 0; y < length; y++)
-        small_memset(&s->tab_ct_depth[(y_cb + y) * s->ps.sps->min_cb_width + x_cb],
-               ct_depth, length);
 }
 
 static const uint8_t tab_mode_idx[] = {
      0,  1,  2,  2,  2,  2,  3,  5,  7,  8, 10, 12, 13, 15, 17, 18, 19, 20,
     21, 22, 23, 23, 24, 24, 25, 25, 26, 27, 27, 28, 28, 29, 29, 30, 31};
 
-static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int x0, const int y0,
-                                  const int log2_cb_size)
+static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                                  const unsigned int x0, const unsigned int y0,
+                                  const unsigned int log2_cb_size)
 {
     static const uint8_t intra_chroma_table[4] = { 0, 26, 10, 1 };
     uint8_t prev_intra_luma_pred_flag[4];
     int split   = lc->cu.part_mode == PART_NxN;
-    int pb_size = (1 << log2_cb_size) >> split;
-    int side    = split + 1;
+    const unsigned int split_size = (1 << (log2_cb_size - 1));
     int chroma_mode;
-    int i, j;
+    const unsigned int n = split ? 4 : 1;
+    unsigned int i;
 
-    for (i = 0; i < side; i++)
-        for (j = 0; j < side; j++)
-            prev_intra_luma_pred_flag[2 * i + j] = ff_hevc_rpi_prev_intra_luma_pred_flag_decode(lc);
+    for (i = 0; i != n; i++)
+        prev_intra_luma_pred_flag[i] = ff_hevc_rpi_prev_intra_luma_pred_flag_decode(lc);
 
-    for (i = 0; i < side; i++) {
-        for (j = 0; j < side; j++) {
-            if (prev_intra_luma_pred_flag[2 * i + j])
-                lc->pu.mpm_idx = ff_hevc_rpi_mpm_idx_decode(lc);
-            else
-                lc->pu.rem_intra_luma_pred_mode = ff_hevc_rpi_rem_intra_luma_pred_mode_decode(lc);
+    for (i = 0; i < n; i++) {
+        if (prev_intra_luma_pred_flag[i])
+            lc->pu.mpm_idx = ff_hevc_rpi_mpm_idx_decode(lc);
+        else
+            lc->pu.rem_intra_luma_pred_mode = ff_hevc_rpi_rem_intra_luma_pred_mode_decode(lc);
 
-            lc->pu.intra_pred_mode[2 * i + j] =
-                luma_intra_pred_mode(s, lc, x0 + pb_size * j, y0 + pb_size * i, pb_size,
-                                     prev_intra_luma_pred_flag[2 * i + j]);
-        }
+        lc->pu.intra_pred_mode[i] =
+            luma_intra_pred_mode(s, lc,
+                                 x0 + ((i & 1) == 0 ? 0 : split_size),
+                                 y0 + ((i & 2) == 0 ? 0 : split_size),
+                                 log2_cb_size - split,
+                                 prev_intra_luma_pred_flag[i]);
     }
 
     if (ctx_cfmt(s) == 3) {
-        for (i = 0; i < side; i++) {
-            for (j = 0; j < side; j++) {
-                lc->pu.chroma_mode_c[2 * i + j] = chroma_mode = ff_hevc_rpi_intra_chroma_pred_mode_decode(lc);
-                if (chroma_mode != 4) {
-                    if (lc->pu.intra_pred_mode[2 * i + j] == intra_chroma_table[chroma_mode])
-                        lc->pu.intra_pred_mode_c[2 * i + j] = 34;
-                    else
-                        lc->pu.intra_pred_mode_c[2 * i + j] = intra_chroma_table[chroma_mode];
-                } else {
-                    lc->pu.intra_pred_mode_c[2 * i + j] = lc->pu.intra_pred_mode[2 * i + j];
-                }
+        for (i = 0; i < n; i++) {
+            lc->pu.chroma_mode_c[i] = chroma_mode = ff_hevc_rpi_intra_chroma_pred_mode_decode(lc);
+            if (chroma_mode != 4) {
+                if (lc->pu.intra_pred_mode[i] == intra_chroma_table[chroma_mode])
+                    lc->pu.intra_pred_mode_c[i] = 34;
+                else
+                    lc->pu.intra_pred_mode_c[i] = intra_chroma_table[chroma_mode];
+            } else {
+                lc->pu.intra_pred_mode_c[i] = lc->pu.intra_pred_mode[i];
             }
         }
     } else if (ctx_cfmt(s) == 2) {
@@ -3070,74 +3131,50 @@ static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCo
     }
 }
 
-static void intra_prediction_unit_default_value(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
-                                                int x0, int y0,
-                                                int log2_cb_size)
+static inline void set_skip(const HEVCRpiContext * const s, const unsigned int x_cb, const unsigned int y_cb, const unsigned int ln)
 {
-    int pb_size          = 1 << log2_cb_size;
-    int size_in_pus      = pb_size >> s->ps.sps->log2_min_pu_size;
-    int min_pu_width     = s->ps.sps->min_pu_width;
-    MvField *tab_mvf     = s->ref->tab_mvf;
-    int x_pu             = x0 >> s->ps.sps->log2_min_pu_size;
-    int y_pu             = y0 >> s->ps.sps->log2_min_pu_size;
-    int j, k;
-
-    if (size_in_pus == 0)
-        size_in_pus = 1;
-    for (j = 0; j < size_in_pus; j++)
-        small_memset(&s->tab_ipm[(y_pu + j) * min_pu_width + x_pu], INTRA_DC, size_in_pus);
-    if (lc->cu.pred_mode == MODE_INTRA)
-        for (j = 0; j < size_in_pus; j++)
-            for (k = 0; k < size_in_pus; k++)
-                tab_mvf[(y_pu + j) * min_pu_width + x_pu + k].pred_flag = PF_INTRA;
+    const unsigned int stride = s->skip_flag_stride;
+    set_bits(s->skip_flag + y_cb * stride, x_cb, stride, ln);
 }
 
-static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int log2_cb_size)
+static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                           const unsigned int x0, const unsigned int y0, const unsigned int log2_cb_size)
 {
-    int cb_size          = 1 << log2_cb_size;
-    int log2_min_cb_size = s->ps.sps->log2_min_cb_size;
-    int length           = cb_size >> log2_min_cb_size;
-    int min_cb_width     = s->ps.sps->min_cb_width;
-    int x_cb             = x0 >> log2_min_cb_size;
-    int y_cb             = y0 >> log2_min_cb_size;
-    int idx              = log2_cb_size - 2;
-    int qp_block_mask    = (1<<(s->ps.sps->log2_ctb_size - s->ps.pps->diff_cu_qp_delta_depth)) - 1;
-    int x, y;
+    const unsigned int cb_size          = 1 << log2_cb_size;
+    const unsigned int log2_min_cb_size = s->ps.sps->log2_min_cb_size;
+    const unsigned int min_cb_width     = s->ps.sps->min_cb_width;
+    const unsigned int x_cb             = x0 >> log2_min_cb_size;
+    const unsigned int y_cb             = y0 >> log2_min_cb_size;
+    const unsigned int idx              = log2_cb_size - 2;
+    const unsigned int qp_block_mask    = (1 << s->ps.pps->log2_min_cu_qp_delta_size) - 1;
+    int skip_flag = 0;
 
     lc->cu.x                = x0;
     lc->cu.y                = y0;
     lc->cu.pred_mode        = MODE_INTRA;
     lc->cu.part_mode        = PART_2Nx2N;
     lc->cu.intra_split_flag = 0;
+    lc->cu.cu_transquant_bypass_flag = 0;
+    lc->pu.intra_pred_mode[0] = 1;
+    lc->pu.intra_pred_mode[1] = 1;
+    lc->pu.intra_pred_mode[2] = 1;
+    lc->pu.intra_pred_mode[3] = 1;
 
-    SAMPLE_CTB(s->skip_flag, x_cb, y_cb) = 0;
-    for (x = 0; x < 4; x++)
-        lc->pu.intra_pred_mode[x] = 1;
     if (s->ps.pps->transquant_bypass_enable_flag) {
         lc->cu.cu_transquant_bypass_flag = ff_hevc_rpi_cu_transquant_bypass_flag_decode(lc);
         if (lc->cu.cu_transquant_bypass_flag)
             set_deblocking_bypass(s, x0, y0, log2_cb_size);
-    } else
-        lc->cu.cu_transquant_bypass_flag = 0;
-
-    if (s->sh.slice_type != HEVC_SLICE_I) {
-        uint8_t skip_flag = ff_hevc_rpi_skip_flag_decode(s, lc, x0, y0, x_cb, y_cb);
-
-        x = y_cb * min_cb_width + x_cb;
-        for (y = 0; y < length; y++) {
-            small_memset(&s->skip_flag[x], skip_flag, length);
-            x += min_cb_width;
-        }
-        lc->cu.pred_mode = skip_flag ? MODE_SKIP : MODE_INTER;
-    } else {
-        x = y_cb * min_cb_width + x_cb;
-        for (y = 0; y < length; y++) {
-            small_memset(&s->skip_flag[x], 0, length);
-            x += min_cb_width;
-        }
     }
 
-    if (SAMPLE_CTB(s->skip_flag, x_cb, y_cb)) {
+    if (s->sh.slice_type != HEVC_SLICE_I) {
+        lc->cu.pred_mode = MODE_INTER;
+        skip_flag = ff_hevc_rpi_skip_flag_decode(s, lc, x0, y0, x_cb, y_cb);
+    }
+
+    if (skip_flag) {
+        set_skip(s, x_cb, y_cb, log2_cb_size - log2_min_cb_size);
+        lc->cu.pred_mode = MODE_SKIP;
+
         hls_prediction_unit(s, lc, x0, y0, cb_size, cb_size, log2_cb_size, 0, idx);
         intra_prediction_unit_default_value(s, lc, x0, y0, log2_cb_size);
 
@@ -3239,20 +3276,16 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
 
     // ?? We do a set where we read the delta too ??
     if (s->ps.pps->cu_qp_delta_enabled_flag && lc->tu.is_cu_qp_delta_coded == 0)
-        ff_hevc_rpi_set_qPy(s, lc, x0, y0, log2_cb_size);
-
-    x = y_cb * min_cb_width + x_cb;
-    for (y = 0; y < length; y++) {
-        small_memset(&s->qp_y_tab[x], lc->qp_y, length);
-        x += min_cb_width;
-    }
+        ff_hevc_rpi_set_qPy(s, lc, x0, y0);
 
     if(((x0 + (1<<log2_cb_size)) & qp_block_mask) == 0 &&
        ((y0 + (1<<log2_cb_size)) & qp_block_mask) == 0) {
         lc->qPy_pred = lc->qp_y;
     }
 
-    set_ct_depth(s, x0, y0, log2_cb_size, lc->ct_depth);
+    set_bytes(s->qp_y_tab + y_cb * min_cb_width + x_cb, min_cb_width, log2_cb_size - log2_min_cb_size, lc->qp_y & 0xff);
+
+    set_bytes(s->tab_ct_depth + y_cb * min_cb_width + x_cb, min_cb_width, log2_cb_size - log2_min_cb_size, lc->ct_depth);
 
     return 0;
 }
@@ -3262,7 +3295,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
 //  0    More data wanted
 //  1    EoSlice / EoPicture
 static int hls_coding_quadtree(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int x0, const int y0,
-                               const int log2_cb_size, const int cb_depth)
+                               const int log2_cb_size, const unsigned int cb_depth)
 {
     const int cb_size    = 1 << log2_cb_size;
     int ret;
@@ -3277,19 +3310,19 @@ static int hls_coding_quadtree(const HEVCRpiContext * const s, HEVCRpiLocalConte
         split_cu = (log2_cb_size > s->ps.sps->log2_min_cb_size);
     }
     if (s->ps.pps->cu_qp_delta_enabled_flag &&
-        log2_cb_size >= s->ps.sps->log2_ctb_size - s->ps.pps->diff_cu_qp_delta_depth) {
+        log2_cb_size >= s->ps.pps->log2_min_cu_qp_delta_size) {
         lc->tu.is_cu_qp_delta_coded = 0;
         lc->tu.cu_qp_delta          = 0;
     }
 
     lc->tu.cu_chroma_qp_offset_wanted = s->sh.cu_chroma_qp_offset_enabled_flag &&
-        log2_cb_size >= s->ps.sps->log2_ctb_size - s->ps.pps->diff_cu_chroma_qp_offset_depth;
+        log2_cb_size >= s->ps.pps->log2_min_cu_qp_delta_size;
     lc->tu.qp_divmod6[0] = s->ps.pps->qp_bd_x[0];
     lc->tu.qp_divmod6[1] = s->ps.pps->qp_bd_x[1] + s->sh.slice_cb_qp_offset;
     lc->tu.qp_divmod6[2] = s->ps.pps->qp_bd_x[2] + s->sh.slice_cr_qp_offset;
 
     if (split_cu) {
-        int qp_block_mask = (1<<(s->ps.sps->log2_ctb_size - s->ps.pps->diff_cu_qp_delta_depth)) - 1;
+        int qp_block_mask = (1 << s->ps.pps->log2_min_cu_qp_delta_size) - 1;
         const int cb_size_split = cb_size >> 1;
         const int x1 = x0 + cb_size_split;
         const int y1 = y0 + cb_size_split;
@@ -3336,7 +3369,7 @@ static int hls_coding_quadtree(const HEVCRpiContext * const s, HEVCRpiLocalConte
             (!((y0 + cb_size) %
                (1 << (s->ps.sps->log2_ctb_size))) ||
              (y0 + cb_size >= s->ps.sps->height))) {
-            int end_of_slice_flag = ff_hevc_rpi_end_of_slice_flag_decode(lc);
+            int end_of_slice_flag = ff_hevc_rpi_get_cabac_terminate(&lc->cc);
             return !end_of_slice_flag;
         } else {
             return 1;
@@ -4149,8 +4182,8 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
         if (more_data && ((ctb_flags & CTB_TS_FLAGS_EOT) != 0 ||
              (s->ps.pps->entropy_coding_sync_enabled_flag && (ctb_flags & CTB_TS_FLAGS_EOTL) != 0)))
         {
-            if (get_cabac_terminate(&lc->cc) < 0 ||
-                skip_bytes(&lc->cc, 0) == NULL)
+            if (ff_hevc_rpi_get_cabac_terminate(&lc->cc) < 0 ||
+                ff_hevc_rpi_cabac_skip_bytes(&lc->cc, 0) == NULL)
             {
                 av_log(s->avctx, AV_LOG_ERROR, "Error reading terminate el\n ");
                 return -1;
@@ -4872,6 +4905,7 @@ static int hevc_frame_start(HEVCRpiContext * const s)
     memset(s->vertical_bs,   0, s->bs_height * (s->bs_width >> 1));
     memset(s->cbf_luma,      0, s->ps.sps->min_tb_width * s->ps.sps->min_tb_height);
     memset(s->is_pcm,        0, s->ps.sps->pcm_width * s->ps.sps->pcm_height);
+    memset(s->skip_flag,     0, s->ps.sps->min_cb_height * s->skip_flag_stride);
     memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
 
     s->is_decoded        = 0;

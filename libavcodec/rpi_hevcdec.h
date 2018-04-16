@@ -434,6 +434,7 @@ typedef struct HEVCRpiLocalContext {
     uint8_t stat_coeff[4];
     GetBitContext gb;
 
+    uint8_t ct_depth;
     int8_t qp_y;
     int8_t curr_qp_y;
     int8_t qPy_pred;
@@ -445,7 +446,6 @@ typedef struct HEVCRpiLocalContext {
     int     end_of_ctb_x;
     int     end_of_ctb_y;
 
-    int ct_depth;
     RpiCodingUnit cu;
     PredictionUnit pu;
 
@@ -767,6 +767,7 @@ typedef struct HEVCRpiContext {
     int32_t *tab_slice_address;
 
     //  CU
+    unsigned int skip_flag_stride;
     uint8_t *skip_flag;
     uint8_t *tab_ct_depth;
     // PU
@@ -844,39 +845,6 @@ int ff_hevc_rpi_frame_rps(HEVCRpiContext *s);
  */
 int ff_hevc_rpi_slice_rpl(HEVCRpiContext *s);
 
-void ff_hevc_rpi_save_states(HEVCRpiContext *s, const HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_cabac_init_decoder(HEVCRpiLocalContext * const lc);
-void ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, const unsigned int ctb_flags);
-int ff_hevc_rpi_sao_merge_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_sao_type_idx_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_sao_band_position_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_sao_offset_abs_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_sao_offset_sign_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_sao_eo_class_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_end_of_slice_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_cu_transquant_bypass_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_skip_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
-                             const int x0, const int y0, const int x_cb, const int y_cb);
-int ff_hevc_rpi_pred_mode_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_split_coding_unit_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int ct_depth,
-                                          const int x0, const int y0);
-int ff_hevc_rpi_part_mode_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int log2_cb_size);
-int ff_hevc_rpi_pcm_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_prev_intra_luma_pred_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_mpm_idx_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_rem_intra_luma_pred_mode_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_intra_chroma_pred_mode_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_merge_idx_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_merge_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_inter_pred_idc_decode(HEVCRpiLocalContext * const lc, int nPbW, int nPbH);
-int ff_hevc_rpi_ref_idx_lx_decode(HEVCRpiLocalContext * const lc, const int num_ref_idx_lx);
-int ff_hevc_rpi_mvp_lx_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_no_residual_syntax_flag_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_split_transform_flag_decode(HEVCRpiLocalContext * const lc, const int log2_trafo_size);
-int ff_hevc_rpi_cbf_cb_cr_decode(HEVCRpiLocalContext * const lc, const int trafo_depth);
-int ff_hevc_rpi_cbf_luma_decode(HEVCRpiLocalContext * const lc, const int trafo_depth);
-int ff_hevc_rpi_log2_res_scale_abs(HEVCRpiLocalContext * const lc, const int idx);
-int ff_hevc_rpi_res_scale_sign_flag(HEVCRpiLocalContext *const lc, const int idx);
 
 /**
  * Get the number of candidate references for the current frame.
@@ -904,21 +872,10 @@ void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
                               int nPbH, int log2_cb_size, int part_idx,
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX);
-void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase, int log2_cb_size);
+void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase);
 void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
                                            int log2_trafo_size);
-int ff_hevc_rpi_cu_qp_delta_sign_flag(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_cu_qp_delta_abs(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_cu_chroma_qp_offset_flag(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_cu_chroma_qp_offset_idx(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int eot);
-void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
-                                const int x0, const int y0,
-                                const int log2_trafo_size, const enum ScanType scan_idx,
-                                const int c_idx);
-
-void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_cabac_overflow(const HEVCRpiLocalContext * const lc);
 
 extern const uint8_t ff_hevc_rpi_qpel_extra_before[4];
 extern const uint8_t ff_hevc_rpi_qpel_extra_after[4];

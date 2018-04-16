@@ -273,8 +273,8 @@ typedef struct HEVCRpiSPS {
     unsigned int log2_diff_max_min_coding_block_size;
     unsigned int log2_min_tb_size;  // 2..5
     unsigned int log2_max_trafo_size;
-    unsigned int log2_ctb_size;
-    unsigned int log2_min_pu_size;
+    unsigned int log2_ctb_size;     // 4..6
+    unsigned int log2_min_pu_size;  // 2..5
 
     int max_transform_hierarchy_depth_inter;
     int max_transform_hierarchy_depth_intra;
@@ -339,8 +339,7 @@ typedef struct HEVCRpiPPS {
     uint8_t transform_skip_enabled_flag;
 
     uint8_t cu_qp_delta_enabled_flag;
-    int diff_cu_qp_delta_depth;
-
+    uint8_t log2_min_cu_qp_delta_size;
     int cb_qp_offset;   // -12..12
     int cr_qp_offset;   // -12..12
     const uint8_t * qp_dblk_x[3];

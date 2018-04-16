@@ -80,31 +80,29 @@ static inline int chroma_tc(const HEVCRpiContext * const s, const int qp_y,
     return tctable[(int)s->ps.pps->qp_dblk_x[c_idx][qp_y] + tc_offset + 2];
 }
 
-static inline int get_qPy_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
+static inline int get_qPy_pred(const HEVCRpiContext * const s, const HEVCRpiLocalContext * const lc,
+                               const unsigned int xBase, const unsigned int yBase)
 {
-    int ctb_size_mask        = (1 << s->ps.sps->log2_ctb_size) - 1;
-    int MinCuQpDeltaSizeMask = ~((1 << (s->ps.sps->log2_ctb_size -
-                                      s->ps.pps->diff_cu_qp_delta_depth)) - 1);
-    int xQgBase              = xBase & MinCuQpDeltaSizeMask;
-    int yQgBase              = yBase & MinCuQpDeltaSizeMask;
-    int min_cb_width         = s->ps.sps->min_cb_width;
-    int x_cb                 = xQgBase >> s->ps.sps->log2_min_cb_size;
-    int y_cb                 = yQgBase >> s->ps.sps->log2_min_cb_size;
-    int availableA           = (xBase   & ctb_size_mask) &&
-                               (xQgBase & ctb_size_mask);
-    int availableB           = (yBase   & ctb_size_mask) &&
-                               (yQgBase & ctb_size_mask);
+    const unsigned int ctb_size_mask        = (1 << s->ps.sps->log2_ctb_size) - 1;
+    const unsigned int MinCuQpDeltaSizeMask = ~0U << s->ps.pps->log2_min_cu_qp_delta_size;
+    const unsigned int xQgBase              = xBase & MinCuQpDeltaSizeMask;
+    const unsigned int yQgBase              = yBase & MinCuQpDeltaSizeMask;
+    const unsigned int min_cb_width         = s->ps.sps->min_cb_width;
+    const unsigned int x_cb                 = xQgBase >> s->ps.sps->log2_min_cb_size;
+    const unsigned int y_cb                 = yQgBase >> s->ps.sps->log2_min_cb_size;
     const int qPy_pred = lc->qPy_pred;
 
-    return ((!availableA ? qPy_pred : s->qp_y_tab[(x_cb - 1) + y_cb * min_cb_width]) +
-            (!availableB ? qPy_pred : s->qp_y_tab[x_cb + (y_cb - 1) * min_cb_width]) + 1) >> 1;
+    return (((xQgBase & ctb_size_mask) == 0 ? qPy_pred :
+             s->qp_y_tab[(x_cb - 1) + y_cb * min_cb_width]) +
+            ((yQgBase & ctb_size_mask) == 0 ? qPy_pred :
+             s->qp_y_tab[x_cb + (y_cb - 1) * min_cb_width]) + 1) >> 1;
 }
 
 // * Only called from bitstream decode in foreground
 //   so should be safe
-void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase, int log2_cb_size)
+void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase)
 {
-    const int qp_y = get_qPy_pred(s, lc, xBase, yBase, log2_cb_size);
+    const int qp_y = get_qPy_pred(s, lc, xBase, yBase);
 
     if (lc->tu.cu_qp_delta != 0) {
         // ?? I suspect that the -bd_offset here leads to us adding it elsewhere

@@ -30,6 +30,7 @@
 #include "rpi_hevc_data.h"
 #include "hevc.h"
 #include "rpi_hevcdec.h"
+#include "rpi_hevc_cabac_fns.h"
 
 #include "libavutil/rpi_sand_fns.h"
 
@@ -787,9 +788,14 @@ void ff_hevc_rpi_cabac_init(const HEVCRpiContext * const s, HEVCRpiLocalContext 
 
 #define GET_CABAC_LC(ctx) get_cabac(&lc->cc, lc->cabac_state + (ctx))
 
-int ff_hevc_rpi_sao_merge_flag_decode(HEVCRpiLocalContext * const lc)
+int ff_hevc_rpi_get_cabac(CABACContext * const c, uint8_t * const state)
 {
-    return get_cabac(&lc->cc, lc->cabac_state + elem_offset[SAO_MERGE_FLAG]);
+    return get_cabac_inline(c, state);
+}
+
+int ff_hevc_rpi_get_cabac_terminate(CABACContext * const c)
+{
+    return get_cabac_terminate(c);
 }
 
 int ff_hevc_rpi_sao_type_idx_decode(HEVCRpiLocalContext * const lc)
@@ -834,65 +840,30 @@ int ff_hevc_rpi_sao_eo_class_decode(HEVCRpiLocalContext * const lc)
     return ret;
 }
 
-int ff_hevc_rpi_end_of_slice_flag_decode(HEVCRpiLocalContext * const lc)
+int ff_hevc_rpi_cu_qp_delta(HEVCRpiLocalContext * const lc)
 {
-    return get_cabac_terminate(&lc->cc);
-}
+    int val = 1;
 
-int ff_hevc_rpi_cu_transquant_bypass_flag_decode(HEVCRpiLocalContext * const lc)
-{
-    return GET_CABAC_LC(elem_offset[CU_TRANSQUANT_BYPASS_FLAG]);
-}
+    if (get_cabac(&lc->cc, lc->cabac_state + HEVC_BIN_CU_QP_DELTA) == 0)
+        return 0;
 
-int ff_hevc_rpi_skip_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
-                             const int x0, const int y0, const int x_cb, const int y_cb)
-{
-    int min_cb_width = s->ps.sps->min_cb_width;
-    int inc = 0;
-    int x0b = av_mod_uintp2(x0, s->ps.sps->log2_ctb_size);
-    int y0b = av_mod_uintp2(y0, s->ps.sps->log2_ctb_size);
+    while (val < 5 &&
+           get_cabac(&lc->cc, lc->cabac_state + HEVC_BIN_CU_QP_DELTA + 1) != 0)
+        val++;
 
-    if (lc->ctb_left_flag || x0b)
-        inc = !!SAMPLE_CTB(s->skip_flag, x_cb - 1, y_cb);
-    if (lc->ctb_up_flag || y0b)
-        inc += !!SAMPLE_CTB(s->skip_flag, x_cb, y_cb - 1);
-
-    return GET_CABAC_LC(elem_offset[SKIP_FLAG] + inc);
-}
-
-int ff_hevc_rpi_cu_qp_delta_abs(HEVCRpiLocalContext * const lc)
-{
-    int prefix_val = 0;
-    int suffix_val = 0;
-    int inc = 0;
-
-    while (prefix_val < 5 && GET_CABAC_LC(elem_offset[CU_QP_DELTA] + inc)) {
-        prefix_val++;
-        inc = 1;
-    }
-    if (prefix_val >= 5) {
-        int k = 0;
+    if (val >= 5) {
+        unsigned int k = 0;
         while (k < CABAC_MAX_BIN && get_cabac_bypass(&lc->cc)) {
-            suffix_val += 1 << k;
+            val += 1 << k;
             k++;
         }
 //        if (k == CABAC_MAX_BIN)
 //            av_log(s->avctx, AV_LOG_ERROR, "CABAC_MAX_BIN : %d\n", k);
 
         while (k--)
-            suffix_val += get_cabac_bypass(&lc->cc) << k;
+            val += get_cabac_bypass(&lc->cc) << k;
     }
-    return prefix_val + suffix_val;
-}
-
-int ff_hevc_rpi_cu_qp_delta_sign_flag(HEVCRpiLocalContext * const lc)
-{
-    return get_cabac_bypass(&lc->cc);
-}
-
-int ff_hevc_rpi_cu_chroma_qp_offset_flag(HEVCRpiLocalContext * const lc)
-{
-    return GET_CABAC_LC(elem_offset[CU_CHROMA_QP_OFFSET_FLAG]);
+    return get_cabac_bypass(&lc->cc) ? -val : val;
 }
 
 int ff_hevc_rpi_cu_chroma_qp_offset_idx(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc)
@@ -904,11 +875,6 @@ int ff_hevc_rpi_cu_chroma_qp_offset_idx(const HEVCRpiContext * const s, HEVCRpiL
         i++;
 
     return i;
-}
-
-int ff_hevc_rpi_pred_mode_decode(HEVCRpiLocalContext * const lc)
-{
-    return GET_CABAC_LC(elem_offset[PRED_MODE_FLAG]);
 }
 
 int ff_hevc_rpi_split_coding_unit_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int ct_depth, int x0, int y0)
@@ -967,16 +933,6 @@ int ff_hevc_rpi_part_mode_decode(const HEVCRpiContext * const s, HEVCRpiLocalCon
     return PART_nLx2N;  // 0000
 }
 
-int ff_hevc_rpi_pcm_flag_decode(HEVCRpiLocalContext * const lc)
-{
-    return get_cabac_terminate(&lc->cc);
-}
-
-int ff_hevc_rpi_prev_intra_luma_pred_flag_decode(HEVCRpiLocalContext * const lc)
-{
-    return GET_CABAC_LC(elem_offset[PREV_INTRA_LUMA_PRED_FLAG]);
-}
-
 int ff_hevc_rpi_mpm_idx_decode(HEVCRpiLocalContext * const lc)
 {
     int i = 0;
@@ -1017,11 +973,6 @@ int ff_hevc_rpi_merge_idx_decode(const HEVCRpiContext * const s, HEVCRpiLocalCon
     return i;
 }
 
-int ff_hevc_rpi_merge_flag_decode(HEVCRpiLocalContext * const lc)
-{
-    return GET_CABAC_LC(elem_offset[MERGE_FLAG]);
-}
-
 int ff_hevc_rpi_inter_pred_idc_decode(HEVCRpiLocalContext * const lc, int nPbW, int nPbH)
 {
     if (nPbW + nPbH == 12)
@@ -1046,16 +997,6 @@ int ff_hevc_rpi_ref_idx_lx_decode(HEVCRpiLocalContext * const lc, const int num_
     }
 
     return i;
-}
-
-int ff_hevc_rpi_mvp_lx_flag_decode(HEVCRpiLocalContext * const lc)
-{
-    return GET_CABAC_LC(elem_offset[MVP_LX_FLAG]);
-}
-
-int ff_hevc_rpi_no_residual_syntax_flag_decode(HEVCRpiLocalContext * const lc)
-{
-    return GET_CABAC_LC(elem_offset[NO_RESIDUAL_DATA_FLAG]);
 }
 
 static av_always_inline int abs_mvd_greater0_flag_decode(HEVCRpiLocalContext * const lc)
@@ -1094,21 +1035,6 @@ static av_always_inline int mvd_sign_flag_decode(HEVCRpiLocalContext * const lc)
     return get_cabac_bypass_sign(&lc->cc, -1);
 }
 
-int ff_hevc_rpi_split_transform_flag_decode(HEVCRpiLocalContext * const lc, const int log2_trafo_size)
-{
-    return GET_CABAC_LC(elem_offset[SPLIT_TRANSFORM_FLAG] + 5 - log2_trafo_size);
-}
-
-int ff_hevc_rpi_cbf_cb_cr_decode(HEVCRpiLocalContext * const lc, const int trafo_depth)
-{
-    return GET_CABAC_LC(elem_offset[CBF_CB_CR] + trafo_depth);
-}
-
-int ff_hevc_rpi_cbf_luma_decode(HEVCRpiLocalContext * const lc, const int trafo_depth)
-{
-    return GET_CABAC_LC(elem_offset[CBF_LUMA] + !trafo_depth);
-}
-
 static int hevc_transform_skip_flag_decode(HEVCRpiLocalContext * const lc, int c_idx_nz)
 {
     return GET_CABAC_LC(elem_offset[TRANSFORM_SKIP_FLAG] + c_idx_nz);
@@ -1124,6 +1050,7 @@ static int explicit_rdpcm_dir_flag_decode(HEVCRpiLocalContext * const lc, int c_
     return GET_CABAC_LC(elem_offset[EXPLICIT_RDPCM_DIR_FLAG] + c_idx_nz);
 }
 
+
 int ff_hevc_rpi_log2_res_scale_abs(HEVCRpiLocalContext * const lc, const int idx) {
     int i =0;
 
@@ -1131,10 +1058,6 @@ int ff_hevc_rpi_log2_res_scale_abs(HEVCRpiLocalContext * const lc, const int idx
         i++;
 
     return i;
-}
-
-int ff_hevc_rpi_res_scale_sign_flag(HEVCRpiLocalContext *const lc, const int idx) {
-    return GET_CABAC_LC(elem_offset[RES_SCALE_SIGN_FLAG] + idx);
 }
 
 static av_always_inline void last_significant_coeff_xy_prefix_decode(HEVCRpiLocalContext * const lc, int c_idx_nz,
@@ -1953,7 +1876,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             int16_t * const blk_coeffs = coeffs +
                 ((x_cg + (y_cg << log2_trafo_size)) << 2);
             // This calculation is 'wrong' for log2_traffo_size == 2
-            // but that doesn't mattor as in this case x_cg & y_cg
+            // but that doesn't matter as in this case x_cg & y_cg
             // are always 0 so result is correct (0) anyway
             const uint8_t * const blk_scale = scale_matrix +
                 (((x_cg + (y_cg << 3)) << (5 - log2_trafo_size)));
