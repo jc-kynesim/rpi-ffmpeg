@@ -1856,28 +1856,38 @@ static void do_intra_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
     }
 }
 
-static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                              int xBase, int yBase, int cb_xBase, int cb_yBase,
-                              int log2_cb_size, int log2_trafo_size,
-                              int blk_idx, int cbf_luma,
-                              const int * const cbf_cb, const int * const cbf_cr)
+#define CBF_CB0_S 0
+#define CBF_CB1_S 1 // CB1 must be CB0 + 1
+#define CBF_CR0_S 2
+#define CBF_CR1_S 3
+
+#define CBF_CB0 (1 << CBF_CB0_S)
+#define CBF_CR0 (1 << CBF_CR0_S)
+#define CBF_CB1 (1 << CBF_CB1_S)
+#define CBF_CR1 (1 << CBF_CR1_S)
+
+
+static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                              const unsigned int x0, const unsigned int y0,
+                              const unsigned int xBase, const unsigned int yBase,
+                              const unsigned int cb_xBase, const unsigned int cb_yBase,
+                              const unsigned int log2_cb_size, const unsigned int log2_trafo_size,
+                              const unsigned int blk_idx, const int cbf_luma,
+                              const unsigned int const cbf_chroma)
 {
-    const int log2_trafo_size_c = log2_trafo_size - ctx_hshift(s, 1);
+    const unsigned int log2_trafo_size_c = log2_trafo_size - ctx_hshift(s, 1);
     int i;
 
     if (lc->cu.pred_mode == MODE_INTRA) {
-        int trafo_size = 1 << log2_trafo_size;
+        const unsigned int trafo_size = 1 << log2_trafo_size;
         ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0, trafo_size, trafo_size);
         do_intra_pred(s, lc, log2_trafo_size, x0, y0, 0);
     }
 
-    if (cbf_luma || cbf_cb[0] || cbf_cr[0] ||
-        (ctx_cfmt(s) == 2 && (cbf_cb[1] || cbf_cr[1]))) {
+    if (cbf_luma || cbf_chroma != 0)
+    {
         int scan_idx   = SCAN_DIAG;
         int scan_idx_c = SCAN_DIAG;
-        int cbf_chroma = cbf_cb[0] || cbf_cr[0] ||
-                         (ctx_cfmt(s) == 2 &&
-                         (cbf_cb[1] || cbf_cr[1]));
 
         if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded)
         {
@@ -1953,25 +1963,24 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                     ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 1);
                 }
-                if (cbf_cb[i])
+                if (((cbf_chroma >> i) & CBF_CB0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, x0, y0 + (i << log2_trafo_size_c),
                                                 log2_trafo_size_c, scan_idx_c, 1);
-                else
-                    if (lc->tu.cross_pf) {
-                        const ptrdiff_t stride = frame_stride1(s->frame, 1);
-                        const int hshift = ctx_hshift(s, 1);
-                        const int vshift = ctx_vshift(s, 1);
-                        int16_t * const coeffs_y = (int16_t*)lc->edge_emu_buffer;
-                        int16_t * const coeffs   = (int16_t*)lc->edge_emu_buffer2;
-                        int size = 1 << log2_trafo_size_c;
+                else if (lc->tu.cross_pf) {
+                    const ptrdiff_t stride = frame_stride1(s->frame, 1);
+                    const int hshift = ctx_hshift(s, 1);
+                    const int vshift = ctx_vshift(s, 1);
+                    int16_t * const coeffs_y = (int16_t*)lc->edge_emu_buffer;
+                    int16_t * const coeffs   = (int16_t*)lc->edge_emu_buffer2;
+                    int size = 1 << log2_trafo_size_c;
 
-                        uint8_t *dst = &s->frame->data[1][(y0 >> vshift) * stride +
-                                                              ((x0 >> hshift) << s->ps.sps->pixel_shift)];
-                        for (i = 0; i < (size * size); i++) {
-                            coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
-                        }
-                        s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                    uint8_t *dst = &s->frame->data[1][(y0 >> vshift) * stride +
+                                                          ((x0 >> hshift) << s->ps.sps->pixel_shift)];
+                    for (i = 0; i < (size * size); i++) {
+                        coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                     }
+                    s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                }
             }
 
             if (lc->tu.cross_pf) {
@@ -1982,25 +1991,24 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                     ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 2);
                 }
-                if (cbf_cr[i])
+                if (((cbf_chroma >> i) & CBF_CR0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, x0, y0 + (i << log2_trafo_size_c),
                                                 log2_trafo_size_c, scan_idx_c, 2);
-                else
-                    if (lc->tu.cross_pf) {
-                        ptrdiff_t stride = frame_stride1(s->frame, 2);
-                        const int hshift = ctx_hshift(s, 2);
-                        const int vshift = ctx_vshift(s, 2);
-                        int16_t *coeffs_y = (int16_t*)lc->edge_emu_buffer;
-                        int16_t *coeffs   = (int16_t*)lc->edge_emu_buffer2;
-                        const int size = 1 << log2_trafo_size_c;
+                else if (lc->tu.cross_pf) {
+                    ptrdiff_t stride = frame_stride1(s->frame, 2);
+                    const int hshift = ctx_hshift(s, 2);
+                    const int vshift = ctx_vshift(s, 2);
+                    int16_t *coeffs_y = (int16_t*)lc->edge_emu_buffer;
+                    int16_t *coeffs   = (int16_t*)lc->edge_emu_buffer2;
+                    const int size = 1 << log2_trafo_size_c;
 
-                        uint8_t *dst = &s->frame->data[2][(y0 >> vshift) * stride +
-                                                          ((x0 >> hshift) << s->ps.sps->pixel_shift)];
-                        for (i = 0; i < (size * size); i++) {
-                            coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
-                        }
-                        s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                    uint8_t *dst = &s->frame->data[2][(y0 >> vshift) * stride +
+                                                      ((x0 >> hshift) << s->ps.sps->pixel_shift)];
+                    for (i = 0; i < (size * size); i++) {
+                        coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                     }
+                    s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                }
             }
         } else if (ctx_cfmt(s) != 0 && blk_idx == 3) {
             int trafo_size_h = 1 << (log2_trafo_size + 1);
@@ -2011,7 +2019,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                                     trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size, xBase, yBase + (i << log2_trafo_size), 1);
                 }
-                if (cbf_cb[i])
+                if (((cbf_chroma >> i) & CBF_CB0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, xBase, yBase + (i << log2_trafo_size),
                                                 log2_trafo_size, scan_idx_c, 1);
             }
@@ -2021,7 +2029,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                                 trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size, xBase, yBase + (i << log2_trafo_size), 2);
                 }
-                if (cbf_cr[i])
+                if (((cbf_chroma >> i) & CBF_CR0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, xBase, yBase + (i << log2_trafo_size),
                                                 log2_trafo_size, scan_idx_c, 2);
             }
@@ -2063,21 +2071,20 @@ static inline void set_deblocking_bypass(const HEVCRpiContext * const s, const i
     set_bits(s->is_pcm + (y0 >> 3) * s->ps.sps->pcm_width, x0 >> 3, s->ps.sps->pcm_width, log2_cb_size - 3);
 }
 
-static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                              int xBase, int yBase, int cb_xBase, int cb_yBase,
-                              int log2_cb_size, int log2_trafo_size,
-                              int trafo_depth, int blk_idx,
-                              const int *base_cbf_cb, const int *base_cbf_cr)
-{
-    uint8_t split_transform_flag;
-    int cbf_cb[2];
-    int cbf_cr[2];
-    int ret;
 
-    cbf_cb[0] = base_cbf_cb[0];
-    cbf_cb[1] = base_cbf_cb[1];
-    cbf_cr[0] = base_cbf_cr[0];
-    cbf_cr[1] = base_cbf_cr[1];
+static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                              const unsigned int x0, const unsigned int y0,
+                              const unsigned int xBase, const unsigned int yBase,
+                              const unsigned int cb_xBase, const unsigned int cb_yBase,
+                              const unsigned int log2_cb_size,
+                              const unsigned int log2_trafo_size,
+                              const unsigned int trafo_depth, const unsigned int blk_idx,
+                              const unsigned int cbf_c0)
+{
+    // When trafo_size == 2 hls_transform_unit uses c0 so put in c1
+    unsigned int cbf_c1 = cbf_c0;
+    int split_transform_flag;
+    int ret;
 
     if (lc->cu.intra_split_flag) {
         if (trafo_depth == 1) {
@@ -2099,7 +2106,8 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
     if (log2_trafo_size <= s->ps.sps->log2_max_trafo_size &&
         log2_trafo_size >  s->ps.sps->log2_min_tb_size    &&
         trafo_depth     < lc->cu.max_trafo_depth       &&
-        !(lc->cu.intra_split_flag && trafo_depth == 0)) {
+        !(lc->cu.intra_split_flag && trafo_depth == 0))
+    {
         split_transform_flag = ff_hevc_rpi_split_transform_flag_decode(lc, log2_trafo_size);
     } else {
         int inter_split = s->ps.sps->max_transform_hierarchy_depth_inter == 0 &&
@@ -2112,19 +2120,23 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                inter_split;
     }
 
-    if (ctx_cfmt(s) != 0 && (log2_trafo_size > 2 || ctx_cfmt(s) == 3)) {
-        if (trafo_depth == 0 || cbf_cb[0]) {
-            cbf_cb[0] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            if (ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
-                cbf_cb[1] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            }
+    if (log2_trafo_size > 2 || ctx_cfmt(s) == 3)
+    {
+        const int wants_c1 = ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3);
+        cbf_c1 = 0;
+
+        if ((cbf_c0 & CBF_CB0) != 0)
+        {
+            cbf_c1 = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CB0_S;
+            if (wants_c1)
+                cbf_c1 |= ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CB1_S;
         }
 
-        if (trafo_depth == 0 || cbf_cr[0]) {
-            cbf_cr[0] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            if (ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
-                cbf_cr[1] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            }
+        if ((cbf_c0 & CBF_CR0) != 0)
+        {
+            cbf_c1 |= ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CR0_S;
+            if (wants_c1)
+                cbf_c1 |= ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CR1_S;
         }
     }
 
@@ -2137,7 +2149,7 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
 do {                                                                            \
     ret = hls_transform_tree(s, lc, x, y, x0, y0, cb_xBase, cb_yBase, log2_cb_size, \
                              log2_trafo_size - 1, trafo_depth + 1, idx,         \
-                             cbf_cb, cbf_cr);                                   \
+                             cbf_c1);                                   \
     if (ret < 0)                                                                \
         return ret;                                                             \
 } while (0)
@@ -2154,15 +2166,16 @@ do {                                                                            
         int min_tu_width     = s->ps.sps->min_tb_width;
         int cbf_luma         = 1;
 
-        if (lc->cu.pred_mode == MODE_INTRA || trafo_depth != 0 ||
-            cbf_cb[0] || cbf_cr[0] ||
-            (ctx_cfmt(s) == 2 && (cbf_cb[1] || cbf_cr[1]))) {
+        // If trafo_size == 2 then we should have cbf_c == 0 here but as we can't have
+        // trafo_size == 2 with depth == 0 the issue is moot
+        if (lc->cu.pred_mode == MODE_INTRA || trafo_depth != 0 || cbf_c1 != 0)
+        {
             cbf_luma = ff_hevc_rpi_cbf_luma_decode(lc, trafo_depth);
         }
 
         ret = hls_transform_unit(s, lc, x0, y0, xBase, yBase, cb_xBase, cb_yBase,
                                  log2_cb_size, log2_trafo_size,
-                                 blk_idx, cbf_luma, cbf_cb, cbf_cr);
+                                 blk_idx, cbf_luma, cbf_c1);
         if (ret < 0)
             return ret;
         // TODO: store cbf_luma somewhere else
@@ -3259,7 +3272,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
                 rqt_root_cbf = ff_hevc_rpi_no_residual_syntax_flag_decode(lc);
             }
             if (rqt_root_cbf) {
-                const static int cbf[2] = { 0 };
+                const unsigned int cbf_c = ctx_cfmt(s) == 0 ? 0 : (CBF_CR0 | CBF_CB0);
                 int ret;
 
                 lc->cu.max_trafo_depth = lc->cu.pred_mode == MODE_INTRA ?
@@ -3267,7 +3280,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
                                          s->ps.sps->max_transform_hierarchy_depth_inter;
                 ret = hls_transform_tree(s, lc, x0, y0, x0, y0, x0, y0,
                                          log2_cb_size,
-                                         log2_cb_size, 0, 0, cbf, cbf);
+                                         log2_cb_size, 0, 0, cbf_c);
                 if (ret < 0)
                     return ret;
             } else {
