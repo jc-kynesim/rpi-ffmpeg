@@ -1821,7 +1821,7 @@ static void hls_sao_param(const HEVCRpiContext *s, HEVCRpiLocalContext * const l
 
 
 static int hls_cross_component_pred(HEVCRpiLocalContext * const lc, const int idx) {
-    int log2_res_scale_abs_plus1 = ff_hevc_rpi_log2_res_scale_abs(lc, idx);
+    int log2_res_scale_abs_plus1 = ff_hevc_rpi_log2_res_scale_abs(lc, idx);  // 0..4
 
     if (log2_res_scale_abs_plus1 !=  0) {
         int res_scale_sign_flag = ff_hevc_rpi_res_scale_sign_flag(lc, idx);
@@ -1859,7 +1859,8 @@ static void do_intra_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
 static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
                               int xBase, int yBase, int cb_xBase, int cb_yBase,
                               int log2_cb_size, int log2_trafo_size,
-                              int blk_idx, int cbf_luma, int *cbf_cb, int *cbf_cr)
+                              int blk_idx, int cbf_luma,
+                              const int * const cbf_cb, const int * const cbf_cr)
 {
     const int log2_trafo_size_c = log2_trafo_size - ctx_hshift(s, 1);
     int i;
@@ -1880,21 +1881,22 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
 
         if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded)
         {
-            lc->tu.is_cu_qp_delta_coded = 1;
-            lc->tu.cu_qp_delta = ff_hevc_rpi_cu_qp_delta(lc);
+            const int qp_delta = ff_hevc_rpi_cu_qp_delta(lc);
 
-            if (lc->tu.cu_qp_delta < -(26 + (s->ps.sps->qp_bd_offset >> 1)) ||
-                lc->tu.cu_qp_delta >  (25 + (s->ps.sps->qp_bd_offset >> 1)))
+            if (qp_delta < -(26 + (s->ps.sps->qp_bd_offset >> 1)) ||
+                qp_delta >  (25 + (s->ps.sps->qp_bd_offset >> 1)))
             {
                 av_log(s->avctx, AV_LOG_ERROR,
                        "The cu_qp_delta %d is outside the valid range "
                        "[%d, %d].\n",
-                       lc->tu.cu_qp_delta,
+                       qp_delta,
                        -(26 + (s->ps.sps->qp_bd_offset >> 1)),
                         (25 + (s->ps.sps->qp_bd_offset >> 1)));
                 return AVERROR_INVALIDDATA;
             }
 
+            lc->tu.is_cu_qp_delta_coded = 1;
+            lc->tu.cu_qp_delta = qp_delta;
             ff_hevc_rpi_set_qPy(s, lc, cb_xBase, cb_yBase);
         }
 
@@ -2996,7 +2998,8 @@ static void intra_prediction_unit_default_value(const HEVCRpiContext * const s, 
  */
 static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                                 int x0, int y0, int log2_pu_size,
-                                int prev_intra_luma_pred_flag)
+                                int prev_intra_luma_pred_flag,
+                                const unsigned int idx)
 {
     int x_pu             = x0 >> s->ps.sps->log2_min_pu_size;
     int y_pu             = y0 >> s->ps.sps->log2_min_pu_size;
@@ -3036,7 +3039,7 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
     }
 
     if (prev_intra_luma_pred_flag) {
-        intra_pred_mode = lc->pu.mpm_idx == 0 ? a : lc->pu.mpm_idx == 1 ? b : c;
+        intra_pred_mode = idx == 0 ? a : idx == 1 ? b : c;
     } else {
         // Sort lowest 1st
         if (a > b)
@@ -3046,7 +3049,7 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
         if (b > c)
             FFSWAP(int, b, c);
 
-        intra_pred_mode = lc->pu.rem_intra_luma_pred_mode;
+        intra_pred_mode = idx;
         if (intra_pred_mode >= a)
             intra_pred_mode++;
         if (intra_pred_mode >= b)
@@ -3081,17 +3084,17 @@ static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCo
         prev_intra_luma_pred_flag[i] = ff_hevc_rpi_prev_intra_luma_pred_flag_decode(lc);
 
     for (i = 0; i < n; i++) {
-        if (prev_intra_luma_pred_flag[i])
-            lc->pu.mpm_idx = ff_hevc_rpi_mpm_idx_decode(lc);
-        else
-            lc->pu.rem_intra_luma_pred_mode = ff_hevc_rpi_rem_intra_luma_pred_mode_decode(lc);
+        // depending on mode idx is mpm or luma_pred_mode
+        const unsigned int idx = prev_intra_luma_pred_flag[i] ?
+            ff_hevc_rpi_mpm_idx_decode(lc) :
+            ff_hevc_rpi_rem_intra_luma_pred_mode_decode(lc);
 
         lc->pu.intra_pred_mode[i] =
             luma_intra_pred_mode(s, lc,
                                  x0 + ((i & 1) == 0 ? 0 : split_size),
                                  y0 + ((i & 2) == 0 ? 0 : split_size),
                                  log2_cb_size - split,
-                                 prev_intra_luma_pred_flag[i]);
+                                 prev_intra_luma_pred_flag[i], idx);
     }
 
     if (ctx_cfmt(s) == 3) {

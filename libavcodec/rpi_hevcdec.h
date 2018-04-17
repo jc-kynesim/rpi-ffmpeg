@@ -323,29 +323,25 @@ typedef struct RpiNeighbourAvailable {
 } RpiNeighbourAvailable;
 
 typedef struct PredictionUnit {
-    int mpm_idx;
-    int rem_intra_luma_pred_mode;
     uint8_t intra_pred_mode[4];
-    Mv mvd;
-    uint8_t merge_flag;
     uint8_t intra_pred_mode_c[4];
     uint8_t chroma_mode_c[4];
+    Mv mvd;
+    uint8_t merge_flag;
 } PredictionUnit;
 
 typedef struct TransformUnit {
-    int cu_qp_delta;
-
-    int res_scale_val;
+    int8_t cu_qp_delta;
+    int8_t res_scale_val;
 
     // Inferred parameters;
-    int intra_pred_mode;
-    int intra_pred_mode_c;
-    int chroma_mode_c;
+    uint8_t intra_pred_mode;
+    uint8_t intra_pred_mode_c;
+    uint8_t chroma_mode_c;
     uint8_t is_cu_qp_delta_coded;
     uint8_t cu_chroma_qp_offset_wanted;
-//    int8_t  cu_qp_offset_cb;
-//    int8_t  cu_qp_offset_cr;
     uint8_t cross_pf;
+
     const int8_t * qp_divmod6[3];
 } TransformUnit;
 
