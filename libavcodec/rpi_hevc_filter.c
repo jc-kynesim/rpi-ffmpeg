@@ -806,149 +806,133 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
 }
 
 
-void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                                           int log2_trafo_size)
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                                               const unsigned int x0, const unsigned int y0,
+                                               const unsigned int log2_trafo_size)
 {
-    MvField *tab_mvf     = s->ref->tab_mvf;
-    int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
-    int log2_min_tu_size = s->ps.sps->log2_min_tb_size;
-    int min_pu_width     = s->ps.sps->min_pu_width;
-    int min_tu_width     = s->ps.sps->min_tb_width;
-    int boundary_upper, boundary_left;
-    int i, j;
-    const RefPicList *rpl = s->ref->refPicList;
-    const unsigned int log2_dup = FFMIN(log2_min_pu_size, log2_trafo_size);
-    const unsigned int min_pu_in_4pix = 1 << (log2_dup - 2);  // Dup
+    const MvField * const tab_mvf       = s->ref->tab_mvf;
+    const unsigned int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
+    const unsigned int log2_min_tu_size = s->ps.sps->log2_min_tb_size;
+    const unsigned int min_pu_width     = s->ps.sps->min_pu_width;
+    const unsigned int min_tu_width     = s->ps.sps->min_tb_width;
+    const RefPicList * const rpl        = s->ref->refPicList;
+    const unsigned int log2_dup         = FFMIN(log2_min_pu_size, log2_trafo_size);
+    const unsigned int min_pu_in_4pix   = 1 << (log2_dup - 2);  // Dup
     const unsigned int trafo_in_min_pus = 1 << (log2_trafo_size - log2_dup); // Rep
-    int y_pu             = y0 >> log2_min_pu_size;
-    int x_pu             = x0 >> log2_min_pu_size;
-    MvField *curr        = &tab_mvf[y_pu * min_pu_width + x_pu];
-    int is_intra         = curr->pred_flag == PF_INTRA;
-    const int inc        = log2_min_pu_size == 2 ? 2 : 1;
+    const MvField * const curr_mvf      = tab_mvf + (y0 >> log2_min_pu_size) * min_pu_width + (x0 >> log2_min_pu_size);
+    const int inc                       = log2_min_pu_size == 2 ? 2 : 1;
+    const uint8_t * const curr_cbf_luma = s->cbf_luma + (y0 >> log2_min_tu_size) * min_tu_width + (x0 >> log2_min_tu_size);
+    // Given where we are called from is_cbf_luma & is_intra will be constant over the block
+    const int is_cbf = *curr_cbf_luma;
+    const int is_intra = curr_mvf->pred_flag == PF_INTRA;
+    const unsigned int boundary_flags   = s->sh.dblk_boundary_flags & lc->boundary_flags;
+
     uint8_t *bs;
+    unsigned int i, j;
 
 #ifdef DISABLE_STRENGTHS
     return;
 #endif
 
-    boundary_upper = y0 > 0 && !(y0 & 7);
-    if (boundary_upper &&
-        ((!s->sh.slice_loop_filter_across_slices_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_UPPER_SLICE &&
-          (y0 % (1 << s->ps.sps->log2_ctb_size)) == 0) ||
-         (!s->ps.pps->loop_filter_across_tiles_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_UPPER_TILE &&
-          (y0 % (1 << s->ps.sps->log2_ctb_size)) == 0)))
-        boundary_upper = 0;
-
     bs = &s->horizontal_bs[(x0 >> 2) + (y0 >> 3) * s->bs_width];
 
-    if (boundary_upper) {
-        const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
-                              ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
-                              rpl;
-        MvField *top = curr - min_pu_width;
+    // Boundary upper
+    if (y0 != 0 && (y0 & 7) == 0 &&
+        ((y0 & ((1 << s->ps.sps->log2_ctb_size) - 1)) != 0 ||
+         (boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0))
+    {
+        const MvField * const top = curr_mvf - min_pu_width;
 
         if (is_intra) {
             for (i = 0; i < (1 << log2_trafo_size); i += 4)
                 bs[i >> 2] = 2;
-
-        } else {
-            int y_tu = y0 >> log2_min_tu_size;
-            int x_tu = x0 >> log2_min_tu_size;
-            uint8_t *curr_cbf_luma = &s->cbf_luma[y_tu * min_tu_width + x_tu];
-            uint8_t *top_cbf_luma = curr_cbf_luma - min_tu_width;
+        }
+        else if (is_cbf) {
+            for (i = 0; i < (1 << log2_trafo_size); i += 4)
+                bs[i >> 2] = (top[i >> log2_min_pu_size].pred_flag == PF_INTRA) ? 2 : 1;
+        }
+        else {
+            const uint8_t *top_cbf_luma = curr_cbf_luma - min_tu_width;
+            const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
+                                  ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
+                                  rpl;
 
             s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                     min_pu_in_4pix, sizeof (MvField), 4 >> 2,
                     rpl[0].list, rpl[1].list, rpl_top[0].list, rpl_top[1].list,
-                    curr, top, bs);
+                    curr_mvf, top, bs);
 
             for (i = 0; i < (1 << log2_trafo_size); i += 4) {
-                int i_pu = i >> log2_min_pu_size;
-                int i_tu = i >> log2_min_tu_size;
-
-                if (top[i_pu].pred_flag == PF_INTRA)
+                if (top[i >> log2_min_pu_size].pred_flag == PF_INTRA)
                     bs[i >> 2] = 2;
-                else if (curr_cbf_luma[i_tu] || top_cbf_luma[i_tu])
+                else if (top_cbf_luma[i >> log2_min_tu_size])
                     bs[i >> 2] = 1;
             }
         }
     }
 
     if (!is_intra) {
-        for (j = inc; j < trafo_in_min_pus; j += inc) {
-            MvField *top;
+        const MvField * mvf = curr_mvf;
 
-            curr += min_pu_width * inc;
-            top = curr - min_pu_width;
+        for (j = inc; j < trafo_in_min_pus; j += inc) {
+            mvf += min_pu_width * inc;
             bs += s->bs_width * ((inc << log2_min_pu_size) >> 3);
 
             s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                     min_pu_in_4pix, sizeof (MvField), 4 >> 2,
                     rpl[0].list, rpl[1].list, rpl[0].list, rpl[1].list,
-                    curr, top, bs);
+                    mvf, mvf - min_pu_width, bs);
         }
     }
 
-    boundary_left = x0 > 0 && !(x0 & 7);
-    if (boundary_left &&
-        ((!s->sh.slice_loop_filter_across_slices_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_LEFT_SLICE &&
-          (x0 % (1 << s->ps.sps->log2_ctb_size)) == 0) ||
-         (!s->ps.pps->loop_filter_across_tiles_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_LEFT_TILE &&
-          (x0 % (1 << s->ps.sps->log2_ctb_size)) == 0)))
-        boundary_left = 0;
-
-    curr = &tab_mvf[y_pu * min_pu_width + x_pu];
     bs = &s->vertical_bs[(x0 >> 3)* s->bs_height + (y0 >> 2)];
 
-    if (boundary_left) {
-        const RefPicList *rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
-                               ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
-                               rpl;
-        MvField *left = curr - 1;
+    // Boundary left
+    if (x0 != 0 && (x0 & 7) == 0 &&
+        ((x0 & ((1 << s->ps.sps->log2_ctb_size) - 1)) != 0 ||
+         (boundary_flags & (BOUNDARY_LEFT_SLICE | BOUNDARY_LEFT_TILE)) == 0))
+    {
+        const MvField * const left = curr_mvf - 1;
 
         if (is_intra) {
             for (j = 0; j < (1 << log2_trafo_size); j += 4)
                 bs[j >> 2] = 2;
-
-        } else {
-            int y_tu = y0 >> log2_min_tu_size;
-            int x_tu = x0 >> log2_min_tu_size;
-            uint8_t *curr_cbf_luma = &s->cbf_luma[y_tu * min_tu_width + x_tu];
-            uint8_t *left_cbf_luma = curr_cbf_luma - 1;
+        }
+        else if (is_cbf) {
+            for (i = 0; i < (1 << log2_trafo_size); i += 4)
+                bs[i >> 2] = (left[(i >> log2_min_pu_size) * min_pu_width].pred_flag == PF_INTRA) ? 2 : 1;
+        }
+        else {
+            const uint8_t * const left_cbf_luma = curr_cbf_luma - 1;
+            const RefPicList * const rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
+                                   ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
+                                   rpl;
 
             s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                     min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
                     rpl[0].list, rpl[1].list, rpl_left[0].list, rpl_left[1].list,
-                    curr, left, bs);
+                    curr_mvf, left, bs);
 
             for (j = 0; j < (1 << log2_trafo_size); j += 4) {
-                int j_pu = j >> log2_min_pu_size;
-                int j_tu = j >> log2_min_tu_size;
-
-                if (left[j_pu * min_pu_width].pred_flag == PF_INTRA)
+                if (left[(j >> log2_min_pu_size) * min_pu_width].pred_flag == PF_INTRA)
                     bs[j >> 2] = 2;
-                else if (curr_cbf_luma[j_tu * min_tu_width] || left_cbf_luma[j_tu * min_tu_width])
+                else if (left_cbf_luma[(j >> log2_min_tu_size) * min_tu_width])
                     bs[j >> 2] = 1;
             }
         }
     }
 
     if (!is_intra) {
-        for (i = inc; i < trafo_in_min_pus; i += inc) {
-            MvField *left;
+        const MvField * mvf = curr_mvf;
 
-            curr += inc;
-            left = curr - 1;
+        for (i = inc; i < trafo_in_min_pus; i += inc) {
+            mvf += inc;
             bs += ((inc << log2_min_pu_size) >> 3) * s->bs_height;
 
             s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                     min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
                     rpl[0].list, rpl[1].list, rpl[0].list, rpl[1].list,
-                    curr, left, bs);
+                    mvf, mvf - 1, bs);
         }
     }
 }

@@ -1666,6 +1666,13 @@ static int hls_slice_header(HEVCRpiContext * const s)
         } else {
             sh->slice_loop_filter_across_slices_enabled_flag = s->ps.pps->seq_loop_filter_across_slices_enabled_flag;
         }
+        sh->dblk_boundary_flags =
+            (sh->slice_loop_filter_across_slices_enabled_flag ? 0 :
+                BOUNDARY_UPPER_SLICE | BOUNDARY_LEFT_SLICE) |
+            (s->ps.pps->loop_filter_across_tiles_enabled_flag ? 0 :
+                BOUNDARY_UPPER_TILE | BOUNDARY_LEFT_TILE);
+
+
     } else if (!s->slice_initialized) {
         av_log(s->avctx, AV_LOG_ERROR, "Independent slice segment missing.\n");
         return AVERROR_INVALIDDATA;

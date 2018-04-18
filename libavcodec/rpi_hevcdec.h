@@ -869,8 +869,9 @@ void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX);
 void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase);
-void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                                           int log2_trafo_size);
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                                               const unsigned int x0, const unsigned int y0,
+                                               const unsigned int log2_trafo_size);
 int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int eot);
 
 extern const uint8_t ff_hevc_rpi_qpel_extra_before[4];

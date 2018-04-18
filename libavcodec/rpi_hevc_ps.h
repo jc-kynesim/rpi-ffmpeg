@@ -85,6 +85,8 @@ typedef struct RpiSliceHeader {
     uint8_t slice_loop_filter_across_slices_enabled_flag;
     uint8_t collocated_list;
 
+    uint8_t dblk_boundary_flags;
+
     unsigned int collocated_ref_idx;
 
     int slice_qp_delta;
