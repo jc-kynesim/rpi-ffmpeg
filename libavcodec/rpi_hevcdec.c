@@ -1666,7 +1666,7 @@ static int hls_slice_header(HEVCRpiContext * const s)
         } else {
             sh->slice_loop_filter_across_slices_enabled_flag = s->ps.pps->seq_loop_filter_across_slices_enabled_flag;
         }
-        sh->dblk_boundary_flags =
+        sh->no_dblk_boundary_flags =
             (sh->slice_loop_filter_across_slices_enabled_flag ? 0 :
                 BOUNDARY_UPPER_SLICE | BOUNDARY_LEFT_SLICE) |
             (s->ps.pps->loop_filter_across_tiles_enabled_flag ? 0 :
@@ -3178,6 +3178,8 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
     lc->cu.part_mode        = PART_2Nx2N;
     lc->cu.intra_split_flag = 0;
     lc->cu.cu_transquant_bypass_flag = 0;
+    lc->cu.min_pb_width     = cb_size;
+    lc->cu.min_pb_height    = cb_size;
     lc->pu.intra_pred_mode[0] = 1;
     lc->pu.intra_pred_mode[1] = 1;
     lc->pu.intra_pred_mode[2] = 1;
@@ -3239,30 +3241,38 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
                 hls_prediction_unit(s, lc, x0, y0, cb_size, cb_size, log2_cb_size, 0, idx);
                 break;
             case PART_2NxN:
+                lc->cu.min_pb_height = cb_size / 2;
                 hls_prediction_unit(s, lc, x0, y0,               cb_size, cb_size / 2, log2_cb_size, 0, idx);
                 hls_prediction_unit(s, lc, x0, y0 + cb_size / 2, cb_size, cb_size / 2, log2_cb_size, 1, idx);
                 break;
             case PART_Nx2N:
+                lc->cu.min_pb_width = cb_size / 2;
                 hls_prediction_unit(s, lc, x0,               y0, cb_size / 2, cb_size, log2_cb_size, 0, idx - 1);
                 hls_prediction_unit(s, lc, x0 + cb_size / 2, y0, cb_size / 2, cb_size, log2_cb_size, 1, idx - 1);
                 break;
             case PART_2NxnU:
+                lc->cu.min_pb_height = cb_size / 4;
                 hls_prediction_unit(s, lc, x0, y0,               cb_size, cb_size     / 4, log2_cb_size, 0, idx);
-                hls_prediction_unit(s, lc, x0, y0 + cb_size / 4, cb_size, cb_size * 3 / 4, log2_cb_size, 1, idx);
+                hls_prediction_unit(s, lc, x0, y0 + cb_size / 4, cb_size, cb_size / 4 * 3, log2_cb_size, 1, idx);
                 break;
             case PART_2NxnD:
-                hls_prediction_unit(s, lc, x0, y0,                   cb_size, cb_size * 3 / 4, log2_cb_size, 0, idx);
-                hls_prediction_unit(s, lc, x0, y0 + cb_size * 3 / 4, cb_size, cb_size     / 4, log2_cb_size, 1, idx);
+                lc->cu.min_pb_height = cb_size / 4;
+                hls_prediction_unit(s, lc, x0, y0,                   cb_size, cb_size / 4 * 3, log2_cb_size, 0, idx);
+                hls_prediction_unit(s, lc, x0, y0 + cb_size / 4 * 3, cb_size, cb_size     / 4, log2_cb_size, 1, idx);
                 break;
             case PART_nLx2N:
+                lc->cu.min_pb_width = cb_size / 4;
                 hls_prediction_unit(s, lc, x0,               y0, cb_size     / 4, cb_size, log2_cb_size, 0, idx - 2);
                 hls_prediction_unit(s, lc, x0 + cb_size / 4, y0, cb_size * 3 / 4, cb_size, log2_cb_size, 1, idx - 2);
                 break;
             case PART_nRx2N:
-                hls_prediction_unit(s, lc, x0,                   y0, cb_size * 3 / 4, cb_size, log2_cb_size, 0, idx - 2);
-                hls_prediction_unit(s, lc, x0 + cb_size * 3 / 4, y0, cb_size     / 4, cb_size, log2_cb_size, 1, idx - 2);
+                lc->cu.min_pb_width = cb_size / 4;
+                hls_prediction_unit(s, lc, x0,                   y0, cb_size / 4 * 3, cb_size, log2_cb_size, 0, idx - 2);
+                hls_prediction_unit(s, lc, x0 + cb_size / 4 * 3, y0, cb_size     / 4, cb_size, log2_cb_size, 1, idx - 2);
                 break;
             case PART_NxN:
+                lc->cu.min_pb_width = cb_size / 2;
+                lc->cu.min_pb_height = cb_size / 2;
                 hls_prediction_unit(s, lc, x0,               y0,               cb_size / 2, cb_size / 2, log2_cb_size, 0, idx - 1);
                 hls_prediction_unit(s, lc, x0 + cb_size / 2, y0,               cb_size / 2, cb_size / 2, log2_cb_size, 1, idx - 1);
                 hls_prediction_unit(s, lc, x0,               y0 + cb_size / 2, cb_size / 2, cb_size / 2, log2_cb_size, 2, idx - 1);
@@ -3285,6 +3295,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
                 lc->cu.max_trafo_depth = lc->cu.pred_mode == MODE_INTRA ?
                                          s->ps.sps->max_transform_hierarchy_depth_intra + lc->cu.intra_split_flag :
                                          s->ps.sps->max_transform_hierarchy_depth_inter;
+                // transform_tree does deblock_boundary_strengths
                 ret = hls_transform_tree(s, lc, x0, y0, x0, y0, x0, y0,
                                          log2_cb_size,
                                          log2_cb_size, 0, 0, cbf_c);

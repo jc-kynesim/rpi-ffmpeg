@@ -1098,7 +1098,7 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
     {
         const unsigned int CtbLog2SizeY = sps->log2_min_cb_size + sps->log2_diff_max_min_coding_block_size;
         // Not a bitstream limitation, but all profiles
-        if (CtbLog2SizeY < 4 || CtbLog2SizeY > 6) {
+        if (CtbLog2SizeY < 4 || CtbLog2SizeY > HEVC_MAX_LOG2_CTB_SIZE) {
             av_log(avctx, AV_LOG_ERROR, "Invalid value %d for CtbLog2SizeY", CtbLog2SizeY);
             return AVERROR_INVALIDDATA;
         }
@@ -1107,6 +1107,10 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
             av_log(avctx, AV_LOG_ERROR, "Invalid value %d for MaxTbLog2SizeY", sps->log2_max_trafo_size);
             return AVERROR_INVALIDDATA;
         }
+
+        // Inferred parameters
+        sps->log2_ctb_size = CtbLog2SizeY;
+        sps->log2_min_pu_size = sps->log2_min_cb_size - 1;
     }
 
     sps->max_transform_hierarchy_depth_inter = get_ue_golomb_long(gb);
@@ -1251,22 +1255,6 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
     }
 
     // Inferred parameters
-    sps->log2_ctb_size = sps->log2_min_cb_size +
-                         sps->log2_diff_max_min_coding_block_size;
-    sps->log2_min_pu_size = sps->log2_min_cb_size - 1;
-
-    if (sps->log2_ctb_size > HEVC_MAX_LOG2_CTB_SIZE) {
-        av_log(avctx, AV_LOG_ERROR, "CTB size out of range: 2^%d\n", sps->log2_ctb_size);
-        return AVERROR_INVALIDDATA;
-    }
-    if (sps->log2_ctb_size < 4) {
-        av_log(avctx,
-               AV_LOG_ERROR,
-               "log2_ctb_size %d differs from the bounds of any known profile\n",
-               sps->log2_ctb_size);
-        avpriv_request_sample(avctx, "log2_ctb_size %d", sps->log2_ctb_size);
-        return AVERROR_INVALIDDATA;
-    }
 
     sps->ctb_width  = (sps->width  + (1 << sps->log2_ctb_size) - 1) >> sps->log2_ctb_size;
     sps->ctb_height = (sps->height + (1 << sps->log2_ctb_size) - 1) >> sps->log2_ctb_size;

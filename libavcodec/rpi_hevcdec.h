@@ -312,6 +312,8 @@ typedef struct RpiCodingUnit {
     uint8_t intra_split_flag;   ///< IntraSplitFlag
     uint8_t max_trafo_depth;    ///< MaxTrafoDepth
     uint8_t cu_transquant_bypass_flag;
+    uint8_t min_pb_width;       // Smallest size of pred in this cu
+    uint8_t min_pb_height;
 } RpiCodingUnit;
 
 typedef struct RpiNeighbourAvailable {
@@ -322,13 +324,13 @@ typedef struct RpiNeighbourAvailable {
     char cand_up_right;
 } RpiNeighbourAvailable;
 
-typedef struct PredictionUnit {
+typedef struct RpiPredictionUnit {
     uint8_t intra_pred_mode[4];
     uint8_t intra_pred_mode_c[4];
     uint8_t chroma_mode_c[4];
     Mv mvd;
     uint8_t merge_flag;
-} PredictionUnit;
+} RpiPredictionUnit;
 
 typedef struct TransformUnit {
     int8_t cu_qp_delta;
@@ -443,7 +445,7 @@ typedef struct HEVCRpiLocalContext {
     int     end_of_ctb_y;
 
     RpiCodingUnit cu;
-    PredictionUnit pu;
+    RpiPredictionUnit pu;
 
 #define BOUNDARY_LEFT_SLICE     (1 << 0)
 #define BOUNDARY_LEFT_TILE      (1 << 1)
@@ -869,7 +871,7 @@ void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX);
 void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase);
-void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, const HEVCRpiLocalContext * const lc,
                                                const unsigned int x0, const unsigned int y0,
                                                const unsigned int log2_trafo_size);
 int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int eot);
