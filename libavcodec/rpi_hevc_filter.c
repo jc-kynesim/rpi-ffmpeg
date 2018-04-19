@@ -886,22 +886,24 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             (off_boundary(y0, s->ps.sps->log2_ctb_size) ||
              (boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0))
         {
-            const MvField * const top = curr_mvf - min_pu_width;
+            const MvField * const top = off_boundary(y0, log2_min_pu_size) ? curr_mvf : curr_mvf - min_pu_width;
+            unsigned int cbf_up;
 
-            // If not on a pu boundary top should equal curr => the only
-            //  thing that can set bs is cbf or intra
-            if (is_intra || off_boundary(y0, log2_min_pu_size)) {
-                bs_set_rep(bs, trafo_size, is_intra ? 2 : 1);
+            if (is_intra)
+            {
+                bs_set_rep(bs, trafo_size, 2);
             }
-            else if (is_cbf) {
+            else if (is_cbf ||
+                (cbf_up = cbf_luma_up(curr_cbf_luma, s->cbf_luma_stride, x0)) == (1 << (trafo_size >> 2)) - 1)
+            {
                 for (i = 0; i < trafo_size; i += 4)
                     bs[i >> 2] = (top[i >> log2_min_pu_size].pred_flag == PF_INTRA) ? 2 : 1;
             }
-            else {
+            else
+            {
                 const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
                                       ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
                                       rpl;
-                unsigned int cbf_up = cbf_luma_up(curr_cbf_luma, s->cbf_luma_stride, x0);
 
                 s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                         min_pu_in_4pix, sizeof (MvField), 1,
@@ -943,12 +945,16 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             ((x0 & ((1 << s->ps.sps->log2_ctb_size) - 1)) != 0 ||
              (boundary_flags & (BOUNDARY_LEFT_SLICE | BOUNDARY_LEFT_TILE)) == 0))
         {
-            const MvField * const left = curr_mvf - 1;
+            const MvField * const left = off_boundary(x0, log2_min_pu_size) ? curr_mvf : curr_mvf - 1;
+            unsigned int cbf_left;
 
-            if (is_intra || off_boundary(x0, log2_min_pu_size)) {
-                bs_set_rep(bs, trafo_size, is_intra ? 2 : 1);
+            if (is_intra)
+            {
+                bs_set_rep(bs, trafo_size, 2);
             }
-            else if (is_cbf) {
+            else if (is_cbf ||
+                (cbf_left = cbf_luma_left(curr_cbf_luma, s->cbf_luma_stride, x0, trafo_size)) == (1 << (trafo_size >> 2)) - 1)
+            {
                 for (i = 0; i < trafo_size; i += 4)
                     bs[i >> 2] = (left[(i >> log2_min_pu_size) * min_pu_width].pred_flag == PF_INTRA) ? 2 : 1;
             }
@@ -956,7 +962,6 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                 const RefPicList * const rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
                                        ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
                                        rpl;
-                unsigned int cbf_left = cbf_luma_left(curr_cbf_luma, s->cbf_luma_stride, x0, trafo_size);
 
                 s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                         min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
