@@ -250,7 +250,10 @@ static void set_bits(uint8_t * f, const unsigned int x, const unsigned int strid
     const unsigned int sh = (x & 7);
 
     f += (x >> 3);
+
     av_assert2(ln <= 3);
+    av_assert2((x & ((1 << ln) - 1)) == 0);
+
     switch (ln)
     {
         case 0:  // 1
@@ -964,7 +967,8 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     if (!s->skip_flag || !s->tab_ct_depth)
         goto fail;
 
-    s->cbf_luma = av_malloc_array(sps->min_tb_width, sps->min_tb_height);
+    s->cbf_luma_stride = (((width + 7) >> 3) + 3) >> 2;  // Word aligned bitmap
+    s->cbf_luma = av_malloc_array(s->cbf_luma_stride, s->bs_height);
     s->tab_ipm  = av_mallocz(min_pu_size);
     s->is_pcm   = av_malloc_array(sps->pcm_width, sps->pcm_height);
     if (!s->tab_ipm || !s->cbf_luma || !s->is_pcm)
@@ -1275,7 +1279,6 @@ static int set_sps(HEVCRpiContext * const s, const HEVCRpiSPS * const sps,
 
     ff_hevc_rpi_pred_init(&s->hpc,     sps->bit_depth);
     ff_hevc_rpi_dsp_init (&s->hevcdsp, sps->bit_depth);
-    ff_videodsp_init (&s->vdsp,    sps->bit_depth);
 
     // * We don't support cross_component_prediction_enabled_flag but as that
     //   must be 0 unless we have 4:4:4 there is no point testing for it as we
@@ -2168,33 +2171,23 @@ do {                                                                            
 
 #undef SUBDIVIDE
     } else {
-        int min_tu_size      = 1 << s->ps.sps->log2_min_tb_size;
-        int log2_min_tu_size = s->ps.sps->log2_min_tb_size;
-        int min_tu_width     = s->ps.sps->min_tb_width;
-        int cbf_luma         = 1;
-
         // If trafo_size == 2 then we should have cbf_c == 0 here but as we can't have
         // trafo_size == 2 with depth == 0 the issue is moot
-        if (lc->cu.pred_mode == MODE_INTRA || trafo_depth != 0 || cbf_c1 != 0)
-        {
-            cbf_luma = ff_hevc_rpi_cbf_luma_decode(lc, trafo_depth);
-        }
+        const int cbf_luma = ((lc->cu.pred_mode != MODE_INTRA && trafo_depth == 0 && cbf_c1 == 0) ||
+            ff_hevc_rpi_cbf_luma_decode(lc, trafo_depth));
+
+        // Stash for deblock strength
+        // Might be needed even if deblock is off for this slice as it is
+        // visible over the slice edge
+        if (cbf_luma)
+            set_bits(s->cbf_luma + (y0 >> 2) * s->cbf_luma_stride, x0 >> 2, s->cbf_luma_stride, log2_trafo_size - 2);
 
         ret = hls_transform_unit(s, lc, x0, y0, xBase, yBase, cb_xBase, cb_yBase,
                                  log2_cb_size, log2_trafo_size,
                                  blk_idx, cbf_luma, cbf_c1);
         if (ret < 0)
             return ret;
-        // TODO: store cbf_luma somewhere else
-        if (cbf_luma) {
-            int i, j;
-            for (i = 0; i < (1 << log2_trafo_size); i += min_tu_size)
-                for (j = 0; j < (1 << log2_trafo_size); j += min_tu_size) {
-                    int x_tu = (x0 + j) >> log2_min_tu_size;
-                    int y_tu = (y0 + i) >> log2_min_tu_size;
-                    s->cbf_luma[y_tu * min_tu_width + x_tu] = 1;
-                }
-        }
+
         if (!s->sh.disable_deblocking_filter_flag) {
             ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_trafo_size);
         }
@@ -4937,7 +4930,7 @@ static int hevc_frame_start(HEVCRpiContext * const s)
 
     memset(s->horizontal_bs, 0, s->bs_width * (s->bs_height >> 1));
     memset(s->vertical_bs,   0, s->bs_height * (s->bs_width >> 1));
-    memset(s->cbf_luma,      0, s->ps.sps->min_tb_width * s->ps.sps->min_tb_height);
+    memset(s->cbf_luma,      0, s->bs_height * s->cbf_luma_stride);
     memset(s->is_pcm,        0, s->ps.sps->pcm_width * s->ps.sps->pcm_height);
     memset(s->skip_flag,     0, s->ps.sps->min_cb_height * s->skip_flag_stride);
     memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
@@ -5513,8 +5506,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->sei.picture_hash.md5_ctx = av_md5_alloc();
     if (!s->sei.picture_hash.md5_ctx)
         goto fail;
-
-    ff_bswapdsp_init(&s->bdsp);
 
     s->context_initialized = 1;
     s->eos = 0;

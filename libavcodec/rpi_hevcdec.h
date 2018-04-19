@@ -698,6 +698,16 @@ typedef struct HEVCRpiContext {
     uint8_t             threads_type;
     uint8_t             threads_number;
 
+    /** 1 if the independent slice segment header was successfully parsed */
+    uint8_t slice_initialized;
+
+    /**
+     * Sequence counters for decoded and output frames, so that old
+     * frames are output first after a POC reset
+     */
+    uint16_t seq_decode;
+    uint16_t seq_output;
+
     int                 width;
     int                 height;
 
@@ -718,9 +728,6 @@ typedef struct HEVCRpiContext {
     HEVCRpiFrameProgressState progress_states[2];
 
     HEVCRpiCabacState *cabac_save;
-
-    /** 1 if the independent slice segment header was successfully parsed */
-    uint8_t slice_initialized;
 
     AVFrame *frame;
     AVFrame *output_frame;
@@ -756,8 +763,6 @@ typedef struct HEVCRpiContext {
 
     HEVCPredContext hpc;
     HEVCDSPContext hevcdsp;
-    VideoDSPContext vdsp;
-    BswapDSPContext bdsp;
     int8_t *qp_y_tab;
     uint8_t *horizontal_bs;
     uint8_t *vertical_bs;
@@ -771,7 +776,8 @@ typedef struct HEVCRpiContext {
     // PU
     uint8_t *tab_ipm;
 
-    uint8_t *cbf_luma; // cbf_luma of colocated TU
+    unsigned int cbf_luma_stride;
+    uint8_t *cbf_luma; // Coded block flags; bitmap bs_width x bs_height
     uint8_t *is_pcm;
 
     // CTB-level flags affecting loop filter operation
@@ -780,13 +786,6 @@ typedef struct HEVCRpiContext {
     /** used on BE to byteswap the lines for checksumming */
     uint8_t *checksum_buf;
     int      checksum_buf_size;
-
-    /**
-     * Sequence counters for decoded and output frames, so that old
-     * frames are output first after a POC reset
-     */
-    uint16_t seq_decode;
-    uint16_t seq_output;
 
     atomic_int wpp_err;
 

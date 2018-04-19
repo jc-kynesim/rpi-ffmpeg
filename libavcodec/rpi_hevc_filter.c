@@ -819,6 +819,32 @@ static inline void bs_set_rep(uint8_t * bs, unsigned int trafo_size, const unsig
     } while (--trafo_size != 0);
 }
 
+// Must be on a boundary so no need to faff - max 8 bits wanted
+static inline unsigned int cbf_luma_up(const uint8_t *const curr, const unsigned int stride, const unsigned int x0)
+{
+    return *(const uint32_t *)(curr - stride) >> ((x0 >> 2) & 31);
+}
+
+// Much less fun than up!
+static inline unsigned int cbf_luma_left(const uint8_t * cbf, const unsigned int stride, const unsigned int x0, unsigned int size)
+{
+    const unsigned int s = ((x0 - 1) >> 2) & 31;
+    unsigned int a = 0;
+    unsigned int n = 0;
+
+    size >>= 2;
+    if (s == 31)
+        cbf -= 4;
+
+    do
+    {
+        a |= ((*(const uint32_t *)cbf >> s) & 1) << n;
+        cbf += stride;
+    } while (++n != size);
+
+    return a;
+}
+
 void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                                                const HEVCRpiLocalContext * const lc,
                                                const unsigned int x0, const unsigned int y0,
@@ -826,9 +852,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
 {
     const MvField * const tab_mvf       = s->ref->tab_mvf;
     const unsigned int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
-    const unsigned int log2_min_tu_size = s->ps.sps->log2_min_tb_size;
     const unsigned int min_pu_width     = s->ps.sps->min_pu_width;
-    const unsigned int min_tu_width     = s->ps.sps->min_tb_width;
     const RefPicList * const rpl        = s->ref->refPicList;
     const unsigned int log2_dup         = FFMIN(log2_min_pu_size, log2_trafo_size);
     const unsigned int min_pu_in_4pix   = 1 << (log2_dup - 2);  // Dup
@@ -836,9 +860,11 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
     const MvField * const curr_mvf      = tab_mvf + (y0 >> log2_min_pu_size) * min_pu_width + (x0 >> log2_min_pu_size);
     // pus per 8pix (dblk H/V interval)
     const int inc                       = log2_min_pu_size == 2 ? 2 : 1;
-    const uint8_t * const curr_cbf_luma = s->cbf_luma + (y0 >> log2_min_tu_size) * min_tu_width + (x0 >> log2_min_tu_size);
+    // Put on a word boundary so we can load all of up at once
+    // but keep as uint8_t * for ease of adding stride
+    const uint8_t *const curr_cbf_luma = s->cbf_luma + (y0 >> 2) * s->cbf_luma_stride + ((x0 >> 5) & ~3);
     // Given where we are called from is_cbf_luma & is_intra will be constant over the block
-    const int is_cbf = *curr_cbf_luma;
+    const int is_cbf = (*(const uint32_t *)curr_cbf_luma >> ((x0 >> 2) & 31)) & 1;
     const int is_intra = curr_mvf->pred_flag == PF_INTRA;
     const unsigned int boundary_flags   = s->sh.no_dblk_boundary_flags & lc->boundary_flags;
     const unsigned int trafo_size       = (1U << log2_trafo_size);
@@ -848,6 +874,8 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
 #ifdef DISABLE_STRENGTHS
     return;
 #endif
+
+    av_assert2(log2_trafo_size <= 6);
 
     // Do Horizontal
     if ((y0 & 7) == 0) {
@@ -870,20 +898,20 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                     bs[i >> 2] = (top[i >> log2_min_pu_size].pred_flag == PF_INTRA) ? 2 : 1;
             }
             else {
-                const uint8_t *top_cbf_luma = curr_cbf_luma - min_tu_width;
                 const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
                                       ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
                                       rpl;
+                unsigned int cbf_up = cbf_luma_up(curr_cbf_luma, s->cbf_luma_stride, x0);
 
                 s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                         min_pu_in_4pix, sizeof (MvField), 1,
                         rpl[0].list, rpl[1].list, rpl_top[0].list, rpl_top[1].list,
                         curr_mvf, top, bs);
 
-                for (i = 0; i < trafo_size; i += 4) {
+                for (i = 0; i < trafo_size; i += 4, cbf_up >>= 1) {
                     if (top[i >> log2_min_pu_size].pred_flag == PF_INTRA)
                         bs[i >> 2] = 2;
-                    else if (top_cbf_luma[i >> log2_min_tu_size])
+                    else if ((cbf_up & 1) != 0)
                         bs[i >> 2] = 1;
                 }
             }
@@ -925,20 +953,20 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                     bs[i >> 2] = (left[(i >> log2_min_pu_size) * min_pu_width].pred_flag == PF_INTRA) ? 2 : 1;
             }
             else {
-                const uint8_t * const left_cbf_luma = curr_cbf_luma - 1;
                 const RefPicList * const rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
                                        ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
                                        rpl;
+                unsigned int cbf_left = cbf_luma_left(curr_cbf_luma, s->cbf_luma_stride, x0, trafo_size);
 
                 s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
                         min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
                         rpl[0].list, rpl[1].list, rpl_left[0].list, rpl_left[1].list,
                         curr_mvf, left, bs);
 
-                for (i = 0; i < trafo_size; i += 4) {
+                for (i = 0; i < trafo_size; i += 4, cbf_left >>= 1) {
                     if (left[(i >> log2_min_pu_size) * min_pu_width].pred_flag == PF_INTRA)
                         bs[i >> 2] = 2;
-                    else if (left_cbf_luma[(i >> log2_min_tu_size) * min_tu_width])
+                    else if ((cbf_left & 1) != 0)
                         bs[i >> 2] = 1;
                 }
             }
