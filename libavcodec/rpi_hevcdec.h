@@ -314,8 +314,6 @@ typedef struct RpiCodingUnit {
     uint8_t intra_split_flag;   ///< IntraSplitFlag
     uint8_t max_trafo_depth;    ///< MaxTrafoDepth
     uint8_t cu_transquant_bypass_flag;
-    uint8_t log2_min_pb_width;       // Smallest size of pred in this cu
-    uint8_t log2_min_pb_height;
 } RpiCodingUnit;
 
 typedef struct RpiNeighbourAvailable {

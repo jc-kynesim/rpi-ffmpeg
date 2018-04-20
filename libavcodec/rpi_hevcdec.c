@@ -3174,8 +3174,6 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
     lc->cu.part_mode        = PART_2Nx2N;
     lc->cu.intra_split_flag = 0;
     lc->cu.cu_transquant_bypass_flag = 0;
-    lc->cu.log2_min_pb_width  = log2_cb_size;
-    lc->cu.log2_min_pb_height = log2_cb_size;
     lc->pu.intra_pred_mode[0] = 1;
     lc->pu.intra_pred_mode[1] = 1;
     lc->pu.intra_pred_mode[2] = 1;
@@ -3237,44 +3235,36 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
                 hls_prediction_unit(s, lc, x0, y0, cb_size, cb_size, log2_cb_size, 0, idx);
                 break;
             case PART_2NxN:
-                lc->cu.log2_min_pb_height = log2_cb_size - 1;
                 lc->cu.y_split = y0 + cb_size / 2;
                 hls_prediction_unit(s, lc, x0, y0,               cb_size, cb_size / 2, log2_cb_size, 0, idx);
                 hls_prediction_unit(s, lc, x0, y0 + cb_size / 2, cb_size, cb_size / 2, log2_cb_size, 1, idx);
                 break;
             case PART_Nx2N:
-                lc->cu.log2_min_pb_width = log2_cb_size - 1;
                 lc->cu.x_split = x0 + cb_size / 2;
                 hls_prediction_unit(s, lc, x0,               y0, cb_size / 2, cb_size, log2_cb_size, 0, idx - 1);
                 hls_prediction_unit(s, lc, x0 + cb_size / 2, y0, cb_size / 2, cb_size, log2_cb_size, 1, idx - 1);
                 break;
             case PART_2NxnU:
-                lc->cu.log2_min_pb_height = log2_cb_size - 2;
                 lc->cu.y_split = y0 + cb_size / 4;
                 hls_prediction_unit(s, lc, x0, y0,               cb_size, cb_size     / 4, log2_cb_size, 0, idx);
                 hls_prediction_unit(s, lc, x0, y0 + cb_size / 4, cb_size, cb_size / 4 * 3, log2_cb_size, 1, idx);
                 break;
             case PART_2NxnD:
-                lc->cu.log2_min_pb_height = log2_cb_size - 2;
                 lc->cu.y_split = y0 + cb_size / 4 * 3;
                 hls_prediction_unit(s, lc, x0, y0,                   cb_size, cb_size / 4 * 3, log2_cb_size, 0, idx);
                 hls_prediction_unit(s, lc, x0, y0 + cb_size / 4 * 3, cb_size, cb_size     / 4, log2_cb_size, 1, idx);
                 break;
             case PART_nLx2N:
-                lc->cu.log2_min_pb_width = log2_cb_size - 2;
                 lc->cu.x_split = x0 + cb_size / 4;
                 hls_prediction_unit(s, lc, x0,               y0, cb_size     / 4, cb_size, log2_cb_size, 0, idx - 2);
                 hls_prediction_unit(s, lc, x0 + cb_size / 4, y0, cb_size * 3 / 4, cb_size, log2_cb_size, 1, idx - 2);
                 break;
             case PART_nRx2N:
-                lc->cu.log2_min_pb_width = log2_cb_size - 2;
                 lc->cu.x_split = x0 + cb_size / 4 * 3;
                 hls_prediction_unit(s, lc, x0,                   y0, cb_size / 4 * 3, cb_size, log2_cb_size, 0, idx - 2);
                 hls_prediction_unit(s, lc, x0 + cb_size / 4 * 3, y0, cb_size     / 4, cb_size, log2_cb_size, 1, idx - 2);
                 break;
             case PART_NxN:
-                lc->cu.log2_min_pb_width  = log2_cb_size - 1;
-                lc->cu.log2_min_pb_height = log2_cb_size - 1;
                 lc->cu.x_split = x0 + cb_size / 2;
                 lc->cu.y_split = y0 + cb_size / 2;
                 hls_prediction_unit(s, lc, x0,               y0,               cb_size / 2, cb_size / 2, log2_cb_size, 0, idx - 1);

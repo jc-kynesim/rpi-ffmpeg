@@ -821,16 +821,16 @@ static inline void set_bs(uint8_t * bs, const uint32_t mask, uint32_t bsf)
 
 static inline uint32_t bsf_unpack(uint32_t a)
 {
-    // zip(a, b)
-    uint32_t x = 0;
-    unsigned int i = 0;
-    a &= 0xffff;
-    while (a != 0) {
-        x |= (a & 1) << i;
-        i += 2;
-        a >>= 1;
-    }
-    return x;
+    uint32_t b = a & 0xffff;
+    a = b & 0xff;
+    a |= (a ^ b) << 8;
+    b = a & 0xf000f;
+    b |= (a ^ b) << 4;
+    a = b & 0x3030303;
+    a |= (a ^ b) << 2;
+    b = a & 0x11111111;
+    b |= (a ^ b) << 1;
+    return b;
 }
 
 // Must be on a boundary so no need to faff - max 8 bits wanted
@@ -872,42 +872,6 @@ static inline unsigned int cbf_luma_left(const uint8_t * cbf, const unsigned int
     } while (n != trafo_4pix2);
 
     return a;
-}
-
-static inline uint32_t bsf_up(
-    const uint32_t bsf0, const uint32_t bsf_cbf, const uint32_t bsf_mask,
-    const uint8_t *const cbf, const unsigned int cbf_stride, const unsigned int x0,
-    const MvField *const mvf, const unsigned int mvf_stride, const unsigned int min_pu_in_4pix,
-    const unsigned int trafo_size)
-{
-    unsigned int bsf = bsf0;
-
-    if (bsf == bsf_mask)
-        return bsf;
-    if (mvf != NULL)
-        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix << 1, trafo_size >> 1);
-    if ((~bsf & bsf_cbf) == 0)
-        return bsf;
-    bsf |= cbf_luma_up(cbf, cbf_stride, x0);
-    return bsf;
-}
-
-static inline uint32_t bsf_left(
-    const uint32_t bsf0, const uint32_t bsf_cbf, const uint32_t bsf_mask,
-    const uint8_t *const cbf, const unsigned int cbf_stride, const unsigned int x0,
-    const MvField *const mvf, const unsigned int mvf_stride, const unsigned int min_pu_in_4pix,
-    const unsigned int trafo_size)
-{
-    unsigned int bsf = bsf0;
-
-    if (bsf == bsf_mask)
-        return bsf;
-    if (mvf != NULL)
-        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix << 1, trafo_size >> 1);
-    if ((~bsf & bsf_cbf) == 0)
-        return bsf;
-    bsf |= cbf_luma_left(cbf, cbf_stride, x0, trafo_size >> 1);
-    return bsf;
 }
 
 static inline uint32_t bsf_mv(const HEVCRpiContext * const s,
@@ -973,22 +937,38 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             (off_boundary(y0, s->ps.sps->log2_ctb_size) ||
              (boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0))
         {
-            const MvField *const up_mvf = (y0 != lc->cu.y && y0 != lc->cu.y_split) ? NULL : curr_mvf - mvf_stride;
+            // In bsf BS=2 is represented by 3 as it is much easier to test & set
+            uint32_t bsf = bsf0;
 
-            uint32_t bsf = bsf_up(
-                bsf0, bsf_cbf, bsf_mask,
-                curr_cbf_luma, s->cbf_luma_stride, x0,
-                up_mvf, 1, min_pu_in_4pix,
-                trafo_size);
-
-            if ((~bsf & bsf_cbf) != 0 && up_mvf != NULL)
+            // All intra?
+            if (bsf != bsf_mask)
             {
-                const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
-                                      ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
-                                      rpl;
-                bsf |= bsf_mv(s, rep_min_pu, min_pu_in_4pix, 1, rpl, rpl_top, curr_mvf, up_mvf);
+                // Next we will want intra from up (BS=2)
+                // There are only 2 possible mv boundaries we might have up,
+                // and if aren't on either then it isn't worth checking
+                // the mv arrays
+                const MvField *const up_mvf = (y0 != lc->cu.y && y0 != lc->cu.y_split) ? NULL : curr_mvf - mvf_stride;
+                if (up_mvf != NULL)
+                    bsf |= bsf_intra(up_mvf, 1, min_pu_in_4pix << 1, trafo_size >> 1);
+
+                // Do we now have something (BS1 or BS2) in all entries?
+                if ((~bsf & bsf_cbf) != 0)
+                {
+                    // Add luma from up (BS=1)
+                    bsf |= cbf_luma_up(curr_cbf_luma, s->cbf_luma_stride, x0);
+
+                    // If that isn't everything then look at MVs (BS=1)
+                    if ((~bsf & bsf_cbf) != 0 && up_mvf != NULL)
+                    {
+                        const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
+                                              ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
+                                              rpl;
+                        bsf |= bsf_mv(s, rep_min_pu, min_pu_in_4pix, 1, rpl, rpl_top, curr_mvf, up_mvf);
+                    }
+                }
             }
 
+            // Finally put the results into bs
             set_bs(s->horizontal_bs + (x0 >> 2) + (y0 >> 3) * s->bs_width,
                    bsf_mask, bsf);
         }
@@ -1015,21 +995,27 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             ((x0 & ((1 << s->ps.sps->log2_ctb_size) - 1)) != 0 ||
              (boundary_flags & (BOUNDARY_LEFT_SLICE | BOUNDARY_LEFT_TILE)) == 0))
         {
-            const MvField * const left_mvf = (x0 != lc->cu.x && x0 != lc->cu.x_split) ? NULL : curr_mvf - 1;
+            uint32_t bsf = bsf0;
 
-            uint32_t bsf = bsf_left(
-                bsf0, bsf_cbf, bsf_mask,
-                curr_cbf_luma, s->cbf_luma_stride, x0,
-                left_mvf, mvf_stride, min_pu_in_4pix,
-                trafo_size);
-
-            if ((~bsf & bsf_cbf) != 0 && left_mvf != NULL)
+            if (bsf != bsf_mask)
             {
-                const RefPicList * const rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
-                                       ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
-                                       rpl;
+                const MvField * const left_mvf = (x0 != lc->cu.x && x0 != lc->cu.x_split) ? NULL : curr_mvf - 1;
+                if (left_mvf != NULL)
+                    bsf |= bsf_intra(left_mvf, mvf_stride, min_pu_in_4pix << 1, trafo_size >> 1);
 
-                bsf |= bsf_mv(s, rep_min_pu, min_pu_in_4pix, mvf_stride, rpl, rpl_left, curr_mvf, left_mvf);
+                if ((~bsf & bsf_cbf) != 0)
+                {
+                    bsf |= cbf_luma_left(curr_cbf_luma, s->cbf_luma_stride, x0, trafo_size >> 1);
+
+                    if ((~bsf & bsf_cbf) != 0 && left_mvf != NULL)
+                    {
+                        const RefPicList * const rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
+                                               ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
+                                               rpl;
+
+                        bsf |= bsf_mv(s, rep_min_pu, min_pu_in_4pix, mvf_stride, rpl, rpl_left, curr_mvf, left_mvf);
+                    }
+                }
             }
 
             set_bs(s->vertical_bs + (x0 >> 3) * s->bs_height + (y0 >> 2),
