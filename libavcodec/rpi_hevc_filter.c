@@ -834,9 +834,9 @@ static inline uint32_t bsf_unpack(uint32_t a)
 }
 
 // Must be on a boundary so no need to faff - max 8 bits wanted
-static inline uint32_t cbf_luma_up(const uint8_t *const curr, const unsigned int stride, const unsigned int x0, const uint32_t bsf_mask)
+static inline uint32_t cbf_luma_up(const uint8_t *const curr, const unsigned int stride, const unsigned int x0)
 {
-    return bsf_unpack(*(const uint32_t *)(curr - stride) >> ((x0 >> 2) & 31)) & bsf_mask;
+    return bsf_unpack(*(const uint32_t *)(curr - stride) >> ((x0 >> 2) & 31));
 }
 
 static inline uint32_t bsf_intra(const MvField *mvf, const unsigned int stride, const unsigned int min_pu_in_4pix2, const unsigned int trafo_4pix2)
@@ -877,36 +877,36 @@ static inline unsigned int cbf_luma_left(const uint8_t * cbf, const unsigned int
 static inline uint32_t bsf_up(
     const uint32_t bsf0, const uint32_t bsf_cbf, const uint32_t bsf_mask,
     const uint8_t *const cbf, const unsigned int cbf_stride, const unsigned int x0,
-    const MvField *const mvf, const unsigned int mvf_stride, const unsigned int min_pu_in_4pix2,
-    const unsigned int trafo_4pix2)
+    const MvField *const mvf, const unsigned int mvf_stride, const unsigned int min_pu_in_4pix,
+    const unsigned int trafo_size)
 {
     unsigned int bsf = bsf0;
 
     if (bsf == bsf_mask)
         return bsf;
     if (mvf != NULL)
-        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix2, trafo_4pix2) & bsf_mask;
+        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix << 1, trafo_size >> 1);
     if ((~bsf & bsf_cbf) == 0)
         return bsf;
-    bsf |= cbf_luma_up(cbf, cbf_stride, x0, bsf_mask);
+    bsf |= cbf_luma_up(cbf, cbf_stride, x0);
     return bsf;
 }
 
 static inline uint32_t bsf_left(
     const uint32_t bsf0, const uint32_t bsf_cbf, const uint32_t bsf_mask,
     const uint8_t *const cbf, const unsigned int cbf_stride, const unsigned int x0,
-    const MvField *const mvf, const unsigned int mvf_stride, const unsigned int min_pu_in_4pix2,
-    const unsigned int trafo_4pix2)
+    const MvField *const mvf, const unsigned int mvf_stride, const unsigned int min_pu_in_4pix,
+    const unsigned int trafo_size)
 {
     unsigned int bsf = bsf0;
 
     if (bsf == bsf_mask)
         return bsf;
     if (mvf != NULL)
-        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix2, trafo_4pix2) & bsf_mask;
+        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix << 1, trafo_size >> 1);
     if ((~bsf & bsf_cbf) == 0)
         return bsf;
-    bsf |= cbf_luma_left(cbf, cbf_stride, x0, trafo_4pix2);
+    bsf |= cbf_luma_left(cbf, cbf_stride, x0, trafo_size >> 1);
     return bsf;
 }
 
@@ -940,29 +940,25 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
 {
     const MvField * const tab_mvf       = s->ref->tab_mvf;
     const unsigned int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
-    const unsigned int min_pu_width     = s->ps.sps->min_pu_width;
+    const unsigned int mvf_stride       = s->ps.sps->min_pu_width;  // width in pus; mvf stride
     const RefPicList * const rpl        = s->ref->refPicList;
-    const unsigned int log2_dup         = FFMIN(log2_min_pu_size, log2_trafo_size);
-    const unsigned int min_pu_in_4pix   = 1 << (log2_dup - 2);  // Dup
-    const unsigned int trafo_in_min_pus = 1 << (log2_trafo_size - log2_dup); // Rep
-    const MvField * const curr_mvf      = tab_mvf + (y0 >> log2_min_pu_size) * min_pu_width + (x0 >> log2_min_pu_size);
-    // pus per 8pix (dblk H/V interval)
-    const int inc                       = log2_min_pu_size == 2 ? 2 : 1;
+    const unsigned int min_pu_in_4pix   = 1 << (log2_min_pu_size - 2);  // Dup
+    // Rep count for bsf_mv when running with min_pu chuncks
+    const unsigned int rep_min_pu       = log2_trafo_size <= log2_min_pu_size ? 1U : 1U << (log2_trafo_size - log2_min_pu_size);
+    const MvField * const curr_mvf      = tab_mvf + (y0 >> log2_min_pu_size) * mvf_stride + (x0 >> log2_min_pu_size);
     // Put on a word boundary so we can load all of up at once
     // but keep as uint8_t * for ease of adding stride
-    const uint8_t *const curr_cbf_luma = s->cbf_luma + (y0 >> 2) * s->cbf_luma_stride + ((x0 >> 5) & ~3);
-    // Given where we are called from is_cbf_luma & is_intra will be constant over the block
-    const int is_cbf = (*(const uint32_t *)curr_cbf_luma >> ((x0 >> 2) & 31)) & 1;
-    const int is_intra = curr_mvf->pred_flag == PF_INTRA;
+    const uint8_t *const curr_cbf_luma  = s->cbf_luma + (y0 >> 2) * s->cbf_luma_stride + ((x0 >> 5) & ~3);
     const unsigned int boundary_flags   = s->sh.no_dblk_boundary_flags & lc->boundary_flags;
     const unsigned int trafo_size       = (1U << log2_trafo_size);
-    const unsigned int trafo_4pix2      = trafo_size >> 1;
-    const unsigned int min_pu_in_4pix2  = 1 << (log2_min_pu_size - 1);
-    const uint32_t bsf_mask = log2_trafo_size > 5 ? ~0U : (1 << trafo_4pix2) - 1;
-    const uint32_t bsf_cbf = (bsf_mask & 0x55555555);
-    const uint32_t bsf0 = is_intra ? bsf_mask : is_cbf ? bsf_cbf : 0;
-
-    unsigned int i;
+    const uint32_t bsf_mask             = log2_trafo_size > 5 ? ~0U : (1U << (trafo_size >> 1)) - 1;
+    const uint32_t bsf_cbf              = (bsf_mask & 0x55555555);
+    // Given where we are called from is_cbf_luma & is_intra will be constant over the block
+    const uint32_t bsf0 =
+        (curr_mvf->pred_flag == PF_INTRA) ?
+            bsf_mask :
+        (*(const uint32_t *)curr_cbf_luma >> ((x0 >> 2) & 31)) & 1 ?
+            bsf_cbf : 0;
 
 #ifdef DISABLE_STRENGTHS
     return;
@@ -977,20 +973,20 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             (off_boundary(y0, s->ps.sps->log2_ctb_size) ||
              (boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0))
         {
-            const MvField *const up_mvf = (y0 != lc->cu.y && y0 != lc->cu.y_split) ? NULL : curr_mvf - min_pu_width;
+            const MvField *const up_mvf = (y0 != lc->cu.y && y0 != lc->cu.y_split) ? NULL : curr_mvf - mvf_stride;
 
             uint32_t bsf = bsf_up(
                 bsf0, bsf_cbf, bsf_mask,
                 curr_cbf_luma, s->cbf_luma_stride, x0,
-                up_mvf, 1, min_pu_in_4pix2,
-                trafo_4pix2);
+                up_mvf, 1, min_pu_in_4pix,
+                trafo_size);
 
             if ((~bsf & bsf_cbf) != 0 && up_mvf != NULL)
             {
                 const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
                                       ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
                                       rpl;
-                bsf |= bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, 1, rpl, rpl_top, curr_mvf, up_mvf);
+                bsf |= bsf_mv(s, rep_min_pu, min_pu_in_4pix, 1, rpl, rpl_top, curr_mvf, up_mvf);
             }
 
             set_bs(s->horizontal_bs + (x0 >> 2) + (y0 >> 3) * s->bs_width,
@@ -1001,33 +997,31 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
         if (y0 < lc->cu.y_split && y0 + trafo_size > lc->cu.y_split && !off_boundary(lc->cu.y_split, 3))
         {
             const MvField * const mvf = tab_mvf +
-                (lc->cu.y_split >> log2_min_pu_size) * min_pu_width + (x0 >> log2_min_pu_size);
+                (lc->cu.y_split >> log2_min_pu_size) * mvf_stride + (x0 >> log2_min_pu_size);
 
             // If we have the x split as well then it must be in the middle
             set_bs(s->horizontal_bs + (x0 >> 2) + (lc->cu.y_split >> 3) * s->bs_width,
                 bsf_mask,
                 (x0 < lc->cu.x_split && x0 + trafo_size > lc->cu.x_split) ?
-                   bsf_mv(s, 2, trafo_size >> 3, trafo_size >> (log2_min_pu_size + 1), rpl, rpl, mvf, mvf - min_pu_width) :
-                   bsf_mv(s, 1, trafo_size >> 2, 0, rpl, rpl, mvf, mvf - min_pu_width));
+                   bsf_mv(s, 2, trafo_size >> 3, trafo_size >> (log2_min_pu_size + 1), rpl, rpl, mvf, mvf - mvf_stride) :
+                   bsf_mv(s, 1, trafo_size >> 2, 0, rpl, rpl, mvf, mvf - mvf_stride));
         }
     }
 
     // And again for vertical - same logic as horizontal just in the other direction
     if ((x0 & 7) == 0) {
-        uint8_t * bs = s->vertical_bs + (x0 >> 3) * s->bs_height + (y0 >> 2);
-
         // Boundary left
         if (x0 != 0 &&
             ((x0 & ((1 << s->ps.sps->log2_ctb_size) - 1)) != 0 ||
              (boundary_flags & (BOUNDARY_LEFT_SLICE | BOUNDARY_LEFT_TILE)) == 0))
         {
-            const MvField * const left_mvf = off_boundary(x0, log2_min_pu_size) ? NULL : curr_mvf - 1;
+            const MvField * const left_mvf = (x0 != lc->cu.x && x0 != lc->cu.x_split) ? NULL : curr_mvf - 1;
 
             uint32_t bsf = bsf_left(
                 bsf0, bsf_cbf, bsf_mask,
                 curr_cbf_luma, s->cbf_luma_stride, x0,
-                left_mvf, min_pu_width, min_pu_in_4pix2,
-                trafo_4pix2);
+                left_mvf, mvf_stride, min_pu_in_4pix,
+                trafo_size);
 
             if ((~bsf & bsf_cbf) != 0 && left_mvf != NULL)
             {
@@ -1035,22 +1029,24 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                                        ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
                                        rpl;
 
-                bsf |= bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, min_pu_width, rpl, rpl_left, curr_mvf, left_mvf);
+                bsf |= bsf_mv(s, rep_min_pu, min_pu_in_4pix, mvf_stride, rpl, rpl_left, curr_mvf, left_mvf);
             }
 
-            set_bs(bs, bsf_mask, bsf);
+            set_bs(s->vertical_bs + (x0 >> 3) * s->bs_height + (y0 >> 2),
+                   bsf_mask, bsf);
         }
 
-        if (lc->cu.log2_min_pb_width < log2_trafo_size) {
-            const MvField * mvf = curr_mvf;
+        if (x0 < lc->cu.x_split && x0 + trafo_size > lc->cu.x_split && !off_boundary(lc->cu.x_split, 3))
+        {
+            const MvField * const mvf = tab_mvf +
+                (y0 >> log2_min_pu_size) * mvf_stride + (lc->cu.x_split >> log2_min_pu_size);
 
-            for (i = inc; i < trafo_in_min_pus; i += inc) {
-                mvf += inc;
-                bs += s->bs_height * ((inc << log2_min_pu_size) >> 3);
-
-                set_bs(bs, bsf_mask,
-                       bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, min_pu_width, rpl, rpl, mvf, mvf - 1));
-            }
+            // If we have the x split as well then it must be in the middle
+            set_bs(s->vertical_bs + (lc->cu.x_split >> 3) * s->bs_height + (y0 >> 2),
+                bsf_mask,
+                (y0 < lc->cu.y_split && y0 + trafo_size > lc->cu.y_split) ?
+                   bsf_mv(s, 2, trafo_size >> 3, mvf_stride << (log2_trafo_size - (log2_min_pu_size + 1)), rpl, rpl, mvf, mvf - 1) :
+                   bsf_mv(s, 1, trafo_size >> 2, 0, rpl, rpl, mvf, mvf - 1));
         }
     }
 }
