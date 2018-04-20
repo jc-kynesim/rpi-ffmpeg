@@ -885,7 +885,7 @@ static inline uint32_t bsf_up(
     if (bsf == bsf_mask)
         return bsf;
     if (!no_mvf)
-        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix2, trafo_4pix2);
+        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix2, trafo_4pix2) & bsf_mask;
     if ((~bsf & bsf_cbf) == 0)
         return bsf;
     bsf |= cbf_luma_up(cbf, cbf_stride, x0, bsf_mask);
@@ -903,7 +903,7 @@ static inline uint32_t bsf_left(
     if (bsf == bsf_mask)
         return bsf;
     if (!no_mvf)
-        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix2, trafo_4pix2);
+        bsf |= bsf_intra(mvf, mvf_stride, min_pu_in_4pix2, trafo_4pix2) & bsf_mask;
     if ((~bsf & bsf_cbf) == 0)
         return bsf;
     bsf |= cbf_luma_left(cbf, cbf_stride, x0, trafo_4pix2);
