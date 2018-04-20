@@ -810,13 +810,13 @@ static inline unsigned int off_boundary(const unsigned int x, const unsigned int
     return x & ~(~0U << log2_n);
 }
 
-static inline void bs_set_rep(uint8_t * bs, unsigned int trafo_size, const unsigned int n)
+static inline void set_bs(uint8_t * bs, const uint32_t mask, uint32_t bsf)
 {
-    trafo_size >>= 2;
-    do
-    {
-        *bs++ = n;
-    } while (--trafo_size != 0);
+    bsf &= mask;
+    while (bsf != 0) {
+        *bs++ = bsf & 3;
+        bsf >>= 2;
+    }
 }
 
 static inline uint32_t bsf_unpack(uint32_t a)
@@ -910,6 +910,27 @@ static inline uint32_t bsf_left(
     return bsf;
 }
 
+static inline uint32_t bsf_mv(const HEVCRpiContext * const s,
+                              const unsigned int rep, const unsigned int dup,
+                              const unsigned int mvf_stride,
+                              const RefPicList * const rpl_p, const RefPicList * const rpl_q,
+                              const MvField * const mvf_p, const MvField * const mvf_q)
+{
+    uint8_t res[16];
+    unsigned int i;
+    unsigned int a = 0;
+
+    s->hevcdsp.hevc_deblocking_boundary_strengths(rep, dup,
+            sizeof(MvField) * mvf_stride, 1,
+            rpl_p[0].list, rpl_p[1].list, rpl_q[0].list, rpl_q[1].list,
+            mvf_p, mvf_q, res);
+
+    for (i = 0; i != rep * dup; ++i) {
+        a |= res[i] << (i * 2);
+    }
+    return a;
+}
+
 
 
 void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
@@ -958,7 +979,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             (off_boundary(y0, s->ps.sps->log2_ctb_size) ||
              (boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0))
         {
-            const MvField * const up_mvf = off_boundary(y0, log2_min_pu_size) ? NULL : curr_mvf - min_pu_width;
+            const MvField * const up_mvf = off_boundary(y0, lc->cu.log2_min_pb_height) ? NULL : curr_mvf - min_pu_width;
 
             uint32_t bsf = bsf_up(
                 bsf0, bsf_cbf, bsf_mask,
@@ -971,17 +992,10 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                 const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
                                       ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
                                       rpl;
-
-                s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                        min_pu_in_4pix, sizeof (MvField), 1,
-                        rpl[0].list, rpl[1].list, rpl_top[0].list, rpl_top[1].list,
-                        curr_mvf, up_mvf, bs);
+                bsf |= bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, 1, rpl, rpl_top, curr_mvf, up_mvf);
             }
 
-            for (i = 0; bsf != 0; i += 4, bsf >>= 2) {
-                if ((bsf & 3) != 0)
-                    bs[i >> 2] = bsf & 3;
-            }
+            set_bs(bs, bsf, bsf_mask);
         }
 
         // Only look for MV boundaries to deblock if we might have multiple MVs here
@@ -993,10 +1007,8 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                 mvf += min_pu_width * inc;
                 bs += s->bs_width * ((inc << log2_min_pu_size) >> 3);
 
-                s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                        min_pu_in_4pix, sizeof (MvField), 1,
-                        rpl[0].list, rpl[1].list, rpl[0].list, rpl[1].list,
-                        mvf, mvf - min_pu_width, bs);
+                set_bs(bs, bsf_mask,
+                       bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, 1, rpl, rpl, mvf, mvf - min_pu_width));
             }
         }
     }
