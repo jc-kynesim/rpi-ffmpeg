@@ -302,8 +302,10 @@ typedef struct RefPicListTab {
 } RefPicListTab;
 
 typedef struct RpiCodingUnit {
-    int x;
-    int y;
+    unsigned int x;             // Passed to deblock
+    unsigned int y;
+    unsigned int x_split;
+    unsigned int y_split;
 
     enum PredMode pred_mode;    ///< PredMode
     enum PartMode part_mode;    ///< PartMode

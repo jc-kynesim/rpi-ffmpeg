@@ -972,14 +972,12 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
 
     // Do Horizontal
     if ((y0 & 7) == 0) {
-        uint8_t * bs = s->horizontal_bs + (x0 >> 2) + (y0 >> 3) * s->bs_width;
-
         // Boundary upper
         if (y0 != 0 &&
             (off_boundary(y0, s->ps.sps->log2_ctb_size) ||
              (boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0))
         {
-            const MvField * const up_mvf = off_boundary(y0, lc->cu.log2_min_pb_height) ? NULL : curr_mvf - min_pu_width;
+            const MvField *const up_mvf = (y0 != lc->cu.y && y0 != lc->cu.y_split) ? NULL : curr_mvf - min_pu_width;
 
             uint32_t bsf = bsf_up(
                 bsf0, bsf_cbf, bsf_mask,
@@ -995,21 +993,22 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                 bsf |= bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, 1, rpl, rpl_top, curr_mvf, up_mvf);
             }
 
-            set_bs(bs, bsf, bsf_mask);
+            set_bs(s->horizontal_bs + (x0 >> 2) + (y0 >> 3) * s->bs_width,
+                   bsf_mask, bsf);
         }
 
-        // Only look for MV boundaries to deblock if we might have multiple MVs here
-        // If intra then pb_width/height will always be >= trafo size so no need to test
-        if (lc->cu.log2_min_pb_height < log2_trafo_size) {
-            const MvField * mvf = curr_mvf;
+        // Max of 1 pu internal split - ignore if not on 8pel boundary
+        if (y0 < lc->cu.y_split && y0 + trafo_size > lc->cu.y_split && !off_boundary(lc->cu.y_split, 3))
+        {
+            const MvField * const mvf = tab_mvf +
+                (lc->cu.y_split >> log2_min_pu_size) * min_pu_width + (x0 >> log2_min_pu_size);
 
-            for (i = inc; i < trafo_in_min_pus; i += inc) {
-                mvf += min_pu_width * inc;
-                bs += s->bs_width * ((inc << log2_min_pu_size) >> 3);
-
-                set_bs(bs, bsf_mask,
-                       bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, 1, rpl, rpl, mvf, mvf - min_pu_width));
-            }
+            // If we have the x split as well then it must be in the middle
+            set_bs(s->horizontal_bs + (x0 >> 2) + (lc->cu.y_split >> 3) * s->bs_width,
+                bsf_mask,
+                (x0 < lc->cu.x_split && x0 + trafo_size > lc->cu.x_split) ?
+                   bsf_mv(s, 2, trafo_size >> 3, trafo_size >> (log2_min_pu_size + 1), rpl, rpl, mvf, mvf - min_pu_width) :
+                   bsf_mv(s, 1, trafo_size >> 2, 0, rpl, rpl, mvf, mvf - min_pu_width));
         }
     }
 
@@ -1036,16 +1035,10 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                                        ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
                                        rpl;
 
-                s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                        min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
-                        rpl[0].list, rpl[1].list, rpl_left[0].list, rpl_left[1].list,
-                        curr_mvf, left_mvf, bs);
+                bsf |= bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, min_pu_width, rpl, rpl_left, curr_mvf, left_mvf);
             }
 
-            for (i = 0; bsf != 0; i += 4, bsf >>= 2) {
-                if ((bsf & 3) != 0)
-                    bs[i >> 2] = bsf & 3;
-            }
+            set_bs(bs, bsf_mask, bsf);
         }
 
         if (lc->cu.log2_min_pb_width < log2_trafo_size) {
@@ -1055,10 +1048,8 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                 mvf += inc;
                 bs += s->bs_height * ((inc << log2_min_pu_size) >> 3);
 
-                s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                        min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
-                        rpl[0].list, rpl[1].list, rpl[0].list, rpl[1].list,
-                        mvf, mvf - 1, bs);
+                set_bs(bs, bsf_mask,
+                       bsf_mv(s, trafo_in_min_pus, min_pu_in_4pix, min_pu_width, rpl, rpl, mvf, mvf - 1));
             }
         }
     }
