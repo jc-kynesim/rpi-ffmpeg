@@ -250,7 +250,10 @@ static void set_bits(uint8_t * f, const unsigned int x, const unsigned int strid
     const unsigned int sh = (x & 7);
 
     f += (x >> 3);
+
     av_assert2(ln <= 3);
+    av_assert2((x & ((1 << ln) - 1)) == 0);
+
     switch (ln)
     {
         case 0:  // 1
@@ -923,7 +926,6 @@ static void pic_arrays_free(HEVCRpiContext *s)
     av_freep(&s->tab_ct_depth);
 
     av_freep(&s->tab_ipm);
-    av_freep(&s->cbf_luma);
     av_freep(&s->is_pcm);
 
     av_freep(&s->qp_y_tab);
@@ -931,7 +933,10 @@ static void pic_arrays_free(HEVCRpiContext *s)
     av_freep(&s->filter_slice_edges);
 
     av_freep(&s->horizontal_bs);
-    av_freep(&s->vertical_bs);
+//    av_freep(&s->vertical_bs);
+    av_freep(&s->vertical_bs2);
+    av_freep(&s->bsf_stash_left);
+    av_freep(&s->bsf_stash_up);
 
     alloc_entry_points(&s->sh, 0);
 
@@ -950,8 +955,8 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     int ctb_count        = sps->ctb_width * sps->ctb_height;
     int min_pu_size      = sps->min_pu_width * sps->min_pu_height;
 
-    s->bs_width  = ((width + 15) & ~15)  >> 2;  // Stride for H block strength - round up to 16 pels
-    s->bs_height = ((height + 15) & ~15) >> 2;  // Stride for V block strength
+    s->hbs_stride = ((width + 63) & ~63) >> 4;
+    s->bs_size = (((height + 15) & ~15) >> 3) * s->hbs_stride;
 
     s->sao           = av_mallocz(ctb_count * sizeof(*s->sao) + 8); // Our sao code overreads this array slightly
     s->deblock       = av_mallocz_array(ctb_count, sizeof(*s->deblock));
@@ -964,10 +969,9 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     if (!s->skip_flag || !s->tab_ct_depth)
         goto fail;
 
-    s->cbf_luma = av_malloc_array(sps->min_tb_width, sps->min_tb_height);
     s->tab_ipm  = av_mallocz(min_pu_size);
     s->is_pcm   = av_malloc_array(sps->pcm_width, sps->pcm_height);
-    if (!s->tab_ipm || !s->cbf_luma || !s->is_pcm)
+    if (!s->tab_ipm || !s->is_pcm)
         goto fail;
 
     s->filter_slice_edges = av_mallocz(ctb_count);
@@ -978,9 +982,13 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     if (!s->qp_y_tab || !s->filter_slice_edges || !s->tab_slice_address)
         goto fail;
 
-    s->horizontal_bs = av_mallocz_array(s->bs_width, s->bs_height >> 1);
-    s->vertical_bs   = av_mallocz_array(s->bs_height, s->bs_width >> 1);
-    if (!s->horizontal_bs || !s->vertical_bs)
+    s->horizontal_bs = av_mallocz(s->bs_size);
+    s->vertical_bs2  = av_mallocz(s->bs_size);
+    if (s->horizontal_bs == NULL || s->vertical_bs2 == NULL)
+        goto fail;
+
+    if ((s->bsf_stash_left = av_mallocz(((height + 63) & ~63) >> 4)) == NULL ||
+        (s->bsf_stash_up   = av_mallocz(((width + 63) & ~63) >> 4)) == NULL)
         goto fail;
 
     s->tab_mvf_pool = av_buffer_pool_init(min_pu_size * sizeof(MvField),
@@ -1275,7 +1283,6 @@ static int set_sps(HEVCRpiContext * const s, const HEVCRpiSPS * const sps,
 
     ff_hevc_rpi_pred_init(&s->hpc,     sps->bit_depth);
     ff_hevc_rpi_dsp_init (&s->hevcdsp, sps->bit_depth);
-    ff_videodsp_init (&s->vdsp,    sps->bit_depth);
 
     // * We don't support cross_component_prediction_enabled_flag but as that
     //   must be 0 unless we have 4:4:4 there is no point testing for it as we
@@ -1666,6 +1673,13 @@ static int hls_slice_header(HEVCRpiContext * const s)
         } else {
             sh->slice_loop_filter_across_slices_enabled_flag = s->ps.pps->seq_loop_filter_across_slices_enabled_flag;
         }
+        sh->no_dblk_boundary_flags =
+            (sh->slice_loop_filter_across_slices_enabled_flag ? 0 :
+                BOUNDARY_UPPER_SLICE | BOUNDARY_LEFT_SLICE) |
+            (s->ps.pps->loop_filter_across_tiles_enabled_flag ? 0 :
+                BOUNDARY_UPPER_TILE | BOUNDARY_LEFT_TILE);
+
+
     } else if (!s->slice_initialized) {
         av_log(s->avctx, AV_LOG_ERROR, "Independent slice segment missing.\n");
         return AVERROR_INVALIDDATA;
@@ -1821,7 +1835,7 @@ static void hls_sao_param(const HEVCRpiContext *s, HEVCRpiLocalContext * const l
 
 
 static int hls_cross_component_pred(HEVCRpiLocalContext * const lc, const int idx) {
-    int log2_res_scale_abs_plus1 = ff_hevc_rpi_log2_res_scale_abs(lc, idx);
+    int log2_res_scale_abs_plus1 = ff_hevc_rpi_log2_res_scale_abs(lc, idx);  // 0..4
 
     if (log2_res_scale_abs_plus1 !=  0) {
         int res_scale_sign_flag = ff_hevc_rpi_res_scale_sign_flag(lc, idx);
@@ -1856,45 +1870,57 @@ static void do_intra_pred(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
     }
 }
 
-static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                              int xBase, int yBase, int cb_xBase, int cb_yBase,
-                              int log2_cb_size, int log2_trafo_size,
-                              int blk_idx, int cbf_luma, int *cbf_cb, int *cbf_cr)
+#define CBF_CB0_S 0
+#define CBF_CB1_S 1 // CB1 must be CB0 + 1
+#define CBF_CR0_S 2
+#define CBF_CR1_S 3
+
+#define CBF_CB0 (1 << CBF_CB0_S)
+#define CBF_CR0 (1 << CBF_CR0_S)
+#define CBF_CB1 (1 << CBF_CB1_S)
+#define CBF_CR1 (1 << CBF_CR1_S)
+
+
+static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                              const unsigned int x0, const unsigned int y0,
+                              const unsigned int xBase, const unsigned int yBase,
+                              const unsigned int cb_xBase, const unsigned int cb_yBase,
+                              const unsigned int log2_cb_size, const unsigned int log2_trafo_size,
+                              const unsigned int blk_idx, const int cbf_luma,
+                              const unsigned int const cbf_chroma)
 {
-    const int log2_trafo_size_c = log2_trafo_size - ctx_hshift(s, 1);
+    const unsigned int log2_trafo_size_c = log2_trafo_size - ctx_hshift(s, 1);
     int i;
 
     if (lc->cu.pred_mode == MODE_INTRA) {
-        int trafo_size = 1 << log2_trafo_size;
+        const unsigned int trafo_size = 1 << log2_trafo_size;
         ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0, trafo_size, trafo_size);
         do_intra_pred(s, lc, log2_trafo_size, x0, y0, 0);
     }
 
-    if (cbf_luma || cbf_cb[0] || cbf_cr[0] ||
-        (ctx_cfmt(s) == 2 && (cbf_cb[1] || cbf_cr[1]))) {
+    if (cbf_luma || cbf_chroma != 0)
+    {
         int scan_idx   = SCAN_DIAG;
         int scan_idx_c = SCAN_DIAG;
-        int cbf_chroma = cbf_cb[0] || cbf_cr[0] ||
-                         (ctx_cfmt(s) == 2 &&
-                         (cbf_cb[1] || cbf_cr[1]));
 
         if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded)
         {
-            lc->tu.is_cu_qp_delta_coded = 1;
-            lc->tu.cu_qp_delta = ff_hevc_rpi_cu_qp_delta(lc);
+            const int qp_delta = ff_hevc_rpi_cu_qp_delta(lc);
 
-            if (lc->tu.cu_qp_delta < -(26 + (s->ps.sps->qp_bd_offset >> 1)) ||
-                lc->tu.cu_qp_delta >  (25 + (s->ps.sps->qp_bd_offset >> 1)))
+            if (qp_delta < -(26 + (s->ps.sps->qp_bd_offset >> 1)) ||
+                qp_delta >  (25 + (s->ps.sps->qp_bd_offset >> 1)))
             {
                 av_log(s->avctx, AV_LOG_ERROR,
                        "The cu_qp_delta %d is outside the valid range "
                        "[%d, %d].\n",
-                       lc->tu.cu_qp_delta,
+                       qp_delta,
                        -(26 + (s->ps.sps->qp_bd_offset >> 1)),
                         (25 + (s->ps.sps->qp_bd_offset >> 1)));
                 return AVERROR_INVALIDDATA;
             }
 
+            lc->tu.is_cu_qp_delta_coded = 1;
+            lc->tu.cu_qp_delta = qp_delta;
             ff_hevc_rpi_set_qPy(s, lc, cb_xBase, cb_yBase);
         }
 
@@ -1951,25 +1977,24 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                     ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 1);
                 }
-                if (cbf_cb[i])
+                if (((cbf_chroma >> i) & CBF_CB0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, x0, y0 + (i << log2_trafo_size_c),
                                                 log2_trafo_size_c, scan_idx_c, 1);
-                else
-                    if (lc->tu.cross_pf) {
-                        const ptrdiff_t stride = frame_stride1(s->frame, 1);
-                        const int hshift = ctx_hshift(s, 1);
-                        const int vshift = ctx_vshift(s, 1);
-                        int16_t * const coeffs_y = (int16_t*)lc->edge_emu_buffer;
-                        int16_t * const coeffs   = (int16_t*)lc->edge_emu_buffer2;
-                        int size = 1 << log2_trafo_size_c;
+                else if (lc->tu.cross_pf) {
+                    const ptrdiff_t stride = frame_stride1(s->frame, 1);
+                    const int hshift = ctx_hshift(s, 1);
+                    const int vshift = ctx_vshift(s, 1);
+                    int16_t * const coeffs_y = (int16_t*)lc->edge_emu_buffer;
+                    int16_t * const coeffs   = (int16_t*)lc->edge_emu_buffer2;
+                    int size = 1 << log2_trafo_size_c;
 
-                        uint8_t *dst = &s->frame->data[1][(y0 >> vshift) * stride +
-                                                              ((x0 >> hshift) << s->ps.sps->pixel_shift)];
-                        for (i = 0; i < (size * size); i++) {
-                            coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
-                        }
-                        s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                    uint8_t *dst = &s->frame->data[1][(y0 >> vshift) * stride +
+                                                          ((x0 >> hshift) << s->ps.sps->pixel_shift)];
+                    for (i = 0; i < (size * size); i++) {
+                        coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                     }
+                    s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                }
             }
 
             if (lc->tu.cross_pf) {
@@ -1980,25 +2005,24 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                     ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0 + (i << log2_trafo_size_c), trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size_c, x0, y0 + (i << log2_trafo_size_c), 2);
                 }
-                if (cbf_cr[i])
+                if (((cbf_chroma >> i) & CBF_CR0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, x0, y0 + (i << log2_trafo_size_c),
                                                 log2_trafo_size_c, scan_idx_c, 2);
-                else
-                    if (lc->tu.cross_pf) {
-                        ptrdiff_t stride = frame_stride1(s->frame, 2);
-                        const int hshift = ctx_hshift(s, 2);
-                        const int vshift = ctx_vshift(s, 2);
-                        int16_t *coeffs_y = (int16_t*)lc->edge_emu_buffer;
-                        int16_t *coeffs   = (int16_t*)lc->edge_emu_buffer2;
-                        const int size = 1 << log2_trafo_size_c;
+                else if (lc->tu.cross_pf) {
+                    ptrdiff_t stride = frame_stride1(s->frame, 2);
+                    const int hshift = ctx_hshift(s, 2);
+                    const int vshift = ctx_vshift(s, 2);
+                    int16_t *coeffs_y = (int16_t*)lc->edge_emu_buffer;
+                    int16_t *coeffs   = (int16_t*)lc->edge_emu_buffer2;
+                    const int size = 1 << log2_trafo_size_c;
 
-                        uint8_t *dst = &s->frame->data[2][(y0 >> vshift) * stride +
-                                                          ((x0 >> hshift) << s->ps.sps->pixel_shift)];
-                        for (i = 0; i < (size * size); i++) {
-                            coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
-                        }
-                        s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                    uint8_t *dst = &s->frame->data[2][(y0 >> vshift) * stride +
+                                                      ((x0 >> hshift) << s->ps.sps->pixel_shift)];
+                    for (i = 0; i < (size * size); i++) {
+                        coeffs[i] = ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
                     }
+                    s->hevcdsp.add_residual[log2_trafo_size_c-2](dst, coeffs, stride);
+                }
             }
         } else if (ctx_cfmt(s) != 0 && blk_idx == 3) {
             int trafo_size_h = 1 << (log2_trafo_size + 1);
@@ -2009,7 +2033,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                                     trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size, xBase, yBase + (i << log2_trafo_size), 1);
                 }
-                if (cbf_cb[i])
+                if (((cbf_chroma >> i) & CBF_CB0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, xBase, yBase + (i << log2_trafo_size),
                                                 log2_trafo_size, scan_idx_c, 1);
             }
@@ -2019,7 +2043,7 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                                 trafo_size_h, trafo_size_v);
                     do_intra_pred(s, lc, log2_trafo_size, xBase, yBase + (i << log2_trafo_size), 2);
                 }
-                if (cbf_cr[i])
+                if (((cbf_chroma >> i) & CBF_CR0) != 0)
                     ff_hevc_rpi_hls_residual_coding(s, lc, xBase, yBase + (i << log2_trafo_size),
                                                 log2_trafo_size, scan_idx_c, 2);
             }
@@ -2061,21 +2085,20 @@ static inline void set_deblocking_bypass(const HEVCRpiContext * const s, const i
     set_bits(s->is_pcm + (y0 >> 3) * s->ps.sps->pcm_width, x0 >> 3, s->ps.sps->pcm_width, log2_cb_size - 3);
 }
 
-static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                              int xBase, int yBase, int cb_xBase, int cb_yBase,
-                              int log2_cb_size, int log2_trafo_size,
-                              int trafo_depth, int blk_idx,
-                              const int *base_cbf_cb, const int *base_cbf_cr)
-{
-    uint8_t split_transform_flag;
-    int cbf_cb[2];
-    int cbf_cr[2];
-    int ret;
 
-    cbf_cb[0] = base_cbf_cb[0];
-    cbf_cb[1] = base_cbf_cb[1];
-    cbf_cr[0] = base_cbf_cr[0];
-    cbf_cr[1] = base_cbf_cr[1];
+static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                              const unsigned int x0, const unsigned int y0,
+                              const unsigned int xBase, const unsigned int yBase,
+                              const unsigned int cb_xBase, const unsigned int cb_yBase,
+                              const unsigned int log2_cb_size,
+                              const unsigned int log2_trafo_size,
+                              const unsigned int trafo_depth, const unsigned int blk_idx,
+                              const unsigned int cbf_c0)
+{
+    // When trafo_size == 2 hls_transform_unit uses c0 so put in c1
+    unsigned int cbf_c1 = cbf_c0;
+    int split_transform_flag;
+    int ret;
 
     if (lc->cu.intra_split_flag) {
         if (trafo_depth == 1) {
@@ -2097,7 +2120,8 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
     if (log2_trafo_size <= s->ps.sps->log2_max_trafo_size &&
         log2_trafo_size >  s->ps.sps->log2_min_tb_size    &&
         trafo_depth     < lc->cu.max_trafo_depth       &&
-        !(lc->cu.intra_split_flag && trafo_depth == 0)) {
+        !(lc->cu.intra_split_flag && trafo_depth == 0))
+    {
         split_transform_flag = ff_hevc_rpi_split_transform_flag_decode(lc, log2_trafo_size);
     } else {
         int inter_split = s->ps.sps->max_transform_hierarchy_depth_inter == 0 &&
@@ -2110,19 +2134,23 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
                                inter_split;
     }
 
-    if (ctx_cfmt(s) != 0 && (log2_trafo_size > 2 || ctx_cfmt(s) == 3)) {
-        if (trafo_depth == 0 || cbf_cb[0]) {
-            cbf_cb[0] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            if (ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
-                cbf_cb[1] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            }
+    if (log2_trafo_size > 2 || ctx_cfmt(s) == 3)
+    {
+        const int wants_c1 = ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3);
+        cbf_c1 = 0;
+
+        if ((cbf_c0 & CBF_CB0) != 0)
+        {
+            cbf_c1 = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CB0_S;
+            if (wants_c1)
+                cbf_c1 |= ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CB1_S;
         }
 
-        if (trafo_depth == 0 || cbf_cr[0]) {
-            cbf_cr[0] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            if (ctx_cfmt(s) == 2 && (!split_transform_flag || log2_trafo_size == 3)) {
-                cbf_cr[1] = ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth);
-            }
+        if ((cbf_c0 & CBF_CR0) != 0)
+        {
+            cbf_c1 |= ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CR0_S;
+            if (wants_c1)
+                cbf_c1 |= ff_hevc_rpi_cbf_cb_cr_decode(lc, trafo_depth) << CBF_CR1_S;
         }
     }
 
@@ -2135,7 +2163,7 @@ static int hls_transform_tree(const HEVCRpiContext * const s, HEVCRpiLocalContex
 do {                                                                            \
     ret = hls_transform_tree(s, lc, x, y, x0, y0, cb_xBase, cb_yBase, log2_cb_size, \
                              log2_trafo_size - 1, trafo_depth + 1, idx,         \
-                             cbf_cb, cbf_cr);                                   \
+                             cbf_c1);                                   \
     if (ret < 0)                                                                \
         return ret;                                                             \
 } while (0)
@@ -2147,34 +2175,19 @@ do {                                                                            
 
 #undef SUBDIVIDE
     } else {
-        int min_tu_size      = 1 << s->ps.sps->log2_min_tb_size;
-        int log2_min_tu_size = s->ps.sps->log2_min_tb_size;
-        int min_tu_width     = s->ps.sps->min_tb_width;
-        int cbf_luma         = 1;
-
-        if (lc->cu.pred_mode == MODE_INTRA || trafo_depth != 0 ||
-            cbf_cb[0] || cbf_cr[0] ||
-            (ctx_cfmt(s) == 2 && (cbf_cb[1] || cbf_cr[1]))) {
-            cbf_luma = ff_hevc_rpi_cbf_luma_decode(lc, trafo_depth);
-        }
+        // If trafo_size == 2 then we should have cbf_c == 0 here but as we can't have
+        // trafo_size == 2 with depth == 0 the issue is moot
+        const int cbf_luma = ((lc->cu.pred_mode != MODE_INTRA && trafo_depth == 0 && cbf_c1 == 0) ||
+            ff_hevc_rpi_cbf_luma_decode(lc, trafo_depth));
 
         ret = hls_transform_unit(s, lc, x0, y0, xBase, yBase, cb_xBase, cb_yBase,
                                  log2_cb_size, log2_trafo_size,
-                                 blk_idx, cbf_luma, cbf_cb, cbf_cr);
+                                 blk_idx, cbf_luma, cbf_c1);
         if (ret < 0)
             return ret;
-        // TODO: store cbf_luma somewhere else
-        if (cbf_luma) {
-            int i, j;
-            for (i = 0; i < (1 << log2_trafo_size); i += min_tu_size)
-                for (j = 0; j < (1 << log2_trafo_size); j += min_tu_size) {
-                    int x_tu = (x0 + j) >> log2_min_tu_size;
-                    int y_tu = (y0 + i) >> log2_min_tu_size;
-                    s->cbf_luma[y_tu * min_tu_width + x_tu] = 1;
-                }
-        }
+
         if (!s->sh.disable_deblocking_filter_flag) {
-            ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_trafo_size);
+            ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_trafo_size, cbf_luma);
         }
     }
     return 0;
@@ -2220,7 +2233,7 @@ static int hls_pcm_sample(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
     const uint8_t * const pcm = ff_hevc_rpi_cabac_skip_bytes(&lc->cc, (length + 7) >> 3);
 
     if (!s->sh.disable_deblocking_filter_flag)
-        ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size);
+        ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size, 0);
 
     // Copy coeffs
     {
@@ -2996,7 +3009,8 @@ static void intra_prediction_unit_default_value(const HEVCRpiContext * const s, 
  */
 static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                                 int x0, int y0, int log2_pu_size,
-                                int prev_intra_luma_pred_flag)
+                                int prev_intra_luma_pred_flag,
+                                const unsigned int idx)
 {
     int x_pu             = x0 >> s->ps.sps->log2_min_pu_size;
     int y_pu             = y0 >> s->ps.sps->log2_min_pu_size;
@@ -3036,7 +3050,7 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
     }
 
     if (prev_intra_luma_pred_flag) {
-        intra_pred_mode = lc->pu.mpm_idx == 0 ? a : lc->pu.mpm_idx == 1 ? b : c;
+        intra_pred_mode = idx == 0 ? a : idx == 1 ? b : c;
     } else {
         // Sort lowest 1st
         if (a > b)
@@ -3046,7 +3060,7 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
         if (b > c)
             FFSWAP(int, b, c);
 
-        intra_pred_mode = lc->pu.rem_intra_luma_pred_mode;
+        intra_pred_mode = idx;
         if (intra_pred_mode >= a)
             intra_pred_mode++;
         if (intra_pred_mode >= b)
@@ -3081,17 +3095,17 @@ static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCo
         prev_intra_luma_pred_flag[i] = ff_hevc_rpi_prev_intra_luma_pred_flag_decode(lc);
 
     for (i = 0; i < n; i++) {
-        if (prev_intra_luma_pred_flag[i])
-            lc->pu.mpm_idx = ff_hevc_rpi_mpm_idx_decode(lc);
-        else
-            lc->pu.rem_intra_luma_pred_mode = ff_hevc_rpi_rem_intra_luma_pred_mode_decode(lc);
+        // depending on mode idx is mpm or luma_pred_mode
+        const unsigned int idx = prev_intra_luma_pred_flag[i] ?
+            ff_hevc_rpi_mpm_idx_decode(lc) :
+            ff_hevc_rpi_rem_intra_luma_pred_mode_decode(lc);
 
         lc->pu.intra_pred_mode[i] =
             luma_intra_pred_mode(s, lc,
                                  x0 + ((i & 1) == 0 ? 0 : split_size),
                                  y0 + ((i & 2) == 0 ? 0 : split_size),
                                  log2_cb_size - split,
-                                 prev_intra_luma_pred_flag[i]);
+                                 prev_intra_luma_pred_flag[i], idx);
     }
 
     if (ctx_cfmt(s) == 3) {
@@ -3151,6 +3165,9 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
 
     lc->cu.x                = x0;
     lc->cu.y                = y0;
+    lc->cu.x_split          = x0;
+    lc->cu.y_split          = y0;
+
     lc->cu.pred_mode        = MODE_INTRA;
     lc->cu.part_mode        = PART_2Nx2N;
     lc->cu.intra_split_flag = 0;
@@ -3179,7 +3196,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
         intra_prediction_unit_default_value(s, lc, x0, y0, log2_cb_size);
 
         if (!s->sh.disable_deblocking_filter_flag)
-            ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size);
+            ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size, 0);
     } else {
         int pcm_flag = 0;
 
@@ -3217,31 +3234,39 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
                 break;
             case PART_2NxN:
                 hls_prediction_unit(s, lc, x0, y0,               cb_size, cb_size / 2, log2_cb_size, 0, idx);
+                lc->cu.y_split = y0 + cb_size / 2;
                 hls_prediction_unit(s, lc, x0, y0 + cb_size / 2, cb_size, cb_size / 2, log2_cb_size, 1, idx);
                 break;
             case PART_Nx2N:
                 hls_prediction_unit(s, lc, x0,               y0, cb_size / 2, cb_size, log2_cb_size, 0, idx - 1);
+                lc->cu.x_split = x0 + cb_size / 2;
                 hls_prediction_unit(s, lc, x0 + cb_size / 2, y0, cb_size / 2, cb_size, log2_cb_size, 1, idx - 1);
                 break;
             case PART_2NxnU:
                 hls_prediction_unit(s, lc, x0, y0,               cb_size, cb_size     / 4, log2_cb_size, 0, idx);
-                hls_prediction_unit(s, lc, x0, y0 + cb_size / 4, cb_size, cb_size * 3 / 4, log2_cb_size, 1, idx);
+                lc->cu.y_split = y0 + cb_size / 4;
+                hls_prediction_unit(s, lc, x0, y0 + cb_size / 4, cb_size, cb_size / 4 * 3, log2_cb_size, 1, idx);
                 break;
             case PART_2NxnD:
-                hls_prediction_unit(s, lc, x0, y0,                   cb_size, cb_size * 3 / 4, log2_cb_size, 0, idx);
-                hls_prediction_unit(s, lc, x0, y0 + cb_size * 3 / 4, cb_size, cb_size     / 4, log2_cb_size, 1, idx);
+                hls_prediction_unit(s, lc, x0, y0,                   cb_size, cb_size / 4 * 3, log2_cb_size, 0, idx);
+                lc->cu.y_split = y0 + cb_size / 4 * 3;
+                hls_prediction_unit(s, lc, x0, y0 + cb_size / 4 * 3, cb_size, cb_size     / 4, log2_cb_size, 1, idx);
                 break;
             case PART_nLx2N:
                 hls_prediction_unit(s, lc, x0,               y0, cb_size     / 4, cb_size, log2_cb_size, 0, idx - 2);
+                lc->cu.x_split = x0 + cb_size / 4;
                 hls_prediction_unit(s, lc, x0 + cb_size / 4, y0, cb_size * 3 / 4, cb_size, log2_cb_size, 1, idx - 2);
                 break;
             case PART_nRx2N:
-                hls_prediction_unit(s, lc, x0,                   y0, cb_size * 3 / 4, cb_size, log2_cb_size, 0, idx - 2);
-                hls_prediction_unit(s, lc, x0 + cb_size * 3 / 4, y0, cb_size     / 4, cb_size, log2_cb_size, 1, idx - 2);
+                hls_prediction_unit(s, lc, x0,                   y0, cb_size / 4 * 3, cb_size, log2_cb_size, 0, idx - 2);
+                lc->cu.x_split = x0 + cb_size / 4 * 3;
+                hls_prediction_unit(s, lc, x0 + cb_size / 4 * 3, y0, cb_size     / 4, cb_size, log2_cb_size, 1, idx - 2);
                 break;
             case PART_NxN:
                 hls_prediction_unit(s, lc, x0,               y0,               cb_size / 2, cb_size / 2, log2_cb_size, 0, idx - 1);
+                lc->cu.x_split = x0 + cb_size / 2;
                 hls_prediction_unit(s, lc, x0 + cb_size / 2, y0,               cb_size / 2, cb_size / 2, log2_cb_size, 1, idx - 1);
+                lc->cu.y_split = y0 + cb_size / 2;
                 hls_prediction_unit(s, lc, x0,               y0 + cb_size / 2, cb_size / 2, cb_size / 2, log2_cb_size, 2, idx - 1);
                 hls_prediction_unit(s, lc, x0 + cb_size / 2, y0 + cb_size / 2, cb_size / 2, cb_size / 2, log2_cb_size, 3, idx - 1);
                 break;
@@ -3256,20 +3281,21 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
                 rqt_root_cbf = ff_hevc_rpi_no_residual_syntax_flag_decode(lc);
             }
             if (rqt_root_cbf) {
-                const static int cbf[2] = { 0 };
+                const unsigned int cbf_c = ctx_cfmt(s) == 0 ? 0 : (CBF_CR0 | CBF_CB0);
                 int ret;
 
                 lc->cu.max_trafo_depth = lc->cu.pred_mode == MODE_INTRA ?
                                          s->ps.sps->max_transform_hierarchy_depth_intra + lc->cu.intra_split_flag :
                                          s->ps.sps->max_transform_hierarchy_depth_inter;
+                // transform_tree does deblock_boundary_strengths
                 ret = hls_transform_tree(s, lc, x0, y0, x0, y0, x0, y0,
                                          log2_cb_size,
-                                         log2_cb_size, 0, 0, cbf, cbf);
+                                         log2_cb_size, 0, 0, cbf_c);
                 if (ret < 0)
                     return ret;
             } else {
                 if (!s->sh.disable_deblocking_filter_flag)
-                    ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size);
+                    ff_hevc_rpi_deblocking_boundary_strengths(s, lc, x0, y0, log2_cb_size, 0);
             }
         }
     }
@@ -4901,9 +4927,8 @@ static int hevc_frame_start(HEVCRpiContext * const s)
                            ((s->ps.sps->height >> s->ps.sps->log2_min_cb_size) + 1);
     int ret;
 
-    memset(s->horizontal_bs, 0, s->bs_width * (s->bs_height >> 1));
-    memset(s->vertical_bs,   0, s->bs_height * (s->bs_width >> 1));
-    memset(s->cbf_luma,      0, s->ps.sps->min_tb_width * s->ps.sps->min_tb_height);
+    memset(s->horizontal_bs, 0, s->bs_size);
+    memset(s->vertical_bs2, 0, s->bs_size);
     memset(s->is_pcm,        0, s->ps.sps->pcm_width * s->ps.sps->pcm_height);
     memset(s->skip_flag,     0, s->ps.sps->min_cb_height * s->skip_flag_stride);
     memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
@@ -5479,8 +5504,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     s->sei.picture_hash.md5_ctx = av_md5_alloc();
     if (!s->sei.picture_hash.md5_ctx)
         goto fail;
-
-    ff_bswapdsp_init(&s->bdsp);
 
     s->context_initialized = 1;
     s->eos = 0;

@@ -574,6 +574,25 @@ static inline uint32_t pcm2(const HEVCRpiContext * const s, const unsigned int x
     return (pcm[0] | (pcm[1] << 8)) >> ((x >> 3) & 7);
 }
 
+// We sometimes need 17 2-bit entries (annoying!)
+// * This could be avoided if we separate out the H filter left-stub deblock
+//   but 64 bit constant shr shouldn't be too bad - though the variable mask here is probably quite nasty
+static inline uint64_t hbs_get(const HEVCRpiContext * const s, const unsigned int xl, const unsigned int xr, const unsigned int y)
+{
+    unsigned int n = (xr - xl + 7) & ~7;
+
+    return n == 0 ? (uint64_t)0 :
+        (*(uint64_t *)(s->horizontal_bs + (xl >> 4) + (y >> 3) * s->hbs_stride) >> ((xl >> 1) & 7)) & (((uint64_t)1 << (n >> 1)) - 1);
+}
+
+static inline uint64_t vbs_get(const HEVCRpiContext * const s, const unsigned int xl, const unsigned int xr, const unsigned int y)
+{
+    unsigned int n = (xr - xl + 7) & ~7;
+
+    return n == 0 ? (uint64_t)0 :
+        (*(uint64_t *)(s->vertical_bs2 + (xl >> 4) + (y >> 3) * s->hbs_stride) >> ((xl >> 1) & 7)) & (((uint64_t)1 << (n >> 1)) - 1);
+}
+
 
 static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int end_x, const int end_y)
 {
@@ -607,14 +626,15 @@ static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, c
                 const uint8_t * const tcv = tctable + dbp->tc_offset;
                 const uint8_t * const betav = betatable + dbp->beta_offset;
                 unsigned int pcmfa = pcm2(s, bv_l - 1, y);
-                const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
+//                const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
+                uint64_t vbs2 = vbs_get(s, bv_l, bv_r, y);
                 unsigned int x;
 
                 for (x = bv_l; x < bv_r; x += 8)
                 {
                     const unsigned int pcmf_v = pcmfa & 3;
-                    const unsigned int bs0 = vbs[0];
-                    const unsigned int bs1 = vbs[1];
+                    const unsigned int bs0 = vbs2 & 3;
+                    const unsigned int bs1 = (vbs2 & 0xc) >> 2;
 
                     if ((bs0 | bs1) != 0 && pcmf_v != 3)
                     {
@@ -629,7 +649,8 @@ static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, c
                     }
 
                     pcmfa >>= 1;
-                    vbs += s->bs_height;
+//                    vbs += s->bs_height;
+                    vbs2 >>= 4;
                 }
             }
 
@@ -637,13 +658,13 @@ static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, c
             {
                 unsigned int x;
                 unsigned int pcmfa = pcm4(s, bh_l, y - 1);
-                const uint8_t * hbs = s->horizontal_bs + (y >> 3) * s->bs_width + (bh_l >> 2);
+                uint64_t hbs = hbs_get(s, bh_l, bh_r + 1, y);  // Will give (x <= bh_r) in for loop
 
-                for (x = bh_l; x <= bh_r; x += 8)
+                for (x = bh_l; hbs != 0; x += 8, hbs >>= 4)
                 {
                     const unsigned int pcmf_h = (pcmfa & 1) | ((pcmfa & 0x10000) >> 15);
-                    const unsigned int bs0 = hbs[0];
-                    const unsigned int bs1 = hbs[1];
+                    const unsigned int bs0 = hbs & 3;
+                    const unsigned int bs1 = (hbs >> 2) & 3;
 
                     if ((bs0 | bs1) != 0 && pcmf_h != 3)
                     {
@@ -659,7 +680,6 @@ static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, c
                     }
 
                     pcmfa >>= 1;
-                    hbs += 2;
                 }
             }
 
@@ -697,8 +717,6 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
     av_assert1((bounds.y & (ctb_size - 1)) == 0);
     av_assert1(bounds.h <= ctb_size);
 
-//    printf("%s: %d,%d (%d,%d) cb_r=%d, b_b=%d\n", __func__, bounds.x, bounds.y, bounds.w, bounds.h, cb_r, b_b);
-
     // Do in CTB-shaped blocks
     for (cb_x = bounds.x; cb_x < cb_r; cb_x += ctb_size, ++dbp) {
         const unsigned int bv_r = FFMIN(cb_x + ctb_size, cb_r);
@@ -715,12 +733,12 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
 
             unsigned int pcmfa = pcm2(s, bv_l - 1, y);
             const uint8_t * const tc = tctable + 2 + (dbp - s->ps.sps->ctb_width)->tc_offset;
-            const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
+            uint64_t vbs2 = (vbs_get(s, bv_l, bv_r, y) & 0x0202020202020202U);
 
-            for (x = bv_l; x < bv_r; x += 16)
+            for (x = bv_l; x < bv_r; x += 16, vbs2 >>= 8)
             {
                 const unsigned int pcmf_v = (pcmfa & 3);
-                if ((vbs[0] & 2) != 0 && pcmf_v != 3)
+                if ((vbs2 & 2) != 0 && pcmf_v != 3)
                 {
                     const int qp0 = q2h(s, x, y);
                     s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
@@ -730,7 +748,6 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
                                                    pcmf_v);
                 }
                 pcmfa >>= 2;
-                vbs += s->bs_height * 2;
             }
         }
 
@@ -742,13 +759,14 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
                 unsigned int pcmfa = pcm4(s, bv_l - 1, y);
                 const unsigned int pcmf_or = (y + 16 <= b_b) ? 0 : BL | BR;
                 const uint8_t * const tc = tctable + 2 + dbp->tc_offset;
-                const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
+                uint64_t vbs2 = (vbs_get(s, bv_l, bv_r, y) & 0x0202020202020202U) |
+                                 ((vbs_get(s, bv_l, bv_r, y + 8) & 0x0202020202020202U) << 4);
 
-                for (x = bv_l; x < bv_r; x += 16)
+                for (x = bv_l; x < bv_r; x += 16, vbs2 >>= 8)
                 {
                     const unsigned int pcmf_v = pcmf_or | (pcmfa & 3) | ((pcmfa >> 14) & 0xc);
-                    const unsigned int bs0 = (~pcmf_v & (TL | TR)) == 0 ? 0 : vbs[0] & 2;
-                    const unsigned int bs1 = (~pcmf_v & (BL | BR)) == 0 ? 0 : vbs[2] & 2;
+                    const unsigned int bs0 = (~pcmf_v & (TL | TR)) == 0 ? 0 : vbs2 & 2;
+                    const unsigned int bs1 = (~pcmf_v & (BL | BR)) == 0 ? 0 : (vbs2 & 0x20) >> 4;
 
                     if ((bs0 | bs1) != 0)
                     {
@@ -763,7 +781,6 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
                     }
 
                     pcmfa >>= 2;
-                    vbs += s->bs_height * 2;
                 }
             }
 
@@ -774,17 +791,22 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
                 const unsigned int bh_r = cb_x + ctb_size >= cb_r ? cb_r : cb_x + ctb_size - 16;
                 const unsigned int bh_l = bv_l - 16;
                 unsigned int pcmfa = pcm4(s, bh_l, y - 1);
-                const uint8_t * hbs = s->horizontal_bs + (y >> 3) * s->bs_width + (bh_l >> 2);
+                uint64_t hbs = hbs_get(s, bh_l, bh_r, y) & 0x2222222222222222U;
                 const int8_t * const qta = s->qp_y_tab + ((y - 1) >> log2_min_cb_size) * s->ps.sps->min_cb_width;
                 const int8_t * const qtb = s->qp_y_tab + (y >> log2_min_cb_size) * s->ps.sps->min_cb_width;
 
-                for (x = bh_l; x < bh_r; x += 16)
-                {
-                    const unsigned int pcmf_h = (x < bounds.x ? TL | BL : x + 16 > bh_r ? TR | BR : 0) |
-                        (pcmfa & 3) | ((pcmfa >> 14) & 0xc);
-                    const int bs0 = (~pcmf_h & (TL | BL)) == 0 ? 0 : hbs[0] & 2;
-                    const int bs1 = (~pcmf_h & (TR | BR)) == 0 ? 0 : hbs[2] & 2;
+                // Chop off bits we don't want...
+                if (bh_l < bounds.x) {
+                    pcmfa |= 0x10001; // TL|BL pre rearrangement
+                    hbs &= ~(uint64_t)3;  // Make BS 0
+                }
 
+                for (x = bh_l; hbs != 0; x += 16, hbs >>= 8)
+                {
+                    const unsigned int pcmf_h = (x + 16 > bh_r ? TR | BR : 0) |
+                        (pcmfa & 3) | ((pcmfa >> 14) & 0xc);
+                    const int bs0 = hbs & 2;
+                    const int bs1 = (~pcmf_h & (TR | BR)) == 0 ? 0 : (hbs >> 4) & 2;
                     if ((bs0 | bs1) != 0)
                     {
                         const int qp0 = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
@@ -798,157 +820,250 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
                             pcmf_h);
                     }
                     pcmfa >>= 2;
-                    hbs += 4;
                 }
             }
         }
     }
 }
 
-
-void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                                           int log2_trafo_size)
+static inline unsigned int off_boundary(const unsigned int x, const unsigned int log2_n)
 {
-    MvField *tab_mvf     = s->ref->tab_mvf;
-    int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
-    int log2_min_tu_size = s->ps.sps->log2_min_tb_size;
-    int min_pu_width     = s->ps.sps->min_pu_width;
-    int min_tu_width     = s->ps.sps->min_tb_width;
-    int boundary_upper, boundary_left;
-    int i, j;
-    const RefPicList *rpl = s->ref->refPicList;
-    const unsigned int log2_dup = FFMIN(log2_min_pu_size, log2_trafo_size);
-    const unsigned int min_pu_in_4pix = 1 << (log2_dup - 2);  // Dup
-    const unsigned int trafo_in_min_pus = 1 << (log2_trafo_size - log2_dup); // Rep
-    int y_pu             = y0 >> log2_min_pu_size;
-    int x_pu             = x0 >> log2_min_pu_size;
-    MvField *curr        = &tab_mvf[y_pu * min_pu_width + x_pu];
-    int is_intra         = curr->pred_flag == PF_INTRA;
-    const int inc        = log2_min_pu_size == 2 ? 2 : 1;
-    uint8_t *bs;
+    return x & ~(~0U << log2_n);
+}
+
+static inline void set_bs_h(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y, const uint32_t mask, uint32_t bsf)
+{
+    av_assert2((y & 7) == 0);
+
+    // This doesn't have the same simultainious update issues that bsf_stash
+    // does (other threads will have a different y) so we can do it the easy way
+    if ((bsf &= mask) != 0)
+        *(uint32_t *)(s->horizontal_bs + ((x >> 4) & ~3) + (y >> 3) * s->hbs_stride) |= bsf << ((x >> 1) & 31);
+}
+
+
+static void set_bs_v(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y, const uint32_t mask, uint32_t bsf)
+{
+    // We arrange this in a slightly odd fashion but it lines up with
+    // how we are going to use it in the actual deblock code & it is easier
+    // to do the contortions here than there
+    //
+    // Arrange (LE) {x0y0, x0y4, x8y0, x8,y4}, {x16y0, x16y4, x24y0, x24y4},...
+
+    av_assert2((x & 7) == 0);
+
+    if ((bsf &= mask) != 0)
+    {
+        const unsigned int stride1 = s->hbs_stride;
+        uint8_t *p = s->vertical_bs2 + (x >> 4) + (y >> 3) * stride1;
+        const unsigned int sh = ((x & 8) | (y & 4)) >> 1;
+
+        if (mask <= 0xf)
+        {
+            *p |= (bsf << sh);
+        }
+        else
+        {
+            do {
+                *p |= (bsf & 0xf) << sh;
+                p += stride1;
+            } while ((bsf >>= 4) != 0);
+        }
+    }
+}
+
+static inline uint32_t bsf_mv(const HEVCRpiContext * const s,
+                              const unsigned int rep, const unsigned int dup,
+                              const unsigned int mvf_stride,
+                              const RefPicList * const rpl_p, const RefPicList * const rpl_q,
+                              const MvField * const mvf_p, const MvField * const mvf_q)
+{
+    uint8_t res[16];
+    unsigned int i;
+    unsigned int a = 0;
+
+    s->hevcdsp.hevc_deblocking_boundary_strengths(rep, dup,
+            sizeof(MvField) * mvf_stride, 1,
+            rpl_p[0].list, rpl_p[1].list, rpl_q[0].list, rpl_q[1].list,
+            mvf_p, mvf_q, res);
+
+    for (i = 0; i != rep * dup; ++i) {
+        a |= res[i] << (i * 2);
+    }
+    return a;
+}
+
+
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
+                                               const HEVCRpiLocalContext * const lc,
+                                               const unsigned int x0, const unsigned int y0,
+                                               const unsigned int log2_trafo_size,
+                                               const int is_coded_block)
+{
+    const MvField * const tab_mvf       = s->ref->tab_mvf;
+    const unsigned int log2_min_pu_size = s->ps.sps->log2_min_pu_size;
+    const unsigned int mvf_stride       = s->ps.sps->min_pu_width;  // width in pus; mvf stride
+    const RefPicList * const rpl        = s->ref->refPicList;
+    // Rep count for bsf_mv when running with min_pu chuncks
+    const unsigned int log2_rep_min_pu  = log2_trafo_size <= log2_min_pu_size ? 0 : log2_trafo_size - log2_min_pu_size;
+    const MvField * const mvf_curr      = tab_mvf + (y0 >> log2_min_pu_size) * mvf_stride + (x0 >> log2_min_pu_size);
+    const unsigned int boundary_flags   = s->sh.no_dblk_boundary_flags & lc->boundary_flags;
+    const unsigned int trafo_size       = (1U << log2_trafo_size);
+    const uint32_t bsf_mask             = log2_trafo_size > 5 ? ~0U : (1U << (trafo_size >> 1)) - 1;
+    const uint32_t bsf_cbf              = (bsf_mask & 0x55555555);
+
+    // Do we cover a pred split line?
+    const int has_x_split = x0 < lc->cu.x_split && x0 + trafo_size > lc->cu.x_split;
+    const int has_y_split = y0 < lc->cu.y_split && y0 + trafo_size > lc->cu.y_split;
+
+    uint32_t bsf_h;
+    uint32_t bsf_v;
 
 #ifdef DISABLE_STRENGTHS
     return;
 #endif
 
-    boundary_upper = y0 > 0 && !(y0 & 7);
-    if (boundary_upper &&
-        ((!s->sh.slice_loop_filter_across_slices_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_UPPER_SLICE &&
-          (y0 % (1 << s->ps.sps->log2_ctb_size)) == 0) ||
-         (!s->ps.pps->loop_filter_across_tiles_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_UPPER_TILE &&
-          (y0 % (1 << s->ps.sps->log2_ctb_size)) == 0)))
-        boundary_upper = 0;
+    // We are always on a size boundary
+    av_assert2((x0 & (trafo_size - 1)) == 0);
+    av_assert2((y0 & (trafo_size - 1)) == 0);
+    // log2_trafo_size not really a transform size; we can have to deal
+    // with size 2^6 blocks
+    av_assert2(log2_trafo_size >= 2 && log2_trafo_size <= 6);
 
-    bs = &s->horizontal_bs[(x0 >> 2) + (y0 >> 3) * s->bs_width];
+    // Retrieve and update coded (b0), intra (b1) bs flags
+    //
+    // Store on min width (rather than uint32_t) to avoid possible issues
+    // with another thread on another core running wpp using the same
+    // memory (min CTB = 16 pels = 4 bsf els = 8 bits)
+    //
+    // In bsf BS=2 is represented by 3 as it is much easier to test & set
+    // and the actual deblock code tests for 0 and b1 set/not-set so 2 and
+    // 3 will work the same
+    {
+        // Given where we are called from is_cbf_luma & is_intra will be constant over the block
+        const uint32_t bsf0 =  (lc->cu.pred_mode == MODE_INTRA) ? bsf_mask : is_coded_block ? bsf_cbf : 0;
+        uint8_t *const p = s->bsf_stash_up + (x0 >> 4);
+        uint8_t *const q = s->bsf_stash_left + (y0 >> 4);
 
-    if (boundary_upper) {
-        const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
-                              ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
-                              rpl;
-        MvField *top = curr - min_pu_width;
-
-        if (is_intra) {
-            for (i = 0; i < (1 << log2_trafo_size); i += 4)
-                bs[i >> 2] = 2;
-
-        } else {
-            int y_tu = y0 >> log2_min_tu_size;
-            int x_tu = x0 >> log2_min_tu_size;
-            uint8_t *curr_cbf_luma = &s->cbf_luma[y_tu * min_tu_width + x_tu];
-            uint8_t *top_cbf_luma = curr_cbf_luma - min_tu_width;
-
-            s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                    min_pu_in_4pix, sizeof (MvField), 4 >> 2,
-                    rpl[0].list, rpl[1].list, rpl_top[0].list, rpl_top[1].list,
-                    curr, top, bs);
-
-            for (i = 0; i < (1 << log2_trafo_size); i += 4) {
-                int i_pu = i >> log2_min_pu_size;
-                int i_tu = i >> log2_min_tu_size;
-
-                if (top[i_pu].pred_flag == PF_INTRA)
-                    bs[i >> 2] = 2;
-                else if (curr_cbf_luma[i_tu] || top_cbf_luma[i_tu])
-                    bs[i >> 2] = 1;
+        switch (log2_trafo_size)
+        {
+            case 2:
+            case 3:
+            {
+                const unsigned int sh_h = (x0 >> 1) & 7;
+                const unsigned int sh_v = (y0 >> 1) & 7;
+                bsf_h = *p;
+                bsf_v = *q;
+                *p = (bsf_h & ~(bsf_mask << sh_h)) | (bsf0 << sh_h);
+                *q = (bsf_v & ~(bsf_mask << sh_v)) | (bsf0 << sh_v);
+                bsf_h >>= sh_h;
+                bsf_v >>= sh_v;
+                break;
             }
+            case 4:
+                bsf_h = *p;
+                bsf_v = *q;
+                *p = bsf0;
+                *q = bsf0;
+                break;
+            case 5:
+                bsf_h = *(uint16_t *)p;
+                bsf_v = *(uint16_t *)q;
+                *(uint16_t *)p = bsf0;
+                *(uint16_t *)q = bsf0;
+                break;
+            case 6:
+            default:
+                bsf_h = *(uint32_t *)p;
+                bsf_v = *(uint32_t *)q;
+                *(uint32_t *)p = bsf0;
+                *(uint32_t *)q = bsf0;
+                break;
         }
+
+        bsf_h |= bsf0;
+        bsf_v |= bsf0;
     }
 
-    if (!is_intra) {
-        for (j = inc; j < trafo_in_min_pus; j += inc) {
-            MvField *top;
+    // Do Horizontal
+    if ((y0 & 7) == 0)
+    {
+        // Boundary upper
+        if (y0 != 0 &&
+            (off_boundary(y0, s->ps.sps->log2_ctb_size) ||
+             (boundary_flags & (BOUNDARY_UPPER_SLICE | BOUNDARY_UPPER_TILE)) == 0))
+        {
+            // Look at MVs (BS=1) if we don't already has a full set of bs bits
+            if ((~bsf_h & bsf_cbf) != 0 && (y0 == lc->cu.y || y0 == lc->cu.y_split))
+            {
+                // If we aren't on the top boundary we must be in the middle
+                // and in that case we know where mvf can change
+                const unsigned int log2_rep = (y0 == lc->cu.y) ? log2_rep_min_pu : has_x_split ? 1 : 0;
+                const RefPicList *const rpl_top = (lc->boundary_flags & BOUNDARY_UPPER_SLICE) ?
+                                      ff_hevc_rpi_get_ref_list(s, s->ref, x0, y0 - 1) :
+                                      rpl;
 
-            curr += min_pu_width * inc;
-            top = curr - min_pu_width;
-            bs += s->bs_width * ((inc << log2_min_pu_size) >> 3);
-
-            s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                    min_pu_in_4pix, sizeof (MvField), 4 >> 2,
-                    rpl[0].list, rpl[1].list, rpl[0].list, rpl[1].list,
-                    curr, top, bs);
-        }
-    }
-
-    boundary_left = x0 > 0 && !(x0 & 7);
-    if (boundary_left &&
-        ((!s->sh.slice_loop_filter_across_slices_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_LEFT_SLICE &&
-          (x0 % (1 << s->ps.sps->log2_ctb_size)) == 0) ||
-         (!s->ps.pps->loop_filter_across_tiles_enabled_flag &&
-          lc->boundary_flags & BOUNDARY_LEFT_TILE &&
-          (x0 % (1 << s->ps.sps->log2_ctb_size)) == 0)))
-        boundary_left = 0;
-
-    curr = &tab_mvf[y_pu * min_pu_width + x_pu];
-    bs = &s->vertical_bs[(x0 >> 3)* s->bs_height + (y0 >> 2)];
-
-    if (boundary_left) {
-        const RefPicList *rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
-                               ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
-                               rpl;
-        MvField *left = curr - 1;
-
-        if (is_intra) {
-            for (j = 0; j < (1 << log2_trafo_size); j += 4)
-                bs[j >> 2] = 2;
-
-        } else {
-            int y_tu = y0 >> log2_min_tu_size;
-            int x_tu = x0 >> log2_min_tu_size;
-            uint8_t *curr_cbf_luma = &s->cbf_luma[y_tu * min_tu_width + x_tu];
-            uint8_t *left_cbf_luma = curr_cbf_luma - 1;
-
-            s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                    min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
-                    rpl[0].list, rpl[1].list, rpl_left[0].list, rpl_left[1].list,
-                    curr, left, bs);
-
-            for (j = 0; j < (1 << log2_trafo_size); j += 4) {
-                int j_pu = j >> log2_min_pu_size;
-                int j_tu = j >> log2_min_tu_size;
-
-                if (left[j_pu * min_pu_width].pred_flag == PF_INTRA)
-                    bs[j >> 2] = 2;
-                else if (curr_cbf_luma[j_tu * min_tu_width] || left_cbf_luma[j_tu * min_tu_width])
-                    bs[j >> 2] = 1;
+                bsf_h |= bsf_mv(s, 1 << log2_rep, trafo_size >> (2 + log2_rep),
+                    trafo_size >> (log2_min_pu_size + log2_rep),
+                    rpl, rpl_top,
+                    mvf_curr, mvf_curr - mvf_stride);
             }
+
+            // Finally put the results into bs
+            set_bs_h(s, x0, y0, bsf_mask, bsf_h);
+        }
+
+        // Max of 1 pu internal split - ignore if not on 8pel boundary
+        if (has_y_split && !off_boundary(lc->cu.y_split, 3))
+        {
+            const MvField * const mvf = tab_mvf +
+                (lc->cu.y_split >> log2_min_pu_size) * mvf_stride + (x0 >> log2_min_pu_size);
+            // If we have the x split as well then it must be in the middle
+            const unsigned int log2_rep = has_x_split ? 1 : 0;
+
+            set_bs_h(s, x0, lc->cu.y_split, bsf_mask,
+                bsf_mv(s, 1 << log2_rep, trafo_size >> (2 + log2_rep),
+                   trafo_size >> (log2_min_pu_size + log2_rep),
+                   rpl, rpl,
+                   mvf, mvf - mvf_stride));
         }
     }
 
-    if (!is_intra) {
-        for (i = inc; i < trafo_in_min_pus; i += inc) {
-            MvField *left;
+    // And again for vertical - same logic as horizontal just in the other direction
+    if ((x0 & 7) == 0)
+    {
+        // Boundary left
+        if (x0 != 0 &&
+            ((x0 & ((1 << s->ps.sps->log2_ctb_size) - 1)) != 0 ||
+             (boundary_flags & (BOUNDARY_LEFT_SLICE | BOUNDARY_LEFT_TILE)) == 0))
+        {
+            if ((~bsf_v & bsf_cbf) != 0 && (x0 == lc->cu.x || x0 == lc->cu.x_split))
+            {
+                const unsigned int log2_rep = (x0 == lc->cu.x) ? log2_rep_min_pu : has_y_split ? 1 : 0;
+                const RefPicList *const rpl_left = (lc->boundary_flags & BOUNDARY_LEFT_SLICE) ?
+                                       ff_hevc_rpi_get_ref_list(s, s->ref, x0 - 1, y0) :
+                                       rpl;
 
-            curr += inc;
-            left = curr - 1;
-            bs += ((inc << log2_min_pu_size) >> 3) * s->bs_height;
+                bsf_v |= bsf_mv(s, 1 << log2_rep, trafo_size >> (2 + log2_rep),
+                    (mvf_stride << log2_trafo_size) >> (log2_min_pu_size + log2_rep),
+                    rpl, rpl_left,
+                    mvf_curr, mvf_curr - 1);
+            }
 
-            s->hevcdsp.hevc_deblocking_boundary_strengths(trafo_in_min_pus,
-                    min_pu_in_4pix, min_pu_width * sizeof (MvField), 1,
-                    rpl[0].list, rpl[1].list, rpl[0].list, rpl[1].list,
-                    curr, left, bs);
+            set_bs_v(s, x0, y0, bsf_mask, bsf_v);
+        }
+
+        if (has_x_split && !off_boundary(lc->cu.x_split, 3))
+        {
+            const MvField * const mvf = tab_mvf +
+                (y0 >> log2_min_pu_size) * mvf_stride + (lc->cu.x_split >> log2_min_pu_size);
+            const unsigned int log2_rep = has_y_split ? 1 : 0;
+
+            set_bs_v(s, lc->cu.x_split, y0, bsf_mask,
+                bsf_mv(s, 1 << log2_rep, trafo_size >> (2 + log2_rep),
+                   (mvf_stride << log2_trafo_size) >> (log2_min_pu_size + log2_rep),
+                   rpl, rpl,
+                   mvf, mvf - 1));
         }
     }
 }

@@ -85,6 +85,8 @@ typedef struct RpiSliceHeader {
     uint8_t slice_loop_filter_across_slices_enabled_flag;
     uint8_t collocated_list;
 
+    uint8_t no_dblk_boundary_flags;
+
     unsigned int collocated_ref_idx;
 
     int slice_qp_delta;
@@ -274,7 +276,7 @@ typedef struct HEVCRpiSPS {
     unsigned int log2_min_tb_size;  // 2..5
     unsigned int log2_max_trafo_size;
     unsigned int log2_ctb_size;     // 4..6
-    unsigned int log2_min_pu_size;  // 2..5
+    unsigned int log2_min_pu_size;  // 2..5 (min_cb_size - 1)
 
     int max_transform_hierarchy_depth_inter;
     int max_transform_hierarchy_depth_intra;

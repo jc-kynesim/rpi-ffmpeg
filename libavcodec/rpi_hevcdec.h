@@ -302,8 +302,10 @@ typedef struct RefPicListTab {
 } RefPicListTab;
 
 typedef struct RpiCodingUnit {
-    int x;
-    int y;
+    unsigned int x;             // Passed to deblock
+    unsigned int y;
+    unsigned int x_split;
+    unsigned int y_split;
 
     enum PredMode pred_mode;    ///< PredMode
     enum PartMode part_mode;    ///< PartMode
@@ -322,30 +324,26 @@ typedef struct RpiNeighbourAvailable {
     char cand_up_right;
 } RpiNeighbourAvailable;
 
-typedef struct PredictionUnit {
-    int mpm_idx;
-    int rem_intra_luma_pred_mode;
+typedef struct RpiPredictionUnit {
     uint8_t intra_pred_mode[4];
-    Mv mvd;
-    uint8_t merge_flag;
     uint8_t intra_pred_mode_c[4];
     uint8_t chroma_mode_c[4];
-} PredictionUnit;
+    Mv mvd;
+    uint8_t merge_flag;
+} RpiPredictionUnit;
 
 typedef struct TransformUnit {
-    int cu_qp_delta;
-
-    int res_scale_val;
+    int8_t cu_qp_delta;
+    int8_t res_scale_val;
 
     // Inferred parameters;
-    int intra_pred_mode;
-    int intra_pred_mode_c;
-    int chroma_mode_c;
+    uint8_t intra_pred_mode;
+    uint8_t intra_pred_mode_c;
+    uint8_t chroma_mode_c;
     uint8_t is_cu_qp_delta_coded;
     uint8_t cu_chroma_qp_offset_wanted;
-//    int8_t  cu_qp_offset_cb;
-//    int8_t  cu_qp_offset_cr;
     uint8_t cross_pf;
+
     const int8_t * qp_divmod6[3];
 } TransformUnit;
 
@@ -447,7 +445,7 @@ typedef struct HEVCRpiLocalContext {
     int     end_of_ctb_y;
 
     RpiCodingUnit cu;
-    PredictionUnit pu;
+    RpiPredictionUnit pu;
 
 #define BOUNDARY_LEFT_SLICE     (1 << 0)
 #define BOUNDARY_LEFT_TILE      (1 << 1)
@@ -700,6 +698,16 @@ typedef struct HEVCRpiContext {
     uint8_t             threads_type;
     uint8_t             threads_number;
 
+    /** 1 if the independent slice segment header was successfully parsed */
+    uint8_t slice_initialized;
+
+    /**
+     * Sequence counters for decoded and output frames, so that old
+     * frames are output first after a POC reset
+     */
+    uint16_t seq_decode;
+    uint16_t seq_output;
+
     int                 width;
     int                 height;
 
@@ -720,9 +728,6 @@ typedef struct HEVCRpiContext {
     HEVCRpiFrameProgressState progress_states[2];
 
     HEVCRpiCabacState *cabac_save;
-
-    /** 1 if the independent slice segment header was successfully parsed */
-    uint8_t slice_initialized;
 
     AVFrame *frame;
     AVFrame *output_frame;
@@ -750,19 +755,19 @@ typedef struct HEVCRpiContext {
     int eos;       ///< current packet contains an EOS/EOB NAL
     int last_eos;  ///< last packet contains an EOS/EOB NAL
     int max_ra;
-    int bs_width;
-    int bs_height;
+    unsigned int hbs_stride;
+    unsigned int bs_size;
 
     int is_decoded;
     int no_rasl_output_flag;
 
     HEVCPredContext hpc;
     HEVCDSPContext hevcdsp;
-    VideoDSPContext vdsp;
-    BswapDSPContext bdsp;
     int8_t *qp_y_tab;
     uint8_t *horizontal_bs;
-    uint8_t *vertical_bs;
+    uint8_t *vertical_bs2;
+    uint8_t *bsf_stash_up;
+    uint8_t *bsf_stash_left;
 
     int32_t *tab_slice_address;
 
@@ -773,7 +778,6 @@ typedef struct HEVCRpiContext {
     // PU
     uint8_t *tab_ipm;
 
-    uint8_t *cbf_luma; // cbf_luma of colocated TU
     uint8_t *is_pcm;
 
     // CTB-level flags affecting loop filter operation
@@ -782,13 +786,6 @@ typedef struct HEVCRpiContext {
     /** used on BE to byteswap the lines for checksumming */
     uint8_t *checksum_buf;
     int      checksum_buf_size;
-
-    /**
-     * Sequence counters for decoded and output frames, so that old
-     * frames are output first after a POC reset
-     */
-    uint16_t seq_decode;
-    uint16_t seq_output;
 
     atomic_int wpp_err;
 
@@ -873,8 +870,9 @@ void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX);
 void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase);
-void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                                           int log2_trafo_size);
+void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, const HEVCRpiLocalContext * const lc,
+                                               const unsigned int x0, const unsigned int y0,
+                                               const unsigned int log2_trafo_size, const int is_coded_block);
 int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk bounds, const int eot);
 
 extern const uint8_t ff_hevc_rpi_qpel_extra_before[4];
