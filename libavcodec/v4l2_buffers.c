@@ -21,6 +21,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <drm/drm_fourcc.h>
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -30,6 +31,7 @@
 #include "libavcodec/avcodec.h"
 #include "libavcodec/internal.h"
 #include "libavutil/pixdesc.h"
+#include "libavutil/hwcontext.h"
 #include "v4l2_context.h"
 #include "v4l2_buffers.h"
 #include "v4l2_m2m.h"
@@ -210,7 +212,79 @@ static enum AVColorTransferCharacteristic v4l2_get_color_trc(V4L2Buffer *buf)
     return AVCOL_TRC_UNSPECIFIED;
 }
 
-static void v4l2_free_buffer(void *opaque, uint8_t *unused)
+static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
+{
+    AVDRMFrameDescriptor *drm_desc = &avbuf->drm_frame;
+    AVDRMLayerDescriptor *layer;
+
+    /* fill the DRM frame descriptor */
+    drm_desc->nb_objects = avbuf->num_planes;
+    drm_desc->nb_layers = 1;
+
+    layer = &drm_desc->layers[0];
+    layer->nb_planes = avbuf->num_planes;
+
+    for (int i = 0; i < avbuf->num_planes; i++) {
+        layer->planes[i].object_index = i;
+        layer->planes[i].offset = 0;
+        layer->planes[i].pitch = avbuf->plane_info[i].bytesperline;
+    }
+
+    switch (avbuf->context->av_pix_fmt) {
+    case AV_PIX_FMT_YUYV422:
+
+        layer->format = DRM_FORMAT_YUYV;
+        layer->nb_planes = 1;
+
+        break;
+
+    case AV_PIX_FMT_NV12:
+    case AV_PIX_FMT_NV21:
+
+        layer->format = avbuf->context->av_pix_fmt == AV_PIX_FMT_NV12 ?
+            DRM_FORMAT_NV12 : DRM_FORMAT_NV21;
+
+        if (avbuf->num_planes > 1)
+            break;
+
+        layer->nb_planes = 2;
+
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = avbuf->plane_info[0].bytesperline *
+            avbuf->context->format.fmt.pix.height;
+        layer->planes[1].pitch = avbuf->plane_info[0].bytesperline;
+        break;
+
+    case AV_PIX_FMT_YUV420P:
+
+        layer->format = DRM_FORMAT_YUV420;
+
+        if (avbuf->num_planes > 1)
+            break;
+
+        layer->nb_planes = 3;
+
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = avbuf->plane_info[0].bytesperline *
+            avbuf->context->format.fmt.pix.height;
+        layer->planes[1].pitch = avbuf->plane_info[0].bytesperline >> 1;
+
+        layer->planes[2].object_index = 0;
+        layer->planes[2].offset = layer->planes[1].offset +
+            ((avbuf->plane_info[0].bytesperline *
+              avbuf->context->format.fmt.pix.height) >> 2);
+        layer->planes[2].pitch = avbuf->plane_info[0].bytesperline >> 1;
+        break;
+
+    default:
+        drm_desc->nb_layers = 0;
+        break;
+    }
+
+    return (uint8_t *) drm_desc;
+}
+
+static void v4l2_free_buffer(void *opaque, uint8_t *data)
 {
     V4L2Buffer* avbuf = opaque;
     V4L2m2mContext *s = buf_to_m2mctx(avbuf);
@@ -234,6 +308,36 @@ static void v4l2_free_buffer(void *opaque, uint8_t *unused)
     }
 }
 
+static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
+{
+    struct v4l2_exportbuffer expbuf;
+    int i, ret;
+
+    for (i = 0; i < avbuf->num_planes; i++) {
+        memset(&expbuf, 0, sizeof(expbuf));
+
+        expbuf.index = avbuf->buf.index;
+        expbuf.type = avbuf->buf.type;
+        expbuf.plane = i;
+
+        ret = ioctl(buf_to_m2mctx(avbuf)->fd, VIDIOC_EXPBUF, &expbuf);
+        if (ret < 0)
+            return AVERROR(errno);
+
+        if (V4L2_TYPE_IS_MULTIPLANAR(avbuf->buf.type)) {
+            /* drm frame */
+            avbuf->drm_frame.objects[i].size = avbuf->buf.m.planes[i].length;
+            avbuf->drm_frame.objects[i].fd = expbuf.fd;
+        } else {
+            /* drm frame */
+            avbuf->drm_frame.objects[0].size = avbuf->buf.length;
+            avbuf->drm_frame.objects[0].fd = expbuf.fd;
+        }
+    }
+
+    return 0;
+}
+
 static int v4l2_buf_increase_ref(V4L2Buffer *in)
 {
     V4L2m2mContext *s = buf_to_m2mctx(in);
@@ -252,6 +356,24 @@ static int v4l2_buf_increase_ref(V4L2Buffer *in)
     atomic_fetch_add_explicit(&s->refcount, 1, memory_order_relaxed);
 
     return 0;
+}
+
+static int v4l2_buf_to_bufref_drm(V4L2Buffer *in, AVBufferRef **buf)
+{
+    int ret;
+
+    *buf = av_buffer_create((uint8_t *) &in->drm_frame,
+                            sizeof(in->drm_frame),
+                            v4l2_free_buffer,
+                            in, AV_BUFFER_FLAG_READONLY);
+    if (!*buf)
+        return AVERROR(ENOMEM);
+
+    ret = v4l2_buf_increase_ref(in);
+    if (ret)
+         av_buffer_unref(buf);
+
+    return ret;
 }
 
 static int v4l2_buf_to_bufref(V4L2Buffer *in, int plane, AVBufferRef **buf)
@@ -303,13 +425,24 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 
     frame->format = avbuf->context->av_pix_fmt;
 
-    for (i = 0; i < avbuf->num_planes; i++) {
-        ret = v4l2_buf_to_bufref(avbuf, i, &frame->buf[i]);
+    if (buf_to_m2mctx(avbuf)->output_drm) {
+        /* 1. get references to the actual data */
+        ret = v4l2_buf_to_bufref_drm(avbuf, &frame->buf[0]);
         if (ret)
             return ret;
 
-        frame->linesize[i] = avbuf->plane_info[i].bytesperline;
-        frame->data[i] = frame->buf[i]->data;
+        frame->data[0] = (uint8_t *) v4l2_get_drm_frame(avbuf);
+        frame->format = AV_PIX_FMT_DRM_PRIME;
+    } else {
+        /* 1. get references to the actual data */
+        for (i = 0; i < avbuf->num_planes; i++) {
+            ret = v4l2_buf_to_bufref(avbuf, i, &frame->buf[i]);
+            if (ret)
+                return ret;
+
+            frame->linesize[i] = avbuf->plane_info[i].bytesperline;
+            frame->data[i] = frame->buf[i]->data;
+        }
     }
 
     /* fixup special cases */
@@ -543,9 +676,6 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
 
     avbuf->status = V4L2BUF_AVAILABLE;
 
-    if (V4L2_TYPE_IS_OUTPUT(ctx->type))
-        return 0;
-
     if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
         avbuf->buf.m.planes = avbuf->planes;
         avbuf->buf.length   = avbuf->num_planes;
@@ -553,6 +683,15 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
     } else {
         avbuf->buf.bytesused = avbuf->planes[0].bytesused;
         avbuf->buf.length    = avbuf->planes[0].length;
+    }
+
+    if (V4L2_TYPE_IS_OUTPUT(ctx->type))
+        return 0;
+
+    if (buf_to_m2mctx(avbuf)->output_drm) {
+        ret = v4l2_buffer_export_drm(avbuf);
+        if (ret)
+                return ret;
     }
 
     return ff_v4l2_buffer_enqueue(avbuf);
