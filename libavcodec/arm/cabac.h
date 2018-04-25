@@ -26,83 +26,209 @@
 #include "libavutil/internal.h"
 #include "libavcodec/cabac.h"
 
+
 #define get_cabac_inline get_cabac_inline_arm
 static av_always_inline int get_cabac_inline_arm(CABACContext *c,
-                                                 uint8_t *const state)
+                                                 uint8_t *state)
 {
-    int bit;
-    void *reg_b, *reg_c, *tmp;
-
-    __asm__ volatile(
-        "ldrb       %[bit]        , [%[state]]                  \n\t"
-        "add        %[r_b]        , %[tables]   , %[lps_off]    \n\t"
-        "mov        %[tmp]        , %[range]                    \n\t"
-        "and        %[range]      , %[range]    , #0xC0         \n\t"
-        "add        %[r_b]        , %[r_b]      , %[bit]        \n\t"
-        "ldrb       %[range]      , [%[r_b], %[range], lsl #1]  \n\t"
-        "add        %[r_b]        , %[tables]   , %[norm_off]   \n\t"
-        "sub        %[r_c]        , %[tmp]      , %[range]      \n\t"
-        "lsl        %[tmp]        , %[r_c]      , #17           \n\t"
-        "cmp        %[tmp]        , %[low]                      \n\t"
-        "it         gt                                          \n\t"
-        "movgt      %[range]      , %[r_c]                      \n\t"
-        "itt        cc                                          \n\t"
-        "mvncc      %[bit]        , %[bit]                      \n\t"
-        "subcc      %[low]        , %[low]      , %[tmp]        \n\t"
-        "add        %[r_c]        , %[tables]   , %[mlps_off]   \n\t"
-        "ldrb       %[tmp]        , [%[r_b], %[range]]          \n\t"
-        "ldrb       %[r_b]        , [%[r_c], %[bit]]            \n\t"
-        "lsl        %[low]        , %[low]      , %[tmp]        \n\t"
-        "lsl        %[range]      , %[range]    , %[tmp]        \n\t"
-        "uxth       %[r_c]        , %[low]                      \n\t"
-        "strb       %[r_b]        , [%[state]]                  \n\t"
-        "tst        %[r_c]        , %[r_c]                      \n\t"
-        "bne        2f                                          \n\t"
-        "ldr        %[r_c]        , [%[c], %[byte]]             \n\t"
+    const uint8_t *mlps_tables = ff_h264_cabac_tables + H264_MLPS_STATE_OFFSET + 128;
+    int bit, ptr, low, tmp1, tmp2;
+    __asm__ volatile (
+        "ldr     %[bit], [%[c], %[range_off]]             \n\t"
+        "ldrb    %[ptr], [%[state]]                       \n\t"
+        "sub     %[tmp1], %[mlps_tables], %[lps_off]      \n\t"
+        "and     %[tmp2], %[bit], #0xc0                   \n\t"
+        "add     %[tmp1], %[tmp1], %[ptr]                 \n\t"
+        "ldr     %[low], [%[c], %[low_off]]               \n\t"
+        "ldrb    %[tmp2], [%[tmp1], %[tmp2], lsl #1]      \n\t"
+        "sub     %[bit], %[bit], %[tmp2]                  \n\t"
+        "mov     %[tmp1], %[bit]                          \n\t"
+        "cmp     %[low], %[bit], lsl #17                  \n\t"
+        "itt     ge                                       \n\t"
+        "movge   %[tmp1], %[tmp2]                         \n\t"
+        "mvnge   %[ptr], %[ptr]                           \n\t"
+        "clz     %[tmp2], %[tmp1]                         \n\t"
+        "it      ge                                       \n\t"
+        "subge   %[low], %[low], %[bit], lsl #17          \n\t"
+        "sub     %[tmp2], %[tmp2], #23                    \n\t"
+        "and     %[bit], %[ptr], #1                       \n\t"
+        "ldrb    %[mlps_tables], [%[mlps_tables], %[ptr]] \n\t"
+        "lsl     %[low], %[low], %[tmp2]                  \n\t"
+        "lsls    %[ptr], %[low], #16                      \n\t"
+        "bne     1f                                       \n\t"
+        "ldr     %[ptr], [%[c], %[ptr_off]]               \n\t"
+        "lsl     %[tmp2], %[tmp1], %[tmp2]                \n\t"
 #if UNCHECKED_BITSTREAM_READER
-        "ldrh       %[tmp]        , [%[r_c]]                    \n\t"
-        "add        %[r_c]        , %[r_c]      , #2            \n\t"
-        "str        %[r_c]        , [%[c], %[byte]]             \n\t"
+        "strb    %[mlps_tables], [%[state]]               \n\t"
+        "rbit    %[state], %[low]                         \n\t"
+        "ldrh    %[tmp1], [%[ptr]], #2                    \n\t"
 #else
-        "ldr        %[r_b]        , [%[c], %[end]]              \n\t"
-        "ldrh       %[tmp]        , [%[r_c]]                    \n\t"
-        "cmp        %[r_c]        , %[r_b]                      \n\t"
-        "itt        lt                                          \n\t"
-        "addlt      %[r_c]        , %[r_c]      , #2            \n\t"
-        "strlt      %[r_c]        , [%[c], %[byte]]             \n\t"
+        "ldr     %[tmp1], [%[c], %[end_off]]              \n\t"
+        "strb    %[mlps_tables], [%[state]]               \n\t"
+        "rbit    %[state], %[low]                         \n\t"
+        "cmp     %[tmp1], %[ptr]                          \n\t"
+#if CONFIG_THUMB
+        "it      cs                                       \n\t"
+        "ldrhcs  %[tmp1], [%[ptr]], #2                    \n\t"
+#else
+        "ldrcsh  %[tmp1], [%[ptr]], #2                    \n\t"
 #endif
-        "sub        %[r_c]        , %[low]      , #1            \n\t"
-        "add        %[r_b]        , %[tables]   , %[norm_off]   \n\t"
-        "eor        %[r_c]        , %[low]      , %[r_c]        \n\t"
-        "rev        %[tmp]        , %[tmp]                      \n\t"
-        "lsr        %[r_c]        , %[r_c]      , #15           \n\t"
-        "lsr        %[tmp]        , %[tmp]      , #15           \n\t"
-        "ldrb       %[r_c]        , [%[r_b], %[r_c]]            \n\t"
-        "movw       %[r_b]        , #0xFFFF                     \n\t"
-        "sub        %[tmp]        , %[tmp]      , %[r_b]        \n\t"
-        "rsb        %[r_c]        , %[r_c]      , #7            \n\t"
-        "lsl        %[tmp]        , %[tmp]      , %[r_c]        \n\t"
-        "add        %[low]        , %[low]      , %[tmp]        \n\t"
-        "2:                                                     \n\t"
-        :    [bit]"=&r"(bit),
-             [low]"+&r"(c->low),
-           [range]"+&r"(c->range),
-             [r_b]"=&r"(reg_b),
-             [r_c]"=&r"(reg_c),
-             [tmp]"=&r"(tmp)
-        :        [c]"r"(c),
-             [state]"r"(state),
-            [tables]"r"(ff_h264_cabac_tables),
-              [byte]"M"(offsetof(CABACContext, bytestream)),
-               [end]"M"(offsetof(CABACContext, bytestream_end)),
-          [norm_off]"I"(H264_NORM_SHIFT_OFFSET),
-           [lps_off]"I"(H264_LPS_RANGE_OFFSET),
-          [mlps_off]"I"(H264_MLPS_STATE_OFFSET + 128)
-        : "memory", "cc"
-        );
-
-    return bit & 1;
+#endif
+        "clz     %[state], %[state]                       \n\t"
+        "movw    %[mlps_tables], #0xffff                  \n\t"
+        "sub     %[state], %[state], #16                  \n\t"
+        "str     %[tmp2], [%[c], %[range_off]]            \n\t"
+        "rev     %[tmp1], %[tmp1]                         \n\t"
+        "str     %[ptr], [%[c], %[ptr_off]]               \n\t"
+        "lsr     %[tmp1], %[tmp1], #15                    \n\t"
+        "sub     %[tmp1], %[tmp1], %[mlps_tables]         \n\t"
+#if CONFIG_THUMB
+        "lsl     %[tmp1], %[tmp1], %[state]               \n\t"
+        "add     %[low], %[low], %[tmp1]                  \n\t"
+#else
+        "add     %[low], %[low], %[tmp1], lsl %[state]    \n\t"
+#endif
+        "str     %[low], [%[c], %[low_off]]               \n\t"
+        "b       2f                                       \n\t"
+        "1:                                               \n\t"
+        "strb    %[mlps_tables], [%[state]]               \n\t"
+        "lsl     %[tmp1], %[tmp1], %[tmp2]                \n\t"
+        "str     %[low], [%[c], %[low_off]]               \n\t"
+        "str     %[tmp1], [%[c], %[range_off]]            \n\t"
+        "2:                                               \n\t"
+    :  // Outputs
+             [state]"+r"(state),
+       [mlps_tables]"+r"(mlps_tables),
+               [bit]"=&r"(bit),
+               [ptr]"=&r"(ptr),
+               [low]"=&r"(low),
+              [tmp1]"=&r"(tmp1),
+              [tmp2]"=&r"(tmp2)
+    :  // Inputs
+               [c]"r"(c),
+         [low_off]"J"(offsetof(CABACContext, low)),
+       [range_off]"J"(offsetof(CABACContext, range)),
+         [ptr_off]"J"(offsetof(CABACContext, bytestream)),
+         [end_off]"J"(offsetof(CABACContext, bytestream_end)),
+         [lps_off]"I"((H264_MLPS_STATE_OFFSET + 128) - H264_LPS_RANGE_OFFSET)
+    :  // Clobbers
+       "cc", "memory"
+    );
+    return bit;
 }
+
+#define get_cabac_bypass get_cabac_bypass_arm
+static inline int get_cabac_bypass_arm(CABACContext * const c)
+{
+    uint32_t low = c->low, range, ptr, tmp;
+    int rv;
+    __asm volatile (
+        "ldr        %[range] , [%[c], %[range_off]] \n\t"
+        "mov        %[rv]    , #0                   \n\t"
+        "ldr        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "lsl        %[low]   , #1                   \n\t"
+#if !UNCHECKED_BITSTREAM_READER
+        "ldr        %[tmp]   , [%[c], %[end_off]]   \n\t"
+#endif
+        "cmp        %[low]   , %[range], lsl #17    \n\t"
+        "itt         cs                              \n\t"
+        "subcs      %[low]   , %[low], %[range], lsl #17 \n\t"
+        "movcs      %[rv]    , #1                   \n\t"
+#if UNCHECKED_BITSTREAM_READER
+        "ldrh       %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "cmp        %[tmp]   , %[ptr]               \n\t"
+#if CONFIG_THUMB
+        "it         cs                              \n\t"
+        "ldrhcs     %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "ldrcsh     %[tmp]   , [%[ptr]], #2         \n\t"
+#endif
+#endif
+        "lsls       %[range] , %[low], #16          \n\t"
+        "bne        1f                              \n\t"
+
+        "str        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "rev        %[tmp]   , %[tmp]               \n\t"
+        "add        %[low]   , %[low], %[tmp], lsr #15 \n\t"
+        "movw       %[tmp]   , 0xFFFF               \n\t"
+        "sub        %[low]   , %[tmp]               \n\t"
+        "1:                                         \n\t"
+        "str        %[low]   , [%[c], %[low_off]]   \n\t"
+        : // Outputs
+               [rv]"=&r"(rv),
+              [low]"+r"(low),
+            [range]"=&r"(range),
+              [ptr]"=&r"(ptr),
+              [tmp]"=&r"(tmp)
+        : // Inputs
+                    [c]"r"(c),
+              [low_off]"J"(offsetof(CABACContext, low)),
+            [range_off]"J"(offsetof(CABACContext, range)),
+              [ptr_off]"J"(offsetof(CABACContext, bytestream)),
+              [end_off]"J"(offsetof(CABACContext, bytestream_end))
+        : // Clobbers
+            "memory", "cc"
+    );
+    return rv;
+}
+
+
+#define get_cabac_bypass_sign get_cabac_bypass_sign_arm
+static inline int get_cabac_bypass_sign_arm(CABACContext * const c, int rv)
+{
+    uint32_t low = c->low, range, ptr, tmp;
+    __asm volatile (
+        "ldr        %[range] , [%[c], %[range_off]] \n\t"
+        "ldr        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "lsl        %[low]   , #1                   \n\t"
+#if !UNCHECKED_BITSTREAM_READER
+        "ldr        %[tmp]   , [%[c], %[end_off]]   \n\t"
+#endif
+        "cmp        %[low]   , %[range], lsl #17    \n\t"
+        "it         cs                              \n\t"
+        "subcs      %[low]   , %[low], %[range], lsl #17 \n\t"
+        "it         cc                              \n\t"
+        "rsbcc      %[rv]    , %[rv], #0            \n\t"
+#if UNCHECKED_BITSTREAM_READER
+        "ldrh       %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "cmp        %[tmp]   , %[ptr]               \n\t"
+#if CONFIG_THUMB
+        "it         cs                              \n\t"
+        "ldrhcs     %[tmp]   , [%[ptr]], #2         \n\t"
+#else
+        "ldrcsh     %[tmp]   , [%[ptr]], #2         \n\t"
+#endif
+#endif
+        "lsls       %[range] , %[low], #16          \n\t"
+        "bne        1f                              \n\t"
+
+        "str        %[ptr]   , [%[c], %[ptr_off]]   \n\t"
+        "rev        %[tmp]   , %[tmp]               \n\t"
+        "add        %[low]   , %[low], %[tmp], lsr #15 \n\t"
+        "movw       %[tmp]   , 0xFFFF               \n\t"
+        "sub        %[low]   , %[tmp]               \n\t"
+        "1:                                         \n\t"
+        "str        %[low]   , [%[c], %[low_off]]   \n\t"
+        : // Outputs
+               [rv]"+r"(rv),
+              [low]"+r"(low),
+            [range]"=&r"(range),
+              [ptr]"=&r"(ptr),
+              [tmp]"=&r"(tmp)
+        : // Inputs
+                    [c]"r"(c),
+              [low_off]"J"(offsetof(CABACContext, low)),
+            [range_off]"J"(offsetof(CABACContext, range)),
+              [ptr_off]"J"(offsetof(CABACContext, bytestream)),
+              [end_off]"J"(offsetof(CABACContext, bytestream_end))
+        : // Clobbers
+            "memory", "cc"
+    );
+    return rv;
+}
+
 #endif /* HAVE_ARMV6T2_INLINE */
 
 #endif /* AVCODEC_ARM_CABAC_H */
