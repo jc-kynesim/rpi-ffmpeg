@@ -815,6 +815,8 @@ typedef struct HEVCRpiContext {
     int nal_length_size;    ///< Number of bytes used for nal length (1, 2 or 4)
     int nuh_layer_id;
 
+    struct AVMD5 *md5_ctx;
+
     HEVCSEIContext sei;
 
     // Put structures that allocate non-trivial storage at the end

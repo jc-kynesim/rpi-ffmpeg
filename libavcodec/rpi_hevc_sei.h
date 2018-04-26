@@ -60,7 +60,6 @@ typedef enum {
 } HEVC_SEI_Type;
 
 typedef struct HEVCSEIPictureHash {
-    struct AVMD5 *md5_ctx;
     uint8_t       md5[3][16];
     uint8_t is_md5;
 } HEVCSEIPictureHash;
@@ -70,6 +69,7 @@ typedef struct HEVCSEIFramePacking {
     int arrangement_type;
     int content_interpretation_type;
     int quincunx_subsampling;
+    int current_frame_is_frame0_flag;
 } HEVCSEIFramePacking;
 
 typedef struct HEVCSEIDisplayOrientation {

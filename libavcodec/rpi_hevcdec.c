@@ -1042,15 +1042,22 @@ static int pred_weight_table(HEVCRpiContext *s, GetBitContext *gb)
     uint8_t chroma_weight_l0_flag[16];
     uint8_t luma_weight_l1_flag[16];
     uint8_t chroma_weight_l1_flag[16];
-    int luma_log2_weight_denom;
+    unsigned int luma_log2_weight_denom;
 
     luma_log2_weight_denom = get_ue_golomb_long(gb);
-    if (luma_log2_weight_denom < 0 || luma_log2_weight_denom > 7)
+    if (luma_log2_weight_denom > 7) {
         av_log(s->avctx, AV_LOG_ERROR, "luma_log2_weight_denom %d is invalid\n", luma_log2_weight_denom);
-    s->sh.luma_log2_weight_denom = av_clip_uintp2(luma_log2_weight_denom, 3);
+        return AVERROR_INVALIDDATA;
+    }
+    s->sh.luma_log2_weight_denom = luma_log2_weight_denom;
     if (ctx_cfmt(s) != 0) {
-        int delta = get_se_golomb(gb);
-        s->sh.chroma_log2_weight_denom = av_clip_uintp2(s->sh.luma_log2_weight_denom + delta, 3);
+        const unsigned int chroma_log2_weight_denom = luma_log2_weight_denom + get_se_golomb(gb);
+        if (chroma_log2_weight_denom > 7)
+        {
+            av_log(s->avctx, AV_LOG_ERROR, "chroma_log2_weight_denom %d is invalid\n", chroma_log2_weight_denom);
+            return AVERROR_INVALIDDATA;
+        }
+        s->sh.chroma_log2_weight_denom = chroma_log2_weight_denom;
     }
 
     for (i = 0; i < s->sh.nb_refs[L0]; i++) {
@@ -1377,6 +1384,7 @@ static int hls_slice_header(HEVCRpiContext * const s)
     if (s->ps.sps != (HEVCRpiSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data) {
         const HEVCRpiSPS *sps = (HEVCRpiSPS*)s->ps.sps_list[s->ps.pps->sps_id]->data;
         const HEVCRpiSPS *last_sps = s->ps.sps;
+        enum AVPixelFormat pix_fmt;
 
         if (last_sps && IS_IRAP(s) && s->nal_unit_type != HEVC_NAL_CRA_NUT) {
             if (sps->width != last_sps->width || sps->height != last_sps->height ||
@@ -1386,9 +1394,19 @@ static int hls_slice_header(HEVCRpiContext * const s)
         }
         ff_hevc_rpi_clear_refs(s);
 
-        ret = set_sps(s, sps, get_format(s, sps));
+        ret = set_sps(s, sps, sps->pix_fmt);
         if (ret < 0)
             return ret;
+
+        pix_fmt = get_format(s, sps);
+        if (pix_fmt < 0)
+            return pix_fmt;
+
+//        ret = set_sps(s, sps, pix_fmt);
+//        if (ret < 0)
+//            return ret;
+
+        s->avctx->pix_fmt = pix_fmt;
 
         s->seq_decode = (s->seq_decode + 1) & 0xff;
         s->max_ra     = INT_MAX;
@@ -4820,6 +4838,13 @@ static int set_side_data(HEVCRpiContext *s)
 
         if (s->sei.frame_packing.content_interpretation_type == 2)
             stereo->flags = AV_STEREO3D_FLAG_INVERT;
+
+        if (s->sei.frame_packing.arrangement_type == 5) {
+            if (s->sei.frame_packing.current_frame_is_frame0_flag)
+                stereo->view = AV_STEREO3D_VIEW_LEFT;
+            else
+                stereo->view = AV_STEREO3D_VIEW_RIGHT;
+        }
     }
 
     if (s->sei.display_orientation.present &&
@@ -5057,7 +5082,12 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
             }
         }
 #endif
-        if (!s->used_for_ref && s->avctx->skip_frame >= AVDISCARD_NONREF) {
+        if (
+            (s->avctx->skip_frame >= AVDISCARD_NONREF && !s->used_for_ref) ||
+            (s->avctx->skip_frame >= AVDISCARD_BIDIR && s->sh.slice_type == HEVC_SLICE_B) ||
+            (s->avctx->skip_frame >= AVDISCARD_NONINTRA && s->sh.slice_type != HEVC_SLICE_I) ||
+            (s->avctx->skip_frame >= AVDISCARD_NONKEY && !IS_IDR(s)))
+        {
             s->is_decoded = 0;
             break;
         }
@@ -5232,7 +5262,7 @@ static int verify_md5(HEVCRpiContext *s, AVFrame *frame)
         int h = (i == 1 || i == 2) ? (height >> desc->log2_chroma_h) : height;
         uint8_t md5[16];
 
-        av_md5_init(s->sei.picture_hash.md5_ctx);
+        av_md5_init(s->md5_ctx);
         for (j = 0; j < h; j++) {
             const uint8_t *src = frame->data[i] + j * frame_stride1(frame, 1);
 #if HAVE_BIGENDIAN
@@ -5242,9 +5272,9 @@ static int verify_md5(HEVCRpiContext *s, AVFrame *frame)
                 src = s->checksum_buf;
             }
 #endif
-            av_md5_update(s->sei.picture_hash.md5_ctx, src, w << pixel_shift);
+            av_md5_update(s->md5_ctx, src, w << pixel_shift);
         }
-        av_md5_final(s->sei.picture_hash.md5_ctx, md5);
+        av_md5_final(s->md5_ctx, md5);
 
         if (!memcmp(md5, s->sei.picture_hash.md5[i], 16)) {
             av_log   (s->avctx, AV_LOG_DEBUG, "plane %d - correct ", i);
@@ -5395,7 +5425,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     pic_arrays_free(s);
 
-    av_freep(&s->sei.picture_hash.md5_ctx);
+    av_freep(&s->md5_ctx);
 
     av_freep(&s->cabac_save);
 
@@ -5507,8 +5537,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     s->max_ra = INT_MAX;
 
-    s->sei.picture_hash.md5_ctx = av_md5_alloc();
-    if (!s->sei.picture_hash.md5_ctx)
+    if ((s->md5_ctx = av_md5_alloc()) == NULL)
         goto fail;
 
     s->context_initialized = 1;
