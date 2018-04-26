@@ -559,6 +559,15 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
 #endif
 }
 
+// When bits are delivered to deblock we want them
+//#define TL 1
+//#define TR 2
+//#define BL 4
+//#define BR 8
+
+// pcm4 returns them as b0 = tl, b1 = tr, b16 = bl, b17 = br
+// so we need to rearrange before passing on
+
 static inline uint32_t pcm4(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y)
 {
     const uint8_t * const pcm = s->is_pcm + (x >> 6) + (y >> 3) * s->ps.sps->pcm_width;
@@ -574,23 +583,60 @@ static inline uint32_t pcm2(const HEVCRpiContext * const s, const unsigned int x
     return (pcm[0] | (pcm[1] << 8)) >> ((x >> 3) & 7);
 }
 
-// We sometimes need 17 2-bit entries (annoying!)
-// * This could be avoided if we separate out the H filter left-stub deblock
-//   but 64 bit constant shr shouldn't be too bad - though the variable mask here is probably quite nasty
-static inline uint64_t hbs_get(const HEVCRpiContext * const s, const unsigned int xl, const unsigned int xr, const unsigned int y)
+// We cast away const here as we want this to work for both get and set
+static inline uint32_t * bs_ptr32(const uint8_t * bs, const unsigned int stride2, const unsigned int x, const unsigned int y)
 {
-    unsigned int n = (xr - xl + 7) & ~7;
-
-    return n == 0 ? (uint64_t)0 :
-        (*(uint64_t *)(s->horizontal_bs + (xl >> 4) + (y >> 3) * s->hbs_stride) >> ((xl >> 1) & 7)) & (((uint64_t)1 << (n >> 1)) - 1);
+    return (uint32_t *)(bs +
+#if (~3U & (HEVC_RPI_BS_STRIDE1_PEL_MASK >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT)) != 0
+#warning Unexpected masks
+        // As it happens we end up with stride1 = sizeof(uint32_t) so this expr vanishes
+        ((x >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT) &
+            (~3 & (HEVC_RPI_BS_STRIDE1_PEL_MASK >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT))) +
+#elif HEVC_RPI_BS_STRIDE1_BYTES < 4
+#error Stride1 < return size
+#endif
+        ((y >> 3) << HEVC_RPI_BS_STRIDE1_BYTE_SHIFT) +
+        (x >> HEVC_RPI_BS_STRIDE1_PEL_SHIFT) * stride2);
 }
 
-static inline uint64_t vbs_get(const HEVCRpiContext * const s, const unsigned int xl, const unsigned int xr, const unsigned int y)
+static inline uint8_t * bs_ptr8(const uint8_t * bs, const unsigned int stride2, const unsigned int x, const unsigned int y)
 {
-    unsigned int n = (xr - xl + 7) & ~7;
+    return (uint8_t *)(bs +
+        ((x >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT) &
+            (HEVC_RPI_BS_STRIDE1_PEL_MASK >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT)) +
+        ((y >> 3) << HEVC_RPI_BS_STRIDE1_BYTE_SHIFT) +
+        (x >> HEVC_RPI_BS_STRIDE1_PEL_SHIFT) * stride2);
+}
 
-    return n == 0 ? (uint64_t)0 :
-        (*(uint64_t *)(s->vertical_bs2 + (xl >> 4) + (y >> 3) * s->hbs_stride) >> ((xl >> 1) & 7)) & (((uint64_t)1 << (n >> 1)) - 1);
+
+// Get block strength
+// Given how we call we will always get within the 32bit boundries
+static inline uint32_t bs_get32(const uint8_t * bs, const unsigned int stride2,
+                                const unsigned int xl, const unsigned int xr, const unsigned int y)
+{
+    if (xr <= xl) {
+        return 0;
+    }
+    else
+    {
+        const uint32_t a = *bs_ptr32(bs, stride2, xl, y);
+        const unsigned int n = ((xr - xl + 7) & ~7) >> 1;
+
+        return n == 32 ? a :
+            (a >> ((xl >> 1) & 31)) & ~(~0U << n);
+    }
+}
+
+static inline uint32_t hbs_get32(const HEVCRpiContext * const s, const unsigned int xl, const unsigned int xr, const unsigned int y)
+{
+    av_assert2(((xl ^ (xr - 1)) >> s->ps.sps->log2_ctb_size) == 0);
+    return bs_get32(s->bs_horizontal, s->bs_stride2, xl, xr, y);
+}
+
+static inline uint32_t vbs_get32(const HEVCRpiContext * const s, const unsigned int xl, const unsigned int xr, const unsigned int y)
+{
+    av_assert2(((xl ^ (xr - 1)) >> s->ps.sps->log2_ctb_size) == 0);
+    return bs_get32(s->bs_vertical, s->bs_stride2, xl, xr, y);
 }
 
 
@@ -618,79 +664,84 @@ static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, c
         // Main body
         for (y = (bounds.y == 0 ? 0 : bounds.y - 8); y < b_b; y += 8)
         {
+            uint32_t vbs = vbs_get32(s, bv_l, bv_r, y);
+
             const DBParams * const dbp = y < bounds.y ? cb_dbp - s->ps.sps->ctb_width : cb_dbp;
             const int8_t * const qta = s->qp_y_tab + ((y - 1) >> log2_min_cb_size) * s->ps.sps->min_cb_width;
             const int8_t * const qtb = s->qp_y_tab + (y >> log2_min_cb_size) * s->ps.sps->min_cb_width;
 
+            if (vbs != 0)
             {
                 const uint8_t * const tcv = tctable + dbp->tc_offset;
                 const uint8_t * const betav = betatable + dbp->beta_offset;
                 unsigned int pcmfa = pcm2(s, bv_l - 1, y);
-//                const uint8_t * vbs = s->vertical_bs + (bv_l >> 3) * s->bs_height + (y >> 2);
-                uint64_t vbs2 = vbs_get(s, bv_l, bv_r, y);
                 unsigned int x;
 
-                for (x = bv_l; x < bv_r; x += 8)
+                for (x = bv_l; vbs != 0; x += 8, vbs >>= 4, pcmfa >>= 1)
                 {
-                    const unsigned int pcmf_v = pcmfa & 3;
-                    const unsigned int bs0 = vbs2 & 3;
-                    const unsigned int bs1 = (vbs2 & 0xc) >> 2;
-
-                    if ((bs0 | bs1) != 0 && pcmf_v != 3)
+                    if ((vbs & 0xf) != 0 && (pcmfa & 3) != 3)
                     {
                         const int qp = (qtb[(x - 1) >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
                         s->hevcdsp.hevc_v_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
                                                          frame_stride1(s->frame, LUMA),
                                                          betav[qp],
-                                                         (bs0 == 0 ? 0 : tcv[qp + (int)(bs0 & 2)]) |
-                                                          ((bs1 == 0 ? 0 : tcv[qp + (int)(bs1 & 2)]) << 16),
-                                                         pcmf_v,
+                                                         ((vbs & 3) == 0 ? 0 : tcv[qp + (int)(vbs & 2)]) |
+                                                          (((vbs & 0xc) == 0 ? 0 : tcv[qp + (int)((vbs >> 2) & 2)]) << 16),
+                                                         pcmfa & 3,
                                                          av_rpi_sand_frame_pos_y(s->frame, x - 4, y));
                     }
-
-                    pcmfa >>= 1;
-//                    vbs += s->bs_height;
-                    vbs2 >>= 4;
                 }
             }
 
             if (y != 0)
             {
-                unsigned int x;
-                unsigned int pcmfa = pcm4(s, bh_l, y - 1);
-                uint64_t hbs = hbs_get(s, bh_l, bh_r + 1, y);  // Will give (x <= bh_r) in for loop
+                uint32_t hbs;
 
-                for (x = bh_l; hbs != 0; x += 8, hbs >>= 4)
+                // H left - mostly separated out so we only need a uint32_t hbs
+                if ((hbs = hbs_get32(s, bh_l, cb_x, y)) != 0)
                 {
-                    const unsigned int pcmf_h = (pcmfa & 1) | ((pcmfa & 0x10000) >> 15);
-                    const unsigned int bs0 = hbs & 3;
-                    const unsigned int bs1 = (hbs >> 2) & 3;
+                    const unsigned int x = bh_l;
+                    const unsigned int pcmfa = pcm4(s, bh_l, y - 1);
+                    const int qp = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
+                    const DBParams * const dbph = dbp - 1;
+                    const uint8_t * const tc = tctable + dbph->tc_offset + qp;
 
-                    if ((bs0 | bs1) != 0 && pcmf_h != 3)
+                    av_assert2(cb_x - bh_l == 8);
+
+                    s->hevcdsp.hevc_h_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
+                                                         frame_stride1(s->frame, LUMA),
+                                                         betatable[qp + dbph->beta_offset],
+                                                         ((hbs & 3) == 0 ? 0 : tc[hbs & 2]) |
+                                                            (((hbs & 0xc) == 0 ? 0 : tc[(hbs >> 2) & 2]) << 16),
+                                                         (pcmfa & 1) | ((pcmfa & 0x10000) >> 15));
+                }
+
+                // H
+                if ((hbs = hbs_get32(s, cb_x, bh_r + 1, y)) != 0)  // Will give (x <= bh_r) in for loop
+                {
+                    unsigned int x;
+                    unsigned int pcmfa = pcm4(s, cb_x, y - 1);
+
+                    for (x = cb_x; hbs != 0; x += 8, hbs >>= 4, pcmfa >>= 1)
                     {
-                        const int qp = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
-                        const DBParams * const dbph = (x < cb_x ? dbp - 1 : dbp);
-                        const uint8_t * const tc = tctable + dbph->tc_offset + qp;
-                        s->hevcdsp.hevc_h_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
-                                                             frame_stride1(s->frame, LUMA),
-                                                             betatable[qp + dbph->beta_offset],
-                                                             (bs0 == 0 ? 0 : tc[bs0 & 2]) |
-                                                                ((bs1 == 0 ? 0 : tc[bs1 & 2]) << 16),
-                                                             pcmf_h);
+                        if ((hbs & 0xf) != 0 && (~pcmfa & 0x10001) != 0)
+                        {
+                            const int qp = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
+                            const uint8_t * const tc = tctable + dbp->tc_offset + qp;
+                            s->hevcdsp.hevc_h_loop_filter_luma2(av_rpi_sand_frame_pos_y(s->frame, x, y),
+                                                                frame_stride1(s->frame, LUMA),
+                                                                betatable[qp + dbp->beta_offset],
+                                                                ((hbs & 3) == 0 ? 0 : tc[hbs & 2]) |
+                                                                   (((hbs & 0xc) == 0 ? 0 : tc[(hbs >> 2) & 2]) << 16),
+                                                                (pcmfa & 1) | ((pcmfa & 0x10000) >> 15));
+                        }
                     }
-
-                    pcmfa >>= 1;
                 }
             }
 
         }
     }
 }
-
-#define TL 1
-#define TR 2
-#define BL 4
-#define BR 8
 
 static av_always_inline int q2h(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y)
 {
@@ -728,98 +779,119 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
             // Deblock V up 8
             // CTB above current
             // Top-half only (tc4 & ~0xffff == 0) is special cased in asm
-            unsigned int x;
             const unsigned int y = bounds.y - 8;
+            uint32_t vbs = vbs_get32(s, bv_l, bv_r, y) & 0x02020202U;
 
-            unsigned int pcmfa = pcm2(s, bv_l - 1, y);
-            const uint8_t * const tc = tctable + 2 + (dbp - s->ps.sps->ctb_width)->tc_offset;
-            uint64_t vbs2 = (vbs_get(s, bv_l, bv_r, y) & 0x0202020202020202U);
-
-            for (x = bv_l; x < bv_r; x += 16, vbs2 >>= 8)
+            if (vbs != 0)
             {
-                const unsigned int pcmf_v = (pcmfa & 3);
-                if ((vbs2 & 2) != 0 && pcmf_v != 3)
+                unsigned int pcmfa = pcm2(s, bv_l - 1, y);
+                const uint8_t * const tc = tctable + 2 + (dbp - s->ps.sps->ctb_width)->tc_offset;
+                unsigned int x;
+
+                for (x = bv_l; vbs != 0; x += 16, vbs >>= 8, pcmfa >>= 2)
                 {
-                    const int qp0 = q2h(s, x, y);
-                    s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
-                                                   frame_stride1(s->frame, 1),
-                                                   tc[tcq_u[qp0]] | (tc[tcq_v[qp0]] << 8),
-                                                   av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
-                                                   pcmf_v);
+                    if ((vbs & 2) != 0 && (~pcmfa & 3) != 0)
+                    {
+                        const int qp0 = q2h(s, x, y);
+                        s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                                                       frame_stride1(s->frame, 1),
+                                                       tc[tcq_u[qp0]] | (tc[tcq_v[qp0]] << 8),
+                                                       av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
+                                                       pcmfa & 3);
+                    }
                 }
-                pcmfa >>= 2;
             }
         }
 
         for (y = bounds.y; y < b_b; y += 16)
         {
+            uint32_t vbs = (vbs_get32(s, bv_l, bv_r, y) & 0x02020202U) |
+                (y + 16 > b_b ? 0 : (vbs_get32(s, bv_l, bv_r, y + 8) & 0x02020202U) << 4);
+
             // V
+            if (vbs != 0)
             {
                 unsigned int x;
-                unsigned int pcmfa = pcm4(s, bv_l - 1, y);
-                const unsigned int pcmf_or = (y + 16 <= b_b) ? 0 : BL | BR;
+                unsigned int pcmfa =
+                    (y + 16 > b_b ?
+                        pcm2(s, bv_l - 1, y) | 0xffff0000 :
+                        pcm4(s, bv_l - 1, y));
                 const uint8_t * const tc = tctable + 2 + dbp->tc_offset;
-                uint64_t vbs2 = (vbs_get(s, bv_l, bv_r, y) & 0x0202020202020202U) |
-                                 ((vbs_get(s, bv_l, bv_r, y + 8) & 0x0202020202020202U) << 4);
 
-                for (x = bv_l; x < bv_r; x += 16, vbs2 >>= 8)
+                for (x = bv_l; vbs != 0; x += 16, vbs >>= 8, pcmfa >>= 2)
                 {
-                    const unsigned int pcmf_v = pcmf_or | (pcmfa & 3) | ((pcmfa >> 14) & 0xc);
-                    const unsigned int bs0 = (~pcmf_v & (TL | TR)) == 0 ? 0 : vbs2 & 2;
-                    const unsigned int bs1 = (~pcmf_v & (BL | BR)) == 0 ? 0 : (vbs2 & 0x20) >> 4;
-
-                    if ((bs0 | bs1) != 0)
+                    if ((vbs & 0xff) != 0 && (~pcmfa & 0x30003) != 0)
                     {
                         const int qp0 = q2h(s, x, y);
                         const int qp1 = q2h(s, x, y + 8);
                         s->hevcdsp.hevc_v_loop_filter_uv2(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
                             frame_stride1(s->frame, 1),
-                            ((bs0 == 0) ? 0 : (tc[tcq_u[qp0]] << 0) | (tc[tcq_v[qp0]] << 8)) |
-                                ((bs1 == 0) ? 0 : (tc[tcq_u[qp1]] << 16) | (tc[tcq_v[qp1]] << 24)),
+                            ((vbs & 2) == 0 ? 0 : (tc[tcq_u[qp0]] << 0) | (tc[tcq_v[qp0]] << 8)) |
+                                ((vbs & 0x20) == 0 ? 0 : (tc[tcq_u[qp1]] << 16) | (tc[tcq_v[qp1]] << 24)),
                             av_rpi_sand_frame_pos_c(s->frame, (x >> 1) - 2, y >> 1),
-                            pcmf_v);
+                            (pcmfa & 3) | ((pcmfa >> 14) & 0xc));
                     }
-
-                    pcmfa >>= 2;
                 }
             }
 
             // H
             if (y != 0)
             {
-                unsigned int x;
-                const unsigned int bh_r = cb_x + ctb_size >= cb_r ? cb_r : cb_x + ctb_size - 16;
+                uint32_t hbs;
                 const unsigned int bh_l = bv_l - 16;
-                unsigned int pcmfa = pcm4(s, bh_l, y - 1);
-                uint64_t hbs = hbs_get(s, bh_l, bh_r, y) & 0x2222222222222222U;
+                const unsigned int bh_r = cb_x + ctb_size >= cb_r ? cb_r : cb_x + ctb_size - 16;
                 const int8_t * const qta = s->qp_y_tab + ((y - 1) >> log2_min_cb_size) * s->ps.sps->min_cb_width;
                 const int8_t * const qtb = s->qp_y_tab + (y >> log2_min_cb_size) * s->ps.sps->min_cb_width;
 
-                // Chop off bits we don't want...
-                if (bh_l < bounds.x) {
-                    pcmfa |= 0x10001; // TL|BL pre rearrangement
-                    hbs &= ~(uint64_t)3;  // Make BS 0
-                }
-
-                for (x = bh_l; hbs != 0; x += 16, hbs >>= 8)
+                // H left - mostly separated out so we only need a uint32_t hbs
+                // Stub is width 8 to the left of bounds, but width 16 internally
+                if ((hbs = hbs_get32(s, bh_l, cb_x, y) & 0x22U) != 0)
                 {
-                    const unsigned int pcmf_h = (x + 16 > bh_r ? TR | BR : 0) |
-                        (pcmfa & 3) | ((pcmfa >> 14) & 0xc);
-                    const int bs0 = hbs & 2;
-                    const int bs1 = (~pcmf_h & (TR | BR)) == 0 ? 0 : (hbs >> 4) & 2;
-                    if ((bs0 | bs1) != 0)
+                    unsigned int pcmfa = pcm4(s, bh_l, y - 1);
+
+                    // Chop off bits we don't want...
+                    if (bh_l < bounds.x) {
+                        pcmfa |= 0x10001; // TL|BL pre rearrangement
+                        hbs &= ~3;  // Make BS 0
+                    }
+
+                    // Double check we still want this
+                    if (hbs != 0 && (~pcmfa & 0x30003) != 0)
                     {
+                        const unsigned int x = bh_l;
                         const int qp0 = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
                         const int qp1 = (qta[(x + 8) >> log2_min_cb_size] + qtb[(x + 8) >> log2_min_cb_size] + 1) >> 1;
-                        const uint8_t * const tc = tctable + 2 + (x < cb_x ? dbp - 1 : dbp)->tc_offset;
+                        const uint8_t * const tc = tctable + 2 + (dbp - 1)->tc_offset;
 
                         s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
                             frame_stride1(s->frame, 1),
-                            ((bs0 == 0) ? 0 : (tc[tcq_u[qp0]] << 0) | (tc[tcq_v[qp0]] << 8)) |
-                                ((bs1 == 0) ? 0 : (tc[tcq_u[qp1]] << 16) | (tc[tcq_v[qp1]] << 24)),
-                            pcmf_h);
+                            ((hbs & 2) == 0 ? 0 : (tc[tcq_u[qp0]] << 0) | (tc[tcq_v[qp0]] << 8)) |
+                                ((hbs & 0x20) == 0 ? 0 : (tc[tcq_u[qp1]] << 16) | (tc[tcq_v[qp1]] << 24)),
+                            (pcmfa & 3) | ((pcmfa >> 14) & 0xc));
                     }
-                    pcmfa >>= 2;
+                }
+
+                // H main
+                if ((hbs = (hbs_get32(s, cb_x, bh_r, y) & 0x22222222U)) != 0)
+                {
+                    unsigned int x;
+                    unsigned int pcmfa = pcm4(s, cb_x, y - 1);  // Might like to mask out far right writes but probably not worth it
+
+                    for (x = cb_x; hbs != 0; x += 16, hbs >>= 8, pcmfa >>= 2)
+                    {
+                        if ((hbs & 0xff) != 0 && (~pcmfa & 0x30003) != 0)
+                        {
+                            const int qp0 = (qta[x >> log2_min_cb_size] + qtb[x >> log2_min_cb_size] + 1) >> 1;
+                            const int qp1 = (qta[(x + 8) >> log2_min_cb_size] + qtb[(x + 8) >> log2_min_cb_size] + 1) >> 1;
+                            const uint8_t * const tc = tctable + 2 + dbp->tc_offset;
+
+                            s->hevcdsp.hevc_h_loop_filter_uv(av_rpi_sand_frame_pos_c(s->frame, x >> 1, y >> 1),
+                                frame_stride1(s->frame, 1),
+                                ((hbs & 2) == 0 ? 0 : (tc[tcq_u[qp0]] << 0) | (tc[tcq_v[qp0]] << 8)) |
+                                    ((hbs & 0x20) == 0 ? 0 : (tc[tcq_u[qp1]] << 16) | (tc[tcq_v[qp1]] << 24)),
+                                (pcmfa & 3) | ((pcmfa >> 14) & 0xc));
+                        }
+                    }
                 }
             }
         }
@@ -838,7 +910,7 @@ static inline void set_bs_h(const HEVCRpiContext * const s, const unsigned int x
     // This doesn't have the same simultainious update issues that bsf_stash
     // does (other threads will have a different y) so we can do it the easy way
     if ((bsf &= mask) != 0)
-        *(uint32_t *)(s->horizontal_bs + ((x >> 4) & ~3) + (y >> 3) * s->hbs_stride) |= bsf << ((x >> 1) & 31);
+        *bs_ptr32(s->bs_horizontal, s->bs_stride2, x, y) |= bsf << ((x >> 1) & 31);
 }
 
 
@@ -854,8 +926,7 @@ static void set_bs_v(const HEVCRpiContext * const s, const unsigned int x, const
 
     if ((bsf &= mask) != 0)
     {
-        const unsigned int stride1 = s->hbs_stride;
-        uint8_t *p = s->vertical_bs2 + (x >> 4) + (y >> 3) * stride1;
+        uint8_t *p = bs_ptr8(s->bs_vertical, s->bs_stride2, x, y);
         const unsigned int sh = ((x & 8) | (y & 4)) >> 1;
 
         if (mask <= 0xf)
@@ -866,7 +937,7 @@ static void set_bs_v(const HEVCRpiContext * const s, const unsigned int x, const
         {
             do {
                 *p |= (bsf & 0xf) << sh;
-                p += stride1;
+                p += HEVC_RPI_BS_STRIDE1_BYTES;
             } while ((bsf >>= 4) != 0);
         }
     }

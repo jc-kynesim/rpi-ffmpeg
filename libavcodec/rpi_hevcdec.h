@@ -685,6 +685,17 @@ typedef struct HEVCRpiCabacState
     uint8_t state[HEVC_CONTEXTS];
 } HEVCRpiCabacState;
 
+#define HEVC_RPI_BS_STRIDE1_PEL_SHIFT   6   // 64 pels
+#define HEVC_RPI_BS_STRIDE1_PELS        (1U << HEVC_RPI_BS_STRIDE1_PEL_SHIFT)
+#define HEVC_RPI_BS_STRIDE1_PEL_MASK    (HEVC_RPI_BS_STRIDE1_PELS - 1)
+#define HEVC_RPI_BS_ELS_PER_BYTE_SHIFT  2   // 4 els per byte
+#define HEVC_RPI_BS_PELS_PER_EL_SHIFT   2   // 4 pels per el
+#define HEVC_RPI_BS_PELS_PER_BYTE_SHIFT (HEVC_RPI_BS_PELS_PER_EL_SHIFT + HEVC_RPI_BS_ELS_PER_BYTE_SHIFT)
+#define HEVC_RPI_BS_STRIDE1_BYTE_SHIFT  (HEVC_RPI_BS_STRIDE1_PEL_SHIFT - HEVC_RPI_BS_PELS_PER_BYTE_SHIFT)
+#define HEVC_RPI_BS_STRIDE1_BYTES       (1U << HEVC_RPI_BS_STRIDE1_BYTE_SHIFT)
+#define HEVC_RPI_BS_Y_SHR               3   // 8 vertical pels per row
+#define HEVC_RPI_BS_COL_BYTES_SHR       (HEVC_RPI_BS_Y_SHR - HEVC_RPI_BS_STRIDE1_BYTE_SHIFT)
+
 typedef struct HEVCRpiContext {
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
@@ -754,8 +765,6 @@ typedef struct HEVCRpiContext {
     int eos;       ///< current packet contains an EOS/EOB NAL
     int last_eos;  ///< last packet contains an EOS/EOB NAL
     int max_ra;
-    unsigned int hbs_stride;
-    unsigned int bs_size;
 
     int is_decoded;
     int no_rasl_output_flag;
@@ -763,8 +772,12 @@ typedef struct HEVCRpiContext {
     HEVCPredContext hpc;
     HEVCDSPContext hevcdsp;
     int8_t *qp_y_tab;
-    uint8_t *horizontal_bs;
-    uint8_t *vertical_bs2;
+
+    // Deblocking block strength bitmaps
+    unsigned int bs_stride2;
+    unsigned int bs_size;
+    uint8_t *bs_horizontal;
+    uint8_t *bs_vertical;
     uint8_t *bsf_stash_up;
     uint8_t *bsf_stash_left;
 

@@ -933,9 +933,9 @@ static void pic_arrays_free(HEVCRpiContext *s)
     av_freep(&s->tab_slice_address);
     av_freep(&s->filter_slice_edges);
 
-    av_freep(&s->horizontal_bs);
+    av_freep(&s->bs_horizontal);
 //    av_freep(&s->vertical_bs);
-    av_freep(&s->vertical_bs2);
+    av_freep(&s->bs_vertical);
     av_freep(&s->bsf_stash_left);
     av_freep(&s->bsf_stash_up);
 
@@ -956,8 +956,13 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     int ctb_count        = sps->ctb_width * sps->ctb_height;
     int min_pu_size      = sps->min_pu_width * sps->min_pu_height;
 
-    s->hbs_stride = ((width + 63) & ~63) >> 4;
-    s->bs_size = (((height + 15) & ~15) >> 3) * s->hbs_stride;
+    {
+        unsigned int w = ((width + HEVC_RPI_BS_STRIDE1_PEL_MASK) & ~HEVC_RPI_BS_STRIDE1_PEL_MASK);
+        unsigned int h = ((height + 15) & ~15);
+
+        s->bs_stride2 = h >> HEVC_RPI_BS_COL_BYTES_SHR; // Column size
+        s->bs_size = s->bs_stride2 * (w >> HEVC_RPI_BS_STRIDE1_PEL_SHIFT); // col size * cols
+    }
 
     s->sao           = av_mallocz(ctb_count * sizeof(*s->sao) + 8); // Our sao code overreads this array slightly
     s->deblock       = av_mallocz_array(ctb_count, sizeof(*s->deblock));
@@ -983,9 +988,9 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     if (!s->qp_y_tab || !s->filter_slice_edges || !s->tab_slice_address)
         goto fail;
 
-    s->horizontal_bs = av_mallocz(s->bs_size);
-    s->vertical_bs2  = av_mallocz(s->bs_size);
-    if (s->horizontal_bs == NULL || s->vertical_bs2 == NULL)
+    s->bs_horizontal = av_mallocz(s->bs_size);
+    s->bs_vertical  = av_mallocz(s->bs_size);
+    if (s->bs_horizontal == NULL || s->bs_vertical == NULL)
         goto fail;
 
     if ((s->bsf_stash_left = av_mallocz(((height + 63) & ~63) >> 4)) == NULL ||
@@ -4928,8 +4933,8 @@ static int hevc_frame_start(HEVCRpiContext * const s)
                            ((s->ps.sps->height >> s->ps.sps->log2_min_cb_size) + 1);
     int ret;
 
-    memset(s->horizontal_bs, 0, s->bs_size);
-    memset(s->vertical_bs2, 0, s->bs_size);
+    memset(s->bs_horizontal, 0, s->bs_size);
+    memset(s->bs_vertical, 0, s->bs_size);
     memset(s->is_pcm,        0, s->ps.sps->pcm_width * s->ps.sps->pcm_height);
     memset(s->skip_flag,     0, s->ps.sps->min_cb_height * s->skip_flag_stride);
     memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
