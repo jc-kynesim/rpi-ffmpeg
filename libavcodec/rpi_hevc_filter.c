@@ -1166,6 +1166,12 @@ int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk boun
 
     // Deblock may not touch the edges of the bound as they are still needed
     // for Intra pred
+    //
+    // Deblock is disabled with a per-slice flag
+    // Given that bounds may cover multiple slices & we dblock outside bounds
+    // anyway we can't avoid deblock using that flag - about the only thing we
+    // could do is have a "no deblock seen yet" flag but it doesn't really
+    // seem worth the effort
 
     deblock_y_blk(s, bounds, x_end, y_end);
     deblock_uv_blk(s, bounds, x_end, y_end);
@@ -1181,9 +1187,12 @@ int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk boun
         const unsigned int xl = ussub(bounds.x, xo);
         const unsigned int xr = x_end ? br : ussub(br, xo);
 
-        for (y = yt; y < yb; y += ctb_size) {
-            for (x = xl; x < xr; x += ctb_size) {
-                sao_filter_CTB(s, x, y);
+        if (s->ps.sps->sao_enabled)
+        {
+            for (y = yt; y < yb; y += ctb_size) {
+                for (x = xl; x < xr; x += ctb_size) {
+                    sao_filter_CTB(s, x, y);
+                }
             }
         }
 
