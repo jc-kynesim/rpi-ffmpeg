@@ -1,0 +1,64 @@
+/*
+ * Copyright (c) 2018 John Cox (for Raspberry Pi)
+ *
+ * This file is part of FFmpeg.
+ *
+ * FFmpeg is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * FFmpeg is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with FFmpeg; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ */
+
+#include "rpi_hevcpred_arm.h"
+
+void ff_hevc_rpi_pred_dc_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_32_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_c_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_c_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_c_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_32_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_c_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_c_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+void ff_hevc_rpi_pred_dc_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+
+void ff_hevc_rpi_pred_init_neon(HEVCRpiPredContext * const c, const int bit_depth)
+{
+    switch (bit_depth)
+    {
+    case 8:
+        c->pred_dc[0]   = ff_hevc_rpi_pred_dc_4_neon_8;
+        c->pred_dc[1]   = ff_hevc_rpi_pred_dc_8_neon_8;
+        c->pred_dc[2]   = ff_hevc_rpi_pred_dc_16_neon_8;
+        c->pred_dc[3]   = ff_hevc_rpi_pred_dc_32_neon_8;
+        c->pred_dc_c[0] = ff_hevc_rpi_pred_dc_c_4_neon_8;
+        c->pred_dc_c[1] = ff_hevc_rpi_pred_dc_c_8_neon_8;
+        c->pred_dc_c[2] = ff_hevc_rpi_pred_dc_c_16_neon_8;
+        break;
+    case 10:
+        c->pred_dc[0]   = ff_hevc_rpi_pred_dc_4_neon_10;
+        c->pred_dc[1]   = ff_hevc_rpi_pred_dc_8_neon_10;
+        c->pred_dc[2]   = ff_hevc_rpi_pred_dc_16_neon_10;
+        c->pred_dc[3]   = ff_hevc_rpi_pred_dc_32_neon_10;
+        c->pred_dc_c[0] = ff_hevc_rpi_pred_dc_c_4_neon_10;
+        c->pred_dc_c[1] = ff_hevc_rpi_pred_dc_c_8_neon_10;
+        c->pred_dc_c[2] = ff_hevc_rpi_pred_dc_c_16_neon_10;
+        break;
+    default:
+        break;
+    }
+}
+

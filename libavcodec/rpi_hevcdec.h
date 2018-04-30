@@ -769,7 +769,7 @@ typedef struct HEVCRpiContext {
     int is_decoded;
     int no_rasl_output_flag;
 
-    HEVCPredContext hpc;
+    HEVCRpiPredContext hpc;
     HEVCDSPContext hevcdsp;
     int8_t *qp_y_tab;
 

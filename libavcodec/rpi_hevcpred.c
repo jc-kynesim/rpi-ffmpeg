@@ -23,6 +23,9 @@
 #include "rpi_hevcdec.h"
 
 #include "rpi_hevcpred.h"
+#if (ARCH_ARM)
+#include "arm/rpi_hevcpred_arm.h"
+#endif
 
 #define PRED_C 0
 #define BIT_DEPTH 8
@@ -60,7 +63,7 @@
 #undef BIT_DEPTH
 #undef PRED_C
 
-void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth)
+void ff_hevc_rpi_pred_init(HEVCRpiPredContext *hpc, int bit_depth)
 {
 #undef FUNC
 #define FUNC(a, depth) a ## _ ## depth
@@ -77,7 +80,10 @@ void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth)
     hpc->pred_planar[1]  = FUNC(pred_planar_1, depth);  \
     hpc->pred_planar[2]  = FUNC(pred_planar_2, depth);  \
     hpc->pred_planar[3]  = FUNC(pred_planar_3, depth);  \
-    hpc->pred_dc         = FUNC(pred_dc, depth);        \
+    hpc->pred_dc[0]      = FUNC(pred_dc_0, depth);      \
+    hpc->pred_dc[1]      = FUNC(pred_dc_1, depth);      \
+    hpc->pred_dc[2]      = FUNC(pred_dc_2, depth);      \
+    hpc->pred_dc[3]      = FUNC(pred_dc_3, depth);      \
     hpc->pred_angular[0] = FUNC(pred_angular_0, depth); \
     hpc->pred_angular[1] = FUNC(pred_angular_1, depth); \
     hpc->pred_angular[2] = FUNC(pred_angular_2, depth); \
@@ -92,7 +98,10 @@ void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth)
     hpc->pred_planar_c[1]  = FUNCC(pred_planar_1, depth);  \
     hpc->pred_planar_c[2]  = FUNCC(pred_planar_2, depth);  \
     hpc->pred_planar_c[3]  = FUNCC(pred_planar_3, depth);  \
-    hpc->pred_dc_c         = FUNCC(pred_dc, depth);        \
+    hpc->pred_dc_c[0]      = FUNCC(pred_dc_0, depth);      \
+    hpc->pred_dc_c[1]      = FUNCC(pred_dc_1, depth);      \
+    hpc->pred_dc_c[2]      = FUNCC(pred_dc_2, depth);      \
+    hpc->pred_dc_c[3]      = FUNCC(pred_dc_3, depth);      \
     hpc->pred_angular_c[0] = FUNCC(pred_angular_0, depth); \
     hpc->pred_angular_c[1] = FUNCC(pred_angular_1, depth); \
     hpc->pred_angular_c[2] = FUNCC(pred_angular_2, depth); \
@@ -117,6 +126,9 @@ void ff_hevc_rpi_pred_init(HEVCPredContext *hpc, int bit_depth)
         break;
     }
 
-    if (ARCH_MIPS)
-        ff_hevc_rpi_pred_init_mips(hpc, bit_depth);
+#if (ARCH_ARM)
+    ff_hevc_rpi_pred_init_arm(hpc, bit_depth);
+#elif (ARCH_MIPS)
+    ff_hevc_rpi_pred_init_mips(hpc, bit_depth);
+#endif
 }

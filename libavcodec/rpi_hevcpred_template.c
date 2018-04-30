@@ -191,20 +191,21 @@ do {                                  \
     const enum IntraPredMode mode = c_idx ? lc->tu.intra_pred_mode_c :
                               lc->tu.intra_pred_mode;
     pixel4 a;
-    pixel  left_array[2 * MAX_TB_SIZE + 1];
+
+    // Align so we can do multiple loads in the asm
+    // Padded to 16 byte boundary so as not to confuse anything
+    DECLARE_ALIGNED(16, pixel, left_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
+    DECLARE_ALIGNED(16, pixel,  top_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
 #if !PRED_C
-    pixel  filtered_left_array[2 * MAX_TB_SIZE + 1];
-#endif
-    pixel  top_array[2 * MAX_TB_SIZE + 1];
-#if !PRED_C
-    pixel  filtered_top_array[2 * MAX_TB_SIZE + 1];
+    DECLARE_ALIGNED(16, pixel, filtered_left_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
+    DECLARE_ALIGNED(16, pixel,  filtered_top_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
 #endif
 
-    pixel  *left          = left_array + 1;
-    pixel  *top           = top_array  + 1;
+    pixel  *left          = left_array + 16 / sizeof(pixel);
+    pixel  *top           = top_array  + 16 / sizeof(pixel);
 #if !PRED_C
-    pixel  *filtered_left = filtered_left_array + 1;
-    pixel  *filtered_top  = filtered_top_array  + 1;
+    pixel  *filtered_left = filtered_left_array + 16 / sizeof(pixel);
+    pixel  *filtered_top  = filtered_top_array  + 16 / sizeof(pixel);
 #endif
     int cand_bottom_left = lc->na.cand_bottom_left && cur_tb_addr > MIN_TB_ADDR_ZS( x_tb - 1, (y_tb + size_in_tbs_v) & s->ps.sps->tb_mask);
     int cand_left        = lc->na.cand_left;
@@ -459,8 +460,8 @@ do {                                  \
                                           (uint8_t *)left, stride);
         break;
     case INTRA_DC:
-        s->hpc.pred_dc((uint8_t *)src, (uint8_t *)top,
-                       (uint8_t *)left, stride, log2_size, c_idx);
+        s->hpc.pred_dc[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                       (uint8_t *)left, stride);
         break;
     default:
         s->hpc.pred_angular[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
@@ -475,8 +476,8 @@ do {                                  \
                                           (uint8_t *)left, stride);
         break;
     case INTRA_DC:
-        s->hpc.pred_dc_c((uint8_t *)src, (uint8_t *)top,
-                       (uint8_t *)left, stride, log2_size, c_idx);
+        s->hpc.pred_dc_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                       (uint8_t *)left, stride);
         break;
     default:
         s->hpc.pred_angular_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
@@ -563,7 +564,7 @@ PRED_PLANAR(3)
 #if !PRED_C
 static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
                           const uint8_t *_left,
-                          ptrdiff_t stride, int log2_size, int c_idx)
+                          ptrdiff_t stride, int log2_size)
 {
     int i, j, x, y;
     int size          = (1 << log2_size);
@@ -583,7 +584,10 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
         for (j = 0; j < size; j+=4)
             AV_WN4P(&POS(j, i), a);
 
-    if (c_idx == 0 && size < 32) {
+//    if (c_idx == 0 && size < 32)
+// As we now have separate fns for y & c - no need to test that
+    if (size < 32)
+    {
         POS(0, 0) = (left[0] + 2 * dc + top[0] + 2) >> 2;
         for (x = 1; x < size; x++)
             POS(x, 0) = (top[x] + 3 * dc + 2) >> 2;
@@ -594,7 +598,7 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
 #else
 static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
                           const uint8_t *_left,
-                          ptrdiff_t stride, int log2_size, int c_idx)
+                          ptrdiff_t stride, int log2_size)
 {
     unsigned int i, j;
     const unsigned int size = (1 << log2_size);
@@ -624,6 +628,20 @@ static void FUNC(pred_dc)(uint8_t *_src, const uint8_t *_top,
     }
 }
 #endif
+
+#define PRED_DC(size)\
+static void FUNC(pred_dc_ ## size)(uint8_t *src, const uint8_t *top,        \
+                                       const uint8_t *left, ptrdiff_t stride)   \
+{                                                                               \
+    FUNC(pred_dc)(src, top, left, stride, size + 2);                        \
+}
+
+PRED_DC(0)
+PRED_DC(1)
+PRED_DC(2)
+PRED_DC(3)
+
+#undef PRED_DC
 
 #ifndef ANGLE_CONSTS
 #define ANGLE_CONSTS
