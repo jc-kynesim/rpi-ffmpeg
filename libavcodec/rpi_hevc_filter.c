@@ -595,7 +595,7 @@ static inline uint32_t * bs_ptr32(const uint8_t * bs, const unsigned int stride2
 #elif HEVC_RPI_BS_STRIDE1_BYTES < 4
 #error Stride1 < return size
 #endif
-        ((y >> 3) << HEVC_RPI_BS_STRIDE1_BYTE_SHIFT) +
+        ((y >> HEVC_RPI_BS_Y_SHR) << HEVC_RPI_BS_STRIDE1_BYTE_SHIFT) +
         (x >> HEVC_RPI_BS_STRIDE1_PEL_SHIFT) * stride2);
 }
 
@@ -604,7 +604,7 @@ static inline uint8_t * bs_ptr8(const uint8_t * bs, const unsigned int stride2, 
     return (uint8_t *)(bs +
         ((x >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT) &
             (HEVC_RPI_BS_STRIDE1_PEL_MASK >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT)) +
-        ((y >> 3) << HEVC_RPI_BS_STRIDE1_BYTE_SHIFT) +
+        ((y >> HEVC_RPI_BS_Y_SHR) << HEVC_RPI_BS_STRIDE1_BYTE_SHIFT) +
         (x >> HEVC_RPI_BS_STRIDE1_PEL_SHIFT) * stride2);
 }
 
@@ -903,7 +903,7 @@ static inline unsigned int off_boundary(const unsigned int x, const unsigned int
     return x & ~(~0U << log2_n);
 }
 
-static inline void set_bs_h(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y, const uint32_t mask, uint32_t bsf)
+static inline void hbs_set(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y, const uint32_t mask, uint32_t bsf)
 {
     av_assert2((y & 7) == 0);
 
@@ -914,7 +914,7 @@ static inline void set_bs_h(const HEVCRpiContext * const s, const unsigned int x
 }
 
 
-static void set_bs_v(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y, const uint32_t mask, uint32_t bsf)
+static void vbs_set(const HEVCRpiContext * const s, const unsigned int x, const unsigned int y, const uint32_t mask, uint32_t bsf)
 {
     // We arrange this in a slightly odd fashion but it lines up with
     // how we are going to use it in the actual deblock code & it is easier
@@ -949,19 +949,10 @@ static inline uint32_t bsf_mv(const HEVCRpiContext * const s,
                               const RefPicList * const rpl_p, const RefPicList * const rpl_q,
                               const MvField * const mvf_p, const MvField * const mvf_q)
 {
-    uint8_t res[16];
-    unsigned int i;
-    unsigned int a = 0;
-
-    s->hevcdsp.hevc_deblocking_boundary_strengths(rep, dup,
-            sizeof(MvField) * mvf_stride, 1,
+    return s->hevcdsp.hevc_deblocking_boundary_strengths(rep, dup,
+            mvf_p, mvf_q,
             rpl_p[0].list, rpl_p[1].list, rpl_q[0].list, rpl_q[1].list,
-            mvf_p, mvf_q, res);
-
-    for (i = 0; i != rep * dup; ++i) {
-        a |= res[i] << (i * 2);
-    }
-    return a;
+            sizeof(MvField) * mvf_stride);
 }
 
 
@@ -1081,7 +1072,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             }
 
             // Finally put the results into bs
-            set_bs_h(s, x0, y0, bsf_mask, bsf_h);
+            hbs_set(s, x0, y0, bsf_mask, bsf_h);
         }
 
         // Max of 1 pu internal split - ignore if not on 8pel boundary
@@ -1092,7 +1083,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
             // If we have the x split as well then it must be in the middle
             const unsigned int log2_rep = has_x_split ? 1 : 0;
 
-            set_bs_h(s, x0, lc->cu.y_split, bsf_mask,
+            hbs_set(s, x0, lc->cu.y_split, bsf_mask,
                 bsf_mv(s, 1 << log2_rep, trafo_size >> (2 + log2_rep),
                    trafo_size >> (log2_min_pu_size + log2_rep),
                    rpl, rpl,
@@ -1105,7 +1096,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
     {
         // Boundary left
         if (x0 != 0 &&
-            ((x0 & ((1 << s->ps.sps->log2_ctb_size) - 1)) != 0 ||
+            (off_boundary(x0, s->ps.sps->log2_ctb_size) ||
              (boundary_flags & (BOUNDARY_LEFT_SLICE | BOUNDARY_LEFT_TILE)) == 0))
         {
             if ((~bsf_v & bsf_cbf) != 0 && (x0 == lc->cu.x || x0 == lc->cu.x_split))
@@ -1121,7 +1112,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                     mvf_curr, mvf_curr - 1);
             }
 
-            set_bs_v(s, x0, y0, bsf_mask, bsf_v);
+            vbs_set(s, x0, y0, bsf_mask, bsf_v);
         }
 
         if (has_x_split && !off_boundary(lc->cu.x_split, 3))
@@ -1130,7 +1121,7 @@ void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s,
                 (y0 >> log2_min_pu_size) * mvf_stride + (lc->cu.x_split >> log2_min_pu_size);
             const unsigned int log2_rep = has_y_split ? 1 : 0;
 
-            set_bs_v(s, lc->cu.x_split, y0, bsf_mask,
+            vbs_set(s, lc->cu.x_split, y0, bsf_mask,
                 bsf_mv(s, 1 << log2_rep, trafo_size >> (2 + log2_rep),
                    (mvf_stride << log2_trafo_size) >> (log2_min_pu_size + log2_rep),
                    rpl, rpl,
