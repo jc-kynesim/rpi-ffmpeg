@@ -544,6 +544,43 @@ static av_always_inline void FUNC(pred_planar)(uint8_t * _src, const uint8_t * _
                          (size - 1 - y) * top[x][1]  + (y + 1) * left[size][1] + size) >> (trafo_size + 1);
         }
     }
+#if BIT_DEPTH == 10
+    if (trafo_size == 4) {
+        DECLARE_ALIGNED(16, uint8_t, a[64*16]);
+        void ff_hevc_rpi_pred_planar_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+
+        src = (c_dst_ptr_t)_src;
+        printf("C:\n");
+        for (y = 0; y < size; y++, src += stride)
+        {
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x:%3x ", src[x][0], src[x][1]);
+            }
+            printf("\n");
+        }
+
+        ff_hevc_rpi_pred_planar_c_16_neon_10(a, _top, _left, 16);
+
+        src = (c_dst_ptr_t)a;
+        printf("A:\n");
+        for (y = 0; y < size; y++, src += size)
+        {
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x:%3x ", src[x][0], src[x][1]);
+            }
+            printf("\n");
+        }
+
+        src = (c_dst_ptr_t)_src;
+        for (y = 0; y < size; y++, src += stride)
+        {
+            av_assert0(memcmp(src, a+64*y, 64) == 0);
+        }
+
+    }
+#endif
 }
 #endif
 
