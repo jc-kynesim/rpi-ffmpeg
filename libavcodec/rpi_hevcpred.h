@@ -39,7 +39,13 @@ typedef struct HEVCRpiPredContext {
                     ptrdiff_t stride);
     void (*pred_angular[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
-                            int c_idx, int mode);
+                            int mode);
+    void (*pred_vertical[4])(uint8_t *src, const uint8_t *top,
+                            const uint8_t *left, ptrdiff_t stride,
+                            int mode);
+    void (*pred_horizontal[4])(uint8_t *src, const uint8_t *top,
+                            const uint8_t *left, ptrdiff_t stride,
+                            int mode);
     void (*intra_pred_c[4])(const struct HEVCRpiContext * const s, struct HEVCRpiLocalContext * const lc, int x0, int y0, int c_idx);
 
     void (*pred_planar_c[4])(uint8_t *src, const uint8_t *top,
@@ -48,7 +54,13 @@ typedef struct HEVCRpiPredContext {
                     ptrdiff_t stride);
     void (*pred_angular_c[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
-                            int c_idx, int mode);
+                            int mode);
+    void (*pred_vertical_c[4])(uint8_t *src, const uint8_t *top,
+                            const uint8_t *left, ptrdiff_t stride,
+                            int mode);
+    void (*pred_horizontal_c[4])(uint8_t *src, const uint8_t *top,
+                            const uint8_t *left, ptrdiff_t stride,
+                            int mode);
 } HEVCRpiPredContext;
 
 void ff_hevc_rpi_pred_init(HEVCRpiPredContext *hpc, int bit_depth);

@@ -20,6 +20,36 @@
 
 #include "rpi_hevcpred_arm.h"
 
+void ff_hevc_rpi_pred_vertical_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_32_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_c_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_c_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_c_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_32_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_c_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_c_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_vertical_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+
+void ff_hevc_rpi_pred_horizontal_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_32_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_c_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_c_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_c_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_32_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_c_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_c_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_horizontal_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+
 void ff_hevc_rpi_pred_planar_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
 void ff_hevc_rpi_pred_planar_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
 void ff_hevc_rpi_pred_planar_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
@@ -55,6 +85,22 @@ void ff_hevc_rpi_pred_init_neon(HEVCRpiPredContext * const c, const int bit_dept
     switch (bit_depth)
     {
     case 8:
+        c->pred_horizontal[0] = ff_hevc_rpi_pred_horizontal_4_neon_8;
+        c->pred_horizontal[1] = ff_hevc_rpi_pred_horizontal_8_neon_8;
+        c->pred_horizontal[2] = ff_hevc_rpi_pred_horizontal_16_neon_8;
+        c->pred_horizontal[3] = ff_hevc_rpi_pred_horizontal_32_neon_8;
+        c->pred_horizontal_c[0] = ff_hevc_rpi_pred_horizontal_c_4_neon_8;
+        c->pred_horizontal_c[1] = ff_hevc_rpi_pred_horizontal_c_8_neon_8;
+        c->pred_horizontal_c[2] = ff_hevc_rpi_pred_horizontal_c_16_neon_8;
+
+        c->pred_vertical[0] = ff_hevc_rpi_pred_vertical_4_neon_8;
+        c->pred_vertical[1] = ff_hevc_rpi_pred_vertical_8_neon_8;
+        c->pred_vertical[2] = ff_hevc_rpi_pred_vertical_16_neon_8;
+        c->pred_vertical[3] = ff_hevc_rpi_pred_vertical_32_neon_8;
+        c->pred_vertical_c[0] = ff_hevc_rpi_pred_vertical_c_4_neon_8;
+        c->pred_vertical_c[1] = ff_hevc_rpi_pred_vertical_c_8_neon_8;
+        c->pred_vertical_c[2] = ff_hevc_rpi_pred_vertical_c_16_neon_8;
+
         c->pred_planar[0] = ff_hevc_rpi_pred_planar_4_neon_8;
         c->pred_planar[1] = ff_hevc_rpi_pred_planar_8_neon_8;
         c->pred_planar[2] = ff_hevc_rpi_pred_planar_16_neon_8;
@@ -72,6 +118,22 @@ void ff_hevc_rpi_pred_init_neon(HEVCRpiPredContext * const c, const int bit_dept
         c->pred_dc_c[2] = ff_hevc_rpi_pred_dc_c_16_neon_8;
         break;
     case 10:
+        c->pred_horizontal[0] = ff_hevc_rpi_pred_horizontal_4_neon_10;
+        c->pred_horizontal[1] = ff_hevc_rpi_pred_horizontal_8_neon_10;
+        c->pred_horizontal[2] = ff_hevc_rpi_pred_horizontal_16_neon_10;
+        c->pred_horizontal[3] = ff_hevc_rpi_pred_horizontal_32_neon_10;
+        c->pred_horizontal_c[0] = ff_hevc_rpi_pred_horizontal_c_4_neon_10;
+        c->pred_horizontal_c[1] = ff_hevc_rpi_pred_horizontal_c_8_neon_10;
+        c->pred_horizontal_c[2] = ff_hevc_rpi_pred_horizontal_c_16_neon_10;
+
+        c->pred_vertical[0] = ff_hevc_rpi_pred_vertical_4_neon_10;
+        c->pred_vertical[1] = ff_hevc_rpi_pred_vertical_8_neon_10;
+        c->pred_vertical[2] = ff_hevc_rpi_pred_vertical_16_neon_10;
+        c->pred_vertical[3] = ff_hevc_rpi_pred_vertical_32_neon_10;
+        c->pred_vertical_c[0] = ff_hevc_rpi_pred_vertical_c_4_neon_10;
+        c->pred_vertical_c[1] = ff_hevc_rpi_pred_vertical_c_8_neon_10;
+        c->pred_vertical_c[2] = ff_hevc_rpi_pred_vertical_c_16_neon_10;
+
         c->pred_planar[0] = ff_hevc_rpi_pred_planar_4_neon_10;
         c->pred_planar[1] = ff_hevc_rpi_pred_planar_8_neon_10;
         c->pred_planar[2] = ff_hevc_rpi_pred_planar_16_neon_10;

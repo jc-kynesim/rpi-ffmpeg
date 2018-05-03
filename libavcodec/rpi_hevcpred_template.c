@@ -463,9 +463,19 @@ do {                                  \
         s->hpc.pred_dc[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
                        (uint8_t *)left, stride);
         break;
+    case INTRA_ANGULAR_HORIZONTAL:
+        s->hpc.pred_horizontal[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                           (uint8_t *)left, stride,
+                                           mode);
+        break;
+    case INTRA_ANGULAR_VERTICAL:
+        s->hpc.pred_vertical[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                           (uint8_t *)left, stride,
+                                           mode);
+        break;
     default:
         s->hpc.pred_angular[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
-                                           (uint8_t *)left, stride, c_idx,
+                                           (uint8_t *)left, stride,
                                            mode);
         break;
     }
@@ -479,9 +489,19 @@ do {                                  \
         s->hpc.pred_dc_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
                        (uint8_t *)left, stride);
         break;
+    case INTRA_ANGULAR_HORIZONTAL:
+        s->hpc.pred_horizontal_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                           (uint8_t *)left, stride,
+                                           mode);
+        break;
+    case INTRA_ANGULAR_VERTICAL:
+        s->hpc.pred_vertical_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+                                           (uint8_t *)left, stride,
+                                           mode);
+        break;
     default:
         s->hpc.pred_angular_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
-                                           (uint8_t *)left, stride, c_idx,
+                                           (uint8_t *)left, stride,
                                            mode);
         break;
     }
@@ -544,7 +564,7 @@ static av_always_inline void FUNC(pred_planar)(uint8_t * _src, const uint8_t * _
                          (size - 1 - y) * top[x][1]  + (y + 1) * left[size][1] + size) >> (trafo_size + 1);
         }
     }
-#if BIT_DEPTH == 10
+#if BIT_DEPTH == 10 && 0
     if (trafo_size == 4) {
         DECLARE_ALIGNED(16, uint8_t, a[64*16]);
         void ff_hevc_rpi_pred_planar_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
@@ -696,7 +716,7 @@ static const int inv_angle[] = {
 static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
                                                 const uint8_t *_top,
                                                 const uint8_t *_left,
-                                                ptrdiff_t stride, int c_idx,
+                                                ptrdiff_t stride,
                                                 int mode, int size)
 {
     int x, y;
@@ -739,9 +759,50 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
                     AV_WN4P(&POS(x, y), AV_RN4P(&ref[x + idx + 1]));
             }
         }
-        if (mode == 26 && c_idx == 0 && size < 32) {
+//        if (mode == 26 && c_idx == 0 && size < 32) {
+        if (mode == 26 && size < 32) {
             for (y = 0; y < size; y++)
                 POS(0, y) = av_clip_pixel(top[0] + ((left[y] - left[-1]) >> 1));
+
+
+#if BIT_DEPTH == 8 && 0
+    if (size == 16) {
+        DECLARE_ALIGNED(16, uint8_t, a[64*16]);
+        void ff_hevc_rpi_pred_vertical_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+
+        src = (pixel *)_src;
+        printf("C:\n");
+        for (y = 0; y < size; y++, src += stride)
+        {
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x ", src[x]);
+            }
+            printf("\n");
+        }
+
+        ff_hevc_rpi_pred_vertical_16_neon_8(a, _top, _left, size);
+
+        src = (pixel *)a;
+        printf("A:\n");
+        for (y = 0; y < size; y++, src += size)
+        {
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x ", src[x]);
+            }
+            printf("\n");
+        }
+
+        src = (pixel *)_src;
+        for (y = 0; y < size; y++, src += stride)
+        {
+            av_assert0(memcmp(src, a+size*sizeof(pixel)*y, size*sizeof(pixel)) == 0);
+        }
+
+    }
+#endif
+
         }
     } else {
         ref = left - 1;
@@ -766,7 +827,8 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
                     POS(x, y) = ref[y + idx + 1];
             }
         }
-        if (mode == 10 && c_idx == 0 && size < 32) {
+//        if (mode == 10 && c_idx == 0 && size < 32) {
+        if (mode == 10 && size < 32) {
             for (x = 0; x < size; x += 4) {
                 POS(x,     0) = av_clip_pixel(left[0] + ((top[x    ] - top[-1]) >> 1));
                 POS(x + 1, 0) = av_clip_pixel(left[0] + ((top[x + 1] - top[-1]) >> 1));
@@ -780,7 +842,7 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
 static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
                                                 const uint8_t *_top,
                                                 const uint8_t *_left,
-                                                ptrdiff_t stride, int c_idx,
+                                                ptrdiff_t stride,
                                                 int mode, int size)
 {
     int x, y;
@@ -856,30 +918,30 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
 
 static void FUNC(pred_angular_0)(uint8_t *src, const uint8_t *top,
                                  const uint8_t *left,
-                                 ptrdiff_t stride, int c_idx, int mode)
+                                 ptrdiff_t stride, int mode)
 {
-    FUNC(pred_angular)(src, top, left, stride, c_idx, mode, 1 << 2);
+    FUNC(pred_angular)(src, top, left, stride, mode, 1 << 2);
 }
 
 static void FUNC(pred_angular_1)(uint8_t *src, const uint8_t *top,
                                  const uint8_t *left,
-                                 ptrdiff_t stride, int c_idx, int mode)
+                                 ptrdiff_t stride, int mode)
 {
-    FUNC(pred_angular)(src, top, left, stride, c_idx, mode, 1 << 3);
+    FUNC(pred_angular)(src, top, left, stride, mode, 1 << 3);
 }
 
 static void FUNC(pred_angular_2)(uint8_t *src, const uint8_t *top,
                                  const uint8_t *left,
-                                 ptrdiff_t stride, int c_idx, int mode)
+                                 ptrdiff_t stride, int mode)
 {
-    FUNC(pred_angular)(src, top, left, stride, c_idx, mode, 1 << 4);
+    FUNC(pred_angular)(src, top, left, stride, mode, 1 << 4);
 }
 
 static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
                                  const uint8_t *left,
-                                 ptrdiff_t stride, int c_idx, int mode)
+                                 ptrdiff_t stride, int mode)
 {
-    FUNC(pred_angular)(src, top, left, stride, c_idx, mode, 1 << 5);
+    FUNC(pred_angular)(src, top, left, stride, mode, 1 << 5);
 }
 
 #undef cpel
