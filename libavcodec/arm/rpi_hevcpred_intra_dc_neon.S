@@ -118,47 +118,51 @@ endfunc
 function ff_hevc_rpi_pred_dc_8_neon_8, export=1
 
         @ Average the els of top & left
-        vld1.8     {d16}, [r1]
-        vld1.8     {d24}, [r2]
-        vaddl.u8    q0,  d16, d24
-        vmov.u16    r1,  d0[0]    @ r1 = top[0] + left[0]
-        vadd.i16    d0,  d1       @ d0 has 4 vals
-        vpadd.i16   d0,  d0       @ 2 (top & bottom the same)
-        vpadd.i16   d0,  d0       @ 1 (all the same)
-        vrshr.u16   d0,  #4
-
-        vmov.i64    d31, #0xff
+        vld1.8      {d0}, [r1]
+        mov r1, #2
+        vld1.8      {d16}, [r2]
+        vmov.i16    q2, #3
+        vmov.i64    d7, #0xffff
+        vaddl.u8    q1, d0, d16   @ d2[0] = top[0] + left[0]
+        vmovl.u8    q0, d0
+        vadd.i16    d6, d2, d3    @ d6 has 4 vals
+        vmov.16     d4[0], r1     @ 2, 3, 3, 3...
+        vbit        d0, d2, d7    @ top[0]+left[0], top[1..3], left[0..3]
 
         @ top line gets some smoothing
         @ (top[i] + 3*dc + 2) >> 2
         @ as does left
         @ top_line[0] is extra special
-        @ (top[0] + left[0] + dc * 2)
+        @ (top[0] + left[0] + 2*dc + 2) >> 2
 
-        vmov.u16    r12, d0[0]   @ dc
-        add         r2,  r12, r12, lsl #1  @ dc*3
-        add         r1,  r1,  r12, lsl #1  @ top[0] + left[0] + dc*2
-
-        vdup.u16    q3,  r2
-        vaddw.u8    q1,  q3,  d16
-        vmov.u16    d2[0], r1
-        vrshrn.u16  d2,  q1,  #2
-
-        @ Construct lhs pels
-        vaddw.u8    q2,  q3,  d24
-        vrshrn.u16  d4,  q2,  #2
+        vmov.i64    d7, #0xff
+        vmovl.u8    q1, d16
+        vpadd.i16   d6, d6        @ 2 (top & bottom of vector the same)
+        vpadd.i16   d6, d6        @ 1 (all the same)
+        vrshr.u16   d6, #4
+        vmla.i16    q1, q2, d6[0]
+        vmla.i16    q0, q2, d6[0]
+        vdup.8      d6, d6[0]
+        vrshrn.i16  d2, q1, #2
+        vrshrn.i16  d0, q0, #2
 
         @ Store top line
-        vst1.8     { d2}, [r0], r3
+        vst1.8      {d0}, [r0], r3
 
-        mov         r1,  #7
-        vdup.u8     d0,  d0[0]
-
+        @ Store the rest
+        vshr.u64    d2, #8
+        vbit        d6, d2, d7
+        vshr.u64    d2, #8
+        vst1.8      {d6}, [r0], r3
+        mov         r1, #6
 1:
-        vext.8      d4,  d4,  #1
-        vbit        d0,  d4,  d31
-        subs        r1,  #1
-        vst1.8     { d0}, [r0], r3
+        vbit        d6, d2, d7
+        vshr.u64    d2, #8
+        vst1.8      {d6}, [r0], r3
+        subs        r1, #2
+        vbit        d6, d2, d7
+        vshr.u64    d2, #8
+        vst1.8      {d6}, [r0], r3
         bne         1b
 
         bx          lr
@@ -444,47 +448,53 @@ endfunc
 function ff_hevc_rpi_pred_dc_8_neon_10, export=1
 
         @ Average the els of top & left
-        vld1.16    {q8 }, [r1]
-        vld1.16    {q12}, [r2]
-        lsl         r3,  #1       @ stride given in pels
-        vadd.u16    q0,  q8,  q12
-        vmov.u16    r1,  d0[0]    @ r1 = top[0] + left[0]
-        vadd.i16    d0,  d1       @ d0 has 4 vals
-        vpadd.i16   d0,  d0       @ 2 (top & bottom the same)
-        vpadd.i16   d0,  d0       @ 1 (all the same)
-        vrshr.u16   d0,  #4
-
-        vmov.i64    d31, #0xffff
+        vld1.16     {q0}, [r1]
+        mov         r1, #2
+        vld1.16     {q8}, [r2]
+T       lsl         r3, #1
+        vmov.i16    q2, #3
+A       add         r2, r0, r3, lsl #1
+T       add         r2, r0, r3
+        vadd.i16    q1, q0, q8    @ q1[0] = top[0] + left[0]
+A       lsl         r3, #2
+T       lsl         r3, #1
+        vmov.i64    d7, #0xffff
+        vmov.16     d4[0], r1     @ 2, 3, 3, 3...
+        vadd.i16    d6, d2, d3    @ d6 has 4 vals
+        vbit        d0, d2, d7    @ top[0]+left[0], top[1..3], left[0..3]
 
         @ top line gets some smoothing
         @ (top[i] + 3*dc + 2) >> 2
+        @ as does left
         @ top_line[0] is extra special
-        @ (top[0] + left[0] + dc * 2)
+        @ (top[0] + left[0] + 2*dc + 2) >> 2
 
-        vmov.u16    r12, d0[0]   @ dc
-        add         r2,  r12, r12, lsl #1  @ dc*3
-        add         r1,  r1,  r12, lsl #1  @ top[0] + left[0] + dc*2
-
-        vdup.u16    q3,  r2
-        vadd.u16    q8,  q3
-        vmov.u16    d16[0], r1
-        vrshr.u16   q8,  #2
-
-        @ Construct lhs pels
-        vadd.u16    q12, q3
-        vrshr.u16   q12, #2
+        vpadd.i16   d6, d6        @ 2 (top & bottom of vector the same)
+        vpadd.i16   d6, d6        @ 1 (all the same)
+        vrshr.u16   d6, #4
+        vmla.i16    q8, q2, d6[0]
+        vmla.i16    q0, q2, d6[0]
+        vdup.16     q2, d6[0]
+        vdup.16     q9, d6[0]
+        vrshr.u16   q8, q8, #2
+        vrshr.u16   q0, q0, #2
+        vext.16     q1, q8, q8, #1
 
         @ Store top line
-        vst1.16    {q8 }, [r0], r3
+        vst1.16     {q0}, [r0], r3
 
-        mov         r1,  #7
-        vdup.u16    q0,  d0[0]
-
+        @ Store the rest
+        vbit        d18, d2, d7
+        vst1.16     {q9}, [r2], r3
+        mov         r1, #6
 1:
-        vext.16     q12, q13, #1
-        vbit        d0,  d24, d31
-        subs        r1,  #1
-        vst1.16    {q0 }, [r0], r3
+        vext.16     q8, q8, q8, #2
+        subs        r1, #2
+        vext.16     q1, q1, q1, #2
+        vbit        d4, d16, d7
+        vst1.16     {q2}, [r0], r3
+        vbit        d18, d2, d7
+        vst1.16     {q9}, [r2], r3
         bne         1b
 
         bx          lr
