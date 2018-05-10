@@ -564,43 +564,6 @@ static av_always_inline void FUNC(pred_planar)(uint8_t * _src, const uint8_t * _
                          (size - 1 - y) * top[x][1]  + (y + 1) * left[size][1] + size) >> (trafo_size + 1);
         }
     }
-#if BIT_DEPTH == 10 && 0
-    if (trafo_size == 4) {
-        DECLARE_ALIGNED(16, uint8_t, a[64*16]);
-        void ff_hevc_rpi_pred_planar_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
-
-        src = (c_dst_ptr_t)_src;
-        printf("C:\n");
-        for (y = 0; y < size; y++, src += stride)
-        {
-            for (x = 0; x < size; x++)
-            {
-                printf("%3x:%3x ", src[x][0], src[x][1]);
-            }
-            printf("\n");
-        }
-
-        ff_hevc_rpi_pred_planar_c_16_neon_10(a, _top, _left, 16);
-
-        src = (c_dst_ptr_t)a;
-        printf("A:\n");
-        for (y = 0; y < size; y++, src += size)
-        {
-            for (x = 0; x < size; x++)
-            {
-                printf("%3x:%3x ", src[x][0], src[x][1]);
-            }
-            printf("\n");
-        }
-
-        src = (c_dst_ptr_t)_src;
-        for (y = 0; y < size; y++, src += stride)
-        {
-            av_assert0(memcmp(src, a+64*y, 64) == 0);
-        }
-
-    }
-#endif
 }
 #endif
 
@@ -763,47 +726,8 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
         if (mode == 26 && size < 32) {
             for (y = 0; y < size; y++)
                 POS(0, y) = av_clip_pixel(top[0] + ((left[y] - left[-1]) >> 1));
-
-
-#if BIT_DEPTH == 8 && 0
-    if (size == 16) {
-        DECLARE_ALIGNED(16, uint8_t, a[64*16]);
-        void ff_hevc_rpi_pred_vertical_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
-
-        src = (pixel *)_src;
-        printf("C:\n");
-        for (y = 0; y < size; y++, src += stride)
-        {
-            for (x = 0; x < size; x++)
-            {
-                printf("%3x ", src[x]);
-            }
-            printf("\n");
         }
 
-        ff_hevc_rpi_pred_vertical_16_neon_8(a, _top, _left, size);
-
-        src = (pixel *)a;
-        printf("A:\n");
-        for (y = 0; y < size; y++, src += size)
-        {
-            for (x = 0; x < size; x++)
-            {
-                printf("%3x ", src[x]);
-            }
-            printf("\n");
-        }
-
-        src = (pixel *)_src;
-        for (y = 0; y < size; y++, src += stride)
-        {
-            av_assert0(memcmp(src, a+size*sizeof(pixel)*y, size*sizeof(pixel)) == 0);
-        }
-
-    }
-#endif
-
-        }
     } else {
         ref = left - 1;
         if (angle < 0 && last < -1) {
@@ -837,6 +761,55 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
             }
         }
     }
+
+
+
+#if BIT_DEPTH == 8 && 0
+    if ((size == 16 || size == 32) && mode != 10 && mode != 26) {
+        DECLARE_ALIGNED(16, uint8_t, a[64*32]);
+        void ff_hevc_rpi_pred_angular_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+//        void ff_hevc_rpi_pred_angular_32_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+#if 1
+        src = (pixel *)_src;
+        printf("C: Mode=%d\n", mode);
+        for (y = 0; y < size; y++, src += stride)
+        {
+            printf("%2d:  ", y);
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x ", src[x]);
+            }
+            printf("\n");
+        }
+#endif
+//            ff_hevc_rpi_pred_vertical_16_neon_8(a, _top, _left, size);
+        memset(a, 0, sizeof(a));
+//        ff_hevc_rpi_pred_angular_32_neon_10(a, _top, _left, size, mode);
+        ff_hevc_rpi_pred_angular_16_neon_8(a, _top, _left, size, mode);
+#if 1
+        src = (pixel *)a;
+        printf("A:\n");
+        for (y = 0; y < size; y++, src += size)
+        {
+            printf("%2d:  ", y);
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x ", src[x]);
+            }
+            printf("\n");
+        }
+#endif
+        src = (pixel *)_src;
+        for (y = 0; y < size; y++, src += stride)
+        {
+            if (memcmp(src, a + size * sizeof(pixel) * y, size * sizeof(pixel)) != 0) {
+                printf("Fail at line %d\n", y);
+                av_assert0(0);
+            }
+        }
+    }
+#endif
+
 }
 #else
 static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
@@ -913,6 +886,49 @@ static av_always_inline void FUNC(pred_angular)(uint8_t *_src,
             }
         }
     }
+
+#if BIT_DEPTH == 10 && 0
+    if (size == 16 && mode != 10 && mode != 26) {
+        DECLARE_ALIGNED(16, uint8_t, a[64*32]);
+//            void ff_hevc_rpi_pred_vertical_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride);
+        void ff_hevc_rpi_pred_angular_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+
+        src = (c_dst_ptr_t)_src;
+        printf("C: mode=%d\n", mode);
+        for (y = 0; y < size; y++, src += stride)
+        {
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x:%3x ", src[x][0], src[x][1]);
+            }
+            printf("\n");
+        }
+
+        memset(a,  0, sizeof(a));
+        ff_hevc_rpi_pred_angular_c_16_neon_10(a, _top, _left, size, mode);
+
+        src = (c_dst_ptr_t)a;
+        printf("A:\n");
+        for (y = 0; y < size; y++, src += size)
+        {
+            for (x = 0; x < size; x++)
+            {
+                printf("%3x:%3x ", src[x][0], src[x][1]);
+            }
+            printf("\n");
+        }
+
+        src = (c_dst_ptr_t)_src;
+        for (y = 0; y < size; y++, src += stride)
+        {
+            if (memcmp(src, a + size * sizeof(pixel) * y, size * sizeof(pixel)) != 0) {
+                printf("Fail at line %d\n", y);
+                av_assert0(0);
+            }
+        }
+
+    }
+#endif
 }
 #endif
 

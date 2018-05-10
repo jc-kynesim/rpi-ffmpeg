@@ -20,6 +20,21 @@
 
 #include "rpi_hevcpred_arm.h"
 
+void ff_hevc_rpi_pred_angular_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_32_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_c_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_c_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_c_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_32_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_c_4_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_c_8_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+void ff_hevc_rpi_pred_angular_c_16_neon_10(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
+
 void ff_hevc_rpi_pred_vertical_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
 void ff_hevc_rpi_pred_vertical_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
 void ff_hevc_rpi_pred_vertical_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
@@ -85,6 +100,14 @@ void ff_hevc_rpi_pred_init_neon(HEVCRpiPredContext * const c, const int bit_dept
     switch (bit_depth)
     {
     case 8:
+        c->pred_angular[0] = ff_hevc_rpi_pred_angular_4_neon_8;
+        c->pred_angular[1] = ff_hevc_rpi_pred_angular_8_neon_8;
+        c->pred_angular[2] = ff_hevc_rpi_pred_angular_16_neon_8;
+        c->pred_angular[3] = ff_hevc_rpi_pred_angular_32_neon_8;
+        c->pred_angular_c[0] = ff_hevc_rpi_pred_angular_c_4_neon_8;
+        c->pred_angular_c[1] = ff_hevc_rpi_pred_angular_c_8_neon_8;
+        c->pred_angular_c[2] = ff_hevc_rpi_pred_angular_c_16_neon_8;
+
         c->pred_horizontal[0] = ff_hevc_rpi_pred_horizontal_4_neon_8;
         c->pred_horizontal[1] = ff_hevc_rpi_pred_horizontal_8_neon_8;
         c->pred_horizontal[2] = ff_hevc_rpi_pred_horizontal_16_neon_8;
@@ -118,6 +141,14 @@ void ff_hevc_rpi_pred_init_neon(HEVCRpiPredContext * const c, const int bit_dept
         c->pred_dc_c[2] = ff_hevc_rpi_pred_dc_c_16_neon_8;
         break;
     case 10:
+        c->pred_angular[0] = ff_hevc_rpi_pred_angular_4_neon_10;
+        c->pred_angular[1] = ff_hevc_rpi_pred_angular_8_neon_10;
+        c->pred_angular[2] = ff_hevc_rpi_pred_angular_16_neon_10;
+        c->pred_angular[3] = ff_hevc_rpi_pred_angular_32_neon_10;
+        c->pred_angular_c[0] = ff_hevc_rpi_pred_angular_c_4_neon_10;
+        c->pred_angular_c[1] = ff_hevc_rpi_pred_angular_c_8_neon_10;
+        c->pred_angular_c[2] = ff_hevc_rpi_pred_angular_c_16_neon_10;
+
         c->pred_horizontal[0] = ff_hevc_rpi_pred_horizontal_4_neon_10;
         c->pred_horizontal[1] = ff_hevc_rpi_pred_horizontal_8_neon_10;
         c->pred_horizontal[2] = ff_hevc_rpi_pred_horizontal_16_neon_10;
