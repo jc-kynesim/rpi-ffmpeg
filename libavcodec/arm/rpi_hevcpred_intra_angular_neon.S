@@ -1611,7 +1611,7 @@ function ff_hevc_rpi_pred_angular_16_neon_10, export=1
         vmov        s1,  r6
         rsb         r12, r6,  #32
         add         r6,  r4
-        vmov.16     s0,  r12
+        vmov        s0,  r12
 
         vmul.u16    q1,  q8,  d0[2]
         vmul.u16    q2,  q9,  d0[2]

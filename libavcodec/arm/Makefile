@@ -40,7 +40,8 @@ OBJS-$(CONFIG_AAC_DECODER)             += arm/aacpsdsp_init_arm.o       \
                                           arm/sbrdsp_init_arm.o
 OBJS-$(CONFIG_DCA_DECODER)             += arm/synth_filter_init_arm.o
 OBJS-$(CONFIG_HEVC_DECODER)            += arm/hevcdsp_init_arm.o
-OBJS-$(CONFIG_HEVC_RPI_DECODER)        += arm/rpi_hevcdsp_init_arm.o
+OBJS-$(CONFIG_HEVC_RPI_DECODER)        += arm/rpi_hevcdsp_init_arm.o    \
+                                          arm/rpi_hevcpred_init_arm.o
 OBJS-$(CONFIG_MLP_DECODER)             += arm/mlpdsp_init_arm.o
 OBJS-$(CONFIG_RV40_DECODER)            += arm/rv40dsp_init_arm.o
 OBJS-$(CONFIG_SBC_ENCODER)             += arm/sbcdsp_init_arm.o
@@ -149,7 +150,6 @@ NEON-OBJS-$(CONFIG_HEVC_RPI_DECODER)   += arm/rpi_hevcdsp_init_neon.o    \
                                           arm/rpi_hevcdsp_res8_neon.o    \
                                           arm/rpi_hevcdsp_res16_neon.o   \
                                           arm/rpi_hevcdsp_sao_neon.o     \
-                                          arm/rpi_hevcpred_init_arm.o    \
                                           arm/rpi_hevcpred_init_neon.o   \
                                           arm/rpi_hevcpred_intra_angular_neon.o \
                                           arm/rpi_hevcpred_intra_dc_neon.o \
