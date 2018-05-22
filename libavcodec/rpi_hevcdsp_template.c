@@ -579,7 +579,7 @@ static void FUNC(sao_edge_filter)(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride
     pixel *src = (pixel *)_src;
     int a_stride, b_stride;
     int x, y;
-    ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
+    const ptrdiff_t stride_src = RPI_HEVC_SAO_BUF_STRIDE / sizeof(pixel);
     stride_dst /= sizeof(pixel);
 
     a_stride = pos[eo][0][0] + pos[eo][0][1] * stride_src;
@@ -807,7 +807,7 @@ static void FUNC(sao_edge_filter_c)(uint8_t *_dst, const uint8_t *_src, ptrdiff_
     pixel *src = (pixel *)_src;
     int a_stride, b_stride;
     int x, y;
-    ptrdiff_t stride_src = (2*MAX_PB_SIZE + AV_INPUT_BUFFER_PADDING_SIZE) / sizeof(pixel);
+    const ptrdiff_t stride_src = RPI_HEVC_SAO_BUF_STRIDE / sizeof(pixel);
 
     stride_dst /= sizeof(pixel);
     width *= 2;
