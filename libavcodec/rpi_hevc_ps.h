@@ -106,6 +106,9 @@ typedef struct RpiSliceHeader {
     int num_entry_point_offsets;
     int offsets_allocated;
 
+    uint8_t offload_wpp;
+    uint8_t offload_tiles;
+
     int8_t slice_qp;
 
     uint8_t luma_log2_weight_denom;

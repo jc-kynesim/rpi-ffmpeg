@@ -702,13 +702,10 @@ typedef struct HEVCRpiContext {
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
 
-    struct HEVCRpiContext  *sList[MAX_NB_THREADS];
-
     HEVCRpiLocalContext    *HEVClcList[MAX_NB_THREADS];
     HEVCRpiLocalContext    *HEVClc;
 
     uint8_t             threads_type;
-    uint8_t             threads_number;
 
     /** 1 if the independent slice segment header was successfully parsed */
     uint8_t slice_initialized;
@@ -913,12 +910,13 @@ void ff_hevc_rpi_progress_signal_field(HEVCRpiContext * const s, const int val, 
 static inline void ff_hevc_rpi_progress_wait_mv(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
                                      const HEVCFrame * const ref, const int y)
 {
-    ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
+    if (s->threads_type != 0)
+        ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
 }
 
 static inline void ff_hevc_rpi_progress_signal_mv(HEVCRpiContext * const s, const int y)
 {
-    if (s->used_for_ref)
+    if (s->used_for_ref && s->threads_type != 0)
         ff_hevc_rpi_progress_signal_field(s, y, 1);
 }
 
@@ -930,7 +928,7 @@ static inline void ff_hevc_rpi_progress_wait_recon(const HEVCRpiContext * const 
 
 static inline void ff_hevc_rpi_progress_signal_recon(HEVCRpiContext * const s, const int y)
 {
-    if (s->used_for_ref)
+    if (s->used_for_ref && s->threads_type != 0)
     {
         ff_hevc_rpi_progress_signal_field(s, y, 0);
     }

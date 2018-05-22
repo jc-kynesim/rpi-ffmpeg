@@ -1713,6 +1713,9 @@ static int hls_slice_header(HEVCRpiContext * const s)
     }
 
     sh->num_entry_point_offsets = 0;
+    sh->offload_wpp = 0;
+    sh->offload_wpp = 0;
+
     if (s->ps.pps->tiles_enabled_flag || s->ps.pps->entropy_coding_sync_enabled_flag) {
         unsigned num_entry_point_offsets = get_ue_golomb_long(gb);
         // It would be possible to bound this tighter but this here is simpler
@@ -1748,6 +1751,18 @@ static int hls_slice_header(HEVCRpiContext * const s)
                     return AVERROR_INVALIDDATA;
                 }
                 sh->entry_point_offset[i] = val_minus1 + 1; // +1 to get the size
+            }
+
+            // Do we want to offload this
+            if (s->threads_type != 0)
+            {
+                sh->offload_wpp = (!s->ps.pps->tile_wpp_inter_disable || sh->slice_type == HEVC_SLICE_I) &&
+                    s->ps.pps->num_tile_columns > 1;
+                // * We only cope with WPP in a single column
+                //   Probably want to deal with that case as tiles rather than WPP anyway
+                // ?? Not actually sure that the main code deals with WPP + multi-col correctly
+                sh->offload_wpp = s->ps.pps->entropy_coding_sync_enabled_flag &&
+                    s->ps.pps->num_tile_columns == 1;
             }
         }
     }
@@ -2299,7 +2314,7 @@ static int hls_pcm_sample(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
 static void hevc_await_progress(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const HEVCFrame * const ref,
                                 const Mv * const mv, const int y0, const int height)
 {
-    if (s->threads_type == FF_THREAD_FRAME) {
+    if (s->threads_type != 0) {
         const int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
 
         // Progress has to be attached to current job as the actual wait
@@ -3476,7 +3491,7 @@ static void rpi_execute_dblk_cmds(const HEVCRpiContext * const s, HEVCRpiJob * c
         (s->ps.pps->ctb_ts_flags[jb->ctu_ts_last] & CTB_TS_FLAGS_EOT) != 0);
 
     // Signal
-    if (s->threads_type == FF_THREAD_FRAME && y > 0) {
+    if (y > 0) {
         // Cast away const as progress is held in s, but this really shouldn't confuse anything
         ff_hevc_rpi_progress_signal_recon((HEVCRpiContext *)s, y - 1);
     }
@@ -4247,7 +4262,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
             ff_hevc_rpi_save_states(s, lc);
 
         // Report progress so we can use our MVs in other frames
-        if (s->threads_type == FF_THREAD_FRAME && (ctb_flags & CTB_TS_FLAGS_EOL) != 0)
+        if ((ctb_flags & CTB_TS_FLAGS_EOL) != 0)
             ff_hevc_rpi_progress_signal_mv(s, y_ctb + ctb_size - 1);
 
         // End of line || End of tile line || End of tile
@@ -4661,9 +4676,7 @@ static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
 
 #if RPI_EXTRA_BIT_THREADS > 0
 
-    if (s->sh.num_entry_point_offsets != 0 &&
-        (!s->ps.pps->tile_wpp_inter_disable || s->sh.slice_type == HEVC_SLICE_I) &&
-        s->ps.pps->num_tile_columns > 1)
+    if (s->sh.offload_tiles)
     {
         unsigned int slice_row = 0;
 
@@ -4708,14 +4721,7 @@ static int rpi_decode_entry(AVCodecContext *avctxt, void *isFilterThread)
         printf("%s: Done wait: ts=%d\n", __func__, lc->ts);
 #endif
     }
-    else
-
-    // * We only cope with WPP in a single column
-    //   Probably want to deal with that case as tiles rather than WPP anyway
-    // ?? Not actually sure that the main code deals with WPP + multi-col correctly
-    if (s->ps.pps->entropy_coding_sync_enabled_flag &&
-        s->ps.pps->num_tile_columns == 1 &&
-        s->sh.num_entry_point_offsets != 0)
+    else if (s->sh.offload_wpp)
     {
 #if TRACE_WPP
         printf("%s: Do WPP\n", __func__);
@@ -5070,8 +5076,7 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_STSA_N  ||
                         s->nal_unit_type == HEVC_NAL_RADL_N  ||
                         s->nal_unit_type == HEVC_NAL_RASL_N);
-        s->offload_recon = s->used_for_ref;
-//        s->offload_recon = 0;
+        s->offload_recon = s->threads_type != 0 && s->used_for_ref;
 
 #if DEBUG_DECODE_N
         {
@@ -5213,7 +5218,7 @@ static int decode_nal_units(HEVCRpiContext *s, const uint8_t *buf, int length)
 
 fail:  // Also success path
     if (s->ref != NULL) {
-        if (s->used_for_ref && s->threads_type == FF_THREAD_FRAME) {
+        if (s->used_for_ref && s->threads_type != 0) {
             ff_hevc_rpi_progress_signal_all_done(s);
         }
         else {
@@ -5462,12 +5467,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     s->ps.pps = NULL;
     s->ps.vps = NULL;
 
-    for (i = 1; i < s->threads_number; i++) {
-        if (s->sList[i] != NULL) {
-            av_freep(&s->sList[i]);
-        }
-    }
-
     // Free separately from sLists as used that way by RPI WPP
     for (i = 0; i < MAX_NB_THREADS && s->HEVClcList[i] != NULL; ++i) {
         av_freep(s->HEVClcList + i);
@@ -5496,7 +5495,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     if (!s->HEVClc)
         goto fail;
     s->HEVClcList[0] = s->HEVClc;
-    s->sList[0] = s;
 
     // Whilst FFmpegs init fn is only called once the close fn is called as
     // many times as we have threads (init_thread_copy is called for the
@@ -5621,7 +5619,6 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     s->is_nalff        = s0->is_nalff;
     s->nal_length_size = s0->nal_length_size;
 
-    s->threads_number      = s0->threads_number;
     s->threads_type        = s0->threads_type;
 
     if (s0->eos) {
@@ -5679,11 +5676,6 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     atomic_init(&s->wpp_err, 0);
 
-    if(avctx->active_thread_type & FF_THREAD_SLICE)
-        s->threads_number = avctx->thread_count;
-    else
-        s->threads_number = 1;
-
     if (avctx->extradata_size > 0 && avctx->extradata) {
         ret = hevc_rpi_decode_extradata(s, avctx->extradata, avctx->extradata_size, 1);
 
@@ -5700,7 +5692,7 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
     if((avctx->active_thread_type & FF_THREAD_FRAME) && avctx->thread_count > 1)
         s->threads_type = FF_THREAD_FRAME;
     else
-        s->threads_type = FF_THREAD_SLICE;
+        s->threads_type = 0;
 
     return 0;
 }
