@@ -976,7 +976,10 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
         goto fail;
 
     s->tab_ipm  = av_mallocz(min_pu_size);
-    s->is_pcm   = av_malloc_array(sps->pcm_width, sps->pcm_height);
+    // We can overread by 1 line & one byte in deblock so alloc & zero
+    // We don't need to zero the extra @ start of frame as it will never be
+    // written
+    s->is_pcm   = av_mallocz(sps->pcm_width * (sps->pcm_height + 1) + 1);
     if (!s->tab_ipm || !s->is_pcm)
         goto fail;
 
