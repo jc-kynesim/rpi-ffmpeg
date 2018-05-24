@@ -722,6 +722,7 @@ endfunc
 function ff_hevc_rpi_h_loop_filter_uv_neon_8, export=1
         sub      r12, r0, r1
         cmp      r2, #0
+        it eq
         bxeq     lr
         vld1.8   {d26,d27}, [r0]
         lsl      r1, #1
@@ -734,10 +735,14 @@ function ff_hevc_rpi_h_loop_filter_uv_neon_8, export=1
         "sub      r12, r0, r1, asr #1"
 
         lsls     r3, #29                @ b2 -> N, b3 -> C
+        it pl
         vstrpl   d26, [r0, #0]
+        it cc
         vstrcc   d27, [r0, #8]
         lsls     r3, #2                 @ b0 -> N, b1 -> C
+        it pl
         vstrpl   d18, [r12, #0]
+        it cc
         vstrcc   d19, [r12, #8]
         bx       lr
 
@@ -756,6 +761,7 @@ endfunc
 .macro m_filter_h_uv_16 bit_depth
         sub      r12, r0, r1
         cmp      r2, #0
+        it eq
         bxeq     lr
         vld1.16  {q12, q13}, [r0]
         lsl      r1, #1
@@ -777,13 +783,17 @@ endfunc
         @ Which means we need to break this apart in an ugly fashion
 1:
         lsls     r3, #29                @ b2 -> N, b3 -> C
+        itt pl
         vstrpl   d24, [r0, #0]
         vstrpl   d25, [r0, #8]
+        itt cc
         vstrcc   d26, [r0, #16]
         vstrcc   d27, [r0, #24]
         lsls     r3, #2                 @ b0 -> N, b1 -> C
+        itt pl
         vstrpl   d20, [r12, #0]
         vstrpl   d21, [r12, #8]
+        itt cc
         vstrcc   d22, [r12, #16]
         vstrcc   d23, [r12, #24]
         bx       lr
@@ -804,6 +814,7 @@ endfunc
 
 function ff_hevc_rpi_v_loop_filter_uv2_neon_8, export=1
         cmp      r2, #0
+        it eq
         bxeq     lr
         push     {lr}
         vld2.16  {d16[0], d18[0]}, [r3], r1
@@ -860,6 +871,7 @@ function ff_hevc_rpi_v_loop_filter_uv2_neon_8, export=1
 @ Either split or partial
 1:
         lsls     lr, #29               @ b3 (Q0b) -> C, b2 (P0b) -> N & b31, b1 (Q0a) -> b30, b0 (P0a) -> b29
+        ittt cs
         addcs    r0, r0, r1, lsl #1
         addcs    r2, r2, r1, lsl #1
         bcs      1f
@@ -869,6 +881,7 @@ function ff_hevc_rpi_v_loop_filter_uv2_neon_8, export=1
         vst1.16  {d21[1]}, [r0], r1
         vst1.16  {d21[0]}, [r2], r1
 1:
+        ittt mi
         addmi    r3, r3, r1, lsl #1
         addmi    ip, ip, r1, lsl #1
         bmi      1f
@@ -950,6 +963,7 @@ endfunc
 
 .macro m_filter_v_uv2_16 bit_depth
         cmp      r2, #0
+        it eq
         bxeq     lr
         push     {lr}
         vld2.32  {d16[0], d18[0]}, [r3], r1
@@ -1006,6 +1020,7 @@ endfunc
 @ Either split or partial
 1:
         lsls     lr, #29               @ b3 (Q0b) -> C, b2 (P0b) -> N & b31, b1 (Q0a) -> b30, b0 (P0a) -> b29
+        ittt cs
         addcs    r0, r0, r1, lsl #1
         addcs    r2, r2, r1, lsl #1
         bcs      1f
@@ -1015,6 +1030,7 @@ endfunc
         vst1.32  {d28[1]}, [r0], r1
         vst1.32  {d28[0]}, [r2], r1
 1:
+        ittt mi
         addmi    r3, r3, r1, lsl #1
         addmi    ip, ip, r1, lsl #1
         bmi      1f
@@ -1188,9 +1204,11 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         vmovl.s16   q5, d29
           teq         lr, #1
         vmovl.s16   q14, d30
-          lslne       v1, lr, #1
+        it ne
+        lslne       v1, lr, #1
         vmovl.s16   q15, d31
-          rsbne       v2, v1, #32
+        it ne
+        rsbne       v2, v1, #32
         vbif        q0, q1, q4
         vbif        q2, q3, q14
         vbif        q1, q0, q5
@@ -1272,13 +1290,21 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         lsl         ip, v2
         lsl         lr, v2
         ldr         v2, [sp, #6*8 + 10*4 + 1*4]
-        orr         a2, ip, a2, lsr v1
+T       lsr         a2, v1
+T       orr         a2, ip, a2
+A       orr         a2, ip, a2, lsr v1
         lsl         ip, v1, #1
-        orr         v8, lr, v8, lsr v1
+T       lsr         v8, v1
+T       orr         v8, lr, v8
+A       orr         v8, lr, v8, lsr v1
         lsl         lr, v1, #2
-        orr         a2, v8, a2, lsr ip
+T       lsr         a2, ip
+T       orr         a2, v8, a2
+A       orr         a2, v8, a2, lsr ip
         ldr         v1, [sp, #6*8 + 10*4]
-        orr         v7, a2, v7, lsr lr
+T       lsr         v7, lr
+T       orr         v7, a2, v7
+A       orr         v7, a2, v7, lsr lr
         bhi         1b
 
         vpop        {d8-d13}
@@ -1344,11 +1370,12 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         vtst.16     d22, d16, d18
         vadd.i16    d30, d16, d17
         vswp        d2, d3
-          ldr         lr, [sp]
+        ldr         lr, [sp]
         vmovl.s16   q10, d20
-          teq         lr, #1
+        teq         lr, #1
         vmovl.s16   q11, d22
-          lslne       v1, lr, #1
+        it ne
+        lslne       v1, lr, #1
         vbif        d0, d1, d20
         vbif        d4, d6, d20
         vbif        d3, d2, d21
@@ -1374,7 +1401,8 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         vshrn.i32   d7, q11, #8
         vmovn.i32   d3, q10
         vand        q0, q3, q1
-          rsbne       v2, v1, #32
+        it ne
+        rsbne       v2, v1, #32
         vrev16.8    q3, q3
         vand        q0, q3
         vsra.u64    d30, #32
@@ -1391,6 +1419,7 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         cmp         a1, #2
         vmov.u16    a1, d0[1]
         vmov.u16    a2, d0[0]
+        it eq
         orreq       a1, a2, a1, lsl #2
         pop         {a2,v1-v8,pc}
 10:
@@ -1403,7 +1432,10 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         pkhbt       a1, a1, a1, lsl #16
         lsr         a2, v2
         lsr         a1, v2
-        orreq       a1, a2, a1, lsl v1
+T       itt eq
+T       lsleq       a1, v1
+T       orreq       a1, a2, a1
+A       orreq       a1, a2, a1, lsl v1
         pop         {a2,v1-v8,pc}
 endfunc
 

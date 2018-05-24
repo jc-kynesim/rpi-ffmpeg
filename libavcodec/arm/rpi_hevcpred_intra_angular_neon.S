@@ -123,8 +123,11 @@ patch_h_up_8x8_8:
         @ r2=left (variable), r1=up (const)
         adds        r8,  r7
         vmov        d24, d16
+T       itee mi
         ldrbmi      r12, [r2,  #-1]!
-        ldrbpl      r12, [r1,  r8,  asr #8]
+T       asrpl       r12, r8,  #8
+T       ldrbpl      r12, [r1,  r12]
+A       ldrbpl      r12, [r1,  r8,  asr #8]
         vext.8      d16, d16, d16, #7
         sub         r6,  #32
         vmov.8      d16[0], r12
@@ -146,7 +149,11 @@ patch_h_up_8x8_8:
         bne         2b
         b           store_tran_8x8_8  @ This will return
 
-
+.macro ADRT reg, val
+@ adr in T32 has enough range but not in A32
+A       adrl        \reg, \val
+T       adr         \reg, \val
+.endm
 
 @ ff_hevc_rpi_pred_angular_4_neon_8
 @       uint8_t *_src,          [r0]
@@ -158,8 +165,8 @@ patch_h_up_8x8_8:
 function ff_hevc_rpi_pred_angular_4_neon_8, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
 
@@ -219,8 +226,11 @@ function ff_hevc_rpi_pred_angular_4_neon_8, export=1
         @ r2=left (variable), r1=up (const)
         adds        r8,  r7
         vmov        d24, d16
+T       itee mi
         ldrbmi      r12, [r2,  #-1]!
-        ldrbpl      r12, [r1,  r8,  asr #8]
+T       asrpl       r12, r8,  #8
+T       ldrbpl      r12, [r1,  r12]
+A       ldrbpl      r12, [r1,  r8,  asr #8]
         vext.8      d16, d16, d16, #7
         sub         r6,  #32
         vmov.8      d16[0], r12
@@ -253,7 +263,9 @@ function ff_hevc_rpi_pred_angular_4_neon_8, export=1
         ble         1f
 
         @ For other widths we may want different logic
-        ldrb        r12, [r2,  r8,  asr #8]
+T       asr         r12, r8,  #8
+T       ldrb        r12, [r2,  r12]
+A       ldrb        r12, [r2,  r8,  asr #8]
 
         vmov        d24, d16
         add         r8,  r7
@@ -315,8 +327,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_8_neon_8, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
 
@@ -359,7 +371,9 @@ function ff_hevc_rpi_pred_angular_8_neon_8, export=1
         ble         1f
 
         @ For other widths we may want different logic
-        ldrb        r12, [r2,  r8,  asr #8]
+T       asr         r12, r8,  #8
+T       ldrb        r12, [r2,  r12]
+A       ldrb        r12, [r2,  r8,  asr #8]
 
         vmov        d24, d16
         add         r8,  r7
@@ -419,8 +433,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_16_neon_8, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
 
@@ -488,7 +502,9 @@ function ff_hevc_rpi_pred_angular_16_neon_8, export=1
         ble         1f
 
         @ For other widths we may want different logic
-        ldrb        r12, [r2,  r8,  asr #8]
+T       asr         r12, r8,  #8
+T       ldrb        r12, [r2,  r12]
+A       ldrb        r12, [r2,  r8,  asr #8]
 
         vmov        q12, q8
         add         r8,  r7
@@ -559,8 +575,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_32_neon_8, export=1
         ldr         r12, [sp, #0]
         push       {r4-r10, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
 
@@ -631,7 +647,9 @@ function ff_hevc_rpi_pred_angular_32_neon_8, export=1
         ble         1f
 
         @ For other widths we may want different logic
-        ldrb        r12, [r2,  r8,  asr #8]
+T       asr         r12, r8,  #8
+T       ldrb        r12, [r2,  r12]
+A       ldrb        r12, [r2,  r8,  asr #8]
 
         vmov        q12, q8
         add         r8,  r7
@@ -759,6 +777,7 @@ patch_h_up_c_4x4_8:
         @ Use r2 for both up and left, we only ever go from left->up so
         @ we assume that we are left and thenm overwrite with up if wanted
         sub         r2,  #2
+        it pl
         addpl       r2,  r1,  r8,  asr #7
         vext.16     d16, d16, d16, #3
         @ We get *2 by >> 7 rather than 8, but that means we need to lose bit 0
@@ -791,8 +810,8 @@ patch_h_up_c_4x4_8:
 function ff_hevc_rpi_pred_angular_c_4_neon_8, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
         lsl         r3,  #1
@@ -897,8 +916,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_c_8_neon_8, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
         lsl         r3,  #1
@@ -1036,8 +1055,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_c_16_neon_8, export=1
         ldr         r12, [sp, #0]
         push       {r4-r10, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
         lsl         r3,  #1
@@ -1263,6 +1282,7 @@ patch_h_up_4x4_10:
         @ Use r2 for both up and left, we only ever go from left->up so
         @ we assume that we are left and thenm overwrite with up if wanted
         sub         r2,  #2
+        it pl
         addpl       r2,  r1,  r8,  asr #7
         vext.16     d16, d16, d16, #3
         @ We get *2 by >> 7 rather than 8, but that means we need to lose bit 0
@@ -1296,8 +1316,8 @@ patch_h_up_4x4_10:
 function ff_hevc_rpi_pred_angular_4_neon_10, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         lsl         r3,  #1
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
@@ -1400,8 +1420,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_8_neon_10, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         lsl         r3,  #1
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
@@ -1527,8 +1547,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_16_neon_10, export=1
         ldr         r12, [sp, #0]
         push       {r4-r10, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         lsl         r3,  #1
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
@@ -1674,8 +1694,8 @@ function ff_hevc_rpi_pred_angular_32_neon_10, export=1
         ldr         r12, [sp, #0]
         push       {r4-r10, lr}
         vpush      {q4 }
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         lsl         r3,  #1
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
@@ -1909,6 +1929,7 @@ patch_h_up_c_4x4_10:
         @ Use r2 for both up and left, we only ever go from left->up so
         @ we assume that we are left and thenm overwrite with up if wanted
         sub         r2,  #4
+        it pl
         addpl       r2,  r1,  r8,  asr #6
         vext.32     q8,  q8,  #3
         @ We get *4 by >> 6 rather than 8, but that means we need to lose bits 0 & 1
@@ -1943,8 +1964,8 @@ patch_h_up_c_4x4_10:
 function ff_hevc_rpi_pred_angular_c_4_neon_10, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         lsl         r3,  #2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
@@ -2049,8 +2070,8 @@ endfunc
 function ff_hevc_rpi_pred_angular_c_8_neon_10, export=1
         ldr         r12, [sp, #0]
         push       {r4-r8, lr}
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         lsl         r3,  #2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
@@ -2189,8 +2210,8 @@ function ff_hevc_rpi_pred_angular_c_16_neon_10, export=1
         ldr         r12, [sp, #0]
         push       {r4-r10, lr}
         vpush      {q4 }
-        adrl        r4,  angle_2 - 2
-        adrl        r7,  inv_angle - 11*2
+        ADRT        r4,  angle_2 - 2
+        ADRT        r7,  inv_angle - 11*2
         lsl         r3,  #2
         ldrsb       r4,  [r4, r12]
         add         r7,  r7,  r12, lsl #1
