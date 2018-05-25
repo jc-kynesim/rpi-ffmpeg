@@ -240,6 +240,30 @@ static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const MvFie
     return bs >> shift;
 }
 
+
+static void cpy_blk(uint8_t *dst, unsigned int stride_dst, const uint8_t *src, unsigned stride_src, unsigned int width, unsigned int height)
+{
+    unsigned int i, j;
+
+    if (((intptr_t)dst | (intptr_t)src | stride_dst | stride_src) & 15) {
+        for (i = 0; i < height; i++) {
+            for (j = 0; j < width; j+=8)
+                AV_COPY64U(dst+j, src+j);
+            dst += stride_dst;
+            src += stride_src;
+        }
+    } else {
+        for (i = 0; i < height; i++) {
+            for (j = 0; j < width; j+=16)
+                AV_COPY128(dst+j, src+j);
+            dst += stride_dst;
+            src += stride_src;
+        }
+    }
+}
+
+
+
 void ff_hevc_rpi_dsp_init(HEVCDSPContext *hevcdsp, int bit_depth)
 {
 #undef FUNC
@@ -407,6 +431,7 @@ int i = 0;
     }
 
     hevcdsp->hevc_deblocking_boundary_strengths = hevc_deblocking_boundary_strengths;
+    hevcdsp->cpy_blk = cpy_blk;
 
     if (ARCH_PPC)
         ff_hevc_rpi_dsp_init_ppc(hevcdsp, bit_depth);

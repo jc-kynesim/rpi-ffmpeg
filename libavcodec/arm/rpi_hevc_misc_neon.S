@@ -24,3 +24,203 @@ function rpi_zap_coeff_vals_neon, export=1
 
 2:      vst1.8   {q0,q1}, [r0:256]
         bx       lr
+endfunc
+
+@ PIC jump tables are more expensive than absolute for A32 code
+.set jent_pic, CONFIG_PIC || CONFIG_THUMB
+
+@ Jump table entry - if in neon mode the bottom bit must be set
+@ ? There is probably a real asm instruction to do this but I haven't found it
+.macro jent lab
+.if jent_pic
+T       .short ((0 + \lab) - (0 + 98b)) / 2
+A       .short (0 + \lab) - (4 + 98b)
+.else
+T       .word   1 + \lab
+A       .word   \lab
+.endif
+.endm
+
+.macro cpy_compound val, p1, p2
+.if \p1 + \p2 != \val
+.error "Bad addition!  \p1 + \p2 != \val"
+.endif
+.if \val <= 64
+@ As max we deal with 128 vals above 64 will never be recursed to
+100\val\():
+        push       {r11, lr}
+.endif
+\val\():
+        push       {r0-r3}
+        bl          100\p1\()b
+        pop        {r0-r3}
+        add         r0, #\p1
+        add         r2, #\p1
+        b           \p2\()b
+.endm
+
+@ ff_hevc_cpy_blks8x4_neon(
+@   dst         [r0]
+@   dst_stride  [r1]
+@   src         [r2]
+@   src_stride  [r3]
+@   width       [sp, #0] (bytes)
+@   height)     [sp, #4]
+@
+@ Power of 2 widths are directly coded, all others are done in stripes
+@ We expect the vast majority of calls to be power of 2
+@
+@ Currently has min width of 8, but we could make that 4 without issue
+@ Min height is 4
+
+function ff_hevc_rpi_cpy_blks8x4_neon, export=1
+        ldr         r12, [sp, #0]
+        push       {r11, lr}
+        sub         r12, #1
+A       adr         lr,  98f
+        ubfx        r12, r12, #3, #4
+        ldr         r11, [sp, #(8 + 4)]
+.if jent_pic
+A       lsl         r12, #1
+A       ldrsh       lr,  [lr,  r12]
+A       add         pc,  lr
+T       tbh         [pc, r12, lsl #1]
+.else
+        @ A32 only, Thumb is always PIC
+        ldr         pc,  [lr,  r12, lsl #2]
+.endif
+
+98:
+        jent        8f
+        jent        16f
+        jent        24f
+        jent        32f
+        jent        40f
+        jent        48f
+        jent        56f
+        jent        64f
+        jent        72f
+        jent        80f
+        jent        88f
+        jent        96f
+        jent        104f
+        jent        112f
+        jent        120f
+        jent        128f
+
+1008:
+        push       {r11, lr}
+8:
+        add         lr,  r2,  r3
+        lsl         r3,  #1
+        add         r12, r0,  r1
+        lsl         r1,  #1
+1:
+        vld1.32    {d0 }, [r2],  r3
+        vld1.32    {d1 }, [lr],  r3
+        vld1.32    {d2 }, [r2],  r3
+        vld1.32    {d3 }, [lr],  r3
+        subs        r11,  #4
+        vst1.32    {d0 }, [r0],  r1
+        vst1.32    {d1 }, [r12], r1
+        vst1.32    {d2 }, [r0],  r1
+        vst1.32    {d3 }, [r12], r1
+        bgt         1b
+        pop        {r11, pc}
+
+10016:
+        push       {r11, lr}
+16:
+        add         lr,  r2,  r3
+        lsl         r3,  #1
+        add         r12, r0,  r1
+        lsl         r1,  #1
+1:
+        vld1.32    {q0 }, [r2],  r3
+        vld1.32    {q1 }, [lr],  r3
+        vld1.32    {q2 }, [r2],  r3
+        vld1.32    {q3 }, [lr],  r3
+        subs        r11, #4
+        vst1.32    {q0 }, [r0],  r1
+        vst1.32    {q1 }, [r12], r1
+        vst1.32    {q2 }, [r0],  r1
+        vst1.32    {q3 }, [r12], r1
+        bgt         1b
+        pop        {r11, pc}
+
+cpy_compound 24, 16, 8
+
+10032:
+        push       {r11, lr}
+32:
+        add         lr,  r2,  r3
+        lsl         r3,  #1
+        add         r12, r0,  r1
+        lsl         r1,  #1
+1:
+        vld1.32    {q8,  q9 }, [r2],  r3
+        vld1.32    {q10, q11}, [lr],  r3
+        vld1.32    {q12, q13}, [r2],  r3
+        vld1.32    {q14, q15}, [lr],  r3
+        subs        r11, #4
+        vst1.32    {q8,  q9 }, [r0],  r1
+        vst1.32    {q10, q11}, [r12], r1
+        vst1.32    {q12, q13}, [r0],  r1
+        vst1.32    {q14, q15}, [r12], r1
+        bgt         1b
+        pop        {r11, pc}
+
+cpy_compound 40, 32, 8
+cpy_compound 48, 32, 16
+cpy_compound 56, 32, 24
+
+10064:
+        push       {r11, lr}
+64:
+        add         lr,  r2,  #32
+        add         r12, r0,  #32
+1:
+        vld1.32    {q8,  q9 }, [r2],  r3
+        vld1.32    {q10, q11}, [lr],  r3
+        vld1.32    {q12, q13}, [r2],  r3
+        vld1.32    {q14, q15}, [lr],  r3
+        subs        r11, #2
+        vst1.32    {q8,  q9 }, [r0],  r1
+        vst1.32    {q10, q11}, [r12], r1
+        vst1.32    {q12, q13}, [r0],  r1
+        vst1.32    {q14, q15}, [r12], r1
+        bgt         1b
+        pop        {r11, pc}
+
+cpy_compound 72, 64, 8
+cpy_compound 80, 64, 16
+cpy_compound 88, 64, 24
+cpy_compound 96, 64, 32
+cpy_compound 104, 64, 40
+cpy_compound 112, 64, 48
+cpy_compound 120, 64, 56
+
+128:
+        push       {r4, r5}
+        @ We could do this with fewer registers if we jump around but I
+        @ have a primative urge to load sequentially
+        mov         r4,  #64
+        add         lr,  r2,  #32
+        add         r12, r0,  #32
+        sub         r3,  r4
+        sub         r1,  r4
+1:
+        vld1.32    {q8,  q9 }, [r2],  r4
+        vld1.32    {q10, q11}, [lr],  r4
+        vld1.32    {q12, q13}, [r2],  r3
+        vld1.32    {q14, q15}, [lr],  r3
+        subs        r11, #1
+        vst1.32    {q8,  q9 }, [r0],  r4
+        vst1.32    {q10, q11}, [r12], r4
+        vst1.32    {q12, q13}, [r0],  r1
+        vst1.32    {q14, q15}, [r12], r1
+        bgt         1b
+        pop        {r4, r5, r11, pc}
+
+endfunc
+

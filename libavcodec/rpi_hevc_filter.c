@@ -118,28 +118,6 @@ static inline unsigned int pixel_shift(const HEVCRpiContext * const s, const uns
     return c_idx != 0 ? 1 + s->ps.sps->pixel_shift : s->ps.sps->pixel_shift;
 }
 
-static void copy_CTB(uint8_t *dst, const uint8_t *src, int width, int height,
-                     ptrdiff_t stride_dst, ptrdiff_t stride_src)
-{
-int i, j;
-
-    if (((intptr_t)dst | (intptr_t)src | stride_dst | stride_src) & 15) {
-        for (i = 0; i < height; i++) {
-            for (j = 0; j < width; j+=8)
-                AV_COPY64U(dst+j, src+j);
-            dst += stride_dst;
-            src += stride_src;
-        }
-    } else {
-        for (i = 0; i < height; i++) {
-            for (j = 0; j < width; j+=16)
-                AV_COPY128(dst+j, src+j);
-            dst += stride_dst;
-            src += stride_src;
-        }
-    }
-}
-
 // "DSP" these?
 static void copy_pixel(uint8_t *dst, const uint8_t *src, int pixel_shift)
 {
@@ -379,7 +357,7 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                     [2*MAX_PB_SIZE*MAX_PB_SIZE];
                 dst = dstbuf;
                 stride_dst = 2*MAX_PB_SIZE;
-                copy_CTB(dst, src, width << sh, height, stride_dst, stride_src);
+                s->hevcdsp.cpy_blk(dst, stride_dst, src, stride_src, width << sh, height);
                 if (sliced && c_idx != 0)
                 {
                     s->hevcdsp.sao_band_filter_c[tab](src, dst, stride_src, stride_dst,
@@ -493,10 +471,7 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                 }
             }
 
-            copy_CTB(dst,
-                     src,
-                     width << sh,
-                     height, stride_dst, stride_src);
+            s->hevcdsp.cpy_blk(dst, stride_dst, src, stride_src, width << sh, height);
 
             copy_CTB_to_hv(s, src, stride_src, x0, y0, width, height, c_idx,
                            x_ctb, y_ctb);
@@ -528,7 +503,6 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
                                                     horiz_edge,
                                                     diag_edge);
             }
-            // ??? Does this actually work for chroma ???
             restore_tqb_pixels(s, src, dst, stride_src, stride_dst,
                                x, y, width, height, c_idx);
             sao->type_idx[c_idx] = SAO_APPLIED;

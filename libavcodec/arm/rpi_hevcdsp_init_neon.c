@@ -232,6 +232,7 @@ void ff_hevc_rpi_sao_band_64_neon_10(uint8_t *_dst, uint8_t *_src, ptrdiff_t str
 uint32_t ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, const MvField *curr, const MvField *neigh,
                                                 const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
                                                 int in_inc);
+void ff_hevc_rpi_cpy_blks8x4_neon(uint8_t *dst, unsigned int stride_dst, const uint8_t *src, unsigned stride_src, unsigned int width, unsigned int height);
 
 
 static void ff_hevc_rpi_sao_edge_48_neon_8(uint8_t *_dst, uint8_t *_src, ptrdiff_t stride_dst, int16_t *_sao_offset_val, int eo, int width, int height)
@@ -462,4 +463,5 @@ av_cold void ff_hevcdsp_rpi_init_neon(HEVCDSPContext *c, const int bit_depth)
     assert(offsetof(MvField, ref_idx) == 8);
     assert(offsetof(MvField, pred_flag) == 10);
     c->hevc_deblocking_boundary_strengths = ff_hevc_rpi_deblocking_boundary_strengths_neon;
+    c->cpy_blk = ff_hevc_rpi_cpy_blks8x4_neon;
 }
