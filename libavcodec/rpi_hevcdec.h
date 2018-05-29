@@ -232,46 +232,6 @@ enum PredFlag {
     PF_BI,
 };
 
-enum IntraPredMode {
-    INTRA_PLANAR = 0,
-    INTRA_DC,
-    INTRA_ANGULAR_2,
-    INTRA_ANGULAR_3,
-    INTRA_ANGULAR_4,
-    INTRA_ANGULAR_5,
-    INTRA_ANGULAR_6,
-    INTRA_ANGULAR_7,
-    INTRA_ANGULAR_8,
-    INTRA_ANGULAR_9,
-    INTRA_ANGULAR_10,
-    INTRA_ANGULAR_11,
-    INTRA_ANGULAR_12,
-    INTRA_ANGULAR_13,
-    INTRA_ANGULAR_14,
-    INTRA_ANGULAR_15,
-    INTRA_ANGULAR_16,
-    INTRA_ANGULAR_17,
-    INTRA_ANGULAR_18,
-    INTRA_ANGULAR_19,
-    INTRA_ANGULAR_20,
-    INTRA_ANGULAR_21,
-    INTRA_ANGULAR_22,
-    INTRA_ANGULAR_23,
-    INTRA_ANGULAR_24,
-    INTRA_ANGULAR_25,
-    INTRA_ANGULAR_26,
-    INTRA_ANGULAR_27,
-    INTRA_ANGULAR_28,
-    INTRA_ANGULAR_29,
-    INTRA_ANGULAR_30,
-    INTRA_ANGULAR_31,
-    INTRA_ANGULAR_32,
-    INTRA_ANGULAR_33,
-    INTRA_ANGULAR_34,
-};
-#define INTRA_ANGULAR_HORIZONTAL INTRA_ANGULAR_10
-#define INTRA_ANGULAR_VERTICAL   INTRA_ANGULAR_26
-
 enum SAOType {
     SAO_NOT_APPLIED = 0,
     SAO_BAND,
@@ -317,14 +277,6 @@ typedef struct RpiCodingUnit {
     uint8_t max_trafo_depth;    ///< MaxTrafoDepth
     uint8_t cu_transquant_bypass_flag;
 } RpiCodingUnit;
-
-typedef struct RpiNeighbourAvailable {
-    char cand_bottom_left;
-    char cand_left;
-    char cand_up;
-    char cand_up_left;
-    char cand_up_right;
-} RpiNeighbourAvailable;
 
 typedef struct RpiPredictionUnit {
     uint8_t intra_pred_mode[4];
@@ -391,14 +343,8 @@ typedef struct HEVCFrame {
     uint8_t dpb_no;
 } HEVCFrame;
 
-typedef struct HEVCRpiLocalContextIntra {
-    TransformUnit tu;
-    RpiNeighbourAvailable na;
-} HEVCRpiLocalContextIntra;
-
 typedef struct HEVCRpiLocalContext {
-    TransformUnit tu;  // Moved to start to match HEVCRpiLocalContextIntra (yuk!)
-    RpiNeighbourAvailable na;
+    TransformUnit tu;
 
     CABACContext cc;
 
@@ -439,10 +385,20 @@ typedef struct HEVCRpiLocalContext {
     int8_t curr_qp_y;
     int8_t qPy_pred;
 
-    uint8_t ctb_left_flag;
-    uint8_t ctb_up_flag;
-    uint8_t ctb_up_right_flag;
-    uint8_t ctb_up_left_flag;
+// N.B. Used by asm (neon) - do not change
+#define AVAIL_S_UR  0
+#define AVAIL_S_U   1
+#define AVAIL_S_UL  2
+#define AVAIL_S_L   3
+#define AVAIL_S_DL  4
+
+#define AVAIL_U     (1 << AVAIL_S_U)
+#define AVAIL_L     (1 << AVAIL_S_L)
+#define AVAIL_UL    (1 << AVAIL_S_UL)
+#define AVAIL_UR    (1 << AVAIL_S_UR)
+#define AVAIL_DL    (1 << AVAIL_S_DL)
+
+    uint8_t ctb_avail;
     int     end_of_ctb_x;
     int     end_of_ctb_y;
 
@@ -482,6 +438,7 @@ enum rpi_pred_cmd_e
     RPI_PRED_ADD_DC_U,       // Both U & V are effectively C
     RPI_PRED_ADD_DC_V,
     RPI_PRED_INTRA,
+    RPI_PRED_INTRA_C,
     RPI_PRED_I_PCM,
     RPI_PRED_CMD_MAX
 };
@@ -489,8 +446,8 @@ enum rpi_pred_cmd_e
 typedef struct HEVCPredCmd {
     uint8_t type;
     uint8_t size;  // log2 "size" used by all variants
-    uint8_t na;    // i_pred - but left here as they pack well
-    uint8_t c_idx; // i_pred
+    uint8_t avail; // i_pred - but left here as they pack well
+    uint8_t dummy;
     union {
         struct {  // TRANSFORM_ADD
             uint8_t * dst;
@@ -820,7 +777,6 @@ typedef struct HEVCRpiContext {
 
     // Put structures that allocate non-trivial storage at the end
     // These are mostly used indirectly so position in the structure doesn't matter
-    HEVCRpiLocalContextIntra HEVClcIntra;
     HEVCRpiPassQueue passq[RPI_PASSES];
 #if RPI_EXTRA_BIT_THREADS > 0
     int bt_started;
@@ -873,13 +829,15 @@ void ff_hevc_rpi_bump_frame(HEVCRpiContext *s);
 
 void ff_hevc_rpi_unref_frame(HEVCRpiContext *s, HEVCFrame *frame, int flags);
 
-void ff_hevc_rpi_set_neighbour_available(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int x0, const int y0,
-                                     const int nPbW, const int nPbH);
+unsigned int ff_hevc_rpi_tb_avail_flags(
+    const HEVCRpiContext * const s, const HEVCRpiLocalContext * const lc,
+    const unsigned int x, const unsigned int y, const unsigned int w, const unsigned int h);
+
 void ff_hevc_rpi_luma_mv_merge_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int nPbW,
                                 int nPbH, int log2_cb_size, int part_idx,
                                 int merge_idx, MvField * const mv);
 void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext *lc, int x0, int y0, int nPbW,
-                              int nPbH, int log2_cb_size, int part_idx,
+                              int nPbH, int log2_cb_size, const unsigned int avail, int part_idx,
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX);
 void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase);

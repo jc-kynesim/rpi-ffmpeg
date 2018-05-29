@@ -39,43 +39,6 @@ static const uint8_t l0_l1_cand_idx[12][2] = {
     { 3, 2, },
 };
 
-void ff_hevc_rpi_set_neighbour_available(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int x0, const int y0,
-                                     const int nPbW, const int nPbH)
-{
-    int x0b = av_mod_uintp2(x0, s->ps.sps->log2_ctb_size);
-    int y0b = av_mod_uintp2(y0, s->ps.sps->log2_ctb_size);
-
-    lc->na.cand_up       = (lc->ctb_up_flag   || y0b);
-    lc->na.cand_left     = (lc->ctb_left_flag || x0b);
-    lc->na.cand_up_left  = (!x0b && !y0b) ? lc->ctb_up_left_flag : lc->na.cand_left && lc->na.cand_up;
-    lc->na.cand_up_right = (x0 + nPbW) >= lc->end_of_ctb_x ?
-                    (lc->ctb_up_right_flag && !y0b) : lc->na.cand_up;
-    lc->na.cand_bottom_left = ((y0 + nPbH) >= lc->end_of_ctb_y) ? 0 : lc->na.cand_left;
-}
-
-/*
- * 6.4.1 Derivation process for z-scan order block availability
- */
-static av_always_inline int z_scan_block_avail(const HEVCRpiContext * const s, const int xCurr, const int yCurr,
-                              const int xN, const int yN)
-{
-#define MIN_TB_ADDR_ZS(x, y)                                            \
-    s->ps.pps->min_tb_addr_zs[(y) * (s->ps.sps->tb_mask+2) + (x)]
-
-    int xCurr_ctb = xCurr >> s->ps.sps->log2_ctb_size;
-    int yCurr_ctb = yCurr >> s->ps.sps->log2_ctb_size;
-    int xN_ctb    = xN    >> s->ps.sps->log2_ctb_size;
-    int yN_ctb    = yN    >> s->ps.sps->log2_ctb_size;
-    if( yN_ctb < yCurr_ctb || xN_ctb < xCurr_ctb )
-        return 1;
-    else {
-        int Curr = MIN_TB_ADDR_ZS((xCurr >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask,
-                (yCurr >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask);
-        int N    = MIN_TB_ADDR_ZS((xN >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask,
-                (yN >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask);
-        return N <= Curr;
-    }
-}
 
 //check if the two luma locations belong to the same motion estimation region
 static av_always_inline int is_diff_mer(const HEVCRpiContext * const s, int xN, int yN, int xP, int yP)
@@ -265,9 +228,6 @@ static int temporal_luma_motion_vector(const HEVCRpiContext * const s, HEVCRpiLo
 #define AVAILABLE(cand, v)                                      \
     (cand && !(TAB_MVF_PU(v).pred_flag == PF_INTRA))
 
-#define PRED_BLOCK_AVAILABLE(v)                                 \
-    z_scan_block_avail(s, x0, y0, x ## v, y ## v)
-
 #define COMPARE_MV_REFIDX(a, b)                                 \
     compare_mv_ref_idx(TAB_MVF_PU(a), TAB_MVF_PU(b))
 
@@ -276,7 +236,7 @@ static int temporal_luma_motion_vector(const HEVCRpiContext * const s, HEVCRpiLo
  */
 static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
                                             int nPbW, int nPbH,
-                                            int log2_cb_size,
+                                            int log2_cb_size, const unsigned int avail,
                                             int singleMCLFlag, int part_idx,
                                             int merge_idx,
                                             struct MvField mergecandlist[])
@@ -285,13 +245,6 @@ static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVC
     const MvField * const tab_mvf       = s->ref->tab_mvf;
 
     const int min_pu_width = s->ps.sps->min_pu_width;
-
-    const int cand_bottom_left = lc->na.cand_bottom_left;
-    const int cand_left        = lc->na.cand_left;
-    const int cand_up_left     = lc->na.cand_up_left;
-    const int cand_up          = lc->na.cand_up;
-    const int cand_up_right    = lc->na.cand_up_right;
-
     const int xA1    = x0 - 1;
     const int yA1    = y0 + nPbH - 1;
 
@@ -329,7 +282,7 @@ static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVC
         is_diff_mer(s, xA1, yA1, x0, y0)) {
         is_available_a1 = 0;
     } else {
-        is_available_a1 = AVAILABLE(cand_left, A1);
+        is_available_a1 = AVAILABLE((avail & AVAIL_L) != 0, A1);
         if (is_available_a1) {
             mergecandlist[nb_merge_cand] = TAB_MVF_PU(A1);
             if (merge_idx == 0)
@@ -345,7 +298,7 @@ static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVC
         is_diff_mer(s, xB1, yB1, x0, y0)) {
         is_available_b1 = 0;
     } else {
-        is_available_b1 = AVAILABLE(cand_up, B1);
+        is_available_b1 = AVAILABLE((avail & AVAIL_U) != 0, B1);
         if (is_available_b1 &&
             !(is_available_a1 && COMPARE_MV_REFIDX(B1, A1))) {
             mergecandlist[nb_merge_cand] = TAB_MVF_PU(B1);
@@ -356,8 +309,7 @@ static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVC
     }
 
     // above right spatial merge candidate
-    is_available_b0 = AVAILABLE(cand_up_right, B0) &&
-                      PRED_BLOCK_AVAILABLE(B0) &&
+    is_available_b0 = AVAILABLE((avail & AVAIL_UR) != 0, B0) &&
                       !is_diff_mer(s, xB0, yB0, x0, y0);
 
     if (is_available_b0 &&
@@ -369,8 +321,7 @@ static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVC
     }
 
     // left bottom spatial merge candidate
-    is_available_a0 = AVAILABLE(cand_bottom_left, A0) &&
-                      PRED_BLOCK_AVAILABLE(A0) &&
+    is_available_a0 = AVAILABLE((avail & AVAIL_DL) != 0, A0) &&
                       !is_diff_mer(s, xA0, yA0, x0, y0);
 
     if (is_available_a0 &&
@@ -382,7 +333,7 @@ static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVC
     }
 
     // above left spatial merge candidate
-    is_available_b2 = AVAILABLE(cand_up_left, B2) &&
+    is_available_b2 = AVAILABLE((avail & AVAIL_UL) != 0, B2) &&
                       !is_diff_mer(s, xB2, yB2, x0, y0);
 
     if (is_available_b2 &&
@@ -484,8 +435,8 @@ void ff_hevc_rpi_luma_mv_merge_mode(const HEVCRpiContext * const s, HEVCRpiLocal
         part_idx      = 0;
     }
 
-    ff_hevc_rpi_set_neighbour_available(s, lc, x0, y0, nPbW, nPbH);
     derive_spatial_merge_candidates(s, lc, x0, y0, nPbW, nPbH, log2_cb_size,
+                                    ff_hevc_rpi_tb_avail_flags(s, lc, x0, y0, nPbW, nPbH),
                                     singleMCLFlag, part_idx,
                                     merge_idx, mergecand_list);
 
@@ -567,8 +518,9 @@ static int mv_mp_mode_mx_lt(const HEVCRpiContext * const s, const int x, const i
                      (y ## v) >> s->ps.sps->log2_min_pu_size,      \
                      pred, &mx, ref_idx_curr, ref_idx)
 
-void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext *lc, int x0, int y0, int nPbW,
-                              int nPbH, int log2_cb_size, int part_idx,
+void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext *lc,
+                              int x0, int y0, int nPbW, int nPbH,
+                              int log2_cb_size, const unsigned int avail, int part_idx,
                               int merge_idx, MvField * const mv,
                               int mvp_lx_flag, int LX)
 {
@@ -598,11 +550,6 @@ void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
     int pred_flag_index_l0;
     int pred_flag_index_l1;
 
-    const int cand_bottom_left = lc->na.cand_bottom_left;
-    const int cand_left        = lc->na.cand_left;
-    const int cand_up_left     = lc->na.cand_up_left;
-    const int cand_up          = lc->na.cand_up;
-    const int cand_up_right    = lc->na.cand_up_right;
     ref_idx_curr       = LX;
     ref_idx            = mv->ref_idx[LX];
     pred_flag_index_l0 = LX;
@@ -612,14 +559,13 @@ void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
     xA0 = x0 - 1;
     yA0 = y0 + nPbH;
 
-    is_available_a0 = AVAILABLE(cand_bottom_left, A0) &&
-                      PRED_BLOCK_AVAILABLE(A0);
+    is_available_a0 = AVAILABLE((avail & AVAIL_DL) != 0, A0);
 
     //left spatial merge candidate
     xA1    = x0 - 1;
     yA1    = y0 + nPbH - 1;
 
-    is_available_a1 = AVAILABLE(cand_left, A1);
+    is_available_a1 = AVAILABLE((avail & AVAIL_L), A1);
     if (is_available_a0 || is_available_a1)
         isScaledFlag_L0 = 1;
 
@@ -666,18 +612,17 @@ b_candidates:
     xB0    = x0 + nPbW;
     yB0    = y0 - 1;
 
-    is_available_b0 =  AVAILABLE(cand_up_right, B0) &&
-                       PRED_BLOCK_AVAILABLE(B0);
+    is_available_b0 =  AVAILABLE((avail & AVAIL_UR) != 0, B0);
 
     // above spatial merge candidate
     xB1    = x0 + nPbW - 1;
     yB1    = y0 - 1;
-    is_available_b1 = AVAILABLE(cand_up, B1);
+    is_available_b1 = AVAILABLE((avail & AVAIL_U) != 0, B1);
 
     // above left spatial merge candidate
     xB2 = x0 - 1;
     yB2 = y0 - 1;
-    is_available_b2 = AVAILABLE(cand_up_left, B2);
+    is_available_b2 = AVAILABLE((avail & AVAIL_UL) != 0, B2);
 
     // above right spatial merge candidate
     if (is_available_b0) {

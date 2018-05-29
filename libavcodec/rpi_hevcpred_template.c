@@ -109,7 +109,7 @@ static inline pixel4_32 PIXEL_SPLAT_X4_32(const uint32_t x)
 #endif
 
 
-#if DUMP_PRED && !defined(INCLUDE_ONCE)
+#if DUMP_PRED && !defined(INCLUDED_ONCE)
 static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const unsigned int size)
 {
     for (unsigned int y = 0; y != size; y++, data += stride * 2) {
@@ -122,105 +122,705 @@ static void dump_pred_uv(const uint8_t * data, const unsigned int stride, const 
 }
 #endif
 
-static av_always_inline void FUNC(intra_pred)(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                                              int log2_size, int c_idx_arg)
+#ifndef INCLUDED_ONCE
+static inline void extend_8(void * ptr, const unsigned int v, unsigned int n)
 {
+    if ((n >>= 2) != 0) {
+        uint32_t v4 = v | (v << 8);
+        uint32_t * p = (uint32_t *)ptr;
+        v4 = v4 | (v4 << 16);
+        do {
+            *p++ = v4;
+        } while (--n != 0);
+    }
+}
+
+static inline void extend_16(void * ptr, const unsigned int v, unsigned int n)
+{
+    if ((n >>= 2) != 0) {
+        uint32_t v2 = v | (v << 16);
+        uint32_t * p = (uint32_t *)ptr;
+        do {
+            *p++ = v2;
+            *p++ = v2;
+        } while (--n != 0);
+    }
+}
+
+static inline void extend_32(void * ptr, const unsigned int v, unsigned int n)
+{
+    if ((n >>= 2) != 0) {
+        uint32_t * p = (uint32_t *)ptr;
+        do {
+            *p++ = v;
+            *p++ = v;
+            *p++ = v;
+            *p++ = v;
+        } while (--n != 0);
+    }
+}
+
+// Beware that this inverts the avail ordering
+// For CIP it seems easier this way round
+static unsigned int cip_avail(const MvField * mvf, const int mvf_stride, const unsigned int log2_pu_size, const unsigned int avail, unsigned int size,
+                              unsigned int s0, unsigned int s1)
+{
+    const unsigned int n = 1 << (log2_pu_size - 2);
+    unsigned int fa = 0;
+    unsigned int i = 0;
+
+    size >>= 2;   // Now in 4-pel units
+    s0 >>= 2;
+    s1 >>= 2;
+
+    if ((avail & 4) != 0)
+        fa |= ((1 << s0) - 1) << (size - s0);
+    if ((avail & 2) != 0)
+        fa |= ((1 << s1) - 1) << size;
+    if ((avail & 1) != 0)
+        fa |= 1 << (size << 1);
+
+    for (i = 0; (fa >> i) != 0; i += n, mvf += mvf_stride) {
+        if ((fa & (((1 << n) - 1) << i)) != 0 && mvf->pred_flag != PF_INTRA)
+            fa &= ~(((1 << n) - 1) << i);
+    }
+
+    return fa;
+}
+
+static inline unsigned int rmbd(unsigned int x)
+{
+#if 1
+    return __builtin_ctz(x);
+#else
+    unsigned int n = 0;
+    if ((x & 0xffff) == 0) {
+        x >>= 16;
+        n += 16;
+    }
+    if ((x & 0xff) == 0) {
+        x >>= 8;
+        n += 8;
+    }
+    if ((x & 0xf) == 0) {
+        x >>= 4;
+        n += 4;
+    }
+    if ((x & 0x3) == 0) {
+        x >>= 2;
+        n += 2;
+    }
+
+    return (x & 1) == 0 ? n + 1 : n;
+#endif
+}
+#endif
+
+
+static void FUNC(cip_fill)(pixel * const left, pixel * const top,
+    const unsigned int avail_l, const unsigned int avail_u,
+    const pixel * const src_l, const pixel * const src_u, const pixel * const src_ur,
+    const unsigned int stride,
+    const unsigned int size)
+{
+    pixel a;
+    unsigned int i;
+
+    // 1st find DL value
+    if ((avail_l & 1) == 0) {
+        if (avail_l != 0)
+            a = src_l[((int)size * 2 - 1 - (int)rmbd(avail_l)*4) * (int)stride];
+        else
+        {
+            // (avail_l | avail_u) != 0 so this must be good
+            const unsigned int n = rmbd(avail_u)*4;
+            a = (n >= size) ? src_ur[n - size] : src_u[n];
+        }
+    }
+
+    // L
+    {
+        pixel * d = left + size * 2 - 1;
+        const pixel * s = src_l + (size * 2 - 1) * stride;
+        unsigned int x = avail_l;
+        for (i = 0; i < size * 2; i += 4, x >>= 1)
+        {
+            if ((x & 1) != 0) {
+                // Avail
+                *d-- = *s;
+                s -= stride;
+                *d-- = *s;
+                s -= stride;
+                *d-- = *s;
+                s -= stride;
+                *d-- = a = *s;
+                s -= stride;
+            }
+            else
+            {
+                *d-- = a;
+                *d-- = a;
+                *d-- = a;
+                *d-- = a;
+                s -= stride * 4;
+            }
+        }
+        // UL
+        *d = a = (x & 1) != 0 ? *s : a;
+    }
+
+    // U
+    {
+        pixel * d = top;
+        const pixel * s = src_u;
+        unsigned int x = avail_u;
+
+        for (i = 0; i < size; i += 4, x >>= 1)
+        {
+            if ((x & 1) != 0) {
+                // Avail
+                *d++ = *s++;
+                *d++ = *s++;
+                *d++ = *s++;
+                *d++ = a = *s++;
+            }
+            else
+            {
+                *d++ = a;
+                *d++ = a;
+                *d++ = a;
+                *d++ = a;
+                s += 4;
+            }
+        }
+
+        // UR
+        s = src_ur;
+        for (i = 0; i < size; i += 4, x >>= 1)
+        {
+            if ((x & 1) != 0) {
+                // Avail
+                *d++ = *s++;
+                *d++ = *s++;
+                *d++ = *s++;
+                *d++ = a = *s++;
+            }
+            else
+            {
+                *d++ = a;
+                *d++ = a;
+                *d++ = a;
+                *d++ = a;
+                s += 4;
+            }
+        }
+    }
+}
+
+
+#if !PRED_C && PW == 1
+#define EXTEND(ptr, val, len) extend_8(ptr, val, len)
+#elif (!PRED_C && PW == 2) || (PRED_C && PW == 1)
+#define EXTEND(ptr, val, len) extend_16(ptr, val, len)
+#else
+#define EXTEND(ptr, val, len) extend_32(ptr, val, len)
+#endif
+
+
 #define PU(x) \
     ((x) >> s->ps.sps->log2_min_pu_size)
 #define MVF(x, y) \
-    (s->ref->tab_mvf[(x) + (y) * min_pu_width])
+    (s->ref->tab_mvf[(x) + (y) * s->ps.sps->min_pu_width])
 #define MVF_PU(x, y) \
     MVF(PU(x0 + ((x) * (1 << hshift))), PU(y0 + ((y) * (1 << vshift))))
-#define IS_INTRA(x, y) \
-    (MVF_PU(x, y).pred_flag == PF_INTRA)
-#define MIN_TB_ADDR_ZS(x, y) \
-    s->ps.pps->min_tb_addr_zs[(y) * (s->ps.sps->tb_mask+2) + (x)]
-#define EXTEND(ptr, val, len)         \
-do {                                  \
-    pixel4 pix = PIXEL_SPLAT_X4(val); \
-    for (i = 0; i < (len); i += 4)    \
-        AV_WN4P(ptr + i, pix);        \
-} while (0)
 
-#define EXTEND_RIGHT_CIP(ptr, start, length)                                   \
-        for (i = start; i < (start) + (length); i += 4)                        \
-            if (!IS_INTRA(i, -1))                                              \
-                AV_WN4P(&ptr[i], a);                                           \
-            else                                                               \
-                a = PIXEL_SPLAT_X4(ptr[i+3])
-#define EXTEND_LEFT_CIP(ptr, start, length) \
-        for (i = start; i > (start) - (length); i--) \
-            if (!IS_INTRA(i - 1, -1)) \
-                ptr[i - 1] = ptr[i]
-#define EXTEND_UP_CIP(ptr, start, length)                                      \
-        for (i = (start); i > (start) - (length); i -= 4)                      \
-            if (!IS_INTRA(-1, i - 3))                                          \
-                AV_WN4P(&ptr[i - 3], a);                                       \
-            else                                                               \
-                a = PIXEL_SPLAT_X4(ptr[i - 3])
-#define EXTEND_DOWN_CIP(ptr, start, length)                                    \
-        for (i = start; i < (start) + (length); i += 4)                        \
-            if (!IS_INTRA(-1, i))                                              \
-                AV_WN4P(&ptr[i], a);                                           \
-            else                                                               \
-                a = PIXEL_SPLAT_X4(ptr[i + 3])
+// Reqs:
+//
+// Planar:  DL[0], L, ul, U, UR[0]
+// DC:         dl, L, ul, U, ur
+// A2-9:       DL, L, ul, u, ur
+// A10:        dl, L, ul, u, ur
+// A11-17      dl, L, UL, U, ur
+// A18-25      dl, L, Ul, U, ur
+// A26         dl, l, ul, U, ur
+// A27-34      dl, l, ul, U, UR
+
+#ifndef INCLUDED_ONCE
+
+intra_filter_fn_t ff_hevc_rpi_intra_filter_8_neon_8;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_4_neon_16;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_8_neon_16;
+
+#define FILTER_LIGHT    0x40
+#define FILTER_STRONG   0x80
+#define FILTER_EITHER   (FILTER_LIGHT | FILTER_STRONG)
+
+static const uint8_t req_avail_c[35] =
+{
+    AVAIL_DL | AVAIL_L | 0         |  AVAIL_U | AVAIL_UR,  // Planar (DL[0] & UR[0] only needed)
+               AVAIL_L | 0         |  AVAIL_U,             // DC
+    AVAIL_DL | AVAIL_L,                                    // 2
+    AVAIL_DL | AVAIL_L,                                    // 3
+    AVAIL_DL | AVAIL_L,                                    // 4
+    AVAIL_DL | AVAIL_L,                                    // 5
+    AVAIL_DL | AVAIL_L,                                    // 6
+    AVAIL_DL | AVAIL_L,                                    // 7
+    AVAIL_DL | AVAIL_L,                                    // 8
+    AVAIL_DL | AVAIL_L,                                    // 9
+               AVAIL_L,                                    // 10 (H)
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 11
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 12
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 13
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 14
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 15
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 16
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 17
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 18
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 19
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 20
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 21
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 22
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 23
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 24
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 25
+                                    AVAIL_U,               // 26 (V)
+                                    AVAIL_U | AVAIL_UR,    // 27
+                                    AVAIL_U | AVAIL_UR,    // 28
+                                    AVAIL_U | AVAIL_UR,    // 29
+                                    AVAIL_U | AVAIL_UR,    // 30
+                                    AVAIL_U | AVAIL_UR,    // 31
+                                    AVAIL_U | AVAIL_UR,    // 32
+                                    AVAIL_U | AVAIL_UR,    // 33
+                                    AVAIL_U | AVAIL_UR     // 34
+};
+
+static const uint8_t req_avail[4][35] = {
+{
+    AVAIL_DL | AVAIL_L | 0         |  AVAIL_U | AVAIL_UR,  // Planar (DL[0] & UR[0] only needed)
+               AVAIL_L | 0         |  AVAIL_U,             // DC
+    AVAIL_DL | AVAIL_L,                                    // 2
+    AVAIL_DL | AVAIL_L,                                    // 3
+    AVAIL_DL | AVAIL_L,                                    // 4
+    AVAIL_DL | AVAIL_L,                                    // 5
+    AVAIL_DL | AVAIL_L,                                    // 6
+    AVAIL_DL | AVAIL_L,                                    // 7
+    AVAIL_DL | AVAIL_L,                                    // 8
+    AVAIL_DL | AVAIL_L,                                    // 9
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 10 (H)
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 11
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 12
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 13
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 14
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 15
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 16
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 17
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 18
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 19
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 20
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 21
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 22
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 23
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 24
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 25
+               AVAIL_L | AVAIL_UL | AVAIL_U,               // 26 (V)
+                                    AVAIL_U | AVAIL_UR,    // 27
+                                    AVAIL_U | AVAIL_UR,    // 28
+                                    AVAIL_U | AVAIL_UR,    // 29
+                                    AVAIL_U | AVAIL_UR,    // 30
+                                    AVAIL_U | AVAIL_UR,    // 31
+                                    AVAIL_U | AVAIL_UR,    // 32
+                                    AVAIL_U | AVAIL_UR,    // 33
+                                    AVAIL_U | AVAIL_UR     // 34
+},
+{  // 3
+    AVAIL_DL | AVAIL_L | 0        | AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // Planar (DL[0] & UR[0] only needed)
+               AVAIL_L | 0        | AVAIL_U,                            // DC
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 2
+    AVAIL_DL | AVAIL_L                                 | 0,             // 3
+    AVAIL_DL | AVAIL_L                                 | 0,             // 4
+    AVAIL_DL | AVAIL_L                                 | 0,             // 5
+    AVAIL_DL | AVAIL_L                                 | 0,             // 6
+    AVAIL_DL | AVAIL_L                                 | 0,             // 7
+    AVAIL_DL | AVAIL_L                                 | 0,             // 8
+    AVAIL_DL | AVAIL_L                                 | 0,             // 9
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 10 (H)
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 11
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 12
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 13
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 14
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 15
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 16
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 17
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 18
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 19
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 20
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 21
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 22
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 23
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 24
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 25
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 26 (V)
+                                    AVAIL_U | AVAIL_UR | 0,             // 27
+                                    AVAIL_U | AVAIL_UR | 0,             // 28
+                                    AVAIL_U | AVAIL_UR | 0,             // 29
+                                    AVAIL_U | AVAIL_UR | 0,             // 30
+                                    AVAIL_U | AVAIL_UR | 0,             // 31
+                                    AVAIL_U | AVAIL_UR | 0,             // 32
+                                    AVAIL_U | AVAIL_UR | 0,             // 33
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT   // 34
+},
+{  // 4
+    AVAIL_DL | AVAIL_L | 0        | AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // Planar (DL[0] & UR[0] only needed)
+               AVAIL_L | 0        | AVAIL_U,                            // DC
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 2
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 3
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 4
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 5
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 6
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 7
+    AVAIL_DL | AVAIL_L                                 | FILTER_LIGHT,  // 8
+    AVAIL_DL | AVAIL_L                                 | 0,             // 9
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 10 (H)
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 11
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 12
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 13
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 14
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 15
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 16
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 17
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 18
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 19
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 20
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 21
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 22
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 23
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_LIGHT,  // 24
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 25
+               AVAIL_L | AVAIL_UL | AVAIL_U            | 0,             // 26 (V)
+                                    AVAIL_U | AVAIL_UR | 0,             // 27
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // 28
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // 29
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // 30
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // 31
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // 32
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT,  // 33
+                                    AVAIL_U | AVAIL_UR | FILTER_LIGHT   // 34
+},
+{  // 5
+    AVAIL_DL | AVAIL_L | 0        | AVAIL_U | AVAIL_UR | FILTER_EITHER, // Planar (DL[0] & UR[0] only needed)
+               AVAIL_L | 0        | AVAIL_U,                            // DC
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 2
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 3
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 4
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 5
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 6
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 7
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 8
+    AVAIL_DL | AVAIL_L                                 | FILTER_EITHER, // 9
+               AVAIL_L                                 | 0,             // 10 (H)
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 11
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 12
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 13
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 14
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 15
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 16
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 17
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 18
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 19
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 20
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 21
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 22
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 23
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 24
+               AVAIL_L | AVAIL_UL | AVAIL_U            | FILTER_EITHER, // 25
+                                    AVAIL_U            | 0,             // 26 (V)
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER, // 27
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER, // 28
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER, // 29
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER, // 30
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER, // 31
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER, // 32
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER, // 33
+                                    AVAIL_U | AVAIL_UR | FILTER_EITHER  // 34
+}
+};
+
+
+#endif
+
+#define filter_light1 FUNC(filter_light1)
+static inline pixel filter_light1(pixel a, pixel b, pixel c)
+{
+    return (a + b*2 + c + 2) >> 2;
+}
+
+#define filter_light FUNC(filter_light)
+static inline void filter_light(pixel * dst, pixel p1, const pixel * src, const pixel pn, const int sstride, const unsigned int n)
+{
+    pixel p0;
+    pixel p2 = *src;
+    // Allow for final pel - it is just clearer to to have the call take the actual number of output pels
+    unsigned int n_minus_1 = n - 1;
+
+    do
+    {
+        src += sstride;
+        p0 = p1;
+        p1 = p2;
+        p2 = *src;
+        *dst++ = filter_light1(p0, p1, p2);
+    } while (--n_minus_1 != 0);
+    *dst = filter_light1(p1, p2, pn);
+}
+
+#define filter_strong FUNC(filter_strong)
+static inline void filter_strong(pixel * dst, const unsigned int p0, const unsigned int p1, unsigned int n)
+{
+    unsigned int a = 64 * p0 + 32;
+    const int v = p1 - p0;
+
+    do
+    {
+        *dst++ = (a += v) >> 6;
+    } while (--n != 0);
+}
+
+#define intra_filter FUNC(intra_filter)
+static av_always_inline void intra_filter(
+    pixel * const left, pixel * const top,
+    const unsigned int req, const unsigned int avail,
+    const pixel * const src_l, const pixel * const src_u, const pixel * const src_ur,
+    const unsigned int stride,
+    const unsigned int top_right_size, const unsigned int down_left_size,
+    const unsigned int log2_size)
+{
+    const unsigned int strong_threshold = 1 << (BIT_DEPTH - 5);
+    const unsigned int size = 1 << log2_size;
+
+    // a_ is the first pel in a section working round dl -> ur
+    // b_ is the last
+    // Beware that top & left work out from UL so usage of a_ & b_ may
+    // swap between them.  It is a bad naming scheme but I have found no
+    // better
+    const pixel * a_dl = src_l + (down_left_size + size - 1) * stride;
+    const pixel * b_dl = src_l + size * stride;
+    const pixel * a_l  = src_l + (size - 1) * stride;
+    const pixel * b_l  = src_l;
+    const pixel * ab_ul = src_l - stride;
+    const pixel * a_u = src_u;
+    const pixel * b_u = src_u + size - 1;
+    const pixel * a_ur = src_ur;
+    const pixel * b_ur = src_ur + top_right_size - 1;
+
+    const unsigned int want = req & ~avail;
+    const unsigned int have = req & avail;
+    unsigned int i;
+
+    if ((avail & AVAIL_DL) == 0)
+    {
+        a_dl = a_ur;
+        if ((avail & AVAIL_U) != 0)
+            a_dl = a_u;
+        if ((avail & AVAIL_UL) != 0)
+            a_dl = ab_ul;
+        if ((avail & AVAIL_L) != 0)
+            a_dl = a_l;
+        b_dl = a_dl;
+    }
+
+    if ((avail & AVAIL_L) == 0)
+    {
+        a_l = b_dl;
+        b_l = b_dl;
+    }
+    if ((avail & AVAIL_UL) == 0)
+    {
+        ab_ul = b_l;
+    }
+    if ((avail & AVAIL_U) == 0)
+    {
+        a_u = ab_ul;
+        b_u = ab_ul;
+    }
+    if ((avail & AVAIL_UR) == 0)
+    {
+        a_ur = b_u;
+        b_ur = b_u;
+    }
+
+    if ((req & FILTER_LIGHT) == 0 || PRED_C || log2_size == 2)  // PRED_C, log2_size compiler opt hints
+    {
+        if ((req & AVAIL_UL) != 0)
+            left[-1] = *ab_ul;
+
+        if ((want & AVAIL_L) != 0)
+            EXTEND(left, *a_l, size);
+        if ((want & AVAIL_DL) != 0)
+            EXTEND(left + size, *a_dl, size);
+        if ((want & AVAIL_U) != 0)
+            EXTEND(top, *a_u, size);
+        if ((want & AVAIL_UR) != 0)
+            EXTEND(top + size, *a_ur, size);
+
+        if ((have & AVAIL_U) != 0)
+            // Always good - even with sand
+            memcpy(top, a_u, size * sizeof(pixel));
+        if ((have & AVAIL_UR) != 0)
+        {
+            memcpy(top + size, a_ur, top_right_size * sizeof(pixel));
+            EXTEND(top + size + top_right_size, *b_ur,
+                   size - top_right_size);
+        }
+        if ((have & AVAIL_L) != 0)
+        {
+            for (i = 0; i < size; i++)
+                left[i] = b_l[stride * i];
+        }
+        if ((have & AVAIL_DL) != 0)
+        {
+            for (i = 0; i < down_left_size; i++)
+                left[i + size] = b_dl[stride * i];
+            EXTEND(left + size + down_left_size, *a_dl,
+                   size - down_left_size);
+        }
+    }
+    else if ((req & FILTER_STRONG) != 0 && log2_size == 5 && // log2_size compiler opt hint
+            FFABS((int)(*a_dl - *a_l * 2 + *ab_ul)) < strong_threshold &&
+            FFABS((int)(*ab_ul - *b_u * 2 + *b_ur)) < strong_threshold)
+    {
+        if ((req & (AVAIL_U | AVAIL_UR)) != 0)
+            filter_strong(top, *ab_ul, *b_ur, size * 2);
+        left[-1] = *ab_ul;
+        if ((req & (AVAIL_L | AVAIL_DL)) != 0)
+            filter_strong(left, *ab_ul, *a_dl, size*2);
+    }
+    else
+    {
+        // Same code for both have & want for UL
+        if ((req & AVAIL_UL) != 0)
+        {
+            left[-1] = filter_light1(*b_l, *ab_ul, *a_u);
+        }
+
+        if ((want & AVAIL_L) != 0)
+        {
+            EXTEND(left, *a_l, size);
+            left[0] = (*a_l * 3 + *ab_ul + 2) >> 2;
+        }
+        if ((want & AVAIL_DL) != 0)
+        {
+            // If we want DL then it cannot be avail so a_dl = a_l so no edge rounding
+            EXTEND(left + size, *a_l, size);
+        }
+        if ((want & AVAIL_U) != 0)
+        {
+            EXTEND(top, *a_u, size);
+            top[size - 1] = (*a_u * 3 + *a_ur + 2) >> 2;
+        }
+        if ((want & AVAIL_UR) != 0)
+        {
+            // If we want UR then it cannot be avail so a_ur = b_u so no edge rounding
+            EXTEND(top + size, *a_ur, size);
+        }
+
+        if ((have & AVAIL_U) != 0)
+        {
+            filter_light(top, *ab_ul, a_u, *a_ur, 1, size);
+        }
+        if ((have & AVAIL_UR) != 0) {
+            filter_light(top + size, *b_u, a_ur, *b_ur, 1, top_right_size);
+            top[size*2 - 1] = *b_ur;
+            EXTEND(top + size + top_right_size, *b_ur, size - top_right_size);
+        }
+        if ((have & AVAIL_L) != 0)
+        {
+            filter_light(left, *ab_ul, b_l, *b_dl, stride, size);
+        }
+        if ((have & AVAIL_DL) != 0)
+        {
+            filter_light(left + size, *a_l, b_dl, *a_dl, stride, down_left_size);
+            left[size*2 - 1] = *a_dl;
+            EXTEND(left + size + down_left_size, *a_dl, size - down_left_size);
+        }
+    }
+}
+
+#define INTRA_FILTER(log2_size) \
+static void FUNC(intra_filter_ ## log2_size)( \
+     uint8_t * const left, uint8_t * const top, \
+     const unsigned int req, const unsigned int avail, \
+     const uint8_t * const src_l, const uint8_t * const src_u, const uint8_t * const src_ur, \
+     const unsigned int stride, \
+     const unsigned int top_right_size, const unsigned int down_left_size) \
+{ \
+    intra_filter((pixel *)left, (pixel *)top, req, avail, \
+        (const pixel *)src_l, (const pixel *)src_u, (const pixel *)src_ur, stride / sizeof(pixel), top_right_size, down_left_size, log2_size); \
+}
+
+INTRA_FILTER(2)
+INTRA_FILTER(3)
+INTRA_FILTER(4)
+INTRA_FILTER(5)
+
+#undef intra_filter
+#undef INTRA_FILTER
+
+static av_always_inline void FUNC(intra_pred)(const HEVCRpiContext * const s,
+                                              const enum IntraPredMode mode, const unsigned int x0, const unsigned int y0, const unsigned int avail,
+                                              const unsigned int log2_size)
+{
     // c_idx will alaways be 1 for _c versions and 0 for y
     const unsigned int c_idx = PRED_C;
-    int i;
     const unsigned int hshift = ctx_hshift(s, c_idx);
     const unsigned int vshift = ctx_vshift(s, c_idx);
-    int size = (1 << log2_size);
-    int size_in_luma_h = size << hshift;
-    int size_in_tbs_h  = size_in_luma_h >> s->ps.sps->log2_min_tb_size;
-    int size_in_luma_v = size << vshift;
-    int size_in_tbs_v  = size_in_luma_v >> s->ps.sps->log2_min_tb_size;
-    const int x = x0 >> hshift;
-    const int y = y0 >> vshift;
-    int x_tb = (x0 >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask;
-    int y_tb = (y0 >> s->ps.sps->log2_min_tb_size) & s->ps.sps->tb_mask;
-
-    int cur_tb_addr = MIN_TB_ADDR_ZS(x_tb, y_tb);
+    const unsigned int size = (1 << log2_size);
+    const unsigned int x = x0 >> hshift;
+    const unsigned int y = y0 >> vshift;
 
     const ptrdiff_t stride = frame_stride1(s->frame, c_idx) / sizeof(pixel);
     pixel *const src = c_idx == 0 ?
         (pixel *)av_rpi_sand_frame_pos_y(s->frame, x, y) :
         (pixel *)av_rpi_sand_frame_pos_c(s->frame, x, y);
 
-    int min_pu_width = s->ps.sps->min_pu_width;
-
-    const enum IntraPredMode mode = c_idx ? lc->tu.intra_pred_mode_c :
-                              lc->tu.intra_pred_mode;
-    pixel4 a;
-
     // Align so we can do multiple loads in the asm
     // Padded to 16 byte boundary so as not to confuse anything
     DECLARE_ALIGNED(16, pixel, left_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
     DECLARE_ALIGNED(16, pixel,  top_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
+
+    pixel  * const left = left_array + 16 / sizeof(pixel);
+    pixel  * const top  = top_array  + 16 / sizeof(pixel);
+    const pixel * top_pred = top;
+
+    const pixel * src_l = src - 1;
+    const pixel * src_u = src - stride;
+    const pixel * src_ur = src_u + size;
 #if !PRED_C
-    DECLARE_ALIGNED(16, pixel, filtered_left_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
-    DECLARE_ALIGNED(16, pixel,  filtered_top_array[2 * MAX_TB_SIZE + 16 / sizeof(pixel)]);
+    unsigned int req = req_avail[log2_size - 2][mode];
+#else
+    unsigned int req = req_avail_c[mode];
 #endif
 
-    pixel  *left          = left_array + 16 / sizeof(pixel);
-    pixel  *top           = top_array  + 16 / sizeof(pixel);
+    // If we have nothing to pred from then fill with grey
+    // This isn't a common case but dealing with it here means we don't have to
+    // test for it later
+    if (avail == 0)
+    {
+dc_only:
 #if !PRED_C
-    pixel  *filtered_left = filtered_left_array + 16 / sizeof(pixel);
-    pixel  *filtered_top  = filtered_top_array  + 16 / sizeof(pixel);
+        s->hpc.pred_dc0[log2_size - 2]((uint8_t *)src, stride);
+#else
+        s->hpc.pred_dc0_c[log2_size - 2]((uint8_t *)src, stride);
 #endif
-    int cand_bottom_left = lc->na.cand_bottom_left && cur_tb_addr > MIN_TB_ADDR_ZS( x_tb - 1, (y_tb + size_in_tbs_v) & s->ps.sps->tb_mask);
-    int cand_left        = lc->na.cand_left;
-    int cand_up_left     = lc->na.cand_up_left;
-    int cand_up          = lc->na.cand_up;
-    int cand_up_right    = lc->na.cand_up_right    && cur_tb_addr > MIN_TB_ADDR_ZS((x_tb + size_in_tbs_h) & s->ps.sps->tb_mask, y_tb - 1);
+        return;
+    }
 
-    int bottom_left_size = (FFMIN(y0 + 2 * size_in_luma_v, s->ps.sps->height) -
-                           (y0 + size_in_luma_v)) >> vshift;
-    int top_right_size   = (FFMIN(x0 + 2 * size_in_luma_h, s->ps.sps->width) -
-                           (x0 + size_in_luma_h)) >> hshift;
-
-    pixel * src_l = src - 1;
-    pixel * src_u = src - stride;
-    pixel * src_ur = src_u + size;
+    // There will be no filtering on C so no point worrying about disabling it
+#if !PRED_C
+    if (s->ps.sps->intra_smoothing_disabled_flag)
+        req &= ~FILTER_EITHER;
+    if (!s->ps.sps->sps_strong_intra_smoothing_enable_flag)
+        req &= ~FILTER_STRONG;
+#endif
 
     {
         // N.B. stride is in pixels (not bytes) or in the case of chroma pixel-pairs
@@ -233,248 +833,96 @@ do {                                  \
             src_ur += stripe_adj;
     }
 
-    if (s->ps.pps->constrained_intra_pred_flag == 1) {
-        int size_in_luma_pu_v = PU(size_in_luma_v);
-        int size_in_luma_pu_h = PU(size_in_luma_h);
-        int on_pu_edge_x    = !av_mod_uintp2(x0, s->ps.sps->log2_min_pu_size);
-        int on_pu_edge_y    = !av_mod_uintp2(y0, s->ps.sps->log2_min_pu_size);
-        if (!size_in_luma_pu_h)
-            size_in_luma_pu_h++;
-        if (cand_bottom_left == 1 && on_pu_edge_x) {
-            int x_left_pu   = PU(x0 - 1);
-            int y_bottom_pu = PU(y0 + size_in_luma_v);
-            int max = FFMIN(size_in_luma_pu_v, s->ps.sps->min_pu_height - y_bottom_pu);
-            cand_bottom_left = 0;
-            for (i = 0; i < max; i += 2)
-                cand_bottom_left |= (MVF(x_left_pu, y_bottom_pu + i).pred_flag == PF_INTRA);
-        }
-        if (cand_left == 1 && on_pu_edge_x) {
-            int x_left_pu   = PU(x0 - 1);
-            int y_left_pu   = PU(y0);
-            int max = FFMIN(size_in_luma_pu_v, s->ps.sps->min_pu_height - y_left_pu);
-            cand_left = 0;
-            for (i = 0; i < max; i += 2)
-                cand_left |= (MVF(x_left_pu, y_left_pu + i).pred_flag == PF_INTRA);
-        }
-        if (cand_up_left == 1) {
-            int x_left_pu   = PU(x0 - 1);
-            int y_top_pu    = PU(y0 - 1);
-            cand_up_left = MVF(x_left_pu, y_top_pu).pred_flag == PF_INTRA;
-        }
-        if (cand_up == 1 && on_pu_edge_y) {
-            int x_top_pu    = PU(x0);
-            int y_top_pu    = PU(y0 - 1);
-            int max = FFMIN(size_in_luma_pu_h, s->ps.sps->min_pu_width - x_top_pu);
-            cand_up = 0;
-            for (i = 0; i < max; i += 2)
-                cand_up |= (MVF(x_top_pu + i, y_top_pu).pred_flag == PF_INTRA);
-        }
-        if (cand_up_right == 1 && on_pu_edge_y) {
-            int y_top_pu    = PU(y0 - 1);
-            int x_right_pu  = PU(x0 + size_in_luma_h);
-            int max = FFMIN(size_in_luma_pu_h, s->ps.sps->min_pu_width - x_right_pu);
-            cand_up_right = 0;
-            for (i = 0; i < max; i += 2)
-                cand_up_right |= (MVF(x_right_pu + i, y_top_pu).pred_flag == PF_INTRA);
-        }
-        memset(left, 128, 2 * MAX_TB_SIZE*sizeof(pixel));
-        memset(top , 128, 2 * MAX_TB_SIZE*sizeof(pixel));
-        top[-1] = 128;
-    }
-    if (cand_up_left) {
-        left[-1] = src_l[-stride];
-        top[-1]  = left[-1];
-    }
-    if (cand_up)
-        // Always good - even with sand
-        memcpy(top, src_u, size * sizeof(pixel));
-    if (cand_up_right) {
-        memcpy(top + size, src_ur, top_right_size * sizeof(pixel));
-        EXTEND(top + size + top_right_size, top[size + top_right_size - 1],
-               size - top_right_size);
-    }
-    if (cand_left)
-        for (i = 0; i < size; i++)
-            left[i] = src_l[stride * i];
-    if (cand_bottom_left) {
-        for (i = size; i < size + bottom_left_size; i++)
-            left[i] = src_l[stride * i];
-        EXTEND(left + size + bottom_left_size, left[size + bottom_left_size - 1],
-               size - bottom_left_size);
-    }
+    if (s->ps.pps->constrained_intra_pred_flag == 1 &&
+        s->sh.slice_type != HEVC_SLICE_I)  // Can deal with I-slices in 'normal' code
+    {
+        const unsigned int l2_pu_s = FFMAX(s->ps.sps->log2_min_pu_size - hshift, 2);
+        const unsigned int l2_pu_stride_s = l2_pu_s - (s->ps.sps->log2_min_pu_size - hshift);
 
-    if (s->ps.pps->constrained_intra_pred_flag == 1) {
-        if (cand_bottom_left || cand_left || cand_up_left || cand_up || cand_up_right) {
-            int size_max_x = x0 + ((2 * size) << hshift) < s->ps.sps->width ?
-                                    2 * size : (s->ps.sps->width - x0) >> hshift;
-            int size_max_y = y0 + ((2 * size) << vshift) < s->ps.sps->height ?
-                                    2 * size : (s->ps.sps->height - y0) >> vshift;
-            int j = size + (cand_bottom_left? bottom_left_size: 0) -1;
-            if (!cand_up_right) {
-                size_max_x = x0 + ((size) << hshift) < s->ps.sps->width ?
-                                                    size : (s->ps.sps->width - x0) >> hshift;
-            }
-            if (!cand_bottom_left) {
-                size_max_y = y0 + (( size) << vshift) < s->ps.sps->height ?
-                                                     size : (s->ps.sps->height - y0) >> vshift;
-            }
-            if (cand_bottom_left || cand_left || cand_up_left) {
-                while (j > -1 && !IS_INTRA(-1, j))
-                    j--;
-                if (!IS_INTRA(-1, j)) {
-                    j = 0;
-                    while (j < size_max_x && !IS_INTRA(j, -1))
-                        j++;
-                    EXTEND_LEFT_CIP(top, j, j + 1);
-                    left[-1] = top[-1];
-                }
-            } else {
-                j = 0;
-                while (j < size_max_x && !IS_INTRA(j, -1))
-                    j++;
-                if (j > 0)
-                    if (x0 > 0) {
-                        EXTEND_LEFT_CIP(top, j, j + 1);
-                    } else {
-                        EXTEND_LEFT_CIP(top, j, j);
-                        top[-1] = top[0];
-                    }
-                left[-1] = top[-1];
-            }
-            left[-1] = top[-1];
-            if (cand_bottom_left || cand_left) {
-                a = PIXEL_SPLAT_X4(left[-1]);
-                EXTEND_DOWN_CIP(left, 0, size_max_y);
-            }
-            if (!cand_left)
-                EXTEND(left, left[-1], size);
-            if (!cand_bottom_left)
-                EXTEND(left + size, left[size - 1], size);
-            if (x0 != 0 && y0 != 0) {
-                a = PIXEL_SPLAT_X4(left[size_max_y - 1]);
-                EXTEND_UP_CIP(left, size_max_y - 1, size_max_y);
-                if (!IS_INTRA(-1, - 1))
-                    left[-1] = left[0];
-            } else if (x0 == 0) {
-                EXTEND(left, 0, size_max_y);
-            } else {
-                a = PIXEL_SPLAT_X4(left[size_max_y - 1]);
-                EXTEND_UP_CIP(left, size_max_y - 1, size_max_y);
-            }
-            top[-1] = left[-1];
-            if (y0 != 0) {
-                a = PIXEL_SPLAT_X4(left[-1]);
-                EXTEND_RIGHT_CIP(top, 0, size_max_x);
-            }
-        }
-    }
-    // Infer the unavailable samples
-    if (!cand_bottom_left) {
-        if (cand_left) {
-            EXTEND(left + size, left[size - 1], size);
-        } else if (cand_up_left) {
-            EXTEND(left, left[-1], 2 * size);
-            cand_left = 1;
-        } else if (cand_up) {
-            left[-1] = top[0];
-            EXTEND(left, left[-1], 2 * size);
-            cand_up_left = 1;
-            cand_left    = 1;
-        } else if (cand_up_right) {
-            EXTEND(top, top[size], size);
-            left[-1] = top[size];
-            EXTEND(left, left[-1], 2 * size);
-            cand_up      = 1;
-            cand_up_left = 1;
-            cand_left    = 1;
-        } else { // No samples available
-#if PRED_C
-            left[-1] = (1 << (BIT_DEPTH - 1)) | (1 << (BIT_DEPTH - 1 + PW * 8));
-#else
-            left[-1] = (1 << (BIT_DEPTH - 1));
-#endif
-            EXTEND(top,  left[-1], 2 * size);
-            EXTEND(left, left[-1], 2 * size);
-        }
-    }
+        unsigned int avail_l = cip_avail(&MVF_PU(-1, size * 2 - 1),
+                                         -(int)(s->ps.sps->min_pu_width << l2_pu_stride_s),
+                                         l2_pu_s,
+                                         avail >> AVAIL_S_UL,
+                                         size,
+                                         FFMIN(size, ((s->ps.sps->height - y0) >> vshift) - size), size);
+        unsigned int avail_u = cip_avail(&MVF_PU(0, -1),
+                                         1 << l2_pu_stride_s,
+                                         l2_pu_s,
+                                         avail << 1,
+                                         size,
+                                         size, FFMIN(size, ((s->ps.sps->width - x0) >> hshift) - size));
 
-    if (!cand_left)
-        EXTEND(left, left[size], size);
-    if (!cand_up_left) {
-        left[-1] = left[0];
-    }
-    if (!cand_up)
-        EXTEND(top, left[-1], size);
-    if (!cand_up_right)
-        EXTEND(top + size, top[size - 1], size);
+        // Anything left?
+        if ((avail_l | avail_u) == 0)
+            goto dc_only;
 
-    top[-1] = left[-1];
+        FUNC(cip_fill)(left, top, avail_l, avail_u, src_l, src_u, src_ur, stride, size);
 
-    // Filtering process
-    // Sand can only apply to chroma_format_idc == 1 so we don't need to
-    // worry about chroma smoothing for that case
 #if !PRED_C
-    if (!s->ps.sps->intra_smoothing_disabled_flag && (c_idx == 0  || ctx_cfmt(s) == 3)) {
-        if (mode != INTRA_DC && size != 4){
-            int intra_hor_ver_dist_thresh[] = { 7, 1, 0 };
-            int min_dist_vert_hor = FFMIN(FFABS((int)(mode - 26U)),
-                                          FFABS((int)(mode - 10U)));
-            if (min_dist_vert_hor > intra_hor_ver_dist_thresh[log2_size - 3]) {
-                int threshold = 1 << (BIT_DEPTH - 5);
-                if (s->ps.sps->sps_strong_intra_smoothing_enable_flag && c_idx == 0 &&
-                    log2_size == 5 &&
-                    FFABS(top[-1]  + top[63]  - 2 * top[31])  < threshold &&
-                    FFABS(left[-1] + left[63] - 2 * left[31]) < threshold) {
-                    // We can't just overwrite values in top because it could be
-                    // a pointer into src
-                    filtered_top[-1] = top[-1];
-                    filtered_top[63] = top[63];
-                    for (i = 0; i < 63; i++)
-                        filtered_top[i] = ((64 - (i + 1)) * top[-1] +
-                                           (i + 1)  * top[63] + 32) >> 6;
-                    for (i = 0; i < 63; i++)
-                        left[i] = ((64 - (i + 1)) * left[-1] +
-                                   (i + 1)  * left[63] + 32) >> 6;
-                    top = filtered_top;
-                } else {
-                    filtered_left[2 * size - 1] = left[2 * size - 1];
-                    filtered_top[2 * size - 1]  = top[2 * size - 1];
-                    for (i = 2 * size - 2; i >= 0; i--)
-                        filtered_left[i] = (left[i + 1] + 2 * left[i] +
-                                            left[i - 1] + 2) >> 2;
-                    filtered_top[-1]  =
-                    filtered_left[-1] = (left[0] + 2 * left[-1] + top[0] + 2) >> 2;
-                    for (i = 2 * size - 2; i >= 0; i--)
-                        filtered_top[i] = (top[i + 1] + 2 * top[i] +
-                                           top[i - 1] + 2) >> 2;
-                    left = filtered_left;
-                    top  = filtered_top;
-                }
+        if ((req & FILTER_LIGHT) != 0)
+        {
+            const unsigned threshold = 1 << (BIT_DEPTH - 5);
+            if ((req & FILTER_STRONG) != 0 &&
+                (int)(FFABS(left[-1]  + top[63] - 2 * top[31]))  < threshold &&
+                (int)(FFABS(left[-1] + left[63] - 2 * left[31])) < threshold)
+            {
+                filter_strong(top, left[-1], top[63], 64);
+                filter_strong(left, left[-1], left[63], 64);
+            } else
+            {
+                // LHS writes UL too so copy for top
+                const pixel p_ul = left[-1];
+                filter_light(left - 1, top[0], left - 1, left[2*size - 1], 1, 2*size);
+                filter_light(top, p_ul, top, top[2*size - 1], 1, 2*size - 1);
             }
+        }
+#endif
+    }
+    else
+    {
+        const unsigned int ur_size = FFMIN(size, ((s->ps.sps->width - x0) >> hshift) - size);
+        if ((req & ~((AVAIL_UR | AVAIL_U) & avail)) == 0 &&
+            ((req & AVAIL_UR) == 0 || src_u + 2*size == src_ur + ur_size))
+        {
+            top_pred = src_u;
+        }
+        else
+        {
+#if !PRED_C
+            s->hpc.intra_filter[log2_size - 2]
+#else
+            s->hpc.intra_filter_c[log2_size - 2]
+#endif
+                ((uint8_t *)left, (uint8_t *)top, req, avail,
+                 (const uint8_t *)src_l, (const uint8_t *)src_u, (const uint8_t *)src_ur, stride * sizeof(pixel),
+                              ur_size,
+                              FFMIN(size, ((s->ps.sps->height - y0) >> vshift) - size));
         }
     }
 
+
+#if !PRED_C
     switch (mode) {
     case INTRA_PLANAR:
-        s->hpc.pred_planar[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_planar[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                           (uint8_t *)left, stride);
         break;
     case INTRA_DC:
-        s->hpc.pred_dc[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_dc[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                        (uint8_t *)left, stride);
         break;
     case INTRA_ANGULAR_HORIZONTAL:
-        s->hpc.pred_horizontal[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_horizontal[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
         break;
     case INTRA_ANGULAR_VERTICAL:
-        s->hpc.pred_vertical[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_vertical[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
         break;
     default:
-        s->hpc.pred_angular[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_angular[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
         break;
@@ -482,25 +930,25 @@ do {                                  \
 #else
     switch (mode) {
     case INTRA_PLANAR:
-        s->hpc.pred_planar_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_planar_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                           (uint8_t *)left, stride);
         break;
     case INTRA_DC:
-        s->hpc.pred_dc_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_dc_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                        (uint8_t *)left, stride);
         break;
     case INTRA_ANGULAR_HORIZONTAL:
-        s->hpc.pred_horizontal_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_horizontal_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
         break;
     case INTRA_ANGULAR_VERTICAL:
-        s->hpc.pred_vertical_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_vertical_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
         break;
     default:
-        s->hpc.pred_angular_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top,
+        s->hpc.pred_angular_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
         break;
@@ -515,10 +963,11 @@ do {                                  \
 #endif
 }
 
-#define INTRA_PRED(size)                                                            \
-static void FUNC(intra_pred_ ## size)(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int c_idx)    \
-{                                                                                   \
-    FUNC(intra_pred)(s, lc, x0, y0, size, c_idx);                                       \
+#define INTRA_PRED(log2_size) \
+static void FUNC(intra_pred_ ## log2_size)(const struct HEVCRpiContext * const s, \
+                          const enum IntraPredMode mode, const unsigned int x0, const unsigned int y0, const unsigned int avail) \
+{ \
+    FUNC(intra_pred)(s, mode, x0, y0, avail, log2_size); \
 }
 
 INTRA_PRED(2)
@@ -662,6 +1111,56 @@ PRED_DC(2)
 PRED_DC(3)
 
 #undef PRED_DC
+
+
+
+
+#if !PRED_C
+static void FUNC(pred_dc0)(uint8_t *_src, ptrdiff_t stride, int log2_size)
+{
+    int i, j;
+    int size          = (1 << log2_size);
+    pixel *src        = (pixel *)_src;
+    pixel4 a = PIXEL_SPLAT_X4(1 << (BIT_DEPTH - 1));
+
+    for (i = 0; i < size; i++)
+        for (j = 0; j < size; j+=4)
+            AV_WN4P(&POS(j, i), a);
+}
+#else
+static void FUNC(pred_dc0)(uint8_t *_src, ptrdiff_t stride, int log2_size)
+{
+    unsigned int i, j;
+    const unsigned int size = (1 << log2_size);
+    c_dst_ptr_t src = (c_dst_ptr_t)_src;
+    const pixel a = (1 << (BIT_DEPTH - 1));
+
+    for (i = 0; i < size; i++, src += stride)
+    {
+        for (j = 0; j < size; ++j)
+        {
+            src[j][0] = a;
+            src[j][1] = a;
+        }
+    }
+}
+#endif
+
+#define PRED_DC0(size)\
+static void FUNC(pred_dc0_ ## size)(uint8_t *src, ptrdiff_t stride)   \
+{                                                                               \
+    FUNC(pred_dc0)(src, stride, size + 2);                        \
+}
+
+PRED_DC0(0)
+PRED_DC0(1)
+PRED_DC0(2)
+PRED_DC0(3)
+
+#undef PRED_DC0
+
+
+
 
 #ifndef ANGLE_CONSTS
 #define ANGLE_CONSTS
@@ -976,6 +1475,11 @@ static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
 #undef MIN_TB_ADDR_ZS
 #undef POS
 #undef PW
+
+#undef filter_light1
+#undef filter_light
+#undef filter_strong
+#undef ref_gen
 
 #ifndef INCLUDED_ONCE
 #define INCLUDED_ONCE

@@ -76,6 +76,10 @@ void ff_hevc_rpi_pred_init(HEVCRpiPredContext *hpc, int bit_depth)
     hpc->intra_pred[1]   = FUNC(intra_pred_3, depth);   \
     hpc->intra_pred[2]   = FUNC(intra_pred_4, depth);   \
     hpc->intra_pred[3]   = FUNC(intra_pred_5, depth);   \
+    hpc->intra_filter[0] = FUNC(intra_filter_2, depth); \
+    hpc->intra_filter[1] = FUNC(intra_filter_3, depth); \
+    hpc->intra_filter[2] = FUNC(intra_filter_4, depth); \
+    hpc->intra_filter[3] = FUNC(intra_filter_5, depth); \
     hpc->pred_planar[0]  = FUNC(pred_planar_0, depth);  \
     hpc->pred_planar[1]  = FUNC(pred_planar_1, depth);  \
     hpc->pred_planar[2]  = FUNC(pred_planar_2, depth);  \
@@ -95,13 +99,21 @@ void ff_hevc_rpi_pred_init(HEVCRpiPredContext *hpc, int bit_depth)
     hpc->pred_angular[0] = FUNC(pred_angular_0, depth); \
     hpc->pred_angular[1] = FUNC(pred_angular_1, depth); \
     hpc->pred_angular[2] = FUNC(pred_angular_2, depth); \
-    hpc->pred_angular[3] = FUNC(pred_angular_3, depth);
+    hpc->pred_angular[3] = FUNC(pred_angular_3, depth); \
+    hpc->pred_dc0[0]     = FUNC(pred_dc0_0, depth);     \
+    hpc->pred_dc0[1]     = FUNC(pred_dc0_1, depth);     \
+    hpc->pred_dc0[2]     = FUNC(pred_dc0_2, depth);     \
+    hpc->pred_dc0[3]     = FUNC(pred_dc0_3, depth);
 
 #define HEVC_PRED_C(depth)                                \
     hpc->intra_pred_c[0]   = FUNCC(intra_pred_2, depth);   \
     hpc->intra_pred_c[1]   = FUNCC(intra_pred_3, depth);   \
     hpc->intra_pred_c[2]   = FUNCC(intra_pred_4, depth);   \
     hpc->intra_pred_c[3]   = FUNCC(intra_pred_5, depth);   \
+	hpc->intra_filter_c[0] = FUNCC(intra_filter_2, depth); \
+	hpc->intra_filter_c[1] = FUNCC(intra_filter_3, depth); \
+	hpc->intra_filter_c[2] = FUNCC(intra_filter_4, depth); \
+	hpc->intra_filter_c[3] = FUNCC(intra_filter_5, depth); \
     hpc->pred_planar_c[0]  = FUNCC(pred_planar_0, depth);  \
     hpc->pred_planar_c[1]  = FUNCC(pred_planar_1, depth);  \
     hpc->pred_planar_c[2]  = FUNCC(pred_planar_2, depth);  \
@@ -121,7 +133,11 @@ void ff_hevc_rpi_pred_init(HEVCRpiPredContext *hpc, int bit_depth)
     hpc->pred_angular_c[0] = FUNCC(pred_angular_0, depth); \
     hpc->pred_angular_c[1] = FUNCC(pred_angular_1, depth); \
     hpc->pred_angular_c[2] = FUNCC(pred_angular_2, depth); \
-    hpc->pred_angular_c[3] = FUNCC(pred_angular_3, depth);
+    hpc->pred_angular_c[3] = FUNCC(pred_angular_3, depth); \
+    hpc->pred_dc0_c[0]     = FUNCC(pred_dc0_0, depth);     \
+    hpc->pred_dc0_c[1]     = FUNCC(pred_dc0_1, depth);     \
+    hpc->pred_dc0_c[2]     = FUNCC(pred_dc0_2, depth);     \
+    hpc->pred_dc0_c[3]     = FUNCC(pred_dc0_3, depth);
 
 #define HEVC_PRED(depth) \
     HEVC_PRED_Y(depth); \

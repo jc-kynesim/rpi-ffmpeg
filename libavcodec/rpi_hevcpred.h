@@ -30,9 +30,58 @@
 struct HEVCRpiContext;
 struct HEVCRpiLocalContext;
 
-typedef struct HEVCRpiPredContext {
-    void (*intra_pred[4])(const struct HEVCRpiContext * const s, struct HEVCRpiLocalContext * const lc, int x0, int y0, int c_idx);
+enum IntraPredMode {
+    INTRA_PLANAR = 0,
+    INTRA_DC,
+    INTRA_ANGULAR_2,
+    INTRA_ANGULAR_3,
+    INTRA_ANGULAR_4,
+    INTRA_ANGULAR_5,
+    INTRA_ANGULAR_6,
+    INTRA_ANGULAR_7,
+    INTRA_ANGULAR_8,
+    INTRA_ANGULAR_9,
+    INTRA_ANGULAR_10,
+    INTRA_ANGULAR_11,
+    INTRA_ANGULAR_12,
+    INTRA_ANGULAR_13,
+    INTRA_ANGULAR_14,
+    INTRA_ANGULAR_15,
+    INTRA_ANGULAR_16,
+    INTRA_ANGULAR_17,
+    INTRA_ANGULAR_18,
+    INTRA_ANGULAR_19,
+    INTRA_ANGULAR_20,
+    INTRA_ANGULAR_21,
+    INTRA_ANGULAR_22,
+    INTRA_ANGULAR_23,
+    INTRA_ANGULAR_24,
+    INTRA_ANGULAR_25,
+    INTRA_ANGULAR_26,
+    INTRA_ANGULAR_27,
+    INTRA_ANGULAR_28,
+    INTRA_ANGULAR_29,
+    INTRA_ANGULAR_30,
+    INTRA_ANGULAR_31,
+    INTRA_ANGULAR_32,
+    INTRA_ANGULAR_33,
+    INTRA_ANGULAR_34,
+};
+#define INTRA_ANGULAR_HORIZONTAL INTRA_ANGULAR_10
+#define INTRA_ANGULAR_VERTICAL   INTRA_ANGULAR_26
 
+typedef void intra_filter_fn_t(
+        uint8_t * const left, uint8_t * const top,
+        const unsigned int req, const unsigned int avail,
+        const uint8_t * const src_l, const uint8_t * const src_u, const uint8_t * const src_ur,
+        const unsigned int stride,
+        const unsigned int top_right_size, const unsigned int down_left_size);
+
+typedef struct HEVCRpiPredContext {
+    void (*intra_pred[4])(const struct HEVCRpiContext * const s,
+                          const enum IntraPredMode mode, const unsigned int x0, const unsigned int y0, const unsigned int avail);
+
+    intra_filter_fn_t *intra_filter[4];
     void (*pred_planar[4])(uint8_t *src, const uint8_t *top,
                            const uint8_t *left, ptrdiff_t stride);
     void (*pred_dc[4])(uint8_t *src, const uint8_t *top, const uint8_t *left,
@@ -46,8 +95,11 @@ typedef struct HEVCRpiPredContext {
     void (*pred_horizontal[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
                             int mode);
-    void (*intra_pred_c[4])(const struct HEVCRpiContext * const s, struct HEVCRpiLocalContext * const lc, int x0, int y0, int c_idx);
+    void (*pred_dc0[4])(uint8_t *src, ptrdiff_t stride);
 
+    void (*intra_pred_c[4])(const struct HEVCRpiContext * const s,
+                          const enum IntraPredMode mode, const unsigned int x0, const unsigned int y0, const unsigned int avail);
+    intra_filter_fn_t *intra_filter_c[4];
     void (*pred_planar_c[4])(uint8_t *src, const uint8_t *top,
                            const uint8_t *left, ptrdiff_t stride);
     void (*pred_dc_c[4])(uint8_t *src, const uint8_t *top, const uint8_t *left,
@@ -61,6 +113,7 @@ typedef struct HEVCRpiPredContext {
     void (*pred_horizontal_c[4])(uint8_t *src, const uint8_t *top,
                             const uint8_t *left, ptrdiff_t stride,
                             int mode);
+    void (*pred_dc0_c[4])(uint8_t *src, ptrdiff_t stride);
 } HEVCRpiPredContext;
 
 void ff_hevc_rpi_pred_init(HEVCRpiPredContext *hpc, int bit_depth);

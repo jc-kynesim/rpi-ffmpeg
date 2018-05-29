@@ -20,6 +20,15 @@
 
 #include "rpi_hevcpred_arm.h"
 
+intra_filter_fn_t ff_hevc_rpi_intra_filter_4_neon_8;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_8_neon_8;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_4_neon_16;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_8_neon_16;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_16_neon_16;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_4_neon_32;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_8_neon_32;
+intra_filter_fn_t ff_hevc_rpi_intra_filter_16_neon_32;
+
 void ff_hevc_rpi_pred_angular_4_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
 void ff_hevc_rpi_pred_angular_8_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
 void ff_hevc_rpi_pred_angular_16_neon_8(uint8_t *src, const uint8_t *top, const uint8_t *left, ptrdiff_t stride, int mode);
@@ -100,6 +109,12 @@ void ff_hevc_rpi_pred_init_neon(HEVCRpiPredContext * const c, const int bit_dept
     switch (bit_depth)
     {
     case 8:
+        c->intra_filter[0] = ff_hevc_rpi_intra_filter_4_neon_8;
+        c->intra_filter[1] = ff_hevc_rpi_intra_filter_8_neon_8;
+        c->intra_filter_c[0] = ff_hevc_rpi_intra_filter_4_neon_16;  // Equivalent to c_4_neon_8
+        c->intra_filter_c[1] = ff_hevc_rpi_intra_filter_8_neon_16;
+        c->intra_filter_c[2] = ff_hevc_rpi_intra_filter_16_neon_16;
+
         c->pred_angular[0] = ff_hevc_rpi_pred_angular_4_neon_8;
         c->pred_angular[1] = ff_hevc_rpi_pred_angular_8_neon_8;
         c->pred_angular[2] = ff_hevc_rpi_pred_angular_16_neon_8;
@@ -141,6 +156,13 @@ void ff_hevc_rpi_pred_init_neon(HEVCRpiPredContext * const c, const int bit_dept
         c->pred_dc_c[2] = ff_hevc_rpi_pred_dc_c_16_neon_8;
         break;
     case 10:
+        c->intra_filter[0] = ff_hevc_rpi_intra_filter_4_neon_16;
+        c->intra_filter[1] = ff_hevc_rpi_intra_filter_8_neon_16;
+        c->intra_filter[2] = ff_hevc_rpi_intra_filter_16_neon_16;
+        c->intra_filter_c[0] = ff_hevc_rpi_intra_filter_4_neon_32;
+        c->intra_filter_c[1] = ff_hevc_rpi_intra_filter_8_neon_32;
+        c->intra_filter_c[2] = ff_hevc_rpi_intra_filter_16_neon_32;
+
         c->pred_angular[0] = ff_hevc_rpi_pred_angular_4_neon_10;
         c->pred_angular[1] = ff_hevc_rpi_pred_angular_8_neon_10;
         c->pred_angular[2] = ff_hevc_rpi_pred_angular_16_neon_10;

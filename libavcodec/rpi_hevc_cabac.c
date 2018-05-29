@@ -885,9 +885,9 @@ int ff_hevc_rpi_split_coding_unit_flag_decode(const HEVCRpiContext * const s, HE
     int x_cb = x0 >> s->ps.sps->log2_min_cb_size;
     int y_cb = y0 >> s->ps.sps->log2_min_cb_size;
 
-    if (lc->ctb_left_flag || x0b)
+    if ((lc->ctb_avail & AVAIL_L) != 0 || x0b)
         depth_left = s->tab_ct_depth[(y_cb) * s->ps.sps->min_cb_width + x_cb - 1];
-    if (lc->ctb_up_flag || y0b)
+    if ((lc->ctb_avail & AVAIL_U) != 0 || y0b)
         depth_top = s->tab_ct_depth[(y_cb - 1) * s->ps.sps->min_cb_width + x_cb];
 
     inc += (depth_left > ct_depth);
@@ -1425,7 +1425,6 @@ static void rpi_add_residual(const HEVCRpiContext *const s, HEVCRpiJob * const j
 
         // Rewrite as add residual - must rewrite all fields as different union member
         pc->type = RPI_PRED_ADD_RESIDUAL_V;
-        pc->c_idx = c_idx;
         pc->ta.buf = coeffs;
         pc->ta.dst = dst;
         pc->ta.stride = stride;
@@ -1438,7 +1437,6 @@ static void rpi_add_residual(const HEVCRpiContext *const s, HEVCRpiJob * const j
 
         cmd->type = RPI_PRED_ADD_RESIDUAL + (is_sliced ? c_idx : 0);
         cmd->size = log2_trafo_size;
-        cmd->c_idx = c_idx;
         cmd->ta.buf = coeffs;
         cmd->ta.dst = dst;
         cmd->ta.stride = stride;
@@ -1494,7 +1492,6 @@ static void rpi_add_dc(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
 
         cmd->type = RPI_PRED_ADD_DC + c_idx;
         cmd->size = log2_trafo_size;
-        cmd->c_idx = c_idx;
         cmd->dc.dst = dst;
         cmd->dc.stride = stride;
         cmd->dc.dc = c_idx == 0 ? coeff : c_idx == 2 ? coeff << 16 : coeff & 0xffff;

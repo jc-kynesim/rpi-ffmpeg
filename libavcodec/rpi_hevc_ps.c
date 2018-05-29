@@ -1375,7 +1375,6 @@ static void hevc_pps_free(void *opaque, uint8_t *data)
     av_freep(&pps->tile_size);
     av_freep(&pps->tile_id);
     av_freep(&pps->ctb_ts_flags);
-    av_freep(&pps->min_tb_addr_zs_tab);
 
     av_freep(&pps);
 }
@@ -1440,7 +1439,6 @@ static int pps_range_extensions(GetBitContext * const gb, AVCodecContext * const
 static inline int setup_pps(AVCodecContext * const avctx,
                             HEVCRpiPPS * const pps, const HEVCRpiSPS * const sps)
 {
-    int log2_diff;
     int pic_area_in_ctbs;
     int i, j, x, y, ctb_addr_rs, tile_id;
 
@@ -1544,9 +1542,8 @@ static inline int setup_pps(AVCodecContext * const avctx,
     pps->tile_size         = av_malloc_array(pps->num_tile_columns * pps->num_tile_rows, sizeof(*pps->tile_size));
     pps->tile_pos_ts       = av_malloc_array(pps->num_tile_columns * pps->num_tile_rows, sizeof(*pps->tile_pos_ts));
     pps->ctb_ts_flags      = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_ts_flags));
-    pps->min_tb_addr_zs_tab = av_malloc_array((sps->tb_mask+2) * (sps->tb_mask+2), sizeof(*pps->min_tb_addr_zs_tab));
     if (!pps->ctb_addr_rs_to_ts || !pps->ctb_addr_ts_to_rs ||
-        !pps->tile_id || !pps->min_tb_addr_zs_tab || pps->tile_pos_ts == NULL || pps->tile_size == NULL) {
+        !pps->tile_id || pps->tile_pos_ts == NULL || pps->tile_size == NULL) {
         return AVERROR(ENOMEM);
     }
 
@@ -1640,26 +1637,6 @@ static inline int setup_pps(AVCodecContext * const avctx,
                 pps->tile_pos_ts[j * pps->num_tile_columns + i] = ts;
                 ts += size;
             }
-    }
-
-    log2_diff = sps->log2_ctb_size - sps->log2_min_tb_size;
-    pps->min_tb_addr_zs = &pps->min_tb_addr_zs_tab[1*(sps->tb_mask+2)+1];
-    for (y = 0; y < sps->tb_mask+2; y++) {
-        pps->min_tb_addr_zs_tab[y*(sps->tb_mask+2)] = -1;
-        pps->min_tb_addr_zs_tab[y]    = -1;
-    }
-    for (y = 0; y < sps->tb_mask+1; y++) {
-        for (x = 0; x < sps->tb_mask+1; x++) {
-            int tb_x = x >> log2_diff;
-            int tb_y = y >> log2_diff;
-            int rs   = sps->ctb_width * tb_y + tb_x;
-            int val  = pps->ctb_addr_rs_to_ts[rs] << (log2_diff * 2);
-            for (i = 0; i < log2_diff; i++) {
-                int m = 1 << i;
-                val += (m & x ? m * m : 0) + (m & y ? 2 * m * m : 0);
-            }
-            pps->min_tb_addr_zs[y * (sps->tb_mask+2) + x] = val;
-        }
     }
 
     return 0;

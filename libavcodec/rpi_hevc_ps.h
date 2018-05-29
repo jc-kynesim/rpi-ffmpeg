@@ -404,8 +404,6 @@ typedef struct HEVCRpiPPS {
     uint16_t *tile_id;           ///< TileId
     uint16_t *tile_pos_ts;       ///< TilePosRS
     uint16_t *tile_size;         ///< TileSize
-    int *min_tb_addr_zs;    ///< MinTbAddrZS
-    int *min_tb_addr_zs_tab;///< MinTbAddrZS
     uint8_t * ctb_ts_flags;
 
     uint8_t data[4096];
@@ -413,14 +411,14 @@ typedef struct HEVCRpiPPS {
 } HEVCRpiPPS;
 
 typedef struct HEVCRpiParamSets {
-    AVBufferRef *vps_list[HEVC_MAX_VPS_COUNT];
-    AVBufferRef *sps_list[HEVC_MAX_SPS_COUNT];
-    AVBufferRef *pps_list[HEVC_MAX_PPS_COUNT];
-
     /* currently active parameter sets */
     const HEVCRpiVPS *vps;
     const HEVCRpiSPS *sps;
     const HEVCRpiPPS *pps;
+
+    AVBufferRef *vps_list[HEVC_MAX_VPS_COUNT];
+    AVBufferRef *sps_list[HEVC_MAX_SPS_COUNT];
+    AVBufferRef *pps_list[HEVC_MAX_PPS_COUNT];
 } HEVCRpiParamSets;
 
 int ff_hevc_rpi_decode_nal_vps(GetBitContext *gb, AVCodecContext *avctx,

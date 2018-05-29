@@ -128,9 +128,9 @@ static inline int ff_hevc_rpi_skip_flag_decode(const HEVCRpiContext * const s, H
     const uint8_t * const skip_bits = s->skip_flag + y_cb * stride;
 
     return ff_hevc_rpi_get_cabac(&lc->cc, lc->cabac_state + HEVC_BIN_SKIP_FLAG +
-        ((!lc->ctb_left_flag && (x0 & ctb_mask) == 0) ? 0 :
+        (((lc->ctb_avail & AVAIL_L) == 0 && (x0 & ctb_mask) == 0) ? 0 :
             (skip_bits[((x_cb - 1) >> 3)] >> ((x_cb - 1) & 7)) & 1) +
-        ((!lc->ctb_up_flag && (y0 & ctb_mask) == 0) ? 0 :
+        (((lc->ctb_avail & AVAIL_U) == 0 && (y0 & ctb_mask) == 0) ? 0 :
             (skip_bits[(x_cb >> 3) - stride] >> (x_cb & 7)) & 1));
 }
 
