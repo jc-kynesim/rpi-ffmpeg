@@ -5,7 +5,7 @@ RPI_OPT_VC=`pwd`/../firmware/hardfp/opt/vc
 
 RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
 RPI_LIBDIRS="-L$RPI_TOOLROOT/lib -L$RPI_OPT_VC/lib"
-RPI_DEFINES="-D__VCCOREVER__=0x4000000"
+RPI_DEFINES="-D__VCCOREVER__=0x4000000 -mfpu=neon"
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
 
