@@ -1714,7 +1714,7 @@ static int hls_slice_header(HEVCRpiContext * const s)
 
     sh->num_entry_point_offsets = 0;
     sh->offload_wpp = 0;
-    sh->offload_wpp = 0;
+    sh->offload_tiles = 0;
 
     if (s->ps.pps->tiles_enabled_flag || s->ps.pps->entropy_coding_sync_enabled_flag) {
         unsigned num_entry_point_offsets = get_ue_golomb_long(gb);
@@ -1756,7 +1756,7 @@ static int hls_slice_header(HEVCRpiContext * const s)
             // Do we want to offload this
             if (s->threads_type != 0)
             {
-                sh->offload_wpp = (!s->ps.pps->tile_wpp_inter_disable || sh->slice_type == HEVC_SLICE_I) &&
+                sh->offload_tiles = (!s->ps.pps->tile_wpp_inter_disable || sh->slice_type == HEVC_SLICE_I) &&
                     s->ps.pps->num_tile_columns > 1;
                 // * We only cope with WPP in a single column
                 //   Probably want to deal with that case as tiles rather than WPP anyway
