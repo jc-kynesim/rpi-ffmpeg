@@ -1180,12 +1180,6 @@ int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk boun
                   il, it, ir - il, ib - it,
                   ctx_vshift(s, 1), 1, 1);
 
-                // *** Tiles where V tile boundries aren't on cache boundries
-                // We have a race condition between ARM side recon in the tlle
-                // on the left & QPU pred in the tile on the right
-                // The code below ameliorates it as does turning off WPP in
-                // these cases but it still exists :-(
-
                 // If we have to commit the right hand tile boundry due to
                 // cache boundry considerations then at EoTile we must commit
                 // that boundry to bottom of tile (bounds)

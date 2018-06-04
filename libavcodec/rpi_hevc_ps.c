@@ -1400,6 +1400,12 @@ static int pps_range_extensions(GetBitContext * const gb, AVCodecContext * const
         pps->log2_max_transform_skip_block_size = get_ue_golomb_long(gb) + 2;
     }
     pps->cross_component_prediction_enabled_flag = get_bits1(gb);
+    if (pps->cross_component_prediction_enabled_flag &&
+        (sps->chroma_format_idc != 3 || sps->separate_colour_plane_flag))
+    {
+        av_log(avctx, AV_LOG_ERROR, "cross_component_prediction_enabled but chroma_format_idc != 3\n");
+        return AVERROR_INVALIDDATA;
+    }
     pps->chroma_qp_offset_list_enabled_flag = get_bits1(gb);
     if (pps->chroma_qp_offset_list_enabled_flag) {
         int err;

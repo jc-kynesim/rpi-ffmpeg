@@ -1537,6 +1537,8 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
     int prev_sig = 0;
     int may_hide_sign;
 
+    int16_t dummy_coeffs[16];
+
     // Derive QP for dequant
     if (!lc->cu.cu_transquant_bypass_flag) {
         may_hide_sign = s->ps.pps->sign_data_hiding_flag;
@@ -1701,14 +1703,14 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
 
     {
         const unsigned int ccount = 1 << (log2_trafo_size * 2);
-        const int special = lc->cu.cu_transquant_bypass_flag || trans_skip_or_bypass || lc->tu.cross_pf;  // These need special processing
+        const int special = trans_skip_or_bypass /* || lc->tu.cross_pf */;  // These need special processing
         use_vpu = 0;
         use_dc = (num_coeff == 1) && !special &&
             !(lc->cu.pred_mode == MODE_INTRA && c_idx == 0 && log2_trafo_size == 2);
 
         if (use_dc) {
             // Just need a little empty space
-            coeffs = (int16_t*)(c_idx_nz ? lc->edge_emu_buffer2 : lc->edge_emu_buffer);
+            coeffs = dummy_coeffs;
             // No need to clear
         }
         else
@@ -2107,6 +2109,9 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             }
         }
     }
+
+#if 0
+    // Mildly rotted - we support no mode where cross is valid
     if (lc->tu.cross_pf) {
         int16_t * const coeffs_y = (int16_t*)lc->edge_emu_buffer;
         const int ccount = 1 << (log2_trafo_size * 2);
@@ -2115,6 +2120,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
             coeffs[i] = coeffs[i] + ((lc->tu.res_scale_val * coeffs_y[i]) >> 3);
         }
     }
+#endif
 
     if (!use_dc) {
 #if RPI_COMPRESS_COEFFS                                

@@ -288,7 +288,6 @@ typedef struct RpiPredictionUnit {
 
 typedef struct TransformUnit {
     int8_t cu_qp_delta;
-    int8_t res_scale_val;
 
     // Inferred parameters;
     uint8_t intra_pred_mode;
@@ -296,8 +295,6 @@ typedef struct TransformUnit {
     uint8_t chroma_mode_c;
     uint8_t is_cu_qp_delta_coded;
     uint8_t cu_chroma_qp_offset_wanted;
-    uint8_t cross_pf;
-
     const int8_t * qp_divmod6[3];
 } TransformUnit;
 
@@ -414,10 +411,10 @@ typedef struct HEVCRpiLocalContext {
     unsigned int boundary_flags;
 
     /* +7 is for subpixel interpolation, *2 for high bit depths */
-    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
+//    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
     /* The extended size between the new edge emu buffer is abused by SAO */
-    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer2)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
-    DECLARE_ALIGNED(32, int16_t, tmp [MAX_PB_SIZE * MAX_PB_SIZE]);
+//    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer2)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
+//    DECLARE_ALIGNED(32, int16_t, tmp [MAX_PB_SIZE * MAX_PB_SIZE]);
 
 } HEVCRpiLocalContext;
 
