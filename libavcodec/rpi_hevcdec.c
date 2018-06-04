@@ -2005,7 +2005,8 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
     enum ScanType scan_idx   = SCAN_DIAG;
     enum ScanType scan_idx_c = SCAN_DIAG;
 
-    if (lc->cu.pred_mode == MODE_INTRA) {
+    if (lc->cu.pred_mode == MODE_INTRA)
+    {
         const unsigned int trafo_size = 1 << log2_trafo_size;
         const unsigned int avail = ff_hevc_rpi_tb_avail_flags(s, lc, x0, y0, trafo_size, trafo_size);
 
@@ -2016,12 +2017,30 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
         else if (blk_idx == 3)
             do_intra_pred(s, lc, log2_trafo_size_c, x0_c, y0_c, 1,
                           ff_hevc_rpi_tb_avail_flags(s, lc, x0_c, y0_c, 8, 8));
+
+        if (log2_trafo_size < 4) {
+            if (lc->tu.intra_pred_mode >= 6 &&
+                lc->tu.intra_pred_mode <= 14) {
+                scan_idx = SCAN_VERT;
+            } else if (lc->tu.intra_pred_mode >= 22 &&
+                       lc->tu.intra_pred_mode <= 30) {
+                scan_idx = SCAN_HORIZ;
+            }
+
+            if (lc->tu.intra_pred_mode_c >=  6 &&
+                lc->tu.intra_pred_mode_c <= 14) {
+                scan_idx_c = SCAN_VERT;
+            } else if (lc->tu.intra_pred_mode_c >= 22 &&
+                       lc->tu.intra_pred_mode_c <= 30) {
+                scan_idx_c = SCAN_HORIZ;
+            }
+        }
     }
 
     if (!cbf_luma && cbf_chroma == 0)
         return 0;
 
-    if (s->ps.pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded)
+    if (lc->tu.is_cu_qp_delta_wanted)
     {
         const int qp_delta = ff_hevc_rpi_cu_qp_delta(lc);
         const unsigned int cb_mask = ~0U << log2_cb_size;
@@ -2038,11 +2057,12 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
             return AVERROR_INVALIDDATA;
         }
 
-        lc->tu.is_cu_qp_delta_coded = 1;
+        lc->tu.is_cu_qp_delta_wanted = 0;
         lc->tu.cu_qp_delta = qp_delta;
         ff_hevc_rpi_set_qPy(s, lc, x0 & cb_mask, y0 & cb_mask);
     }
 
+    // * Not main profile & untested due to no conform streams
     if (lc->tu.cu_chroma_qp_offset_wanted && cbf_chroma &&
         !lc->cu.cu_transquant_bypass_flag) {
         int cu_chroma_qp_offset_flag = ff_hevc_rpi_cu_chroma_qp_offset_flag(lc);
@@ -2050,31 +2070,11 @@ static int hls_transform_unit(const HEVCRpiContext * const s, HEVCRpiLocalContex
             int cu_chroma_qp_offset_idx  = 0;
             if (s->ps.pps->chroma_qp_offset_list_len_minus1 > 0) {
                 cu_chroma_qp_offset_idx = ff_hevc_rpi_cu_chroma_qp_offset_idx(s, lc);
-                av_log(s->avctx, AV_LOG_ERROR,
-                    "cu_chroma_qp_offset_idx not yet tested.\n");
             }
             lc->tu.qp_divmod6[1] += s->ps.pps->cb_qp_offset_list[cu_chroma_qp_offset_idx];
             lc->tu.qp_divmod6[2] += s->ps.pps->cr_qp_offset_list[cu_chroma_qp_offset_idx];
         }
         lc->tu.cu_chroma_qp_offset_wanted = 0;
-    }
-
-    if (lc->cu.pred_mode == MODE_INTRA && log2_trafo_size < 4) {
-        if (lc->tu.intra_pred_mode >= 6 &&
-            lc->tu.intra_pred_mode <= 14) {
-            scan_idx = SCAN_VERT;
-        } else if (lc->tu.intra_pred_mode >= 22 &&
-                   lc->tu.intra_pred_mode <= 30) {
-            scan_idx = SCAN_HORIZ;
-        }
-
-        if (lc->tu.intra_pred_mode_c >=  6 &&
-            lc->tu.intra_pred_mode_c <= 14) {
-            scan_idx_c = SCAN_VERT;
-        } else if (lc->tu.intra_pred_mode_c >= 22 &&
-                   lc->tu.intra_pred_mode_c <= 30) {
-            scan_idx_c = SCAN_HORIZ;
-        }
     }
 
     if (cbf_luma)
@@ -3307,8 +3307,8 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
         }
     }
 
-    // ?? We do a set where we read the delta too ??
-    if (s->ps.pps->cu_qp_delta_enabled_flag && lc->tu.is_cu_qp_delta_coded == 0)
+    // If the delta is still wanted then we haven't read the delta & therefore need to set qp here
+    if (lc->tu.is_cu_qp_delta_wanted)
         ff_hevc_rpi_set_qPy(s, lc, x0, y0);
 
     if(((x0 + (1<<log2_cb_size)) & qp_block_mask) == 0 &&
@@ -3335,21 +3335,29 @@ static int hls_coding_quadtree(const HEVCRpiContext * const s, HEVCRpiLocalConte
     int split_cu;
 
     lc->ct_depth = cb_depth;
+    split_cu = (log2_cb_size > s->ps.sps->log2_min_cb_size);
     if (x0 + cb_size <= s->ps.sps->width  &&
         y0 + cb_size <= s->ps.sps->height &&
-        log2_cb_size > s->ps.sps->log2_min_cb_size) {
+        split_cu)
+    {
         split_cu = ff_hevc_rpi_split_coding_unit_flag_decode(s, lc, cb_depth, x0, y0);
-    } else {
-        split_cu = (log2_cb_size > s->ps.sps->log2_min_cb_size);
-    }
-    if (s->ps.pps->cu_qp_delta_enabled_flag &&
-        log2_cb_size >= s->ps.pps->log2_min_cu_qp_delta_size) {
-        lc->tu.is_cu_qp_delta_coded = 0;
-        lc->tu.cu_qp_delta          = 0;
     }
 
-    lc->tu.cu_chroma_qp_offset_wanted = s->sh.cu_chroma_qp_offset_enabled_flag &&
-        log2_cb_size >= s->ps.pps->log2_min_cu_qp_delta_size;
+    // Qp delta (and offset) need to remain wanted if cb_size < min until
+    // a coded block is found so we still initial state at depth 0 (outside
+    // this fn) and only reset here
+    if (s->ps.pps->cu_qp_delta_enabled_flag &&
+        log2_cb_size >= s->ps.pps->log2_min_cu_qp_delta_size)
+    {
+        lc->tu.is_cu_qp_delta_wanted = 1;
+        lc->tu.cu_qp_delta          = 0;
+    }
+    if (s->sh.cu_chroma_qp_offset_enabled_flag &&
+        log2_cb_size >= s->ps.pps->log2_min_cu_qp_delta_size)
+    {
+        lc->tu.cu_chroma_qp_offset_wanted = 1;
+    }
+
     lc->tu.qp_divmod6[0] = s->ps.pps->qp_bd_x[0];
     lc->tu.qp_divmod6[1] = s->ps.pps->qp_bd_x[1] + s->sh.slice_cb_qp_offset;
     lc->tu.qp_divmod6[2] = s->ps.pps->qp_bd_x[2] + s->sh.slice_cr_qp_offset;
@@ -4189,6 +4197,10 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
         s->deblock[ctb_addr_rs].tc_offset   = s->sh.tc_offset;
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
+        // Set initial tu states
+        lc->tu.cu_qp_delta = 0;
+        lc->tu.is_cu_qp_delta_wanted = 0;
+        lc->tu.cu_chroma_qp_offset_wanted = 0;
         more_data = hls_coding_quadtree(s, lc, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
         if (ff_hevc_rpi_cabac_overflow(lc))

@@ -286,17 +286,17 @@ typedef struct RpiPredictionUnit {
     uint8_t merge_flag;
 } RpiPredictionUnit;
 
-typedef struct TransformUnit {
+typedef struct HEVCRpiTransformUnit {
     int8_t cu_qp_delta;
 
     // Inferred parameters;
     uint8_t intra_pred_mode;
     uint8_t intra_pred_mode_c;
     uint8_t chroma_mode_c;
-    uint8_t is_cu_qp_delta_coded;
+    uint8_t is_cu_qp_delta_wanted;
     uint8_t cu_chroma_qp_offset_wanted;
     const int8_t * qp_divmod6[3];
-} TransformUnit;
+} HEVCRpiTransformUnit;
 
 typedef struct DBParams {
     int8_t beta_offset; // -12 to +12
@@ -341,7 +341,7 @@ typedef struct HEVCFrame {
 } HEVCFrame;
 
 typedef struct HEVCRpiLocalContext {
-    TransformUnit tu;
+    HEVCRpiTransformUnit tu;
 
     CABACContext cc;
 
