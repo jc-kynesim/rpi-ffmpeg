@@ -877,25 +877,6 @@ int ff_hevc_rpi_cu_chroma_qp_offset_idx(const HEVCRpiContext * const s, HEVCRpiL
     return i;
 }
 
-int ff_hevc_rpi_split_coding_unit_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int ct_depth, int x0, int y0)
-{
-    int inc = 0, depth_left = 0, depth_top = 0;
-    int x0b  = av_mod_uintp2(x0, s->ps.sps->log2_ctb_size);
-    int y0b  = av_mod_uintp2(y0, s->ps.sps->log2_ctb_size);
-    int x_cb = x0 >> s->ps.sps->log2_min_cb_size;
-    int y_cb = y0 >> s->ps.sps->log2_min_cb_size;
-
-    if ((lc->ctb_avail & AVAIL_L) != 0 || x0b)
-        depth_left = s->tab_ct_depth[(y_cb) * s->ps.sps->min_cb_width + x_cb - 1];
-    if ((lc->ctb_avail & AVAIL_U) != 0 || y0b)
-        depth_top = s->tab_ct_depth[(y_cb - 1) * s->ps.sps->min_cb_width + x_cb];
-
-    inc += (depth_left > ct_depth);
-    inc += (depth_top  > ct_depth);
-
-    return GET_CABAC_LC(elem_offset[SPLIT_CODING_UNIT_FLAG] + inc);
-}
-
 int ff_hevc_rpi_part_mode_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int log2_cb_size)
 {
     if (GET_CABAC_LC(elem_offset[PART_MODE])) // 1

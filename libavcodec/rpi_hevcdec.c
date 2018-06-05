@@ -191,7 +191,7 @@ typedef struct ipe_init_info_s
     ipe_chan_info_t chroma;
 } ipe_init_info_t;
 
-static void set_bytes(uint8_t * b, const unsigned int stride, const unsigned int ln, unsigned int a)
+static void set_bytes(uint8_t * b, const unsigned int stride, const int ln, unsigned int a)
 {
     switch (ln)
     {
@@ -242,6 +242,60 @@ static void set_bytes(uint8_t * b, const unsigned int stride, const unsigned int
         }
     }
 }
+
+// We expect this to be called with ln = (log2_cb_size - 3) so range =  -1..3
+// (4 not required)
+static void set_cabac_stash(uint8_t * b_u, uint8_t * b_l, const int ln, unsigned int a)
+{
+    switch (ln)
+    {
+        default:  // 0 or -1
+            *b_u = a;
+            *b_l = a;
+            break;
+        case 1:
+            a |= a << 8;
+            *(uint16_t *)b_u = a;
+            *(uint16_t *)b_l = a;
+            break;
+        case 2:
+            a |= a << 8;
+            a |= a << 16;
+            *(uint32_t *)b_u = a;
+            *(uint32_t *)b_l = a;
+            break;
+        case 3:
+            a |= a << 8;
+            a |= a << 16;
+            *(uint32_t *)b_u = a;
+            *(uint32_t *)(b_u + 4) = a;
+            *(uint32_t *)b_l = a;
+            *(uint32_t *)(b_l + 4) = a;
+            break;
+    }
+}
+
+static void zap_cabac_stash(uint8_t * b, const int ln)
+{
+    switch (ln)
+    {
+        default:  // 0
+            *b = 0;
+            break;
+        case 1:
+            *(uint16_t *)b = 0;
+            break;
+        case 2:
+            *(uint32_t *)b = 0;
+            break;
+        case 3:
+            *(uint32_t *)b = 0;
+            *(uint32_t *)(b + 4) = 0;
+            break;
+    }
+}
+
+
 
 // Set a small square block of bits in a bitmap
 // Bits must be aligned on their size boundry (which will be true of all split CBs)
@@ -923,8 +977,8 @@ static void pic_arrays_free(HEVCRpiContext *s)
     av_freep(&s->sao);
     av_freep(&s->deblock);
 
-    av_freep(&s->skip_flag);
-    av_freep(&s->tab_ct_depth);
+    av_freep(&s->cabac_stash_up);
+    s->cabac_stash_left = NULL;  // freed with _up
 
     av_freep(&s->tab_ipm);
     av_freep(&s->is_pcm);
@@ -934,7 +988,6 @@ static void pic_arrays_free(HEVCRpiContext *s)
     av_freep(&s->filter_slice_edges);
 
     av_freep(&s->bs_horizontal);
-//    av_freep(&s->vertical_bs);
     av_freep(&s->bs_vertical);
     av_freep(&s->bsf_stash_left);
     av_freep(&s->bsf_stash_up);
@@ -969,10 +1022,9 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     if (!s->sao || !s->deblock)
         goto fail;
 
-    s->skip_flag_stride = (sps->min_cb_width + 7) >> 3;
-    s->skip_flag    = av_malloc_array(sps->min_cb_height, s->skip_flag_stride);
-    s->tab_ct_depth = av_malloc_array(sps->min_cb_height, sps->min_cb_width);
-    if (!s->skip_flag || !s->tab_ct_depth)
+    s->cabac_stash_up  = av_malloc((((width + 63) & ~63) >> 3) + (((height + 63) & ~63) >> 3));
+    s->cabac_stash_left = s->cabac_stash_up + (((width + 63) & ~63) >> 3);
+    if (s->cabac_stash_up == NULL)
         goto fail;
 
     s->tab_ipm  = av_mallocz(min_pu_size);
@@ -3153,12 +3205,6 @@ static void intra_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCo
     }
 }
 
-static inline void set_skip(const HEVCRpiContext * const s, const unsigned int x_cb, const unsigned int y_cb, const unsigned int ln)
-{
-    const unsigned int stride = s->skip_flag_stride;
-    set_bits(s->skip_flag + y_cb * stride, x_cb, stride, ln);
-}
-
 static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                            const unsigned int x0, const unsigned int y0, const unsigned int log2_cb_size)
 {
@@ -3197,7 +3243,6 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
     }
 
     if (skip_flag) {
-        set_skip(s, x_cb, y_cb, log2_cb_size - log2_min_cb_size);
         lc->cu.pred_mode = MODE_SKIP;
 
         hls_prediction_unit(s, lc, x0, y0, cb_size, cb_size, log2_cb_size, 0, idx);
@@ -3318,7 +3363,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
 
     set_bytes(s->qp_y_tab + y_cb * min_cb_width + x_cb, min_cb_width, log2_cb_size - log2_min_cb_size, lc->qp_y & 0xff);
 
-    set_bytes(s->tab_ct_depth + y_cb * min_cb_width + x_cb, min_cb_width, log2_cb_size - log2_min_cb_size, lc->ct_depth);
+    set_cabac_stash(s->cabac_stash_up + (x0 >> 3), s->cabac_stash_left + (y0 >> 3), log2_cb_size - 3, (lc->ct_depth << 1) | skip_flag);
 
     return 0;
 }
@@ -4197,6 +4242,12 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
         s->deblock[ctb_addr_rs].tc_offset   = s->sh.tc_offset;
         s->filter_slice_edges[ctb_addr_rs]  = s->sh.slice_loop_filter_across_slices_enabled_flag;
 
+        // Zap stashes if navail
+        if ((lc->ctb_avail & AVAIL_U) == 0)
+            zap_cabac_stash(s->cabac_stash_up + (x_ctb >> 3), s->ps.sps->log2_ctb_size - 3);
+        if ((lc->ctb_avail & AVAIL_L) == 0)
+            zap_cabac_stash(s->cabac_stash_left + (y_ctb >> 3), s->ps.sps->log2_ctb_size - 3);
+
         // Set initial tu states
         lc->tu.cu_qp_delta = 0;
         lc->tu.is_cu_qp_delta_wanted = 0;
@@ -4937,7 +4988,6 @@ static int hevc_frame_start(HEVCRpiContext * const s)
     memset(s->bs_horizontal, 0, s->bs_size);
     memset(s->bs_vertical, 0, s->bs_size);
     memset(s->is_pcm,        0, s->ps.sps->pcm_width * s->ps.sps->pcm_height);
-    memset(s->skip_flag,     0, s->ps.sps->min_cb_height * s->skip_flag_stride);
     memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
 
     s->is_decoded        = 0;

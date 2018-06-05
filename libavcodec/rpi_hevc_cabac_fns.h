@@ -12,8 +12,6 @@ int ff_hevc_rpi_sao_band_position_decode(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_sao_offset_abs_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_sao_offset_sign_decode(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_sao_eo_class_decode(HEVCRpiLocalContext * const lc);
-int ff_hevc_rpi_split_coding_unit_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int ct_depth,
-                                          const int x0, const int y0);
 int ff_hevc_rpi_part_mode_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int log2_cb_size);
 int ff_hevc_rpi_mpm_idx_decode(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_rem_intra_luma_pred_mode_decode(HEVCRpiLocalContext * const lc);
@@ -120,18 +118,21 @@ static inline int ff_hevc_rpi_cu_chroma_qp_offset_flag(HEVCRpiLocalContext * con
     return ff_hevc_rpi_get_cabac(&lc->cc, lc->cabac_state + HEVC_BIN_CU_CHROMA_QP_OFFSET_FLAG);
 }
 
+static inline int ff_hevc_rpi_split_coding_unit_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+                                                            const unsigned int ct_depth,
+                                                            const unsigned int x0, const unsigned int y0)
+{
+    return ff_hevc_rpi_get_cabac(&lc->cc, lc->cabac_state + HEVC_BIN_SPLIT_CODING_UNIT_FLAG +
+                                 ((s->cabac_stash_left[y0 >> 3] >> 1) > ct_depth) +
+                                 ((s->cabac_stash_up[x0 >> 3] >> 1) > ct_depth));
+}
+
 static inline int ff_hevc_rpi_skip_flag_decode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                              const int x0, const int y0, const int x_cb, const int y_cb)
 {
-    const unsigned int ctb_mask = (1 << s->ps.sps->log2_ctb_size) - 1;
-    const unsigned int stride = s->skip_flag_stride;
-    const uint8_t * const skip_bits = s->skip_flag + y_cb * stride;
-
     return ff_hevc_rpi_get_cabac(&lc->cc, lc->cabac_state + HEVC_BIN_SKIP_FLAG +
-        (((lc->ctb_avail & AVAIL_L) == 0 && (x0 & ctb_mask) == 0) ? 0 :
-            (skip_bits[((x_cb - 1) >> 3)] >> ((x_cb - 1) & 7)) & 1) +
-        (((lc->ctb_avail & AVAIL_U) == 0 && (y0 & ctb_mask) == 0) ? 0 :
-            (skip_bits[(x_cb >> 3) - stride] >> (x_cb & 7)) & 1));
+                                 (s->cabac_stash_left[y0 >> 3] & 1) +
+                                 (s->cabac_stash_up[x0 >> 3] & 1));
 }
 
 static inline int ff_hevc_rpi_pred_mode_decode(HEVCRpiLocalContext * const lc)

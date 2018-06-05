@@ -678,6 +678,11 @@ typedef struct HEVCRpiContext {
     char offload_recon;
 
     HEVCRpiJobCtl * jbc;
+    // cabac stash
+    // b0       skip flag
+    // b1+      ct_depth
+    uint8_t * cabac_stash_left;
+    uint8_t * cabac_stash_up;
 
     // Function pointers
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
@@ -736,10 +741,6 @@ typedef struct HEVCRpiContext {
 
     int32_t *tab_slice_address;
 
-    //  CU
-    unsigned int skip_flag_stride;
-    uint8_t *skip_flag;
-    uint8_t *tab_ct_depth;
     // PU
     uint8_t *tab_ipm;
 
