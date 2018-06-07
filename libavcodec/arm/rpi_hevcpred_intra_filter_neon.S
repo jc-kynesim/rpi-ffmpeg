@@ -31,7 +31,7 @@
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 @
@@ -79,16 +79,17 @@
 @
 @ Extend values:
 @  d_l  scalar contains value for L & DL
+@       if DL avail then this is is DL[0] so we don't need to load that
 @  d_ul scalar containing value for UL
 @  d_u  scalar containing value for U
 @  d_ur scalar containing value for UR
 @ If DL avail then d_l == b_dl elif L avail then d_l == a_l else...
-@ This means that L-filter works even if nreq DL (we never filter
+@ This means that L-light-filter works even if nreq DL (we never filter
 @ req-DL without req-L, but we do filter req-L without req-DL)
 @ If UR avail then d_ur == a_ur so U-filter good too
 @
 @ Data load pointers (only load if req & avail):
-@  r4   DL
+@  r4   DL + stride
 @  r10  L
 @  r6   U
 @  r5   UR
@@ -97,7 +98,7 @@
 @  r2   req
 @  r7   req & avail
 @  r3   L + stride
-@  r8   DL + stride
+@  r8   DL + stride * 2
 @  r9   stride * 2
 @  cs   Load U
 @  mi   Load UR
@@ -148,7 +149,7 @@
         itt vc
         movvc      r8,  r7
         movvc      r6,  r7
-        vld1.\d_type {\d_l }, [r4]
+        vld1.\d_type {\d_l }, [r4], r9
         tst        r3,  #AVAIL_UR
         vld1.\d_type {\d_u }, [r6]
         it eq
@@ -171,7 +172,7 @@
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -200,10 +201,9 @@ function ff_hevc_rpi_intra_filter_4_neon_8, export=1
         vld1.8    {d0[3]}, [r3]
 1:
         bcc        1f
-        vld1.8    {d0[4]}, [r4],  r9
-        vld1.8    {d0[5]}, [r8],  r9
-        vld1.8    {d0[6]}, [r4]
-        vld1.8    {d0[7]}, [r8]
+        vld1.8    {d0[5]}, [r4],  r9
+        vld1.8    {d0[6]}, [r8]
+        vld1.8    {d0[7]}, [r4]
 1:
         vstr       d1,  [r1]            @ Up
         vst1.8    {d31[7]}, [r12]
@@ -220,7 +220,7 @@ endfunc
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -246,10 +246,9 @@ function ff_hevc_rpi_intra_filter_4_neon_16, export=1
         vld1.16   {d0[3]}, [r3]
 1:
         bcc        1f
-        vld1.16   {d1[0]}, [r4],  r9
-        vld1.16   {d1[1]}, [r8],  r9
-        vld1.16   {d1[2]}, [r4]
-        vld1.16   {d1[3]}, [r8]
+        vld1.16   {d1[1]}, [r4],  r9
+        vld1.16   {d1[2]}, [r8]
+        vld1.16   {d1[3]}, [r4]
 1:
         vst1.16   {q1}, [r1]           @ Up
         vst1.16   {d31[3]}, [r12]
@@ -266,7 +265,7 @@ endfunc
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -296,14 +295,13 @@ function ff_hevc_rpi_intra_filter_8_neon_8, export=1
         vld1.8    {d0[7]}, [r3]
 1:
         bcc        1f
-        vld1.8    {d1[0]}, [r4],  r9
-        vld1.8    {d1[1]}, [r8],  r9
-        vld1.8    {d1[2]}, [r4],  r9
-        vld1.8    {d1[3]}, [r8],  r9
-        vld1.8    {d1[4]}, [r4],  r9
-        vld1.8    {d1[5]}, [r8],  r9
-        vld1.8    {d1[6]}, [r4]
-        vld1.8    {d1[7]}, [r8]
+        vld1.8    {d1[1]}, [r4],  r9
+        vld1.8    {d1[2]}, [r8],  r9
+        vld1.8    {d1[3]}, [r4],  r9
+        vld1.8    {d1[4]}, [r8],  r9
+        vld1.8    {d1[5]}, [r4],  r9
+        vld1.8    {d1[6]}, [r8]
+        vld1.8    {d1[7]}, [r4]
 1:
         tst        r2,  #FILTER_LIGHT
         add        r12, r0,  #-pw
@@ -354,7 +352,7 @@ endfunc
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -393,16 +391,15 @@ function ff_hevc_rpi_intra_filter_8_neon_16, export=1
 1:
         bcc        1f
         ldr        r12, [sp, #dl_size]
-        vld1.16   {d2[0]}, [r4],  r9
-        vld1.16   {d2[1]}, [r8],  r9
+        vld1.16   {d2[1]}, [r4],  r9
         cmp        r12, #p_size
-        vld1.16   {d2[2]}, [r4],  r9
-        vld1.16   {d2[3]}, [r8],  r9
+        vld1.16   {d2[2]}, [r8],  r9
+        vld1.16   {d2[3]}, [r4],  r9
         blt        2f
-        vld1.16   {d3[0]}, [r4],  r9
-        vld1.16   {d3[1]}, [r8],  r9
-        vld1.16   {d3[2]}, [r4]
-        vld1.16   {d3[3]}, [r8]
+        vld1.16   {d3[0]}, [r8],  r9
+        vld1.16   {d3[1]}, [r4],  r9
+        vld1.16   {d3[2]}, [r8]
+        vld1.16   {d3[3]}, [r4]
         b          1f
 2:
         vdup.16    d3,  d2[3]
@@ -457,7 +454,7 @@ endfunc
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -517,27 +514,26 @@ function ff_hevc_rpi_intra_filter_16_neon_16, export=1
         vld1.16   {d3[3]}, [r3]
 1:
         bcc        1f
-        vld1.16   {d4[0]}, [r4],  r9
-        vld1.16   {d4[1]}, [r8],  r9
+        vld1.16   {d4[1]}, [r4],  r9
         cmp        r12, #4
-        vld1.16   {d4[2]}, [r4],  r9
-        vld1.16   {d4[3]}, [r8],  r9
+        vld1.16   {d4[2]}, [r8],  r9
+        vld1.16   {d4[3]}, [r4],  r9
         ble        2f
-        vld1.16   {d5[0]}, [r4],  r9
-        vld1.16   {d5[1]}, [r8],  r9
+        vld1.16   {d5[0]}, [r8],  r9
+        vld1.16   {d5[1]}, [r4],  r9
         cmp        r12, #12
-        vld1.16   {d5[2]}, [r4],  r9
-        vld1.16   {d5[3]}, [r8],  r9
+        vld1.16   {d5[2]}, [r8],  r9
+        vld1.16   {d5[3]}, [r4],  r9
         blt        3f
-        vld1.16   {d6[0]}, [r4],  r9
-        vld1.16   {d6[1]}, [r8],  r9
-        vld1.16   {d6[2]}, [r4],  r9
-        vld1.16   {d6[3]}, [r8],  r9
+        vld1.16   {d6[0]}, [r8],  r9
+        vld1.16   {d6[1]}, [r4],  r9
+        vld1.16   {d6[2]}, [r8],  r9
+        vld1.16   {d6[3]}, [r4],  r9
         ble        4f
-        vld1.16   {d7[0]}, [r4],  r9
-        vld1.16   {d7[1]}, [r8],  r9
-        vld1.16   {d7[2]}, [r4]
-        vld1.16   {d7[3]}, [r8]
+        vld1.16   {d7[0]}, [r8],  r9
+        vld1.16   {d7[1]}, [r4],  r9
+        vld1.16   {d7[2]}, [r8]
+        vld1.16   {d7[3]}, [r4]
         b          1f
 2:      vdup.16    d5,  d4[3]
 3:      vdup.16    d6,  d5[3]
@@ -627,7 +623,7 @@ endfunc
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -654,10 +650,9 @@ function ff_hevc_rpi_intra_filter_4_neon_32, export=1
         vld1.32   {d1[1]}, [r3]
 1:
         bcc        1f
-        vld1.32   {d2[0]}, [r4],  r9
-        vld1.32   {d2[1]}, [r8],  r9
-        vld1.32   {d3[0]}, [r4]
-        vld1.32   {d3[1]}, [r8]
+        vld1.32   {d2[1]}, [r4],  r9
+        vld1.32   {d3[0]}, [r8]
+        vld1.32   {d3[1]}, [r4]
 1:
         vst1.32    {q2,  q3 }, [r1]     @ Up
         vst1.32    {d31[1]}, [r12]
@@ -674,7 +669,7 @@ endfunc
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -718,16 +713,15 @@ function ff_hevc_rpi_intra_filter_8_neon_32, export=1
 1:
         bcc        1f
         ldr        r12, [sp, #dl_size]
-        vld1.32   {d4[0]}, [r4],  r9
-        vld1.32   {d4[1]}, [r8],  r9
+        vld1.32   {d4[1]}, [r4],  r9
         cmp        r12, #p_size
-        vld1.32   {d5[0]}, [r4],  r9
-        vld1.32   {d5[1]}, [r8],  r9
+        vld1.32   {d5[0]}, [r8],  r9
+        vld1.32   {d5[1]}, [r4],  r9
         blt        2f
-        vld1.32   {d6[0]}, [r4],  r9
-        vld1.32   {d6[1]}, [r8],  r9
-        vld1.32   {d7[0]}, [r4]
-        vld1.32   {d7[1]}, [r8]
+        vld1.32   {d6[0]}, [r8],  r9
+        vld1.32   {d6[1]}, [r4],  r9
+        vld1.32   {d7[0]}, [r8]
+        vld1.32   {d7[1]}, [r4]
         b          1f
 2:
         vdup.32    q3,  d5[1]
@@ -748,7 +742,7 @@ endfunc
 @    const pixel * const src_l,            [sp, #0]
 @    const pixel * const src_u,            [sp, #4]
 @    const pixel * const src_ur,           [sp, #8]
-@    const unsigned int stride,            [sp, #12] (bytes)
+@    const unsigned int stride,            [sp, #12] (pels)
 @    const unsigned int top_right_size,    [sp, #16]
 @    const unsigned int down_left_size)    [sp, #20]
 
@@ -812,28 +806,28 @@ function ff_hevc_rpi_intra_filter_16_neon_32, export=1
 1:
         bcc        1f
         ldr        r12, [sp, #dl_size]
+        vdup.32    d16, d30[0]          @ d16[0] = d30[0]
         add        lr,  r0,  #(pw << log2_s)
-        vld1.32   {d16[0]}, [r4],  r9
-        vld1.32   {d16[1]}, [r8],  r9
+        vld1.32   {d16[1]}, [r4],  r9
         cmp        r12, #4
-        vld1.32   {d17[0]}, [r4],  r9
-        vld1.32   {d17[1]}, [r8],  r9
+        vld1.32   {d17[0]}, [r8],  r9
+        vld1.32   {d17[1]}, [r4],  r9
         ble        2f
-        vld1.32   {d18[0]}, [r4],  r9
-        vld1.32   {d18[1]}, [r8],  r9
+        vld1.32   {d18[0]}, [r8],  r9
+        vld1.32   {d18[1]}, [r4],  r9
         cmp        r12, #12
-        vld1.32   {d19[0]}, [r4],  r9
-        vld1.32   {d19[1]}, [r8],  r9
+        vld1.32   {d19[0]}, [r8],  r9
+        vld1.32   {d19[1]}, [r4],  r9
         blt        3f
-        vld1.32   {d20[0]}, [r4],  r9
-        vld1.32   {d20[1]}, [r8],  r9
-        vld1.32   {d21[0]}, [r4],  r9
-        vld1.32   {d21[1]}, [r8],  r9
+        vld1.32   {d20[0]}, [r8],  r9
+        vld1.32   {d20[1]}, [r4],  r9
+        vld1.32   {d21[0]}, [r8],  r9
+        vld1.32   {d21[1]}, [r4],  r9
         ble        4f
-        vld1.32   {d22[0]}, [r4],  r9
-        vld1.32   {d22[1]}, [r8],  r9
-        vld1.32   {d23[0]}, [r4]
-        vld1.32   {d23[1]}, [r8]
+        vld1.32   {d22[0]}, [r8],  r9
+        vld1.32   {d22[1]}, [r4],  r9
+        vld1.32   {d23[0]}, [r8]
+        vld1.32   {d23[1]}, [r4]
         b          5f
 2:      vdup.32    q9,  d17[1]
 3:      vdup.32    q10, d19[1]
