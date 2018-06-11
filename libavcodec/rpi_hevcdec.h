@@ -656,13 +656,18 @@ typedef struct HEVCRpiContext {
     const AVClass *c;  // needed by private avoptions
     AVCodecContext *avctx;
 
-    HEVCRpiLocalContext    *HEVClcList[MAX_NB_THREADS];
-    HEVCRpiLocalContext    *HEVClc;
-
     uint8_t             threads_type;
 
     /** 1 if the independent slice segment header was successfully parsed */
     uint8_t slice_initialized;
+    char used_for_ref;  // rpi
+    char offload_recon;
+    uint8_t eos;       ///< current packet contains an EOS/EOB NAL
+    uint8_t last_eos;  ///< last packet contains an EOS/EOB NAL
+    uint8_t no_backward_pred_flag;
+    uint8_t is_decoded;
+    uint8_t no_rasl_output_flag;
+
 
     /**
      * Sequence counters for decoded and output frames, so that old
@@ -673,9 +678,6 @@ typedef struct HEVCRpiContext {
 
     int                 width;
     int                 height;
-
-    char used_for_ref;  // rpi
-    char offload_recon;
 
     HEVCRpiJobCtl * jbc;
     // cabac stash
@@ -702,33 +704,19 @@ typedef struct HEVCRpiContext {
     uint8_t *sao_pixel_buffer_h[3];
     uint8_t *sao_pixel_buffer_v[3];
 
-    HEVCRpiParamSets ps;
-
     AVBufferPool *tab_mvf_pool;
     AVBufferPool *rpl_tab_pool;
 
-    ///< candidate references for the current frame
-    RefPicList rps[5];
-
-    RpiSliceHeader sh;
     RpiSAOParams *sao;
     DBParams *deblock;
     enum HEVCNALUnitType nal_unit_type;
     int temporal_id;  ///< temporal_id_plus1 - 1
     HEVCFrame *ref;
-    HEVCFrame DPB[HEVC_DPB_ELS];
     int poc;
     int pocTid0;
     int slice_idx; ///< number of the slice being currently decoded
-    int eos;       ///< current packet contains an EOS/EOB NAL
-    int last_eos;  ///< last packet contains an EOS/EOB NAL
     int max_ra;
 
-    int is_decoded;
-    int no_rasl_output_flag;
-
-    HEVCRpiPredContext hpc;
-    HEVCDSPContext hevcdsp;
     int8_t *qp_y_tab;
 
     // Deblocking block strength bitmaps
@@ -770,6 +758,21 @@ typedef struct HEVCRpiContext {
     int nuh_layer_id;
 
     struct AVMD5 *md5_ctx;
+
+    RpiSliceHeader sh;
+
+    HEVCRpiParamSets ps;
+
+    HEVCRpiLocalContext    *HEVClc;
+    HEVCRpiLocalContext    *HEVClcList[MAX_NB_THREADS];
+
+    HEVCFrame DPB[HEVC_DPB_ELS];
+
+    ///< candidate references for the current frame
+    RefPicList rps[5];
+
+    HEVCRpiPredContext hpc;
+    HEVCDSPContext hevcdsp;
 
     HEVCSEIContext sei;
 

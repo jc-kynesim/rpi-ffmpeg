@@ -4826,11 +4826,32 @@ fail:
 }
 
 
+static void set_no_backward_pred(HEVCRpiContext * const s)
+{
+    int i, j;
+    const RefPicList *const refPicList = s->ref->refPicList;
+
+    s->no_backward_pred_flag = 0;
+    if (s->sh.slice_type != HEVC_SLICE_B || !s->sh.slice_temporal_mvp_enabled_flag)
+        return;
+
+    for (j = 0; j < 2; j++) {
+        for (i = 0; i < refPicList[j].nb_refs; i++) {
+            if (refPicList[j].list[i] > s->poc) {
+                s->no_backward_pred_flag = 1;
+                return;
+            }
+        }
+    }
+}
+
 static int hls_slice_data(HEVCRpiContext * const s, const H2645NAL * const nal)
 {
     int err;
     if ((err = gen_entry_points(s, nal)) < 0)
         return err;
+
+    set_no_backward_pred(s);
 
     return rpi_decode_entry(s->avctx, NULL);
 }

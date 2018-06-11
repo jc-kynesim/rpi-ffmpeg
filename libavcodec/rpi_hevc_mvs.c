@@ -117,7 +117,7 @@ static int check_mvset(Mv * const mvLXCol, const Mv * const mvCol,
                 refPicList, X, refIdxLx,                        \
                 refPicList_col, L ## l, temp_col.ref_idx[l])
 
-// derive the motion vectors section 8.5.3.1.8
+// derive the motion vectors section 8.5.3.2.8
 static int derive_temporal_colocated_mvs(const HEVCRpiContext * const s, const MvField temp_col,
                                          const int refIdxLx, Mv * const mvLXCol, const int X,
                                          const int colPic, const RefPicList * const refPicList_col)
@@ -127,35 +127,12 @@ static int derive_temporal_colocated_mvs(const HEVCRpiContext * const s, const M
     if (temp_col.pred_flag == PF_INTRA)
         return 0;
 
-    if (!(temp_col.pred_flag & PF_L0))
-        return CHECK_MVSET(1);
-    else if (temp_col.pred_flag == PF_L0)
+    if (temp_col.pred_flag == PF_L0 ||
+        (temp_col.pred_flag == PF_BI && (s->no_backward_pred_flag ? s->sh.collocated_list == L1 : X == 0)))
+    {
         return CHECK_MVSET(0);
-    else if (temp_col.pred_flag == PF_BI) {
-        int check_diffpicount = 0;
-        int i, j;
-        for (j = 0; j < 2; j++) {
-            for (i = 0; i < refPicList[j].nb_refs; i++) {
-                if (refPicList[j].list[i] > s->poc) {
-                    check_diffpicount++;
-                    break;
-                }
-            }
-        }
-        if (!check_diffpicount) {
-            if (X==0)
-                return CHECK_MVSET(0);
-            else
-                return CHECK_MVSET(1);
-        } else {
-            if (s->sh.collocated_list == L1)
-                return CHECK_MVSET(0);
-            else
-                return CHECK_MVSET(1);
-        }
     }
-
-    return 0;
+    return CHECK_MVSET(1);
 }
 
 #define TAB_MVF(x, y)                                                   \
