@@ -1,6 +1,9 @@
 #ifndef RPI_PROFILE_H
 #define RPI_PROFILE_H
 
+#include "config.h"
+#include <stdint.h>
+
 #if ARCH_ARM
 #define RPI_PROFILE 1
 #else
@@ -19,24 +22,47 @@
 #define Z
 #endif
 
-X unsigned int rpi_residual_sig_coeffs Z;
-X unsigned int rpi_residual_sig_bits Z;
+X uint64_t av_rpi_planar_cycles Z;
+X unsigned int av_rpi_planar_cnt Z;
+#define RPI_planar_MAX_DURATION 10000
 
-X uint64_t rpi_residual_abs_cycles Z;
-X unsigned int rpi_residual_abs_cnt Z;
-#define RPI_residual_abs_MAX_DURATION 5000
+X uint64_t av_rpi_dc_cycles Z;
+X unsigned int av_rpi_dc_cnt Z;
+#define RPI_dc_MAX_DURATION 10000
 
-X uint64_t rpi_residual_greater1_cycles Z;
-X unsigned int rpi_residual_greater1_cnt Z;
-#define RPI_residual_greater1_MAX_DURATION 10000
+X uint64_t av_rpi_angular_h_cycles Z;
+X unsigned int av_rpi_angular_h_cnt Z;
+#define RPI_angular_h_MAX_DURATION 10000
 
-X uint64_t rpi_residual_core_cycles Z;
-X unsigned int rpi_residual_core_cnt Z;
-#define RPI_residual_core_MAX_DURATION 100000
+X uint64_t av_rpi_angular_v_cycles Z;
+X unsigned int av_rpi_angular_v_cnt Z;
+#define RPI_angular_v_MAX_DURATION 10000
 
-X uint64_t rpi_residual_base_cycles Z;
-X unsigned int rpi_residual_base_cnt Z;
-#define RPI_residual_base_MAX_DURATION 100000
+X uint64_t av_rpi_angular_cycles Z;
+X unsigned int av_rpi_angular_cnt Z;
+#define RPI_angular_MAX_DURATION 10000
+
+
+X uint64_t av_rpi_planar_c_cycles Z;
+X unsigned int av_rpi_planar_c_cnt Z;
+#define RPI_planar_c_MAX_DURATION 10000
+
+X uint64_t av_rpi_dc_c_cycles Z;
+X unsigned int av_rpi_dc_c_cnt Z;
+#define RPI_dc_c_MAX_DURATION 10000
+
+X uint64_t av_rpi_angular_h_c_cycles Z;
+X unsigned int av_rpi_angular_h_c_cnt Z;
+#define RPI_angular_h_c_MAX_DURATION 10000
+
+X uint64_t av_rpi_angular_v_c_cycles Z;
+X unsigned int av_rpi_angular_v_c_cnt Z;
+#define RPI_angular_v_c_MAX_DURATION 10000
+
+X uint64_t av_rpi_angular_c_cycles Z;
+X unsigned int av_rpi_angular_c_cnt Z;
+#define RPI_angular_c_MAX_DURATION 10000
+
 
 #undef X
 #undef Z
@@ -59,14 +85,14 @@ do {\
         const uint32_t duration = perf_2 - perf_1;\
         if (duration < RPI_##x##_MAX_DURATION)\
         {\
-            rpi_##x##_cycles += duration;\
-            rpi_##x##_cnt += 1;\
+            av_rpi_##x##_cycles += duration;\
+            av_rpi_##x##_cnt += 1;\
         }\
     }\
 } while(0)
 
 #define PROFILE_PRINTF(x)\
-    printf("%-20s cycles=%14" PRIu64 " cnt=%u\n", #x, rpi_##x##_cycles, rpi_##x##_cnt)
+    printf("%-20s cycles=%14" PRIu64 ";  cnt=%8u;  avg=%5" PRIu64 "\n", #x, av_rpi_##x##_cycles, av_rpi_##x##_cnt, av_rpi_##x##_cycles / (uint64_t)av_rpi_##x##_cnt)
 
 #else
 

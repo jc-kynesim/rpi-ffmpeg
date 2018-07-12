@@ -1,5 +1,6 @@
 OBJS += arm/cpu.o                                                       \
         arm/float_dsp_init_arm.o                                        \
+        arm/v7_pmu.o
 
 VFP-OBJS += arm/float_dsp_init_vfp.o                                    \
             arm/float_dsp_vfp.o                                         \

@@ -28,6 +28,7 @@
 #include "rpi_hevcdec.h"
 #include "rpi_hevcpred.h"
 
+#include "libavutil/rpi_prof.h"
 
 #define DUMP_PRED 0
 
@@ -904,53 +905,73 @@ dc_only:
 #if !PRED_C
     switch (mode) {
     case INTRA_PLANAR:
+        PROFILE_START();
         s->hpc.pred_planar[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                           (uint8_t *)left, stride);
+        PROFILE_ACC(planar);
         break;
     case INTRA_DC:
+        PROFILE_START();
         s->hpc.pred_dc[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                        (uint8_t *)left, stride);
+        PROFILE_ACC(dc);
         break;
     case INTRA_ANGULAR_HORIZONTAL:
+        PROFILE_START();
         s->hpc.pred_horizontal[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
+        PROFILE_ACC(angular_h);
         break;
     case INTRA_ANGULAR_VERTICAL:
+        PROFILE_START();
         s->hpc.pred_vertical[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
+        PROFILE_ACC(angular_v);
         break;
     default:
+        PROFILE_START();
         s->hpc.pred_angular[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
+        PROFILE_ACC(angular);
         break;
     }
 #else
     switch (mode) {
     case INTRA_PLANAR:
+        PROFILE_START();
         s->hpc.pred_planar_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                           (uint8_t *)left, stride);
+        PROFILE_ACC(planar_c);
         break;
     case INTRA_DC:
+        PROFILE_START();
         s->hpc.pred_dc_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                        (uint8_t *)left, stride);
+        PROFILE_ACC(dc_c);
         break;
     case INTRA_ANGULAR_HORIZONTAL:
+        PROFILE_START();
         s->hpc.pred_horizontal_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
+        PROFILE_ACC(angular_h_c);
         break;
     case INTRA_ANGULAR_VERTICAL:
+        PROFILE_START();
         s->hpc.pred_vertical_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
+        PROFILE_ACC(angular_v_c);
         break;
     default:
+        PROFILE_START();
         s->hpc.pred_angular_c[log2_size - 2]((uint8_t *)src, (uint8_t *)top_pred,
                                            (uint8_t *)left, stride,
                                            mode);
+        PROFILE_ACC(angular_c);
         break;
     }
 

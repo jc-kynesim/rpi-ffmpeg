@@ -76,6 +76,8 @@
 # include "libavfilter/buffersrc.h"
 # include "libavfilter/buffersink.h"
 
+#include "libavutil/rpi_prof.h"
+
 #ifdef RPI_DISPLAY
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files
@@ -5050,6 +5052,8 @@ int main(int argc, char **argv)
 
     register_exit(ffmpeg_cleanup);
 
+    PROFILE_INIT();
+
     setvbuf(stderr,NULL,_IONBF,0); /* win32 runtime needs this */
 
     av_log_set_flags(AV_LOG_SKIP_REPEATED);
@@ -5107,6 +5111,17 @@ int main(int argc, char **argv)
            decode_error_stat[0], decode_error_stat[1]);
     if ((decode_error_stat[0] + decode_error_stat[1]) * max_error_rate < decode_error_stat[1])
         exit_program(69);
+
+    PROFILE_PRINTF(planar);
+    PROFILE_PRINTF(dc);
+    PROFILE_PRINTF(angular_h);
+    PROFILE_PRINTF(angular_v);
+    PROFILE_PRINTF(angular);
+    PROFILE_PRINTF(planar_c);
+    PROFILE_PRINTF(dc_c);
+    PROFILE_PRINTF(angular_h_c);
+    PROFILE_PRINTF(angular_v_c);
+    PROFILE_PRINTF(angular_c);
 
     exit_program(received_nb_signals ? 255 : main_return_code);
     return main_return_code;

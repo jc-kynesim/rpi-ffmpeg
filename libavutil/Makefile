@@ -63,6 +63,7 @@ HEADERS = adler32.h                                                     \
           rc4.h                                                         \
           rational.h                                                    \
           replaygain.h                                                  \
+          rpi_prof.h                                                    \
           ripemd.h                                                      \
           samplefmt.h                                                   \
           sha.h                                                         \
@@ -141,6 +142,7 @@ OBJS = adler32.o                                                        \
        reverse.o                                                        \
        rc4.o                                                            \
        ripemd.o                                                         \
+       rpi_prof.o                                                       \
        samplefmt.o                                                      \
        sha.o                                                            \
        sha512.o                                                         \
