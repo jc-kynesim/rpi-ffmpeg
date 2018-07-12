@@ -92,7 +92,8 @@ do {\
 } while(0)
 
 #define PROFILE_PRINTF(x)\
-    printf("%-20s cycles=%14" PRIu64 ";  cnt=%8u;  avg=%5" PRIu64 "\n", #x, av_rpi_##x##_cycles, av_rpi_##x##_cnt, av_rpi_##x##_cycles / (uint64_t)av_rpi_##x##_cnt)
+    printf("%-20s cycles=%14" PRIu64 ";  cnt=%8u;  avg=%5" PRIu64 "\n", #x, av_rpi_##x##_cycles, av_rpi_##x##_cnt,\
+        av_rpi_##x##_cnt == 0 ? (uint64_t)0 : av_rpi_##x##_cycles / (uint64_t)av_rpi_##x##_cnt)
 
 #else
 
