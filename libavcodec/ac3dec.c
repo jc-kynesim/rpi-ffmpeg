@@ -1690,6 +1690,7 @@ dependent_frame:
 
     if (s->frame_type == EAC3_FRAME_TYPE_DEPENDENT) {
         uint64_t ich_layout = avpriv_ac3_channel_layout_tab[s->prev_output_mode & ~AC3_OUTPUT_LFEON];
+        int channel_map_size = ff_ac3_channels_tab[s->output_mode & ~AC3_OUTPUT_LFEON] + s->lfe_on;
         uint64_t channel_layout;
         int extend = 0;
 
@@ -1702,6 +1703,11 @@ dependent_frame:
                 channel_layout |= custom_channel_map_locations[ch][1];
             }
         }
+        if (av_get_channel_layout_nb_channels(channel_layout) > EAC3_MAX_CHANNELS) {
+            av_log(avctx, AV_LOG_ERROR, "Too many channels (%d) coded\n",
+                   av_get_channel_layout_nb_channels(channel_layout));
+            return AVERROR_INVALIDDATA;
+        }
 
         avctx->channel_layout = channel_layout;
         avctx->channels = av_get_channel_layout_nb_channels(channel_layout);
@@ -1713,6 +1719,9 @@ dependent_frame:
                                                                     custom_channel_map_locations[ch][1]);
                     if (index < 0)
                         return AVERROR_INVALIDDATA;
+                    if (extend >= channel_map_size)
+                        return AVERROR_INVALIDDATA;
+
                     extended_channel_map[index] = offset + channel_map[extend++];
                 } else {
                     int i;
@@ -1723,6 +1732,9 @@ dependent_frame:
                                                                             1LL << i);
                             if (index < 0)
                                 return AVERROR_INVALIDDATA;
+                            if (extend >= channel_map_size)
+                                return AVERROR_INVALIDDATA;
+
                             extended_channel_map[index] = offset + channel_map[extend++];
                         }
                     }
@@ -1738,7 +1750,9 @@ dependent_frame:
 
     for (ch = 0; ch < avctx->channels; ch++) {
         int map = extended_channel_map[ch];
-        memcpy((SHORTFLOAT *)frame->data[ch], s->output_buffer[map],
+        av_assert0(ch>=AV_NUM_DATA_POINTERS || frame->extended_data[ch] == frame->data[ch]);
+        memcpy((SHORTFLOAT *)frame->extended_data[ch],
+               s->output_buffer[map],
                s->num_blocks * AC3_BLOCK_SIZE * sizeof(SHORTFLOAT));
     }
 
@@ -1799,6 +1813,9 @@ dependent_frame:
         return AVERROR(ENOMEM);
 
     *got_frame_ptr = 1;
+
+    if (!s->superframe_size)
+        return FFMIN(full_buf_size, s->frame_size);
 
     return FFMIN(full_buf_size, s->superframe_size);
 }
