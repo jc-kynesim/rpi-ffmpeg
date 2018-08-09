@@ -76,9 +76,12 @@ A       .word   \lab
 function ff_hevc_rpi_cpy_blks8x4_neon, export=1
         ldr         r12, [sp, #0]
         push       {r11, lr}
-        sub         r12, #1
-A       adr         lr,  98f
-        ubfx        r12, r12, #3, #4
+.if jent_pic
+A       adr         lr,  98f - 2
+.else
+A       adr         lr,  98f - 4
+.endif
+        lsr         r12, #3
         ldr         r11, [sp, #(8 + 4)]
 .if jent_pic
 A       lsl         r12, #1
@@ -91,6 +94,7 @@ T       tbh         [pc, r12, lsl #1]
 .endif
 
 98:
+T       .short      0 @ unused
         jent        8f
         jent        16f
         jent        24f
