@@ -2001,11 +2001,15 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                         const int res = trans_scale_sat(
                             (levels[m] ^ k) - k, scale, dc_scale, shift);
 #if RPI_COMPRESS_COEFFS
-                      if (use_compress)
-                        coeffs32[num_nonzero++] = (res<<16) + (blk_coeffs - coeffs);
-                      else
+                        if (use_compress)
+                        {
+                            coeffs32[num_nonzero++] = (res<<16) + (blk_coeffs - coeffs);
+                        }
+                        else
 #endif
-                        blk_coeffs[0] = res;
+                        {
+                            blk_coeffs[0] = res;
+                        }
                         --m;
                     }
 
