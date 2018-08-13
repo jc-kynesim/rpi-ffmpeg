@@ -213,14 +213,7 @@ static void restore_tqb_pixels(const HEVCRpiContext * const s,
             const uint8_t * bs = dst1;
             while (m != 0) {
                 if ((m & 1) != 0) {
-                    unsigned int i;
-                    uint8_t * d = bd;
-                    const uint8_t * s = bs;
-                    for (i = 0; i != bheight; ++i) {
-                        memcpy(d, s, bwidth);
-                        d += stride_src;
-                        s += stride_dst;
-                    }
+                    s->hevcdsp.cpy_blk(bd, stride_src, bs, stride_dst, bwidth, bheight);
                 }
                 m >>= 1;
                 bs += bwidth;
