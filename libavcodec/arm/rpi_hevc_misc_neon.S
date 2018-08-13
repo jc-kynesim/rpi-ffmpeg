@@ -45,11 +45,6 @@ A       .word   \lab
 .if \p1 + \p2 != \val
 .error "Bad addition!  \p1 + \p2 != \val"
 .endif
-.if \val <= 64
-@ As max we deal with 128 vals above 64 will never be recursed to
-100\val\():
-        push       {r11, lr}
-.endif
 \val\():
         push       {r0-r3}
         bl          100\p1\()b
