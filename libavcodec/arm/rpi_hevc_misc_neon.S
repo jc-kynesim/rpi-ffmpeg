@@ -41,9 +41,14 @@ A       .word   \lab
 .endif
 .endm
 
-.macro cpy_compound val, p1, p2
+.set expected_next, 0
+
+.macro cpy_compound val, p1, p2, drop_thru=0
 .if \p1 + \p2 != \val
 .error "Bad addition!  \p1 + \p2 != \val"
+.endif
+.if expected_next != 0 && expected_next != \val
+.error "Drop thru failure"
 .endif
 \val\():
         push       {r0-r3}
@@ -51,7 +56,12 @@ A       .word   \lab
         pop        {r0-r3}
         add         r0, #\p1
         add         r2, #\p1
+.if \drop_thru == 0
         b           \p2\()b
+.set expected_next, 0
+.else
+.set expected_next, \p2
+.endif
 .endm
 
 @ ff_hevc_cpy_blks8x4_neon(
@@ -143,8 +153,6 @@ T       tbh         [pc, r12, lsl #1]
         bgt         1b
         pop        {r11, pc}
 
-cpy_compound 24, 16, 8
-
 10032:
         push       {r11, lr}
 32:
@@ -165,10 +173,6 @@ cpy_compound 24, 16, 8
         bgt         1b
         pop        {r11, pc}
 
-cpy_compound 40, 32, 8
-cpy_compound 48, 32, 16
-cpy_compound 56, 32, 24
-
 10064:
         push       {r11, lr}
 64:
@@ -186,14 +190,6 @@ cpy_compound 56, 32, 24
         vst1.32    {q14, q15}, [r12], r1
         bgt         1b
         pop        {r11, pc}
-
-cpy_compound 72, 64, 8
-cpy_compound 80, 64, 16
-cpy_compound 88, 64, 24
-cpy_compound 96, 64, 32
-cpy_compound 104, 64, 40
-cpy_compound 112, 64, 48
-cpy_compound 120, 64, 56
 
 128:
         push       {r4, r5}
@@ -216,6 +212,23 @@ cpy_compound 120, 64, 56
         vst1.32    {q14, q15}, [r12], r1
         bgt         1b
         pop        {r4, r5, r11, pc}
+
+@ Use drop_thru where we can
+cpy_compound 104, 64, 40, 1
+cpy_compound 40, 32, 8
+
+cpy_compound 112, 64, 48, 1
+cpy_compound 48, 32, 16
+
+cpy_compound 120, 64, 56, 1
+cpy_compound 56, 32, 24, 1
+cpy_compound 24, 16, 8
+
+cpy_compound 72, 64, 8
+cpy_compound 80, 64, 16
+cpy_compound 88, 64, 24
+cpy_compound 96, 64, 32
+
 
 endfunc
 
