@@ -68,6 +68,7 @@ To blank the screen before starting use "xdg-screensaver activate"
     argp.add_argument("--csv_out", default="ffperf_out.csv", help="CSV output filename")
     argp.add_argument("--csv_in", help="CSV input filename")
     argp.add_argument("--prefix", help="Filename prefix (include terminal '/' if a directory).")
+    argp.add_argument("--repeat", default=3, type=int, help="Run repeat count")
 
     args = argp.parse_args()
 
@@ -102,7 +103,7 @@ To blank the screen before starting use "xdg-screensaver activate"
         print ("====", f)
 
         t0 = tstats({"name":f, "elapsed":999, "user":999, "sys":999})
-        for i in range(3):
+        for i in range(args.repeat):
             t = tstats.time_file(f, prefix)
             print ("...", t.times_str())
             if t0 > t:
