@@ -554,19 +554,58 @@ static inline uint8_t * bs_ptr8(const uint8_t * bs, const unsigned int stride2, 
 
 // Get block strength
 // Given how we call we will always get within the 32bit boundries
-static inline uint32_t bs_get32(const uint8_t * bs, const unsigned int stride2,
-                                const unsigned int xl, const unsigned int xr, const unsigned int y)
+static inline uint32_t bs_get32(const uint8_t * bs, unsigned int stride2,
+                                unsigned int xl, unsigned int xr, const unsigned int y)
 {
     if (xr <= xl) {
         return 0;
     }
     else
     {
+#if HAVE_ARMV6T2_INLINE
+#if (~3U & (HEVC_RPI_BS_STRIDE1_PEL_MASK >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT)) != 0
+#error This case not yet handled in bs_get32
+#elif HEVC_RPI_BS_STRIDE1_BYTES < 4
+#error Stride1 < return size
+#endif
+        uint32_t tmp;
+        __asm__ (
+            "lsr         %[tmp], %[xl], %[xl_shift]                  \n\t"
+            "rsb         %[xr], %[xl], %[xr]                         \n\t"
+            "mla         %[stride2], %[stride2], %[tmp], %[bs]       \n\t"
+            "add         %[xr], %[xr], #7                            \n\t"
+            "lsr         %[bs], %[y], %[y_shift1]                    \n\t"
+            "bic         %[xr], %[xr], #7                            \n\t"
+            "ubfx        %[xl], %[xl], #1, #5                        \n\t"
+            "lsr         %[xr], %[xr], #1                            \n\t"
+            "cmp         %[xr], #32                                  \n\t"
+            "mvn         %[tmp], #0                                  \n\t"
+            "ldr         %[bs], [%[stride2], %[bs], lsl %[y_shift2]] \n\t"
+            "lsl         %[tmp], %[tmp], %[xr]                       \n\t"
+            "lsr         %[xl], %[bs], %[xl]                         \n\t"
+            "bicne       %[bs], %[xl], %[tmp]                        \n\t"
+            :  // Outputs
+                      [bs]"+r"(bs),
+                 [stride2]"+r"(stride2),
+                      [xl]"+r"(xl),
+                      [xr]"+r"(xr),
+                     [tmp]"=&r"(tmp)
+            :  // Inputs
+                       [y]"r"(y),
+                [xl_shift]"M"(HEVC_RPI_BS_STRIDE1_PEL_SHIFT),
+                [y_shift1]"M"(HEVC_RPI_BS_Y_SHR),
+                [y_shift2]"M"(HEVC_RPI_BS_STRIDE1_BYTE_SHIFT)
+            :  // Clobbers
+                "cc"
+        );
+        return (uint32_t) bs;
+#else
         const uint32_t a = *bs_ptr32(bs, stride2, xl, y);
         const unsigned int n = ((xr - xl + 7) & ~7) >> 1;
 
         return n == 32 ? a :
             (a >> ((xl >> 1) & 31)) & ~(~0U << n);
+#endif
     }
 }
 
