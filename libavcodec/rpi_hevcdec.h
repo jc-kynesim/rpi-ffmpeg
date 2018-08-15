@@ -43,6 +43,10 @@
 #include "thread.h"
 #include "videodsp.h"
 
+#if ARCH_ARM
+#include "arm/rpi_hevc_misc_neon.h"
+#endif
+
 #define MAX_NB_THREADS 16
 #define SHIFT_CTB_WPP 2
 
@@ -954,6 +958,39 @@ static inline int frame_stride1(const AVFrame * const frame, const int c_idx)
 #if HEVC_RPI_SAND128_ONLY
 // Propagate this decision to later zc includes
 #define RPI_ZC_SAND128_ONLY 1
+#endif
+
+#ifndef ff_hevc_rpi_copy_vert
+static inline void ff_hevc_rpi_copy_vert(uint8_t *dst, const uint8_t *src,
+                                         int pixel_shift, int height,
+                                         ptrdiff_t stride_dst, ptrdiff_t stride_src)
+{
+    int i;
+    switch (pixel_shift)
+    {
+        case 2:
+            for (i = 0; i < height; i++) {
+                *(uint32_t *)dst = *(uint32_t *)src;
+                dst += stride_dst;
+                src += stride_src;
+            }
+            break;
+        case 1:
+            for (i = 0; i < height; i++) {
+                *(uint16_t *)dst = *(uint16_t *)src;
+                dst += stride_dst;
+                src += stride_src;
+            }
+            break;
+        default:
+            for (i = 0; i < height; i++) {
+                *dst = *src;
+                dst += stride_dst;
+                src += stride_src;
+            }
+            break;
+    }
+}
 #endif
 
 #endif /* AVCODEC_RPI_HEVCDEC_H */

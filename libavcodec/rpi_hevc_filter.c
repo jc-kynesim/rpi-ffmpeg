@@ -135,37 +135,6 @@ static void copy_pixel(uint8_t *dst, const uint8_t *src, int pixel_shift)
     }
 }
 
-static void copy_vert(uint8_t *dst, const uint8_t *src,
-                      int pixel_shift, int height,
-                      ptrdiff_t stride_dst, ptrdiff_t stride_src)
-{
-    int i;
-    switch (pixel_shift)
-    {
-        case 2:
-            for (i = 0; i < height; i++) {
-                *(uint32_t *)dst = *(uint32_t *)src;
-                dst += stride_dst;
-                src += stride_src;
-            }
-            break;
-        case 1:
-            for (i = 0; i < height; i++) {
-                *(uint16_t *)dst = *(uint16_t *)src;
-                dst += stride_dst;
-                src += stride_src;
-            }
-            break;
-        default:
-            for (i = 0; i < height; i++) {
-                *dst = *src;
-                dst += stride_dst;
-                src += stride_src;
-            }
-            break;
-    }
-}
-
 static void copy_CTB_to_hv(const HEVCRpiContext * const s, const uint8_t * const src,
                            ptrdiff_t stride_src, int x, int y, int width, int height,
                            int c_idx, int x_ctb, int y_ctb)
@@ -181,9 +150,9 @@ static void copy_CTB_to_hv(const HEVCRpiContext * const s, const uint8_t * const
         src + stride_src * (height - 1), width << sh);
 
     /* copy vertical edges */
-    copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb) * h + y) << sh), src, sh, height, 1 << sh, stride_src);
+    ff_hevc_rpi_copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb) * h + y) << sh), src, sh, height, 1 << sh, stride_src);
 
-    copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 1) * h + y) << sh), src + ((width - 1) << sh), sh, height, 1 << sh, stride_src);
+    ff_hevc_rpi_copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 1) * h + y) << sh), src + ((width - 1) << sh), sh, height, 1 << sh, stride_src);
 }
 
 // N.B. Src & dst are swapped as this is a restore!
@@ -450,22 +419,22 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
             }
             if (src_l != NULL) {
                 if (CTB(s->sao, x_ctb-1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
-                    copy_vert(dst - (1 << sh),
+                    ff_hevc_rpi_copy_vert(dst - (1 << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb - 1) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    copy_vert(dst - (1 << sh),
+                    ff_hevc_rpi_copy_vert(dst - (1 << sh),
                               src_l,
                               sh, height, stride_dst, stride_src);
                 }
             }
             if (src_r != NULL) {
                 if (CTB(s->sao, x_ctb+1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
-                    copy_vert(dst + (width << sh),
+                    ff_hevc_rpi_copy_vert(dst + (width << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 2) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    copy_vert(dst + (width << sh),
+                    ff_hevc_rpi_copy_vert(dst + (width << sh),
                               src_r,
                               sh, height, stride_dst, stride_src);
                 }
