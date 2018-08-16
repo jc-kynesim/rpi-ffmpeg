@@ -1559,6 +1559,8 @@ angle_2:
         @ Standard sign
         .byte     2,   5,   9,  13,  17,  21,  26,  32
 
+        .balign   2
+
         @ Sign inverted from standards table
 inv_angle:
         .short   4096, 1638,  910,  630,  482,  390,  315
