@@ -328,10 +328,12 @@ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
             /* drm frame */
             avbuf->drm_frame.objects[i].size = avbuf->buf.m.planes[i].length;
             avbuf->drm_frame.objects[i].fd = expbuf.fd;
+            avbuf->drm_frame.objects[i].format_modifier = DRM_FORMAT_MOD_LINEAR;
         } else {
             /* drm frame */
             avbuf->drm_frame.objects[0].size = avbuf->buf.length;
             avbuf->drm_frame.objects[0].fd = expbuf.fd;
+            avbuf->drm_frame.objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         }
     }
 
