@@ -662,14 +662,22 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
 
         if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
             avbuf->plane_info[i].length = avbuf->buf.m.planes[i].length;
-            avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.m.planes[i].length,
-                                           PROT_READ | PROT_WRITE, MAP_SHARED,
-                                           buf_to_m2mctx(avbuf)->fd, avbuf->buf.m.planes[i].m.mem_offset);
+
+            if ((V4L2_TYPE_IS_OUTPUT(ctx->type) && buf_to_m2mctx(avbuf)->output_drm) ||
+                !buf_to_m2mctx(avbuf)->output_drm) {
+                avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.m.planes[i].length,
+                                               PROT_READ | PROT_WRITE, MAP_SHARED,
+                                               buf_to_m2mctx(avbuf)->fd, avbuf->buf.m.planes[i].m.mem_offset);
+            }
         } else {
             avbuf->plane_info[i].length = avbuf->buf.length;
-            avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.length,
-                                          PROT_READ | PROT_WRITE, MAP_SHARED,
-                                          buf_to_m2mctx(avbuf)->fd, avbuf->buf.m.offset);
+
+            if ((V4L2_TYPE_IS_OUTPUT(ctx->type) && buf_to_m2mctx(avbuf)->output_drm) ||
+                !buf_to_m2mctx(avbuf)->output_drm) {
+                avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.length,
+                                               PROT_READ | PROT_WRITE, MAP_SHARED,
+                                               buf_to_m2mctx(avbuf)->fd, avbuf->buf.m.offset);
+            }
         }
 
         if (avbuf->plane_info[i].mm_addr == MAP_FAILED)
