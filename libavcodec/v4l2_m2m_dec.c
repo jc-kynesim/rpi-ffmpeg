@@ -219,8 +219,16 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      *   - the DRM frame format is passed in the DRM frame descriptor layer.
      *       check the v4l2_get_drm_frame function.
      */
-    if (ff_get_format(avctx, avctx->codec->pix_fmts) == AV_PIX_FMT_DRM_PRIME)
+    switch (ff_get_format(avctx, avctx->codec->pix_fmts)) {
+    case AV_PIX_FMT_DRM_PRIME:
         s->output_drm = 1;
+        break;
+    case AV_PIX_FMT_NONE:
+        return 0;
+        break;
+    default:
+        break;
+    }
 
     s->avctx = avctx;
     ret = ff_v4l2_m2m_codec_init(priv);
@@ -276,6 +284,7 @@ static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
         .capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
         .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_CLEANUP, \
         .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
+                                                         AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_NONE}, \
         .hw_configs     = v4l2_m2m_hw_configs, \
         .wrapper_name   = "v4l2m2m", \
