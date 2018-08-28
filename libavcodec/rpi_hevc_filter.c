@@ -135,37 +135,6 @@ static void copy_pixel(uint8_t *dst, const uint8_t *src, int pixel_shift)
     }
 }
 
-static void copy_vert(uint8_t *dst, const uint8_t *src,
-                      int pixel_shift, int height,
-                      ptrdiff_t stride_dst, ptrdiff_t stride_src)
-{
-    int i;
-    switch (pixel_shift)
-    {
-        case 2:
-            for (i = 0; i < height; i++) {
-                *(uint32_t *)dst = *(uint32_t *)src;
-                dst += stride_dst;
-                src += stride_src;
-            }
-            break;
-        case 1:
-            for (i = 0; i < height; i++) {
-                *(uint16_t *)dst = *(uint16_t *)src;
-                dst += stride_dst;
-                src += stride_src;
-            }
-            break;
-        default:
-            for (i = 0; i < height; i++) {
-                *dst = *src;
-                dst += stride_dst;
-                src += stride_src;
-            }
-            break;
-    }
-}
-
 static void copy_CTB_to_hv(const HEVCRpiContext * const s, const uint8_t * const src,
                            ptrdiff_t stride_src, int x, int y, int width, int height,
                            int c_idx, int x_ctb, int y_ctb)
@@ -181,9 +150,9 @@ static void copy_CTB_to_hv(const HEVCRpiContext * const s, const uint8_t * const
         src + stride_src * (height - 1), width << sh);
 
     /* copy vertical edges */
-    copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb) * h + y) << sh), src, sh, height, 1 << sh, stride_src);
+    ff_hevc_rpi_copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb) * h + y) << sh), src, sh, height, 1 << sh, stride_src);
 
-    copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 1) * h + y) << sh), src + ((width - 1) << sh), sh, height, 1 << sh, stride_src);
+    ff_hevc_rpi_copy_vert(s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 1) * h + y) << sh), src + ((width - 1) << sh), sh, height, 1 << sh, stride_src);
 }
 
 // N.B. Src & dst are swapped as this is a restore!
@@ -443,22 +412,22 @@ static void sao_filter_CTB(const HEVCRpiContext * const s, const int x, const in
             }
             if (src_l != NULL) {
                 if (CTB(s->sao, x_ctb-1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
-                    copy_vert(dst - (1 << sh),
+                    ff_hevc_rpi_copy_vert(dst - (1 << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb - 1) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    copy_vert(dst - (1 << sh),
+                    ff_hevc_rpi_copy_vert(dst - (1 << sh),
                               src_l,
                               sh, height, stride_dst, stride_src);
                 }
             }
             if (src_r != NULL) {
                 if (CTB(s->sao, x_ctb+1, y_ctb).type_idx[c_idx] == SAO_APPLIED) {
-                    copy_vert(dst + (width << sh),
+                    ff_hevc_rpi_copy_vert(dst + (width << sh),
                               s->sao_pixel_buffer_v[c_idx] + (((2 * x_ctb + 2) * h + y0) << sh),
                               sh, height, stride_dst, 1 << sh);
                 } else {
-                    copy_vert(dst + (width << sh),
+                    ff_hevc_rpi_copy_vert(dst + (width << sh),
                               src_r,
                               sh, height, stride_dst, stride_src);
                 }
@@ -578,19 +547,58 @@ static inline uint8_t * bs_ptr8(const uint8_t * bs, const unsigned int stride2, 
 
 // Get block strength
 // Given how we call we will always get within the 32bit boundries
-static inline uint32_t bs_get32(const uint8_t * bs, const unsigned int stride2,
-                                const unsigned int xl, const unsigned int xr, const unsigned int y)
+static inline uint32_t bs_get32(const uint8_t * bs, unsigned int stride2,
+                                unsigned int xl, unsigned int xr, const unsigned int y)
 {
     if (xr <= xl) {
         return 0;
     }
     else
     {
+#if HAVE_ARMV6T2_INLINE
+#if (~3U & (HEVC_RPI_BS_STRIDE1_PEL_MASK >> HEVC_RPI_BS_PELS_PER_BYTE_SHIFT)) != 0
+#error This case not yet handled in bs_get32
+#elif HEVC_RPI_BS_STRIDE1_BYTES < 4
+#error Stride1 < return size
+#endif
+        uint32_t tmp;
+        __asm__ (
+            "lsr         %[tmp], %[xl], %[xl_shift]                  \n\t"
+            "rsb         %[xr], %[xl], %[xr]                         \n\t"
+            "mla         %[stride2], %[stride2], %[tmp], %[bs]       \n\t"
+            "add         %[xr], %[xr], #7                            \n\t"
+            "lsr         %[bs], %[y], %[y_shift1]                    \n\t"
+            "bic         %[xr], %[xr], #7                            \n\t"
+            "ubfx        %[xl], %[xl], #1, #5                        \n\t"
+            "lsr         %[xr], %[xr], #1                            \n\t"
+            "cmp         %[xr], #32                                  \n\t"
+            "mvn         %[tmp], #0                                  \n\t"
+            "ldr         %[bs], [%[stride2], %[bs], lsl %[y_shift2]] \n\t"
+            "lsl         %[tmp], %[tmp], %[xr]                       \n\t"
+            "lsr         %[xl], %[bs], %[xl]                         \n\t"
+            "bicne       %[bs], %[xl], %[tmp]                        \n\t"
+            :  // Outputs
+                      [bs]"+r"(bs),
+                 [stride2]"+r"(stride2),
+                      [xl]"+r"(xl),
+                      [xr]"+r"(xr),
+                     [tmp]"=&r"(tmp)
+            :  // Inputs
+                       [y]"r"(y),
+                [xl_shift]"M"(HEVC_RPI_BS_STRIDE1_PEL_SHIFT),
+                [y_shift1]"M"(HEVC_RPI_BS_Y_SHR),
+                [y_shift2]"M"(HEVC_RPI_BS_STRIDE1_BYTE_SHIFT)
+            :  // Clobbers
+                "cc"
+        );
+        return (uint32_t) bs;
+#else
         const uint32_t a = *bs_ptr32(bs, stride2, xl, y);
         const unsigned int n = ((xr - xl + 7) & ~7) >> 1;
 
         return n == 32 ? a :
             (a >> ((xl >> 1) & 31)) & ~(~0U << n);
+#endif
     }
 }
 
