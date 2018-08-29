@@ -36,6 +36,7 @@
 #include "rpi_hevcpred.h"
 #include "h2645_parse.h"
 #include "hevc.h"
+#include "rpi_hevc_mv.h"
 #include "rpi_hevc_ps.h"
 #include "rpi_hevc_sei.h"
 #include "rpi_hevcdsp.h"
@@ -129,10 +130,7 @@
 
 
 // Min CTB size is 16
-#if ((HEVC_RPI_MAX_WIDTH + 15) / 16) * ((HEVC_RPI_MAX_HEIGHT + 15) / 16) >= (1 << 16)
-#error Check CTB translation array el sizes (currently uint16_t)
-#endif
-
+#define HEVC_RPI_MAX_CTBS ((HEVC_RPI_MAX_WIDTH + 15) / 16) * ((HEVC_RPI_MAX_HEIGHT + 15) / 16)
 
 /**
  * Value of the luma sample at position (x, y) in the 2D array tab.
@@ -257,9 +255,9 @@ enum ScanType {
 };
 
 typedef struct RefPicList {
-    struct HEVCFrame *ref[HEVC_MAX_REFS];
+    struct HEVCRpiFrame *ref[HEVC_MAX_REFS];
     int list[HEVC_MAX_REFS];
-    int isLongTerm[HEVC_MAX_REFS];
+    uint8_t isLongTerm[HEVC_MAX_REFS];
     int nb_refs;
 } RefPicList;
 
@@ -286,7 +284,6 @@ typedef struct RpiPredictionUnit {
     uint8_t intra_pred_mode[4];
     uint8_t intra_pred_mode_c[4];
     uint8_t chroma_mode_c[4];
-    Mv mvd;
     uint8_t merge_flag;
 } RpiPredictionUnit;
 
@@ -314,19 +311,14 @@ typedef struct DBParams {
 
 struct HEVCRpiJob;
 
-typedef struct HEVCFrame {
+typedef struct HEVCRpiFrame {
     AVFrame *frame;
     ThreadFrame tf;
-    MvField *tab_mvf;
-    RefPicList *refPicList;
-    RefPicListTab **rpl_tab;
-    int ctb_count;
+    ColMvField *col_mvf;
     int poc;
-    struct HEVCFrame *collocated_ref;
+    struct HEVCRpiFrame *collocated_ref;
 
-    AVBufferRef *tab_mvf_buf;
-    AVBufferRef *rpl_tab_buf;
-    AVBufferRef *rpl_buf;
+    AVBufferRef *col_mvf_buf;
 
     /**
      * A sequence counter, so that old frames are output first
@@ -342,7 +334,7 @@ typedef struct HEVCFrame {
     // Entry no in DPB - can be used as a small unique
     // frame identifier (within the current thread)
     uint8_t dpb_no;
-} HEVCFrame;
+} HEVCRpiFrame;
 
 typedef struct HEVCRpiLocalContext {
     HEVCRpiTransformUnit tu;
@@ -413,6 +405,18 @@ typedef struct HEVCRpiLocalContext {
     /* properties of the boundary of the current CTB for the purposes
      * of the deblocking filter */
     unsigned int boundary_flags;
+
+#define IPM_TAB_SIZE (HEVC_MAX_CTB_SIZE >> LOG2_MIN_PU_SIZE)
+    uint8_t ipm_left[IPM_TAB_SIZE];
+    uint8_t ipm_up[IPM_TAB_SIZE];
+
+//#define MVF_STASH_WIDTH       128
+#define MVF_STASH_WIDTH       64
+#define MVF_STASH_HEIGHT      64
+#define MVF_STASH_WIDTH_PU    (MVF_STASH_WIDTH >> LOG2_MIN_PU_SIZE)
+#define MVF_STASH_HEIGHT_PU   (MVF_STASH_HEIGHT >> LOG2_MIN_PU_SIZE)
+    HEVCRpiMvField mvf_ul[1];
+    HEVCRpiMvField mvf_stash[MVF_STASH_WIDTH_PU * MVF_STASH_HEIGHT_PU];
 
     /* +7 is for subpixel interpolation, *2 for high bit depths */
 //    DECLARE_ALIGNED(32, uint8_t, edge_emu_buffer)[(MAX_PB_SIZE + 7) * EDGE_EMU_BUFFER_STRIDE * 2];
@@ -665,6 +669,7 @@ typedef struct HEVCRpiContext {
     /** 1 if the independent slice segment header was successfully parsed */
     uint8_t slice_initialized;
     char used_for_ref;  // rpi
+    char is_irap;
     char offload_recon;
     uint8_t eos;       ///< current packet contains an EOS/EOB NAL
     uint8_t last_eos;  ///< last packet contains an EOS/EOB NAL
@@ -708,14 +713,14 @@ typedef struct HEVCRpiContext {
     uint8_t *sao_pixel_buffer_h[3];
     uint8_t *sao_pixel_buffer_v[3];
 
-    AVBufferPool *tab_mvf_pool;
-    AVBufferPool *rpl_tab_pool;
+    unsigned int col_mvf_stride;
+    AVBufferPool *col_mvf_pool;
 
     RpiSAOParams *sao;
     DBParams *deblock;
     enum HEVCNALUnitType nal_unit_type;
     int temporal_id;  ///< temporal_id_plus1 - 1
-    HEVCFrame *ref;
+    HEVCRpiFrame *ref;
     int poc;
     int pocTid0;
     int slice_idx; ///< number of the slice being currently decoded
@@ -731,12 +736,27 @@ typedef struct HEVCRpiContext {
     uint8_t *bsf_stash_up;
     uint8_t *bsf_stash_left;
 
-    int32_t *tab_slice_address;
+#if HEVC_RPI_MAX_CTBS >= 0xffff
+#define TAB_SLICE_ADDR_BROKEN ~(uint32_t)0
+    uint32_t *tab_slice_address;
+#else
+#define TAB_SLICE_ADDR_BROKEN ~(uint16_t)0
+    uint16_t *tab_slice_address;
+#endif
+
+    // Bitfield 1 bit per 8 pels (min pcm size)
+    uint8_t *is_pcm;
+    // Bitfield 1 bit per 8 pels (min cb size)
+    // Only needed for CIP as CIP processing is async to the main thread
+    uint8_t *is_intra;
 
     // PU
-    uint8_t *tab_ipm;
+    HEVCRpiMvField *mvf_up;
+    HEVCRpiMvField *mvf_left;
 
-    uint8_t *is_pcm;
+    const RefPicList **rpl_up;
+    const RefPicList **rpl_left;
+    RefPicList * refPicList;
 
     // CTB-level flags affecting loop filter operation
     uint8_t *filter_slice_edges;
@@ -763,6 +783,11 @@ typedef struct HEVCRpiContext {
 
     struct AVMD5 *md5_ctx;
 
+    RefPicListTab * rpl_tab;
+    unsigned int rpl_tab_size;
+
+    uint8_t *is_intra_store;
+
     RpiSliceHeader sh;
 
     HEVCRpiParamSets ps;
@@ -770,7 +795,7 @@ typedef struct HEVCRpiContext {
     HEVCRpiLocalContext    *HEVClc;
     HEVCRpiLocalContext    *HEVClcList[MAX_NB_THREADS];
 
-    HEVCFrame DPB[HEVC_DPB_ELS];
+    HEVCRpiFrame DPB[HEVC_DPB_ELS];
 
     ///< candidate references for the current frame
     RefPicList rps[5];
@@ -803,9 +828,6 @@ void ff_hevc_rpi_clear_refs(HEVCRpiContext *s);
  */
 void ff_hevc_rpi_flush_dpb(HEVCRpiContext *s);
 
-const RefPicList *ff_hevc_rpi_get_ref_list(const HEVCRpiContext * const s, const HEVCFrame * const ref,
-                                 int x0, int y0);
-
 /**
  * Construct the reference picture sets for the current frame.
  */
@@ -832,7 +854,7 @@ int ff_hevc_rpi_output_frame(HEVCRpiContext *s, AVFrame *frame, int flush);
 
 void ff_hevc_rpi_bump_frame(HEVCRpiContext *s);
 
-void ff_hevc_rpi_unref_frame(HEVCRpiContext *s, HEVCFrame *frame, int flags);
+void ff_hevc_rpi_unref_frame(HEVCRpiContext *s, HEVCRpiFrame *frame, int flags);
 
 unsigned int ff_hevc_rpi_tb_avail_flags(
     const HEVCRpiContext * const s, const HEVCRpiLocalContext * const lc,
@@ -840,11 +862,13 @@ unsigned int ff_hevc_rpi_tb_avail_flags(
 
 void ff_hevc_rpi_luma_mv_merge_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int nPbW,
                                 int nPbH, int log2_cb_size, int part_idx,
-                                int merge_idx, MvField * const mv);
-void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext *lc, int x0, int y0, int nPbW,
-                              int nPbH, int log2_cb_size, const unsigned int avail, int part_idx,
-                              int merge_idx, MvField * const mv,
-                              int mvp_lx_flag, int LX);
+                                int merge_idx, HEVCRpiMvField * const mv);
+void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+    const unsigned int x0, const unsigned int y0,
+    const unsigned int nPbW, const unsigned int nPbH,
+    const unsigned int avail,
+    HEVCRpiMvField * const mv,
+    const unsigned int mvp_lx_flag, const unsigned int LX);
 void ff_hevc_rpi_set_qPy(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int xBase, int yBase);
 void ff_hevc_rpi_deblocking_boundary_strengths(const HEVCRpiContext * const s, const HEVCRpiLocalContext * const lc,
                                                const unsigned int x0, const unsigned int y0,
@@ -864,14 +888,14 @@ extern void rpi_zap_coeff_vals_neon(int16_t * dst, unsigned int l2ts_m2);
 #endif
 
 void ff_hevc_rpi_progress_wait_field(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
-                                     const HEVCFrame * const ref, const int val, const int field);
+                                     const HEVCRpiFrame * const ref, const int val, const int field);
 
 void ff_hevc_rpi_progress_signal_field(HEVCRpiContext * const s, const int val, const int field);
 
 // All of these expect that s->threads_type == FF_THREAD_FRAME
 
 static inline void ff_hevc_rpi_progress_wait_mv(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
-                                     const HEVCFrame * const ref, const int y)
+                                     const HEVCRpiFrame * const ref, const int y)
 {
     if (s->threads_type != 0)
         ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 1);
@@ -884,7 +908,7 @@ static inline void ff_hevc_rpi_progress_signal_mv(HEVCRpiContext * const s, cons
 }
 
 static inline void ff_hevc_rpi_progress_wait_recon(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
-                                     const HEVCFrame * const ref, const int y)
+                                     const HEVCRpiFrame * const ref, const int y)
 {
     ff_hevc_rpi_progress_wait_field(s, jb, ref, y, 0);
 }
@@ -906,7 +930,7 @@ static inline void ff_hevc_rpi_progress_signal_all_done(HEVCRpiContext * const s
 
 // Set all done - signal nothing (used in missing refs)
 // Works for both rpi & non-rpi
-static inline void ff_hevc_rpi_progress_set_all_done(HEVCFrame * const ref)
+static inline void ff_hevc_rpi_progress_set_all_done(HEVCRpiFrame * const ref)
 {
     if (ref->tf.progress != NULL)
     {
@@ -990,6 +1014,73 @@ static inline void ff_hevc_rpi_copy_vert(uint8_t *dst, const uint8_t *src,
             }
             break;
     }
+}
+#endif
+
+
+#if MVF_STASH_WIDTH == 64
+static inline HEVCRpiMvField* mvf_stash_ptr(const HEVCRpiContext *const s, const HEVCRpiLocalContext * const lc,
+                               const unsigned int x, const unsigned int y)
+{
+    const unsigned int mask_cs_hi = (~0U << s->ps.sps->log2_ctb_size);
+    return (HEVCRpiMvField*)(lc->mvf_stash + ((y & ~mask_cs_hi) >> LOG2_MIN_PU_SIZE) * MVF_STASH_WIDTH_PU + ((x & ~mask_cs_hi) >> LOG2_MIN_PU_SIZE));
+}
+
+static inline HEVCRpiMvField* mvf_ptr(const HEVCRpiContext *const s, const HEVCRpiLocalContext * const lc,
+                               const unsigned int x0, const unsigned int y0,
+                               const unsigned int x, const unsigned int y)
+{
+    const unsigned int mask_cs_hi = (~0U << s->ps.sps->log2_ctb_size);
+    const unsigned int x0_ctb = x0 & mask_cs_hi;
+    const unsigned int y0_ctb = y0 & mask_cs_hi;
+
+    return (HEVCRpiMvField *)((y < y0_ctb) ?
+        (x < x0_ctb ? lc->mvf_ul : s->mvf_up + (x >> LOG2_MIN_PU_SIZE)) :
+        (x < x0_ctb ? s->mvf_left + (y >> LOG2_MIN_PU_SIZE) :
+            lc->mvf_stash +
+                ((y & ~mask_cs_hi) >> LOG2_MIN_PU_SIZE) * MVF_STASH_WIDTH_PU +
+                ((x & ~mask_cs_hi) >> LOG2_MIN_PU_SIZE)));
+}
+
+static inline unsigned int mvf_left_stride(const HEVCRpiContext *const s,
+                               const unsigned int x0,
+                               const unsigned int x)
+{
+    const unsigned int mask_cs_hi = (~0U << s->ps.sps->log2_ctb_size);
+    const unsigned int x0_ctb = x0 & mask_cs_hi;
+    return x < x0_ctb ? 1 : MVF_STASH_WIDTH_PU;
+}
+
+#else
+static inline HEVCRpiMvField* mvf_stash_ptr(const HEVCRpiContext *const s, const HEVCRpiLocalContext * const lc,
+                               const unsigned int x, const unsigned int y)
+{
+    const unsigned int mask_cs_hi = (~0U << s->ps.sps->log2_ctb_size);
+    return (HEVCRpiMvField*)(lc->mvf_stash + ((y & ~mask_cs_hi) >> LOG2_MIN_PU_SIZE) * MVF_STASH_WIDTH_PU + ((x >> LOG2_MIN_PU_SIZE) & (MVF_STASH_WIDTH_PU - 1)));
+}
+
+static inline HEVCRpiMvField* mvf_ptr(const HEVCRpiContext *const s, const HEVCRpiLocalContext * const lc,
+                               const unsigned int x0, const unsigned int y0,
+                               const unsigned int x, const unsigned int y)
+{
+    const unsigned int mask_cs_hi = (~0U << s->ps.sps->log2_ctb_size);
+
+    const unsigned int x0_ctb = x0 & mask_cs_hi;
+    const unsigned int y0_ctb = y0 & mask_cs_hi;
+
+    // If not in the same CTB for Y assume up
+    if (y < y0_ctb) {
+        // If not in the same CTB for X too assume up-left
+        return (HEVCRpiMvField *)(x < x0_ctb ? lc->mvf_ul : s->mvf_up + (x >> LOG2_MIN_PU_SIZE));
+    }
+    return mvf_stash_ptr(s, lc, x, y);
+}
+
+static inline unsigned int mvf_left_stride(const HEVCRpiContext *const s,
+                               const unsigned int x0,
+                               const unsigned int x)
+{
+    return MVF_STASH_WIDTH_PU;
 }
 #endif
 

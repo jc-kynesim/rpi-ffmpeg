@@ -28,6 +28,8 @@
 #include "hevc.h"
 #include "get_bits.h"
 
+struct HEVCRpiMvField;
+
 #define MAX_PB_SIZE 64
 
 #define RPI_HEVC_SAO_BUF_STRIDE 160
@@ -42,16 +44,6 @@ typedef struct RpiSAOParams {
 
 } RpiSAOParams;
 
-typedef struct Mv {
-    int16_t x;  ///< horizontal component of motion vector
-    int16_t y;  ///< vertical component of motion vector
-} Mv;
-
-typedef struct MvField {
-    DECLARE_ALIGNED(4, Mv, mv)[2];
-    int8_t ref_idx[2];
-    int8_t pred_flag;
-} MvField;
 
 // This controls how many sao dsp functions there are
 // N=5 has width = 8, 16, 32, 48, 64
@@ -166,9 +158,9 @@ typedef struct HEVCDSPContext {
                                  uint8_t * src_l,
                                  unsigned int no_f);
 
-    uint32_t (*hevc_deblocking_boundary_strengths)(int pus, int dup, const MvField *curr, const MvField *neigh,
+    uint32_t (*hevc_deblocking_boundary_strengths)(int pus, int dup, const struct HEVCRpiMvField *curr, const struct HEVCRpiMvField *neigh,
                                                const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
-                                               int in_inc);
+                                               int in_inc0, int inc_inc1);
 
     void (* cpy_blk)(uint8_t * dst, unsigned int dst_stride, const uint8_t * src, unsigned int src_stride, unsigned int width, unsigned int height);
 } HEVCDSPContext;

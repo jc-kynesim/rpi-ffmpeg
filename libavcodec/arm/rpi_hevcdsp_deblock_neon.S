@@ -1091,8 +1091,9 @@ endfunc
 .endm
 
 
-#if 1 // NEON version
+#if 0 // NEON version
 
+@ ****** Doesn't cope with mult-stride yet
 
 /* uint32_t ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, const MvField *curr, const MvField *neigh,
  *                                            const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
@@ -1496,11 +1497,12 @@ A       orr         v7, v5, v7, lsr #2
 T       orr         v7, v5, v7
         bhi         11b
 
-        ldr         v5, [sp, #16*4]
-        add         ip, sp, #16*4
+        ldr         ip, [sp, #16*4]
+        ldr         v5, [sp, #17*4]
         ldr         a2, [sp]
         subs        a1, a1, #1
-        add         a3, a3, v5
+        add         a3, a3, ip
+        add         ip, sp, #16*4
         add         a4, a4, v5
         bhi         1b
         mov         a1, v7, lsr v6

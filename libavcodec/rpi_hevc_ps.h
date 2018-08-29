@@ -279,7 +279,9 @@ typedef struct HEVCRpiSPS {
     unsigned int log2_min_tb_size;  // 2..5
     unsigned int log2_max_trafo_size;
     unsigned int log2_ctb_size;     // 4..6
-    unsigned int log2_min_pu_size;  // 2..5 (min_cb_size - 1)
+//    unsigned int log2_min_pu_size;  // 2..5 (min_cb_size - 1)
+#define LOG2_MIN_PU_SIZE 2
+#define LOG2_MIN_CU_SIZE 3
 
     int max_transform_hierarchy_depth_inter;
     int max_transform_hierarchy_depth_intra;

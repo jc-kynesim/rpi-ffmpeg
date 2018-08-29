@@ -1110,7 +1110,7 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
 
         // Inferred parameters
         sps->log2_ctb_size = CtbLog2SizeY;
-        sps->log2_min_pu_size = sps->log2_min_cb_size - 1;
+//        sps->log2_min_pu_size = sps->log2_min_cb_size - 1;
     }
 
     sps->max_transform_hierarchy_depth_inter = get_ue_golomb_long(gb);
@@ -1264,8 +1264,8 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
     sps->min_cb_height = sps->height >> sps->log2_min_cb_size;
     sps->min_tb_width  = sps->width  >> sps->log2_min_tb_size;
     sps->min_tb_height = sps->height >> sps->log2_min_tb_size;
-    sps->min_pu_width  = sps->width  >> sps->log2_min_pu_size;
-    sps->min_pu_height = sps->height >> sps->log2_min_pu_size;
+    sps->min_pu_width  = sps->width  >> LOG2_MIN_PU_SIZE;
+    sps->min_pu_height = sps->height >> LOG2_MIN_PU_SIZE;
     sps->tb_mask       = (1 << (sps->log2_ctb_size - sps->log2_min_tb_size)) - 1;
 
     sps->qp_bd_offset = 6 * (sps->bit_depth - 8);
@@ -1540,7 +1540,7 @@ static inline int setup_pps(AVCodecContext * const avctx,
     /**
      * 6.5
      */
-    pic_area_in_ctbs     = sps->ctb_width    * sps->ctb_height;
+    pic_area_in_ctbs     = sps->ctb_size;
 
     pps->ctb_addr_rs_to_ts = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_addr_rs_to_ts));
     pps->ctb_addr_ts_to_rs = av_malloc_array(pic_area_in_ctbs,    sizeof(*pps->ctb_addr_ts_to_rs));

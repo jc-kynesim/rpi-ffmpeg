@@ -245,7 +245,7 @@ static void set_bytes(uint8_t * b, const unsigned int stride, const int ln, unsi
 
 // We expect this to be called with ln = (log2_cb_size - 3) so range =  -1..3
 // (4 not required)
-static void set_cabac_stash(uint8_t * b_u, uint8_t * b_l, const int ln, unsigned int a)
+static void set_stash2(uint8_t * b_u, uint8_t * b_l, const int ln, unsigned int a)
 {
     switch (ln)
     {
@@ -271,6 +271,18 @@ static void set_cabac_stash(uint8_t * b_u, uint8_t * b_l, const int ln, unsigned
             *(uint32_t *)(b_u + 4) = a;
             *(uint32_t *)b_l = a;
             *(uint32_t *)(b_l + 4) = a;
+            break;
+        case 4:
+            a |= a << 8;
+            a |= a << 16;
+            *(uint32_t *)b_u = a;
+            *(uint32_t *)(b_u + 4) = a;
+            *(uint32_t *)(b_u + 8) = a;
+            *(uint32_t *)(b_u + 12) = a;
+            *(uint32_t *)b_l = a;
+            *(uint32_t *)(b_l + 4) = a;
+            *(uint32_t *)(b_l + 8) = a;
+            *(uint32_t *)(b_l + 12) = a;
             break;
     }
 }
@@ -311,7 +323,7 @@ static void set_bits(uint8_t * f, const unsigned int x, const unsigned int strid
 
     switch (ln)
     {
-        case 0:  // 1
+        default:  // 1
             f[0] |= 1 << sh;
             break;
         case 1:  // 3 * 2
@@ -326,7 +338,7 @@ static void set_bits(uint8_t * f, const unsigned int x, const unsigned int strid
             f[stride * 2] |= n;
             f[stride * 3] |= n;
             break;
-        default:  // 0xff * 8
+        case 3:  // 0xff * 8
             for (n = 0; n != 8; ++n, f += stride)
                 *f = 0xff;
             break;
@@ -844,7 +856,7 @@ int16_t * rpi_alloc_coeff_buf(HEVCRpiJob * const jb, const int buf_no, const int
 }
 
 void ff_hevc_rpi_progress_wait_field(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
-                                     const HEVCFrame * const ref, const int val, const int field)
+                                     const HEVCRpiFrame * const ref, const int val, const int field)
 {
     if (ref->tf.progress != NULL && ((int *)ref->tf.progress->data)[field] < val) {
         HEVCRpiContext *const fs = ref->tf.owner[field]->priv_data;
@@ -980,34 +992,41 @@ static void pic_arrays_free(HEVCRpiContext *s)
     av_freep(&s->cabac_stash_up);
     s->cabac_stash_left = NULL;  // freed with _up
 
-    av_freep(&s->tab_ipm);
+    av_freep(&s->mvf_up);
+    av_freep(&s->mvf_left);
+
     av_freep(&s->is_pcm);
+    av_freep(&s->is_intra_store);
+    s->is_intra = NULL;
+    av_freep(&s->rpl_tab);
+    s->rpl_tab_size = 0;
 
     av_freep(&s->qp_y_tab);
     av_freep(&s->tab_slice_address);
     av_freep(&s->filter_slice_edges);
 
     av_freep(&s->bs_horizontal);
-    av_freep(&s->bs_vertical);
+    s->bs_vertical = NULL;  // freed with H
     av_freep(&s->bsf_stash_left);
     av_freep(&s->bsf_stash_up);
 
+    av_freep(&s->rpl_up);
+    av_freep(&s->rpl_left);
+
     alloc_entry_points(&s->sh, 0);
 
-    av_buffer_pool_uninit(&s->tab_mvf_pool);
-    av_buffer_pool_uninit(&s->rpl_tab_pool);
+    av_buffer_pool_uninit(&s->col_mvf_pool);
 }
 
 /* allocate arrays that depend on frame dimensions */
-static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
+static int pic_arrays_init(HEVCRpiContext * const s, const HEVCRpiSPS * const sps)
 {
-    int log2_min_cb_size = sps->log2_min_cb_size;
-    int width            = sps->width;
-    int height           = sps->height;
-    int pic_size_in_ctb  = ((width  >> log2_min_cb_size) + 1) *
+    const unsigned int log2_min_cb_size = sps->log2_min_cb_size;
+    const unsigned int width            = sps->width;
+    const unsigned int height           = sps->height;
+    const unsigned int pic_size_in_cb   = ((width  >> log2_min_cb_size) + 1) *
                            ((height >> log2_min_cb_size) + 1);
-    int ctb_count        = sps->ctb_width * sps->ctb_height;
-    int min_pu_size      = sps->min_pu_width * sps->min_pu_height;
+    const unsigned int ctb_count        = sps->ctb_size;
 
     {
         unsigned int w = ((width + HEVC_RPI_BS_STRIDE1_PEL_MASK) & ~HEVC_RPI_BS_STRIDE1_PEL_MASK);
@@ -1027,36 +1046,45 @@ static int pic_arrays_init(HEVCRpiContext *s, const HEVCRpiSPS *sps)
     if (s->cabac_stash_up == NULL)
         goto fail;
 
-    s->tab_ipm  = av_mallocz(min_pu_size);
+    // Round width up to max ctb size
+    s->mvf_up = av_malloc((((width + 63) & ~63) >> LOG2_MIN_PU_SIZE) * sizeof(*s->mvf_up));
+    // * Only needed if we have H tiles
+    s->mvf_left = av_malloc((((height + 63) & ~63) >> LOG2_MIN_PU_SIZE) * sizeof(*s->mvf_up));
+
     // We can overread by 1 line & one byte in deblock so alloc & zero
     // We don't need to zero the extra @ start of frame as it will never be
     // written
     s->is_pcm   = av_mallocz(sps->pcm_width * (sps->pcm_height + 1) + 1);
-    if (!s->tab_ipm || !s->is_pcm)
+    s->is_intra_store = av_mallocz(sps->pcm_width * (sps->pcm_height + 1) + 1);
+    if (s->is_pcm == NULL || s->is_intra_store == NULL)
         goto fail;
 
     s->filter_slice_edges = av_mallocz(ctb_count);
-    s->tab_slice_address  = av_malloc_array(pic_size_in_ctb,
+    s->tab_slice_address  = av_malloc_array(ctb_count,
                                       sizeof(*s->tab_slice_address));
-    s->qp_y_tab           = av_malloc_array(pic_size_in_ctb,
+    s->qp_y_tab           = av_malloc_array(pic_size_in_cb,
                                       sizeof(*s->qp_y_tab));
     if (!s->qp_y_tab || !s->filter_slice_edges || !s->tab_slice_address)
         goto fail;
 
-    s->bs_horizontal = av_mallocz(s->bs_size);
-    s->bs_vertical  = av_mallocz(s->bs_size);
-    if (s->bs_horizontal == NULL || s->bs_vertical == NULL)
+    s->bs_horizontal = av_mallocz(s->bs_size * 2);
+    s->bs_vertical   = s->bs_horizontal + s->bs_size;
+    if (s->bs_horizontal == NULL)
+        goto fail;
+
+    s->rpl_up = av_mallocz(sps->ctb_width * sizeof(*s->rpl_up));
+    s->rpl_left = av_mallocz(sps->ctb_height * sizeof(*s->rpl_left));
+    if (s->rpl_left == NULL || s->rpl_up == NULL)
         goto fail;
 
     if ((s->bsf_stash_left = av_mallocz(((height + 63) & ~63) >> 4)) == NULL ||
         (s->bsf_stash_up   = av_mallocz(((width + 63) & ~63) >> 4)) == NULL)
         goto fail;
 
-    s->tab_mvf_pool = av_buffer_pool_init(min_pu_size * sizeof(MvField),
+    s->col_mvf_stride = (width + 15) >> 4;
+    s->col_mvf_pool = av_buffer_pool_init(((height + 15) >> 4) * s->col_mvf_stride * sizeof(ColMvField),
                                           av_buffer_allocz);
-    s->rpl_tab_pool = av_buffer_pool_init(ctb_count * sizeof(RefPicListTab),
-                                          av_buffer_allocz);
-    if (!s->tab_mvf_pool || !s->rpl_tab_pool)
+    if (s->col_mvf_pool == NULL)
         goto fail;
 
     return 0;
@@ -1474,10 +1502,9 @@ static int hls_slice_header(HEVCRpiContext * const s)
         if (s->ps.pps->dependent_slice_segments_enabled_flag)
             sh->dependent_slice_segment_flag = get_bits1(gb);
 
-        slice_address_length = av_ceil_log2(s->ps.sps->ctb_width *
-                                            s->ps.sps->ctb_height);
+        slice_address_length = av_ceil_log2(s->ps.sps->ctb_size);
         sh->slice_segment_addr = get_bitsz(gb, slice_address_length);
-        if (sh->slice_segment_addr >= s->ps.sps->ctb_width * s->ps.sps->ctb_height) {
+        if (sh->slice_segment_addr >= s->ps.sps->ctb_size) {
             av_log(s->avctx, AV_LOG_ERROR,
                    "Invalid slice segment address: %u.\n",
                    sh->slice_segment_addr);
@@ -2331,11 +2358,11 @@ static int hls_pcm_sample(const HEVCRpiContext * const s, HEVCRpiLocalContext * 
 }
 
 
-static void hevc_await_progress(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const HEVCFrame * const ref,
-                                const Mv * const mv, const int y0, const int height)
+static void hevc_await_progress(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const HEVCRpiFrame * const ref,
+                                const MvXY xy, const int y0, const int height)
 {
     if (s->threads_type != 0) {
-        const int y = FFMAX(0, (mv->y >> 2) + y0 + height + 9);
+        const int y = FFMAX(0, (MV_Y(xy) >> 2) + y0 + height + 9);
 
         // Progress has to be attached to current job as the actual wait
         // is in worker_core which can't use lc
@@ -2348,8 +2375,8 @@ static void hevc_await_progress(const HEVCRpiContext * const s, HEVCRpiLocalCont
 
 static void hevc_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                                   const int x0, const int y0, const int nPbW,
-                                  const int nPbH, const int log2_cb_size, const int part_idx,
-                                  const int merge_idx, MvField * const mv)
+                                  const int nPbH,
+                                  HEVCRpiMvField * const mv)
 {
     enum InterPredIdc inter_pred_idc = PRED_L0;
     int mvp_flag;
@@ -2360,34 +2387,33 @@ static void hevc_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalCo
         inter_pred_idc = ff_hevc_rpi_inter_pred_idc_decode(lc, nPbW, nPbH);
 
     if (inter_pred_idc != PRED_L1) {
+        MvXY mvd;
+
         if (s->sh.nb_refs[L0])
             mv->ref_idx[0]= ff_hevc_rpi_ref_idx_lx_decode(lc, s->sh.nb_refs[L0]);
 
         mv->pred_flag = PF_L0;
-        ff_hevc_rpi_hls_mvd_coding(lc);
+        mvd = ff_hevc_rpi_hls_mvd_coding(lc);
         mvp_flag = ff_hevc_rpi_mvp_lx_flag_decode(lc);
-        ff_hevc_rpi_luma_mv_mvp_mode(s, lc, x0, y0, nPbW, nPbH, log2_cb_size, avail,
-                                 part_idx, merge_idx, mv, mvp_flag, 0);
-        mv->mv[0].x += lc->pu.mvd.x;
-        mv->mv[0].y += lc->pu.mvd.y;
+        ff_hevc_rpi_luma_mv_mvp_mode(s, lc, x0, y0, nPbW, nPbH, avail,
+                                 mv, mvp_flag, 0);
+        mv->xy[0] = mvxy_add(mv->xy[0], mvd);
     }
 
     if (inter_pred_idc != PRED_L0) {
-        if (s->sh.nb_refs[L1])
-            mv->ref_idx[1]= ff_hevc_rpi_ref_idx_lx_decode(lc, s->sh.nb_refs[L1]);
+        MvXY mvd = 0;
 
-        if (s->sh.mvd_l1_zero_flag == 1 && inter_pred_idc == PRED_BI) {
-            AV_ZERO32(&lc->pu.mvd);
-        } else {
-            ff_hevc_rpi_hls_mvd_coding(lc);
-        }
+        if (s->sh.nb_refs[L1])
+            mv->ref_idx[1] = ff_hevc_rpi_ref_idx_lx_decode(lc, s->sh.nb_refs[L1]);
+
+        if (s->sh.mvd_l1_zero_flag != 1 || inter_pred_idc != PRED_BI)
+            mvd = ff_hevc_rpi_hls_mvd_coding(lc);
 
         mv->pred_flag += PF_L1;
         mvp_flag = ff_hevc_rpi_mvp_lx_flag_decode(lc);
-        ff_hevc_rpi_luma_mv_mvp_mode(s, lc, x0, y0, nPbW, nPbH, log2_cb_size, avail,
-                                 part_idx, merge_idx, mv, mvp_flag, 1);
-        mv->mv[1].x += lc->pu.mvd.x;
-        mv->mv[1].y += lc->pu.mvd.y;
+        ff_hevc_rpi_luma_mv_mvp_mode(s, lc, x0, y0, nPbW, nPbH, avail,
+                                 mv, mvp_flag, 1);
+        mv->xy[1] = mvxy_add(mv->xy[1], mvd);
     }
 }
 
@@ -2505,14 +2531,14 @@ static void
 rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
            const int x0, const int y0,
            const int nPbW, const int nPbH,
-           const Mv *const mv,
+           const MvXY mv_xy,
            const int weight_mul,
            const int weight_offset,
            AVFrame *const src_frame)
 {
     const unsigned int y_off = av_rpi_sand_frame_off_y(s->frame, x0, y0);
-    const unsigned int mx          = mv->x & 3;
-    const unsigned int my          = mv->y & 3;
+    const unsigned int mx          = MV_X(mv_xy) & 3;
+    const unsigned int my          = MV_Y(mv_xy) & 3;
     const unsigned int my_mx       = (my << 8) | mx;
     const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
     const qpu_mc_src_addr_t src_vc_address_y = get_mc_address_y(src_frame);
@@ -2523,8 +2549,8 @@ rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
 
     if (my_mx == 0)
     {
-        const int x1 = x0 + (mv->x >> 2);
-        const int y1 = y0 + (mv->y >> 2);
+        const int x1 = x0 + (MV_X(mv_xy) >> 2);
+        const int y1 = y0 + (MV_Y(mv_xy) >> 2);
         const int bh = nPbH;
 
         for (int start_x = 0; start_x < nPbW; start_x += 16)
@@ -2564,8 +2590,8 @@ rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
     }
     else
     {
-        const int x1_m3 = x0 + (mv->x >> 2) - 3;
-        const int y1_m3 = y0 + (mv->y >> 2) - 3;
+        const int x1_m3 = x0 + (MV_X(mv_xy) >> 2) - 3;
+        const int y1_m3 = y0 + (MV_Y(mv_xy) >> 2) - 3;
         const unsigned int bh = nPbH;
         int start_x = 0;
 
@@ -2668,19 +2694,19 @@ static void
 rpi_pred_y_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
            const int x0, const int y0,
            const int nPbW, const int nPbH,
-           const struct MvField *const mv_field,
+           const struct HEVCRpiMvField *const mv_field,
            const AVFrame *const src_frame,
            const AVFrame *const src_frame2)
 {
     const unsigned int y_off = av_rpi_sand_frame_off_y(s->frame, x0, y0);
-    const Mv * const mv  = mv_field->mv + 0;
-    const Mv * const mv2 = mv_field->mv + 1;
+    const MvXY const mv  = mv_field->xy[0];
+    const MvXY const mv2 = mv_field->xy[1];
 
-    const unsigned int mx          = mv->x & 3;
-    const unsigned int my          = mv->y & 3;
+    const unsigned int mx          = MV_X(mv) & 3;
+    const unsigned int my          = MV_Y(mv) & 3;
     const unsigned int my_mx = (my<<8) | mx;
-    const unsigned int mx2          = mv2->x & 3;
-    const unsigned int my2          = mv2->y & 3;
+    const unsigned int mx2          = MV_X(mv2) & 3;
+    const unsigned int my2          = MV_Y(mv2) & 3;
     const unsigned int my2_mx2 = (my2<<8) | mx2;
     const uint32_t     my2_mx2_my_mx = (my2_mx2 << 16) | my_mx;
     const unsigned int ref_idx0 = mv_field->ref_idx[0];
@@ -2698,10 +2724,10 @@ rpi_pred_y_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
 
     if (my2_mx2_my_mx == 0)
     {
-        const int x1 = x0 + (mv->x >> 2);
-        const int y1 = y0 + (mv->y >> 2);
-        const int x2 = x0 + (mv2->x >> 2);
-        const int y2 = y0 + (mv2->y >> 2);
+        const int x1 = x0 + (MV_X(mv) >> 2);
+        const int y1 = y0 + (MV_Y(mv) >> 2);
+        const int x2 = x0 + (MV_X(mv2) >> 2);
+        const int y2 = y0 + (MV_Y(mv2) >> 2);
         const int bh = nPbH;
 
         // Can do chunks a full 16 wide if we don't want the H filter
@@ -2742,10 +2768,10 @@ rpi_pred_y_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     else
     {
         // Filter requires a run-up of 3
-        const int x1 = x0 + (mv->x >> 2) - 3;
-        const int y1 = y0 + (mv->y >> 2) - 3;
-        const int x2 = x0 + (mv2->x >> 2) - 3;
-        const int y2 = y0 + (mv2->y >> 2) - 3;
+        const int x1 = x0 + (MV_X(mv) >> 2) - 3;
+        const int y1 = y0 + (MV_Y(mv) >> 2) - 3;
+        const int x2 = x0 + (MV_X(mv2) >> 2) - 3;
+        const int y2 = y0 + (MV_Y(mv2) >> 2) - 3;
         const int bh = nPbH;
 
         for (int start_x=0; start_x < nPbW; start_x += 8)
@@ -2800,7 +2826,7 @@ static void
 rpi_pred_c(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
   const unsigned int lx, const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
-  const Mv * const mv,
+  const MvXY const mv,
   const int16_t * const c_weights,
   const int16_t * const c_offsets,
   AVFrame * const src_frame)
@@ -2809,11 +2835,11 @@ rpi_pred_c(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const int hshift = 1; // = s->ps.sps->hshift[1];
     const int vshift = 1; // = s->ps.sps->vshift[1];
 
-    const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
-    const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
+    const int x1_c = x0_c + (MV_X(mv) >> (2 + hshift)) - 1;
+    const int y1_c = y0_c + (MV_Y(mv) >> (2 + hshift)) - 1;
     const qpu_mc_src_addr_t src_base_u = get_mc_address_u(src_frame);
-    const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->x, 2 + hshift) << (1 - hshift)];
-    const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(mv->y, 2 + vshift) << (1 - vshift)];
+    const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(MV_X(mv), 2 + hshift) << (1 - hshift)];
+    const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(MV_Y(mv), 2 + vshift) << (1 - vshift)];
     const uint32_t wo_u = PACK2(offset_depth_adj(s, c_offsets[0]) * 2 + 1, c_weights[0]);
     const uint32_t wo_v = PACK2(offset_depth_adj(s, c_offsets[1]) * 2 + 1, c_weights[1]);
     qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
@@ -2851,7 +2877,7 @@ static void
 rpi_pred_c_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
   const int x0_c, const int y0_c,
   const int nPbW_c, const int nPbH_c,
-  const struct MvField * const mv_field,
+  const struct HEVCRpiMvField * const mv_field,
   const int16_t * const c_weights,
   const int16_t * const c_offsets,
   const int16_t * const c_weights2,
@@ -2862,23 +2888,23 @@ rpi_pred_c_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const unsigned int c_off = av_rpi_sand_frame_off_c(s->frame, x0_c, y0_c);
     const int hshift = 1; // s->ps.sps->hshift[1];
     const int vshift = 1; // s->ps.sps->vshift[1];
-    const Mv * const mv = mv_field->mv + 0;
-    const Mv * const mv2 = mv_field->mv + 1;
+    const MvXY const mv = mv_field->xy[0];
+    const MvXY const mv2 = mv_field->xy[1];
 
-    const unsigned int mx = av_mod_uintp2(mv->x, 2 + hshift);
-    const unsigned int my = av_mod_uintp2(mv->y, 2 + vshift);
+    const unsigned int mx = av_mod_uintp2(MV_X(mv), 2 + hshift);
+    const unsigned int my = av_mod_uintp2(MV_Y(mv), 2 + vshift);
     const uint32_t coefs0_x = rpi_filter_coefs[mx << (1 - hshift)];
     const uint32_t coefs0_y = rpi_filter_coefs[my << (1 - vshift)]; // Fractional part of motion vector
-    const int x1_c = x0_c + (mv->x >> (2 + hshift)) - 1;
-    const int y1_c = y0_c + (mv->y >> (2 + hshift)) - 1;
+    const int x1_c = x0_c + (MV_X(mv) >> (2 + hshift)) - 1;
+    const int y1_c = y0_c + (MV_Y(mv) >> (2 + hshift)) - 1;
 
-    const unsigned int mx2 = av_mod_uintp2(mv2->x, 2 + hshift);
-    const unsigned int my2 = av_mod_uintp2(mv2->y, 2 + vshift);
+    const unsigned int mx2 = av_mod_uintp2(MV_X(mv2), 2 + hshift);
+    const unsigned int my2 = av_mod_uintp2(MV_Y(mv2), 2 + vshift);
     const uint32_t coefs1_x = rpi_filter_coefs[mx2 << (1 - hshift)];
     const uint32_t coefs1_y = rpi_filter_coefs[my2 << (1 - vshift)]; // Fractional part of motion vector
 
-    const int x2_c = x0_c + (mv2->x >> (2 + hshift)) - 1;
-    const int y2_c = y0_c + (mv2->y >> (2 + hshift)) - 1;
+    const int x2_c = x0_c + (MV_X(mv2) >> (2 + hshift)) - 1;
+    const int y2_c = y0_c + (MV_Y(mv2) >> (2 + hshift)) - 1;
 
     const uint32_t wo_u2 = PACK2(offset_depth_adj(s, c_offsets[0] + c_offsets2[0]) + 1, c_weights2[0]);
     const uint32_t wo_v2 = PACK2(offset_depth_adj(s, c_offsets[1] + c_offsets2[1]) + 1, c_weights2[1]);
@@ -2925,22 +2951,65 @@ rpi_pred_c_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
 }
 
 
+static inline void
+col_stash(const HEVCRpiContext * const s,
+          const unsigned int x0, const unsigned int y0, const unsigned int w0, const unsigned int h0,
+          const HEVCRpiMvField * const mvf)
+{
+    ColMvField * const col_mvf = s->ref->col_mvf;
+    const unsigned int x = (x0 + 15) >> 4;
+    const unsigned int y = (y0 + 15) >> 4;
+    const unsigned int w = ((x0 + 15 + w0) >> 4) - x;
+    const unsigned int h = ((y0 + 15 + h0) >> 4) - y;
+
+    if (col_mvf != NULL && w != 0 && h != 0)
+    {
+        // Only record MV from the top left of the 16x16 block
+
+        const RefPicList * const rpl = s->refPicList;
+        const ColMvField cmv = {
+            .L = {
+                {
+                    .poc = (mvf->pred_flag & PF_L0) == 0 ?
+                            COL_POC_INTRA :
+                            COL_POC_MAKE_INTER(rpl[0].isLongTerm[mvf->ref_idx[0]], rpl[0].list[mvf->ref_idx[0]]),
+                    .xy = mvf->xy[0]
+                },
+                {
+                    .poc = (mvf->pred_flag & PF_L1) == 0 ?
+                            COL_POC_INTRA :
+                            COL_POC_MAKE_INTER(rpl[1].isLongTerm[mvf->ref_idx[1]], rpl[1].list[mvf->ref_idx[1]]),
+                    .xy = mvf->xy[1]
+                }
+            }
+        };
+
+        ColMvField * p = col_mvf + y * s->col_mvf_stride + x;
+        const unsigned int stride = s->col_mvf_stride - w;
+        unsigned int j = h;
+
+        do
+        {
+            unsigned int k = w;
+            do
+            {
+                *p++ = cmv;
+            } while (--k != 0);
+            p += stride;
+        } while (--j != 0);
+    }
+}
+
 static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
-                                const int x0, const int y0,
-                                const int nPbW, const int nPbH,
+                                const unsigned int x0, const unsigned int y0,
+                                const unsigned int nPbW, const unsigned int nPbH,
                                 const unsigned int log2_cb_size, const unsigned int partIdx, const unsigned int idx)
 {
     HEVCRpiJob * const jb = lc->jb0;
 
-    struct MvField current_mv = {{{ 0 }}};
-
-    int min_pu_width = s->ps.sps->min_pu_width;
-
-    MvField * const tab_mvf = s->ref->tab_mvf;
-    const RefPicList  *const refPicList = s->ref->refPicList;
-    const HEVCFrame *ref0 = NULL, *ref1 = NULL;
-    int x_pu, y_pu;
-    int i, j;
+    struct HEVCRpiMvField current_mv = {{0}};
+    const RefPicList  *const refPicList = s->refPicList;
+    const HEVCRpiFrame *ref0 = NULL, *ref1 = NULL;
 
     if (lc->cu.pred_mode != MODE_SKIP)
         lc->pu.merge_flag = ff_hevc_rpi_merge_flag_decode(lc);
@@ -2952,28 +3021,34 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
         ff_hevc_rpi_luma_mv_merge_mode(s, lc, x0, y0, nPbW, nPbH, log2_cb_size,
                                    partIdx, merge_idx, &current_mv);
     } else {
-        hevc_luma_mv_mvp_mode(s, lc, x0, y0, nPbW, nPbH, log2_cb_size,
-                              partIdx, 0, &current_mv);
+        hevc_luma_mv_mvp_mode(s, lc, x0, y0, nPbW, nPbH, &current_mv);
     }
 
-    x_pu = x0 >> s->ps.sps->log2_min_pu_size;
-    y_pu = y0 >> s->ps.sps->log2_min_pu_size;
+    {
+        HEVCRpiMvField * p = mvf_stash_ptr(s, lc, x0, y0);
+        unsigned int i, j;
 
-    for (j = 0; j < nPbH >> s->ps.sps->log2_min_pu_size; j++)
-        for (i = 0; i < nPbW >> s->ps.sps->log2_min_pu_size; i++)
-            tab_mvf[(y_pu + j) * min_pu_width + x_pu + i] = current_mv;
+        for (j = 0; j < nPbH >> LOG2_MIN_PU_SIZE; j++)
+        {
+            for (i = 0; i < nPbW >> LOG2_MIN_PU_SIZE; i++)
+                p[i] = current_mv;
+            p += MVF_STASH_WIDTH_PU;
+        }
+    }
+
+    col_stash(s, x0, y0, nPbW, nPbH, &current_mv);
 
     if (current_mv.pred_flag & PF_L0) {
         ref0 = refPicList[0].ref[current_mv.ref_idx[0]];
         if (!ref0)
             return;
-        hevc_await_progress(s, lc, ref0, &current_mv.mv[0], y0, nPbH);
+        hevc_await_progress(s, lc, ref0, current_mv.xy[0], y0, nPbH);
     }
     if (current_mv.pred_flag & PF_L1) {
         ref1 = refPicList[1].ref[current_mv.ref_idx[1]];
         if (!ref1)
             return;
-        hevc_await_progress(s, lc, ref1, &current_mv.mv[1], y0, nPbH);
+        hevc_await_progress(s, lc, ref1, current_mv.xy[1], y0, nPbH);
     }
 
     if (current_mv.pred_flag == PF_L0) {
@@ -2982,12 +3057,12 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
         const int nPbW_c = nPbW >> ctx_hshift(s, 1);
         const int nPbH_c = nPbH >> ctx_vshift(s, 1);
 
-        rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 0,
+        rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.xy[0],
           s->sh.luma_weight_l0[current_mv.ref_idx[0]], s->sh.luma_offset_l0[current_mv.ref_idx[0]],
           ref0->frame);
 
         if (ctx_cfmt(s) != 0) {
-            rpi_pred_c(s, jb, 0, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 0,
+            rpi_pred_c(s, jb, 0, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.xy[0],
               s->sh.chroma_weight_l0[current_mv.ref_idx[0]], s->sh.chroma_offset_l0[current_mv.ref_idx[0]],
               ref0->frame);
             return;
@@ -2998,12 +3073,12 @@ static void hls_prediction_unit(const HEVCRpiContext * const s, HEVCRpiLocalCont
         const int nPbW_c = nPbW >> ctx_hshift(s, 1);
         const int nPbH_c = nPbH >> ctx_vshift(s, 1);
 
-        rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.mv + 1,
+        rpi_pred_y(s, jb, x0, y0, nPbW, nPbH, current_mv.xy[1],
           s->sh.luma_weight_l1[current_mv.ref_idx[1]], s->sh.luma_offset_l1[current_mv.ref_idx[1]],
           ref1->frame);
 
         if (ctx_cfmt(s) != 0) {
-            rpi_pred_c(s, jb, 1, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.mv + 1,
+            rpi_pred_c(s, jb, 1, x0_c, y0_c, nPbW_c, nPbH_c, current_mv.xy[1],
               s->sh.chroma_weight_l1[current_mv.ref_idx[1]], s->sh.chroma_offset_l1[current_mv.ref_idx[1]],
               ref1->frame);
             return;
@@ -3035,30 +3110,65 @@ static void set_ipm(const HEVCRpiContext * const s, HEVCRpiLocalContext * const 
                     const unsigned int log2_cb_size,
                     const unsigned int ipm)
 {
-    const unsigned int min_pu_width     = s->ps.sps->min_pu_width;
-    const unsigned int x_pu             = x0 >> s->ps.sps->log2_min_pu_size;
-    const unsigned int y_pu             = y0 >> s->ps.sps->log2_min_pu_size;
+    const unsigned int x_pu = x0 >> LOG2_MIN_PU_SIZE;
+    const unsigned int y_pu = y0 >> LOG2_MIN_PU_SIZE;
 
-    set_bytes(s->tab_ipm + y_pu * min_pu_width + x_pu, min_pu_width, log2_cb_size - s->ps.sps->log2_min_pu_size, ipm);
-
-    if (lc->cu.pred_mode == MODE_INTRA)
     {
-        unsigned int j, k;
-        MvField * tab_mvf     = s->ref->tab_mvf + y_pu * min_pu_width + x_pu;
-        const unsigned int size_in_pus = (1 << log2_cb_size) >> s->ps.sps->log2_min_pu_size;
+        const unsigned int ctb_mask = ~(~0U << (s->ps.sps->log2_ctb_size - LOG2_MIN_PU_SIZE));
+        set_stash2(lc->ipm_left + (y_pu & ctb_mask), lc->ipm_up + (x_pu & ctb_mask), log2_cb_size - LOG2_MIN_PU_SIZE, ipm);
+    }
 
-        if (size_in_pus <= 1)
-            tab_mvf[0].pred_flag = PF_INTRA;
-        else
+    // If IRAP then everything is Intra & we avoid ever looking at these
+    // stashes so don't bother setting them
+    if (!s->is_irap && lc->cu.pred_mode == MODE_INTRA)
+    {
+        if (s->is_intra != NULL)
         {
-            for (j = 0; j < size_in_pus; j++, tab_mvf += min_pu_width)
-                for (k = 0; k < size_in_pus; k++)
-                    tab_mvf[k].pred_flag = PF_INTRA;
+            set_bits(s->is_intra + (y0 >> LOG2_MIN_CU_SIZE) * s->ps.sps->pcm_width, x0 >> LOG2_MIN_CU_SIZE, s->ps.sps->pcm_width, log2_cb_size - LOG2_MIN_CU_SIZE);
+        }
+
+        {
+            HEVCRpiMvField * p = mvf_stash_ptr(s, lc, x0, y0);
+            const unsigned int size_in_pus = (1 << log2_cb_size) >> LOG2_MIN_PU_SIZE; // min_pu <= log2_cb so >= 1
+            unsigned int n = size_in_pus;
+
+            do
+            {
+                memset(p, 0, size_in_pus * sizeof(*p));
+                p += MVF_STASH_WIDTH_PU;
+            } while (--n != 0);
+        }
+
+
+        if (s->ref->col_mvf != NULL && ((x0 | y0) & 0xf) == 0)
+        {
+            // Only record top left stuff
+            // Blocks should always be alinged on size boundries
+            // so cannot have overflow from a small block
+
+            ColMvField * p = s->ref->col_mvf + (y0 >> 4) * s->col_mvf_stride + (x0 >> 4);
+            const unsigned int size_in_col = log2_cb_size < 4 ? 1 : (1 << (log2_cb_size - 4));
+            const unsigned int stride = s->col_mvf_stride - size_in_col;
+            unsigned int j = size_in_col;
+
+            do
+            {
+                unsigned int k = size_in_col;
+                do
+                {
+                    p->L[0].poc = COL_POC_INTRA;
+                    p->L[0].xy = 0;
+                    p->L[1].poc = COL_POC_INTRA;
+                    p->L[1].xy = 0;
+                    ++p;
+                } while (--k != 0);
+                p += stride;
+            } while (--j != 0);
         }
     }
 }
 
-static void intra_prediction_unit_default_value(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+static inline void intra_prediction_unit_default_value(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
                                                 const unsigned int x0, const unsigned int y0,
                                                 const unsigned int log2_cb_size)
 {
@@ -3074,17 +3184,14 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
                                 int prev_intra_luma_pred_flag,
                                 const unsigned int idx)
 {
-    int x_pu             = x0 >> s->ps.sps->log2_min_pu_size;
-    int y_pu             = y0 >> s->ps.sps->log2_min_pu_size;
-    int min_pu_width     = s->ps.sps->min_pu_width;
-    int x0b              = av_mod_uintp2(x0, s->ps.sps->log2_ctb_size);
-    int y0b              = av_mod_uintp2(y0, s->ps.sps->log2_ctb_size);
+    const unsigned int ctb_mask = ~(~0U << s->ps.sps->log2_ctb_size);
+    int xb_pu             = (x0 & ctb_mask) >> LOG2_MIN_PU_SIZE;
+    int yb_pu             = (y0 & ctb_mask) >> LOG2_MIN_PU_SIZE;
 
-    // intra_pred_mode prediction does not cross vertical CTB boundaries
-    const unsigned int cand_up   = y0b != 0 ?
-                    s->tab_ipm[(y_pu - 1) * min_pu_width + x_pu] : INTRA_DC;
-    const unsigned int cand_left = ((lc->ctb_avail & AVAIL_L) != 0  || x0b) ?
-                    s->tab_ipm[y_pu * min_pu_width + x_pu - 1]   : INTRA_DC;
+    // Up does not cross boundries so as we always scan 1 slice-tile-line in an
+    // lc we can just keep 1 CTB lR stashes
+    const unsigned int cand_up   = yb_pu == 0 ? INTRA_DC : lc->ipm_up[xb_pu];
+    const unsigned int cand_left = ((lc->ctb_avail & AVAIL_L) == 0  && xb_pu == 0) ? INTRA_DC : lc->ipm_left[yb_pu];
 
     int intra_pred_mode;
     int a, b, c;
@@ -3363,7 +3470,7 @@ static int hls_coding_unit(const HEVCRpiContext * const s, HEVCRpiLocalContext *
 
     set_bytes(s->qp_y_tab + y_cb * min_cb_width + x_cb, min_cb_width, log2_cb_size - log2_min_cb_size, lc->qp_y & 0xff);
 
-    set_cabac_stash(s->cabac_stash_up + (x0 >> 3), s->cabac_stash_left + (y0 >> 3), log2_cb_size - 3, (lc->ct_depth << 1) | skip_flag);
+    set_stash2(s->cabac_stash_up + (x0 >> 3), s->cabac_stash_left + (y0 >> 3), log2_cb_size - 3, (lc->ct_depth << 1) | skip_flag);
 
     return 0;
 }
@@ -4247,11 +4354,27 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
             zap_cabac_stash(s->cabac_stash_up + (x_ctb >> 3), s->ps.sps->log2_ctb_size - 3);
         if ((lc->ctb_avail & AVAIL_L) == 0)
             zap_cabac_stash(s->cabac_stash_left + (y_ctb >> 3), s->ps.sps->log2_ctb_size - 3);
+#if MVF_STASH_WIDTH > 64
+        // Restore left mvf stash at start of tile if not at start of line
+        if ((ctb_flags & CTB_TS_FLAGS_SOTL) != 0 && x_ctb != 0 && !s->is_irap)
+        {
+            unsigned int i;
+            HEVCRpiMvField * dst = mvf_stash_ptr(s, lc, x_ctb - 1, 0);
+            const HEVCRpiMvField * src = s->mvf_left + (y_ctb >> LOG2_MIN_PU_SIZE);
+            for (i = 0; i != ctb_size >> LOG2_MIN_PU_SIZE; ++i)
+            {
+                *dst = *src++;
+                dst += MVF_STASH_WIDTH_PU;
+            }
+        }
+#endif
 
         // Set initial tu states
         lc->tu.cu_qp_delta = 0;
         lc->tu.is_cu_qp_delta_wanted = 0;
         lc->tu.cu_chroma_qp_offset_wanted = 0;
+
+        // Decode
         more_data = hls_coding_quadtree(s, lc, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
 
         if (ff_hevc_rpi_cabac_overflow(lc))
@@ -4261,7 +4384,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
         }
 
         if (more_data < 0) {
-            s->tab_slice_address[ctb_addr_rs] = -1;  // Mark slice as broken
+            s->tab_slice_address[ctb_addr_rs] = TAB_SLICE_ADDR_BROKEN;  // Mark slice as broken
             return more_data;
         }
 
@@ -4273,6 +4396,41 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
             {
                 av_log(s->avctx, AV_LOG_ERROR, "Error reading terminate el\n ");
                 return -1;
+            }
+        }
+
+        // --- Post CTB processing
+
+        // Stash rpl top/left for deblock that needs to remember such things cross-slice
+        s->rpl_up[x_ctb >> s->ps.sps->log2_ctb_size] = s->refPicList;
+        s->rpl_left[y_ctb >> s->ps.sps->log2_ctb_size] = s->refPicList;
+
+        if (!s->is_irap)
+        {
+            // Copy MVF up to up-left & stash to up
+            {
+                const HEVCRpiMvField * src = mvf_stash_ptr(s, lc, x_ctb, ctb_size - 1);
+                HEVCRpiMvField * dst = s->mvf_up + (x_ctb >> LOG2_MIN_PU_SIZE);
+
+    //            printf("Stash: %d,%d, ctb_size=%d, %p->%p\n", x_ctb, y_ctb, ctb_size, src, dst);
+
+                lc->mvf_ul[0] = dst[(ctb_size - 1) >> LOG2_MIN_PU_SIZE];
+                memcpy(dst, src, (sizeof(*src)*ctb_size) >> LOG2_MIN_PU_SIZE);
+            }
+            // Stash sideways if end of tile line but not end of line (no point)
+            // ** Could/should do this @ end of fn
+#if MVF_STASH_WIDTH > 64
+            if ((ctb_flags & (CTB_TS_FLAGS_EOTL | CTB_TS_FLAGS_EOL)) == CTB_TS_FLAGS_EOTL)
+#endif
+            {
+                unsigned int i;
+                const HEVCRpiMvField * src = mvf_stash_ptr(s, lc, x_ctb + ctb_size - 1, 0);
+                HEVCRpiMvField * dst = s->mvf_left + (y_ctb >> LOG2_MIN_PU_SIZE);
+                for (i = 0; i != ctb_size >> LOG2_MIN_PU_SIZE; ++i)
+                {
+                    *dst++ = *src;
+                    src += MVF_STASH_WIDTH_PU;
+                }
             }
         }
 
@@ -4525,7 +4683,29 @@ static int rpi_run_one_line(HEVCRpiContext *const s, HEVCRpiLocalContext * const
     else
     {
         movlc(s->HEVClcList[0], lc, s->ps.pps->dependent_slice_segments_enabled_flag);
+#if MVF_STASH_WIDTH > 64
+        // Horrid calculations to work out what we want but luckily this should almost never execute
+        // **** Move to movlc
+        if (!s->is_irap)
+        {
+            const unsigned int ctb_flags = s->ps.pps->ctb_ts_flags[lc->ts];
+            if ((ctb_flags & CTB_TS_FLAGS_EOTL) == 0) // If EOTL then we have already stashed mvf
+            {
+                const unsigned int x_ctb = ((s->ps.pps->ctb_addr_ts_to_rs[lc->ts] % s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size) - 1;
+                unsigned int i;
+                const HEVCRpiMvField *s_mvf = lc->mvf_stash + ((x_ctb >> LOG2_MIN_PU_SIZE) & (MVF_STASH_WIDTH_PU - 1));
+                HEVCRpiMvField *d_mvf = s->HEVClcList[0]->mvf_stash + ((x_ctb >> LOG2_MIN_PU_SIZE) & (MVF_STASH_WIDTH_PU - 1));
 
+                for (i = 0; i != MVF_STASH_HEIGHT_PU; ++i)
+                {
+                    *d_mvf = *s_mvf;
+                    d_mvf += MVF_STASH_WIDTH_PU;
+                    s_mvf += MVF_STASH_WIDTH_PU;
+                }
+
+            }
+        }
+#endif
         // When all done poke the thread 0 sem_in one final time
 #if TRACE_WPP
         printf("%s[%d]: Poke final %p\n", __func__, lc->lc_n, &s->HEVClcList[0]->bt_sem_in);
@@ -4829,7 +5009,7 @@ fail:
 static void set_no_backward_pred(HEVCRpiContext * const s)
 {
     int i, j;
-    const RefPicList *const refPicList = s->ref->refPicList;
+    const RefPicList *const refPicList = s->refPicList;
 
     s->no_backward_pred_flag = 0;
     if (s->sh.slice_type != HEVC_SLICE_B || !s->sh.slice_temporal_mvp_enabled_flag)
@@ -5002,24 +5182,43 @@ static int set_side_data(HEVCRpiContext *s)
 
 static int hevc_frame_start(HEVCRpiContext * const s)
 {
-    int pic_size_in_ctb  = ((s->ps.sps->width  >> s->ps.sps->log2_min_cb_size) + 1) *
-                           ((s->ps.sps->height >> s->ps.sps->log2_min_cb_size) + 1);
     int ret;
 
-    memset(s->bs_horizontal, 0, s->bs_size);
-    memset(s->bs_vertical, 0, s->bs_size);
+    memset(s->bs_horizontal, 0, s->bs_size * 2);  // Does V too
     memset(s->is_pcm,        0, s->ps.sps->pcm_width * s->ps.sps->pcm_height);
-    memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
+    memset(s->tab_slice_address, -1, s->ps.sps->ctb_size * sizeof(*s->tab_slice_address));
+
+    // Only need to remember intra for CIP
+    if (!s->ps.pps->constrained_intra_pred_flag || s->is_irap)
+        s->is_intra = NULL;
+    else
+    {
+        s->is_intra = s->is_intra_store;
+        memset(s->is_intra, 0, s->ps.sps->pcm_width * s->ps.sps->pcm_height);
+    }
 
     s->is_decoded        = 0;
     s->first_nal_type    = s->nal_unit_type;
 
     s->no_rasl_output_flag = IS_IDR(s) || IS_BLA(s) || (s->nal_unit_type == HEVC_NAL_CRA_NUT && s->last_eos);
 
+    if (s->pkt.nb_nals > s->rpl_tab_size)
+    {
+        // In most cases it will be faster to free & realloc as that doesn't
+        // require (an unwanted) copy
+        av_freep(&s->rpl_tab);
+        s->rpl_tab_size = 0;
+        if ((s->rpl_tab = av_malloc(s->pkt.nb_nals * sizeof(*s->rpl_tab))) == NULL)
+            goto fail;
+        s->rpl_tab_size = s->pkt.nb_nals;
+    }
+    memset(s->rpl_tab, 0, s->pkt.nb_nals * sizeof(*s->rpl_tab));
+
     ret = ff_hevc_rpi_set_new_ref(s, &s->frame, s->poc);
     if (ret < 0)
         goto fail;
 
+    // Resize rpl_tab to max that we might want
     ret = ff_hevc_rpi_frame_rps(s);
     if (ret < 0) {
         av_log(s->avctx, AV_LOG_ERROR, "Error constructing the frame RPS.\n");
@@ -5115,6 +5314,7 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
                         s->nal_unit_type == HEVC_NAL_RADL_N  ||
                         s->nal_unit_type == HEVC_NAL_RASL_N);
         s->offload_recon = s->threads_type != 0 && s->used_for_ref;
+        s->is_irap = IS_IRAP(s);
 
 #if DEBUG_DECODE_N
         {
@@ -5183,7 +5383,7 @@ static int decode_nal_unit(HEVCRpiContext *s, const H2645NAL *nal)
         }
 
         ctb_addr_ts = hls_slice_data(s, nal);
-        if (ctb_addr_ts >= (s->ps.sps->ctb_width * s->ps.sps->ctb_height)) {
+        if (ctb_addr_ts >= s->ps.sps->ctb_size) {
             s->is_decoded = 1;
         }
 
@@ -5430,7 +5630,7 @@ static int hevc_rpi_decode_frame(AVCodecContext *avctx, void *data, int *got_out
     return avpkt->size;
 }
 
-static int hevc_ref_frame(HEVCRpiContext *s, HEVCFrame *dst, HEVCFrame *src)
+static int hevc_ref_frame(HEVCRpiContext *s, HEVCRpiFrame *dst, HEVCRpiFrame *src)
 {
     int ret;
 
@@ -5438,22 +5638,15 @@ static int hevc_ref_frame(HEVCRpiContext *s, HEVCFrame *dst, HEVCFrame *src)
     if (ret < 0)
         return ret;
 
-    dst->tab_mvf_buf = av_buffer_ref(src->tab_mvf_buf);
-    if (!dst->tab_mvf_buf)
-        goto fail;
-    dst->tab_mvf = src->tab_mvf;
-
-    dst->rpl_tab_buf = av_buffer_ref(src->rpl_tab_buf);
-    if (!dst->rpl_tab_buf)
-        goto fail;
-    dst->rpl_tab = src->rpl_tab;
-
-    dst->rpl_buf = av_buffer_ref(src->rpl_buf);
-    if (!dst->rpl_buf)
-        goto fail;
+    if (src->col_mvf_buf != NULL)
+    {
+        dst->col_mvf_buf = av_buffer_ref(src->col_mvf_buf);
+        if (!dst->col_mvf_buf)
+            goto fail;
+    }
+    dst->col_mvf = src->col_mvf;
 
     dst->poc        = src->poc;
-    dst->ctb_count  = src->ctb_count;
     dst->flags      = src->flags;
     dst->sequence   = src->sequence;
     return 0;

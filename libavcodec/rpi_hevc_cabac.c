@@ -2119,7 +2119,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
 
 #if !USE_BY22
 // Stores results to lc
-void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
+MvXY ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
 {
     int x = abs_mvd_greater0_flag_decode(lc);
     int y = abs_mvd_greater0_flag_decode(lc);
@@ -2130,28 +2130,26 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
         y += abs_mvd_greater1_flag_decode(lc);
 
     switch (x) {
-    case 2: lc->pu.mvd.x = mvd_decode(lc);           break;
-    case 1: lc->pu.mvd.x = mvd_sign_flag_decode(lc); break;
-    case 0: lc->pu.mvd.x = 0;                       break;
+    case 2: x = mvd_decode(lc);           break;
+    case 1: x = mvd_sign_flag_decode(lc); break;
+    case 0: x = 0;                       break;
     }
 
     switch (y) {
-    case 2: lc->pu.mvd.y = mvd_decode(lc);           break;
-    case 1: lc->pu.mvd.y = mvd_sign_flag_decode(lc); break;
-    case 0: lc->pu.mvd.y = 0;                       break;
+    case 2: y = mvd_decode(lc);           break;
+    case 1: y = mvd_sign_flag_decode(lc); break;
+    case 0: y = 0;                       break;
     }
+    return MV_XY(x,y);
 }
 #else
-void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
+MvXY ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
 {
     int x = abs_mvd_greater0_flag_decode(lc);
     int y = abs_mvd_greater0_flag_decode(lc);
 
-    lc->pu.mvd.x = 0;
-    lc->pu.mvd.y = 0;
-
     if ((x | y) == 0)
-        return;
+        return 0;
 
     if (x != 0)
         x += abs_mvd_greater1_flag_decode(lc);
@@ -2162,9 +2160,9 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
     {
         // Not worth starting BY22
         if (x != 0)
-            lc->pu.mvd.x = mvd_sign_flag_decode(lc);
+            x = mvd_sign_flag_decode(lc);
         if (y != 0)
-            lc->pu.mvd.y = mvd_sign_flag_decode(lc);
+            y = mvd_sign_flag_decode(lc);
     }
     else
     {
@@ -2177,7 +2175,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
         b = val = get_cabac_by22_peek(cc);
 
         if (x == 1) {
-            lc->pu.mvd.x = ((int32_t)b >> 31) | 1;
+            x = ((int32_t)b >> 31) | 1;
             n = 1;
             b <<= 1;
         }
@@ -2206,7 +2204,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
             x = (b >> (32 - k)) + (1 << k);
             b <<= k;
             s = (int32_t)b >> 31;
-            lc->pu.mvd.x = (x ^ s) - s;
+            x = (x ^ s) - s;
             b <<= 1;
 
             // Max abs value of an mv is 2^15 - 1 (i.e. a prefix len of 15 bits)
@@ -2219,7 +2217,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
         }
 
         if (y == 1) {
-            lc->pu.mvd.y = ((int32_t)b >> 31) | 1;
+            y = ((int32_t)b >> 31) | 1;
             ++n;
             // don't care about b anymore
         }
@@ -2244,7 +2242,7 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
 
             y = (b >> (32 - k)) + (1 << k);
             s = (int32_t)(b << k) >> 31;
-            lc->pu.mvd.y = (y ^ s) - s;
+            y = (y ^ s) - s;
             // don't care about b anymore
         }
 
@@ -2252,6 +2250,6 @@ void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc)
         bypass_finish(cc);
     }
 
-//    printf("BY: X=%d,Y=%d\n", lc->pu.mvd.x, lc->pu.mvd.y);
+    return MV_XY(x, y);
 }
 #endif

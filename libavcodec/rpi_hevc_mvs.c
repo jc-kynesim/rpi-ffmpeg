@@ -24,152 +24,44 @@
 #include "hevc.h"
 #include "rpi_hevcdec.h"
 
-static const uint8_t l0_l1_cand_idx[12][2] = {
-    { 0, 1, },
-    { 1, 0, },
-    { 0, 2, },
-    { 2, 0, },
-    { 1, 2, },
-    { 2, 1, },
-    { 0, 3, },
-    { 3, 0, },
-    { 1, 3, },
-    { 3, 1, },
-    { 2, 3, },
-    { 3, 2, },
-};
-
-
-//check if the two luma locations belong to the same motion estimation region
-static av_always_inline int is_diff_mer(const HEVCRpiContext * const s, int xN, int yN, int xP, int yP)
+static av_always_inline int
+is_eq_mer(const unsigned int plevel,
+    const unsigned int xN, const unsigned int yN,
+    const unsigned int xP, const unsigned int yP)
 {
-    uint8_t plevel = s->ps.pps->log2_parallel_merge_level;
-
-    return xN >> plevel == xP >> plevel &&
-           yN >> plevel == yP >> plevel;
+    return (((xN ^ xP) | (yN ^ yP)) >> plevel) == 0;
 }
-
-#define MATCH_MV(x) (AV_RN32A(&A.x) == AV_RN32A(&B.x))
-#define MATCH(x) (A.x == B.x)
 
 // check if the mv's and refidx are the same between A and B
-static av_always_inline int compare_mv_ref_idx(const struct MvField A, const struct MvField B)
+static av_always_inline int compare_mv_ref_idx(const HEVCRpiMvField * const a, const HEVCRpiMvField * const b)
 {
-    int a_pf = A.pred_flag;
-    int b_pf = B.pred_flag;
-    if (a_pf == b_pf) {
-        if (a_pf == PF_BI) {
-            return MATCH(ref_idx[0]) && MATCH_MV(mv[0]) &&
-                   MATCH(ref_idx[1]) && MATCH_MV(mv[1]);
-        } else if (a_pf == PF_L0) {
-            return MATCH(ref_idx[0]) && MATCH_MV(mv[0]);
-        } else if (a_pf == PF_L1) {
-            return MATCH(ref_idx[1]) && MATCH_MV(mv[1]);
-        }
-    }
+    return a->pred_flag == b->pred_flag &&
+        ((a->pred_flag & PF_L0) == 0 || (a->ref_idx[0] == b->ref_idx[0] && a->xy[0] == b->xy[0])) &&
+        ((a->pred_flag & PF_L1) == 0 || (a->ref_idx[1] == b->ref_idx[1] && a->xy[1] == b->xy[1]));
     return 0;
 }
-
-static av_always_inline void mv_scale(Mv * const dst, const Mv * const src, int td, int tb)
-{
-    int tx, scale_factor;
-
-    td = av_clip_int8(td);
-    tb = av_clip_int8(tb);
-    tx = (0x4000 + abs(td / 2)) / td;
-    scale_factor = av_clip_intp2((tb * tx + 32) >> 6, 12);
-    dst->x = av_clip_int16((scale_factor * src->x + 127 +
-                           (scale_factor * src->x < 0)) >> 8);
-    dst->y = av_clip_int16((scale_factor * src->y + 127 +
-                           (scale_factor * src->y < 0)) >> 8);
-}
-
-static int check_mvset(Mv * const mvLXCol, const Mv * const mvCol,
-                       const int colPic, const int poc,
-                       const RefPicList * const refPicList, const int X, const int refIdxLx,
-                       const RefPicList * const refPicList_col, const int listCol, const int refidxCol)
-{
-    int cur_lt = refPicList[X].isLongTerm[refIdxLx];
-    int col_lt = refPicList_col[listCol].isLongTerm[refidxCol];
-    int col_poc_diff, cur_poc_diff;
-
-    if (cur_lt != col_lt) {
-        mvLXCol->x = 0;
-        mvLXCol->y = 0;
-        return 0;
-    }
-
-    col_poc_diff = colPic - refPicList_col[listCol].list[refidxCol];
-    cur_poc_diff = poc    - refPicList[X].list[refIdxLx];
-
-    if (cur_lt || col_poc_diff == cur_poc_diff || !col_poc_diff) {
-        mvLXCol->x = mvCol->x;
-        mvLXCol->y = mvCol->y;
-    } else {
-        mv_scale(mvLXCol, mvCol, col_poc_diff, cur_poc_diff);
-    }
-    return 1;
-}
-
-#define CHECK_MVSET(l)                                          \
-    check_mvset(mvLXCol, temp_col.mv + l,                       \
-                colPic, s->poc,                                 \
-                refPicList, X, refIdxLx,                        \
-                refPicList_col, L ## l, temp_col.ref_idx[l])
-
-// derive the motion vectors section 8.5.3.2.8
-static int derive_temporal_colocated_mvs(const HEVCRpiContext * const s, const MvField temp_col,
-                                         const int refIdxLx, Mv * const mvLXCol, const int X,
-                                         const int colPic, const RefPicList * const refPicList_col)
-{
-    const RefPicList * const refPicList = s->ref->refPicList;
-
-    if (temp_col.pred_flag == PF_INTRA)
-        return 0;
-
-    if (temp_col.pred_flag == PF_L0 ||
-        (temp_col.pred_flag == PF_BI && (s->no_backward_pred_flag ? s->sh.collocated_list == L1 : X == 0)))
-    {
-        return CHECK_MVSET(0);
-    }
-    return CHECK_MVSET(1);
-}
-
-#define TAB_MVF(x, y)                                                   \
-    tab_mvf[(y) * min_pu_width + x]
-
-#define TAB_MVF_PU(v)                                                   \
-    TAB_MVF(((x ## v) >> s->ps.sps->log2_min_pu_size),                     \
-            ((y ## v) >> s->ps.sps->log2_min_pu_size))
-
-#define DERIVE_TEMPORAL_COLOCATED_MVS                                   \
-    derive_temporal_colocated_mvs(s, temp_col,                          \
-                                  refIdxLx, mvLXCol, X, colPic,         \
-                                  ff_hevc_rpi_get_ref_list(s, ref, x, y))
 
 /*
  * 8.5.3.1.7  temporal luma motion vector prediction
  */
-static int temporal_luma_motion_vector(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, const int x0, const int y0,
+static int temporal_luma_motion_vector(const HEVCRpiContext * const s,
+                                       const HEVCRpiLocalContext * const lc, const int x0, const int y0,
                                        const int nPbW, const int nPbH, const int refIdxLx,
-                                       Mv * const mvLXCol, const int X)
+                                       MvXY * const mvLXCol, const int X)
 {
-    MvField *tab_mvf;
-    MvField temp_col;
-    int x, y, x_pu, y_pu;
-    const int min_pu_width = s->ps.sps->min_pu_width;
-    int availableFlagLXCol = 0;
-    int colPic;
+    int x, y;
+    const ColMv * cmv = NULL;
 
-    HEVCFrame * const ref = s->ref->collocated_ref;
+    HEVCRpiFrame * const col_ref = s->ref->collocated_ref;
+    const RefPicList * const refPicList = s->refPicList + X;
+    const int cur_lt = refPicList->isLongTerm[refIdxLx];
 
-    if (ref == NULL || ref->tab_mvf == NULL) {
-        memset(mvLXCol, 0, sizeof(*mvLXCol));
+    *mvLXCol = 0;
+    // Unlikely but we might have a col_ref IDR frame!
+    if (col_ref->col_mvf == NULL)
         return 0;
-    }
 
-    tab_mvf = ref->tab_mvf;
-    colPic  = ref->poc;
+    ff_hevc_rpi_progress_wait_mv(s, lc->jb0, col_ref, y0 + nPbH);
 
     //bottom right collocated motion vector
     x = x0 + nPbW;
@@ -177,505 +69,418 @@ static int temporal_luma_motion_vector(const HEVCRpiContext * const s, HEVCRpiLo
 
     if ((y0 >> s->ps.sps->log2_ctb_size) == (y >> s->ps.sps->log2_ctb_size) &&
         y < s->ps.sps->height &&
-        x < s->ps.sps->width) {
-        x                 &= ~15;
-        y                 &= ~15;
-        ff_hevc_rpi_progress_wait_mv(s, lc->jb0, ref, y);
-        x_pu               = x >> s->ps.sps->log2_min_pu_size;
-        y_pu               = y >> s->ps.sps->log2_min_pu_size;
-        temp_col           = TAB_MVF(x_pu, y_pu);
-        availableFlagLXCol = DERIVE_TEMPORAL_COLOCATED_MVS;
+        x < s->ps.sps->width)
+    {
+        const ColMvField * const col = col_ref->col_mvf + (x >> 4) +
+            (y >> 4) * s->col_mvf_stride;
+
+        if (col->L[0].poc != COL_POC_INTRA &&
+            (col->L[1].poc == COL_POC_INTRA ||
+             (s->no_backward_pred_flag ? s->sh.collocated_list == L1 : X == 0)))
+        {
+            cmv = col->L + 0;
+        }
+        else if (col->L[1].poc != COL_POC_INTRA)
+        {
+            cmv = col->L + 1;
+        }
     }
 
     // derive center collocated motion vector
-    if (!availableFlagLXCol) {
+    if (cmv == NULL || COL_POC_IS_LT(cmv->poc) != cur_lt)
+    {
+        cmv = NULL;
         x                  = x0 + (nPbW >> 1);
         y                  = y0 + (nPbH >> 1);
-        x                 &= ~15;
-        y                 &= ~15;
-        ff_hevc_rpi_progress_wait_mv(s, lc->jb0, ref, y);
-        x_pu               = x >> s->ps.sps->log2_min_pu_size;
-        y_pu               = y >> s->ps.sps->log2_min_pu_size;
-        temp_col           = TAB_MVF(x_pu, y_pu);
-        availableFlagLXCol = DERIVE_TEMPORAL_COLOCATED_MVS;
-    }
-    return availableFlagLXCol;
-}
 
-#define AVAILABLE(cand, v)                                      \
-    (cand && !(TAB_MVF_PU(v).pred_flag == PF_INTRA))
+        {
+            const ColMvField * const col = col_ref->col_mvf + (x >> 4) +
+              (y >> 4) * s->col_mvf_stride;
 
-#define COMPARE_MV_REFIDX(a, b)                                 \
-    compare_mv_ref_idx(TAB_MVF_PU(a), TAB_MVF_PU(b))
-
-/*
- * 8.5.3.1.2  Derivation process for spatial merging candidates
- */
-static void derive_spatial_merge_candidates(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0,
-                                            int nPbW, int nPbH,
-                                            int log2_cb_size, const unsigned int avail,
-                                            int singleMCLFlag, int part_idx,
-                                            int merge_idx,
-                                            struct MvField mergecandlist[])
-{
-    const RefPicList * const refPicList = s->ref->refPicList;
-    const MvField * const tab_mvf       = s->ref->tab_mvf;
-
-    const int min_pu_width = s->ps.sps->min_pu_width;
-    const int xA1    = x0 - 1;
-    const int yA1    = y0 + nPbH - 1;
-
-    const int xB1    = x0 + nPbW - 1;
-    const int yB1    = y0 - 1;
-
-    const int xB0    = x0 + nPbW;
-    const int yB0    = y0 - 1;
-
-    const int xA0    = x0 - 1;
-    const int yA0    = y0 + nPbH;
-
-    const int xB2    = x0 - 1;
-    const int yB2    = y0 - 1;
-
-    const int nb_refs = (s->sh.slice_type == HEVC_SLICE_P) ?
-                        s->sh.nb_refs[0] : FFMIN(s->sh.nb_refs[0], s->sh.nb_refs[1]);
-
-    int zero_idx = 0;
-
-    int nb_merge_cand = 0;
-    int nb_orig_merge_cand = 0;
-
-    int is_available_a0;
-    int is_available_a1;
-    int is_available_b0;
-    int is_available_b1;
-    int is_available_b2;
-
-
-    if (!singleMCLFlag && part_idx == 1 &&
-        (lc->cu.part_mode == PART_Nx2N ||
-         lc->cu.part_mode == PART_nLx2N ||
-         lc->cu.part_mode == PART_nRx2N) ||
-        is_diff_mer(s, xA1, yA1, x0, y0)) {
-        is_available_a1 = 0;
-    } else {
-        is_available_a1 = AVAILABLE((avail & AVAIL_L) != 0, A1);
-        if (is_available_a1) {
-            mergecandlist[nb_merge_cand] = TAB_MVF_PU(A1);
-            if (merge_idx == 0)
-                return;
-            nb_merge_cand++;
-        }
-    }
-
-    if (!singleMCLFlag && part_idx == 1 &&
-        (lc->cu.part_mode == PART_2NxN ||
-         lc->cu.part_mode == PART_2NxnU ||
-         lc->cu.part_mode == PART_2NxnD) ||
-        is_diff_mer(s, xB1, yB1, x0, y0)) {
-        is_available_b1 = 0;
-    } else {
-        is_available_b1 = AVAILABLE((avail & AVAIL_U) != 0, B1);
-        if (is_available_b1 &&
-            !(is_available_a1 && COMPARE_MV_REFIDX(B1, A1))) {
-            mergecandlist[nb_merge_cand] = TAB_MVF_PU(B1);
-            if (merge_idx == nb_merge_cand)
-                return;
-            nb_merge_cand++;
-        }
-    }
-
-    // above right spatial merge candidate
-    is_available_b0 = AVAILABLE((avail & AVAIL_UR) != 0, B0) &&
-                      !is_diff_mer(s, xB0, yB0, x0, y0);
-
-    if (is_available_b0 &&
-        !(is_available_b1 && COMPARE_MV_REFIDX(B0, B1))) {
-        mergecandlist[nb_merge_cand] = TAB_MVF_PU(B0);
-        if (merge_idx == nb_merge_cand)
-            return;
-        nb_merge_cand++;
-    }
-
-    // left bottom spatial merge candidate
-    is_available_a0 = AVAILABLE((avail & AVAIL_DL) != 0, A0) &&
-                      !is_diff_mer(s, xA0, yA0, x0, y0);
-
-    if (is_available_a0 &&
-        !(is_available_a1 && COMPARE_MV_REFIDX(A0, A1))) {
-        mergecandlist[nb_merge_cand] = TAB_MVF_PU(A0);
-        if (merge_idx == nb_merge_cand)
-            return;
-        nb_merge_cand++;
-    }
-
-    // above left spatial merge candidate
-    is_available_b2 = AVAILABLE((avail & AVAIL_UL) != 0, B2) &&
-                      !is_diff_mer(s, xB2, yB2, x0, y0);
-
-    if (is_available_b2 &&
-        !(is_available_a1 && COMPARE_MV_REFIDX(B2, A1)) &&
-        !(is_available_b1 && COMPARE_MV_REFIDX(B2, B1)) &&
-        nb_merge_cand != 4) {
-        mergecandlist[nb_merge_cand] = TAB_MVF_PU(B2);
-        if (merge_idx == nb_merge_cand)
-            return;
-        nb_merge_cand++;
-    }
-
-    // temporal motion vector candidate
-    if (s->sh.slice_temporal_mvp_enabled_flag &&
-        nb_merge_cand < s->sh.max_num_merge_cand) {
-        Mv mv_l0_col = { 0 }, mv_l1_col = { 0 };
-        int available_l0 = temporal_luma_motion_vector(s, lc, x0, y0, nPbW, nPbH,
-                                                       0, &mv_l0_col, 0);
-        int available_l1 = (s->sh.slice_type == HEVC_SLICE_B) ?
-                           temporal_luma_motion_vector(s, lc, x0, y0, nPbW, nPbH,
-                                                       0, &mv_l1_col, 1) : 0;
-
-        if (available_l0 || available_l1) {
-            mergecandlist[nb_merge_cand].pred_flag = available_l0 + (available_l1 << 1);
-            AV_ZERO16(mergecandlist[nb_merge_cand].ref_idx);
-            mergecandlist[nb_merge_cand].mv[0]      = mv_l0_col;
-            mergecandlist[nb_merge_cand].mv[1]      = mv_l1_col;
-
-            if (merge_idx == nb_merge_cand)
-                return;
-            nb_merge_cand++;
-        }
-    }
-
-    nb_orig_merge_cand = nb_merge_cand;
-
-    // combined bi-predictive merge candidates  (applies for B slices)
-    if (s->sh.slice_type == HEVC_SLICE_B && nb_orig_merge_cand > 1 &&
-        nb_orig_merge_cand < s->sh.max_num_merge_cand) {
-        int comb_idx = 0;
-
-        for (comb_idx = 0; nb_merge_cand < s->sh.max_num_merge_cand &&
-                           comb_idx < nb_orig_merge_cand * (nb_orig_merge_cand - 1); comb_idx++) {
-            int l0_cand_idx = l0_l1_cand_idx[comb_idx][0];
-            int l1_cand_idx = l0_l1_cand_idx[comb_idx][1];
-            MvField l0_cand = mergecandlist[l0_cand_idx];
-            MvField l1_cand = mergecandlist[l1_cand_idx];
-
-            if ((l0_cand.pred_flag & PF_L0) && (l1_cand.pred_flag & PF_L1) &&
-                (refPicList[0].list[l0_cand.ref_idx[0]] !=
-                 refPicList[1].list[l1_cand.ref_idx[1]] ||
-                 AV_RN32A(&l0_cand.mv[0]) != AV_RN32A(&l1_cand.mv[1]))) {
-                mergecandlist[nb_merge_cand].ref_idx[0]   = l0_cand.ref_idx[0];
-                mergecandlist[nb_merge_cand].ref_idx[1]   = l1_cand.ref_idx[1];
-                mergecandlist[nb_merge_cand].pred_flag    = PF_BI;
-                AV_COPY32(&mergecandlist[nb_merge_cand].mv[0], &l0_cand.mv[0]);
-                AV_COPY32(&mergecandlist[nb_merge_cand].mv[1], &l1_cand.mv[1]);
-                if (merge_idx == nb_merge_cand)
-                    return;
-                nb_merge_cand++;
+            if (col->L[0].poc != COL_POC_INTRA &&
+              (col->L[1].poc == COL_POC_INTRA ||
+               (s->no_backward_pred_flag ? s->sh.collocated_list == L1 : X == 0)))
+            {
+              cmv = col->L + 0;
+            }
+            else if (col->L[1].poc != COL_POC_INTRA)
+            {
+              cmv = col->L + 1;
             }
         }
     }
 
-    // append Zero motion vector candidates
-    while (nb_merge_cand < s->sh.max_num_merge_cand) {
-        mergecandlist[nb_merge_cand].pred_flag    = PF_L0 + ((s->sh.slice_type == HEVC_SLICE_B) << 1);
-        AV_ZERO32(mergecandlist[nb_merge_cand].mv + 0);
-        AV_ZERO32(mergecandlist[nb_merge_cand].mv + 1);
-        mergecandlist[nb_merge_cand].ref_idx[0]   = zero_idx < nb_refs ? zero_idx : 0;
-        mergecandlist[nb_merge_cand].ref_idx[1]   = zero_idx < nb_refs ? zero_idx : 0;
+    if (cmv == NULL || cur_lt != COL_POC_IS_LT(cmv->poc))
+        return 0;
 
-        if (merge_idx == nb_merge_cand)
-            return;
-        nb_merge_cand++;
-        zero_idx++;
+    {
+        const int col_poc  = col_ref->poc;
+        const int ref_poc  = refPicList->list[refIdxLx];
+
+        *mvLXCol = (cur_lt ||
+                        cmv->poc == col_poc ||
+                        COL_POC_DIFF(col_poc, cmv->poc) == s->poc - ref_poc) ?
+                    cmv->xy :
+                    mv_scale_xy(cmv->xy, COL_POC_DIFF(col_poc, cmv->poc), s->poc - ref_poc);
     }
+
+    return cmv != NULL;
 }
+
+static inline int mvf_eq(const HEVCRpiMvField * const a, const HEVCRpiMvField * const b)
+{
+    return b != NULL && compare_mv_ref_idx(a, b);
+}
+
+
 
 /*
- * 8.5.3.1.1 Derivation process of luma Mvs for merge mode
+ * 8.5.3.1.2  Derivation process for spatial merging candidates
  */
+static inline const HEVCRpiMvField *
+derive_spatial_merge_candidates(
+    const HEVCRpiContext * const s,
+    const HEVCRpiLocalContext * const lc,
+    const unsigned int x0, const unsigned int y0,
+    const unsigned int nPbW, const unsigned int nPbH,
+    const unsigned int avail,
+    const unsigned int part_idx,
+    const unsigned int merge_idx,
+    HEVCRpiMvField * const mvf_t)
+{
+    const unsigned int parts_a1 = (1 << PART_Nx2N) | (1 << PART_nLx2N) | (1 << PART_nRx2N);
+    const unsigned int parts_b1 = (1 << PART_2NxN) | (1<< PART_2NxnU) | (1 << PART_2NxnD);
+
+    const HEVCRpiMvField * mvf_a1 = mvf_ptr(s, lc, x0, y0, x0 - 1, y0 + nPbH - 1);
+    const HEVCRpiMvField * mvf_a0 = mvf_a1 + mvf_left_stride(s, x0, x0 - 1);
+    const HEVCRpiMvField * mvf_b1 = mvf_ptr(s, lc, x0, y0, x0 + nPbW - 1, y0 - 1);
+    const HEVCRpiMvField * mvf_b0 = mvf_b1 + 1;
+    const unsigned int plevel = s->ps.pps->log2_parallel_merge_level;
+    const unsigned int part_mode = lc->cu.part_mode;
+
+    const HEVCRpiMvField * perm[4];
+    unsigned int nb_merge_cand = 0;
+
+    // singleMCLFlag => part_idx == 0 so no need to test for it
+    if ((avail & AVAIL_L) == 0 ||
+        (part_idx == 1 &&
+            ((parts_a1 >> part_mode) & 1) != 0 ||
+                is_eq_mer(plevel, x0 - 1, y0 + nPbH - 1, x0, y0)) ||
+        mvf_a1->pred_flag == PF_INTRA)
+    {
+        mvf_a1 = NULL;
+    }
+    else
+    {
+        if (merge_idx == nb_merge_cand)
+            return mvf_a1;
+        perm[nb_merge_cand++] = mvf_a1;
+    }
+
+    if ((avail & AVAIL_U) == 0 ||
+            (part_idx == 1 &&
+               ((parts_b1 >> part_mode) & 1) != 0 ||
+                   is_eq_mer(plevel, x0 + nPbW - 1, y0 - 1, x0, y0)) ||
+            mvf_b1->pred_flag == PF_INTRA)
+    {
+        mvf_b1 = NULL;
+    }
+    else if (!mvf_eq(mvf_b1, mvf_a1))
+    {
+        if (merge_idx == nb_merge_cand)
+            return mvf_b1;
+        perm[nb_merge_cand++] = mvf_b1;
+    }
+
+    // above right spatial merge candidate
+    // Never need mvf_b0 again so don't bother zeroing if navail
+    if ((avail & AVAIL_UR) != 0 &&
+        !is_eq_mer(plevel, x0 + nPbW, y0 - 1, x0, y0) &&
+        mvf_b0->pred_flag != PF_INTRA &&
+        !mvf_eq(mvf_b0, mvf_b1))
+    {
+        if (merge_idx == nb_merge_cand)
+            return mvf_b0;
+        perm[nb_merge_cand++] = mvf_b0;
+    }
+
+    // left bottom spatial merge candidate
+    // Never need mvf_a0 again so don't bother zeroing if navail
+    if ((avail & AVAIL_DL) != 0 &&
+        !is_eq_mer(plevel, x0 - 1, y0 + nPbH, x0, y0) &&
+        mvf_a0->pred_flag != PF_INTRA &&
+        !mvf_eq(mvf_a0, mvf_a1))
+    {
+        if (merge_idx == nb_merge_cand)
+            return mvf_a0;
+        perm[nb_merge_cand++] = mvf_a0;
+    }
+
+    // above left spatial merge candidate
+    if (nb_merge_cand != 4 &&
+        (avail & AVAIL_UL) != 0 &&
+        !is_eq_mer(plevel, x0 - 1, y0 - 1, x0, y0))
+    {
+        const HEVCRpiMvField * mvf_b2 = mvf_ptr(s, lc, x0, y0, x0 - 1, y0 - 1);  // UL
+
+        if (mvf_b2->pred_flag != PF_INTRA &&
+            !mvf_eq(mvf_b2, mvf_a1) &&
+            !mvf_eq(mvf_b2, mvf_b1))
+        {
+            if (merge_idx == nb_merge_cand)
+                return mvf_b2;
+            perm[nb_merge_cand++] = mvf_b2;
+        }
+    }
+
+    // temporal motion vector candidate
+    if (s->sh.slice_temporal_mvp_enabled_flag)
+    {
+        static const HEVCRpiMvField mvf_z = {{0}};
+
+        *mvf_t = mvf_z;
+
+        if (temporal_luma_motion_vector(s, lc, x0, y0, nPbW, nPbH,
+                                        0, mvf_t->xy + 0, 0))
+            mvf_t->pred_flag = PF_L0;
+
+        if (s->sh.slice_type == HEVC_SLICE_B &&
+                temporal_luma_motion_vector(s, lc, x0, y0, nPbW, nPbH,
+                                            0, mvf_t->xy + 1, 1))
+            mvf_t->pred_flag |= PF_L1;
+
+        if (mvf_t->pred_flag != 0)
+        {
+            if (merge_idx == nb_merge_cand)
+                return mvf_t;
+            perm[nb_merge_cand++] = mvf_t;
+        }
+    }
+
+    // combined bi-predictive merge candidates  (applies for B slices)
+    if (s->sh.slice_type == HEVC_SLICE_B && nb_merge_cand > 1)
+    {
+        unsigned int comb_idx = 0;
+        const unsigned int cand_count = nb_merge_cand * (nb_merge_cand - 1);
+        const RefPicList * const refPicList = s->refPicList;
+
+        for (comb_idx = 0; comb_idx < cand_count; comb_idx++)
+        {
+            static const uint8_t l0_l1_cand_idx[12][2] = {
+                { 0, 1, },
+                { 1, 0, },
+                { 0, 2, },
+                { 2, 0, },
+                { 1, 2, },
+                { 2, 1, },
+                { 0, 3, },
+                { 3, 0, },
+                { 1, 3, },
+                { 3, 1, },
+                { 2, 3, },
+                { 3, 2, },
+            };
+
+            const unsigned int l0_cand_idx = l0_l1_cand_idx[comb_idx][0];
+            const unsigned int l1_cand_idx = l0_l1_cand_idx[comb_idx][1];
+            const HEVCRpiMvField * const mvf_c0 = perm[l0_cand_idx];
+            const HEVCRpiMvField * const mvf_c1 = perm[l1_cand_idx];
+
+            if ((mvf_c0->pred_flag & PF_L0) != 0 &&
+                (mvf_c1->pred_flag & PF_L1) != 0 &&
+                (refPicList[0].list[mvf_c0->ref_idx[0]] != refPicList[1].list[mvf_c1->ref_idx[1]] ||
+                 mvf_c0->xy[0] != mvf_c1->xy[1]))
+            {
+                if (merge_idx == nb_merge_cand++)
+                {
+                    // Need to be a bit careful as we will construct mvf_t and we
+                    // may already be using that as one of our condidates
+                    // so build & copy rather than build in place
+                    const HEVCRpiMvField mvf_m = {
+                        .xy = {
+                            mvf_c0->xy[0],
+                            mvf_c1->xy[1]},
+                        .ref_idx = {
+                            mvf_c0->ref_idx[0],
+                            mvf_c1->ref_idx[1]},
+                        .pred_flag = PF_BI
+                    };
+                    *mvf_t = mvf_m;
+                    return mvf_t;
+                }
+            }
+        }
+    }
+
+    // "append" Zero motion vector candidates
+    {
+        const unsigned int nb_refs = (s->sh.slice_type == HEVC_SLICE_B) ?
+                            FFMIN(s->sh.nb_refs[0], s->sh.nb_refs[1]) : s->sh.nb_refs[0];
+        const unsigned int zero_idx = merge_idx - nb_merge_cand;
+
+        const HEVCRpiMvField mvf_m = {
+            .xy = {0, 0},
+            .ref_idx = {
+                zero_idx < nb_refs ? zero_idx : 0,
+                (s->sh.slice_type == HEVC_SLICE_B && zero_idx < nb_refs) ? zero_idx : 0},
+            .pred_flag = (s->sh.slice_type == HEVC_SLICE_B) ? PF_BI : PF_L0
+        };
+
+        *mvf_t = mvf_m;
+        return mvf_t;
+    }
+}
+
+
+// 8.5.3.1.1 Derivation process of luma Mvs for merge mode
 void ff_hevc_rpi_luma_mv_merge_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc, int x0, int y0, int nPbW,
                                 int nPbH, int log2_cb_size, int part_idx,
-                                int merge_idx, MvField * const mv)
+                                int merge_idx, HEVCRpiMvField * const mv)
 {
-    int singleMCLFlag = 0;
-    int nCS = 1 << log2_cb_size;
-    LOCAL_ALIGNED(4, MvField, mergecand_list, [MRG_MAX_NUM_CANDS]);
-    int nPbW2 = nPbW;
-    int nPbH2 = nPbH;
+    const HEVCRpiMvField * mvf_m = (s->ps.pps->log2_parallel_merge_level > 2 && log2_cb_size == 3) ?
+        derive_spatial_merge_candidates(s, lc, lc->cu.x, lc->cu.y, 8, 8,
+                                        ff_hevc_rpi_tb_avail_flags(s, lc, lc->cu.x, lc->cu.y, 8, 8),
+                                        0, merge_idx, mv) :
+        derive_spatial_merge_candidates(s, lc, x0, y0, nPbW, nPbH,
+                                        ff_hevc_rpi_tb_avail_flags(s, lc, x0, y0, nPbW, nPbH),
+                                        part_idx, merge_idx, mv);
 
-    if (s->ps.pps->log2_parallel_merge_level > 2 && nCS == 8) {
-        singleMCLFlag = 1;
-        x0            = lc->cu.x;
-        y0            = lc->cu.y;
-        nPbW          = nCS;
-        nPbH          = nCS;
-        part_idx      = 0;
-    }
+    if (mvf_m != mv)
+        *mv = *mvf_m;
 
-    derive_spatial_merge_candidates(s, lc, x0, y0, nPbW, nPbH, log2_cb_size,
-                                    ff_hevc_rpi_tb_avail_flags(s, lc, x0, y0, nPbW, nPbH),
-                                    singleMCLFlag, part_idx,
-                                    merge_idx, mergecand_list);
-
-    if (mergecand_list[merge_idx].pred_flag == PF_BI &&
-        (nPbW2 + nPbH2) == 12) {
-        mergecand_list[merge_idx].pred_flag = PF_L0;
-    }
-
-    *mv = mergecand_list[merge_idx];
+    if (mv->pred_flag == PF_BI && (nPbW + nPbH) == 12)
+        mv->pred_flag = PF_L0;
 }
 
-static av_always_inline void dist_scale(const HEVCRpiContext * const s, Mv * const mv,
-                                        int min_pu_width, int x, int y,
-                                        int elist, int ref_idx_curr, int ref_idx)
-{
-    const RefPicList * const refPicList = s->ref->refPicList;
-    const MvField * const tab_mvf       = s->ref->tab_mvf;
-    int ref_pic_elist      = refPicList[elist].list[TAB_MVF(x, y).ref_idx[elist]];
-    int ref_pic_curr       = refPicList[ref_idx_curr].list[ref_idx];
 
-    if (ref_pic_elist != ref_pic_curr) {
-        int poc_diff = s->poc - ref_pic_elist;
-        if (!poc_diff)
-            poc_diff = 1;
-        mv_scale(mv, mv, poc_diff, s->poc - ref_pic_curr);
+static av_always_inline const MvXY *
+mvf_same_poc(const RefPicList * const rpl, const unsigned int pfi0, const unsigned int pfi1, const int poc0, const HEVCRpiMvField * const mvf)
+{
+    if (mvf != NULL)
+    {
+        if (((mvf->pred_flag >> pfi0) & 1) != 0 && rpl[pfi0].list[mvf->ref_idx[pfi0]] == poc0)
+            return mvf->xy + pfi0;
+        if (((mvf->pred_flag >> pfi1) & 1) != 0 && rpl[pfi1].list[mvf->ref_idx[pfi1]] == poc0)
+            return mvf->xy + pfi1;
     }
+    return NULL;
 }
 
-static int mv_mp_mode_mx(const HEVCRpiContext * const s, const int x, const int y, const int pred_flag_index,
-                         Mv * const mv, const int ref_idx_curr, const int ref_idx)
+static av_always_inline const MvXY *
+mvf_other_poc(const RefPicList * const rpl, const unsigned int pfi0, const unsigned int pfi1,
+              const int islt0, const int poc0, const int poc_cur,
+              MvXY * const mv_t, const HEVCRpiMvField * const mvf)
 {
-    const MvField * const tab_mvf = s->ref->tab_mvf;
-    const int min_pu_width = s->ps.sps->min_pu_width;
-
-    const RefPicList * const refPicList = s->ref->refPicList;
-
-    if (((TAB_MVF(x, y).pred_flag) & (1 << pred_flag_index)) &&
-        refPicList[pred_flag_index].list[TAB_MVF(x, y).ref_idx[pred_flag_index]] == refPicList[ref_idx_curr].list[ref_idx]) {
-        *mv = TAB_MVF(x, y).mv[pred_flag_index];
-        return 1;
+    if (mvf != NULL)
+    {
+        if (((mvf->pred_flag >> pfi0) & 1) != 0 && rpl[pfi0].isLongTerm[mvf->ref_idx[pfi0]] == islt0)
+        {
+            const int poc1 = rpl[pfi0].list[mvf->ref_idx[pfi0]];
+            if (islt0 || poc1 == poc0) {
+                return mvf->xy + pfi0;
+            }
+            *mv_t = mv_scale_xy(mvf->xy[pfi0], poc_cur - poc1, poc_cur - poc0);
+            return mv_t;
+        }
+        if (((mvf->pred_flag >> pfi1) & 1) != 0 && rpl[pfi1].isLongTerm[mvf->ref_idx[pfi1]] == islt0)
+        {
+            const int poc1 = rpl[pfi1].list[mvf->ref_idx[pfi1]];
+            if (islt0 || poc1 == poc0) {
+                return mvf->xy + pfi1;
+            }
+            *mv_t = mv_scale_xy(mvf->xy[pfi1], poc_cur - poc1, poc_cur - poc0);
+            return mv_t;
+        }
     }
-    return 0;
+    return NULL;
 }
 
-static int mv_mp_mode_mx_lt(const HEVCRpiContext * const s, const int x, const int y, const int pred_flag_index,
-                            Mv * const mv, const int ref_idx_curr, const int ref_idx)
+void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext * const lc,
+    const unsigned int x0, const unsigned int y0,
+    const unsigned int nPbW, const unsigned int nPbH,
+    const unsigned int avail,
+    HEVCRpiMvField * const mv,
+    const unsigned int mvp_lx_flag, const unsigned int LX)
 {
-    MvField *tab_mvf = s->ref->tab_mvf;
-    int min_pu_width = s->ps.sps->min_pu_width;
+    const unsigned int pfi0 = LX;
+    const unsigned int pfi1 = LX == 0 ? 1 : 0;
+    const RefPicList * const rpl = s->refPicList;
+    const int poc0 = rpl[LX].list[mv->ref_idx[LX]];
+    const int poc_cur = s->poc;
+    const int islt0 = rpl[LX].isLongTerm[mv->ref_idx[LX]];
 
-    RefPicList *refPicList = s->ref->refPicList;
+    const HEVCRpiMvField * mvf_a1 = mvf_ptr(s, lc, x0, y0, x0 - 1, y0 + nPbH - 1);
+    const HEVCRpiMvField * mvf_a0 = mvf_a1 + mvf_left_stride(s, x0, x0 - 1);
+    const HEVCRpiMvField * mvf_b2 = mvf_ptr(s, lc, x0, y0, x0 - 1, y0 - 1);  // UL
+    const HEVCRpiMvField * mvf_b1 = mvf_ptr(s, lc, x0, y0, x0 + nPbW - 1, y0 - 1);
+    const HEVCRpiMvField * mvf_b0 = mvf_b1 + 1;
+    const MvXY * mva = NULL;
+    const MvXY * mvb;
+    MvXY * const mv_rv = mv->xy + LX;
+    MvXY mvt_a, mvt_b;
 
-    if ((TAB_MVF(x, y).pred_flag) & (1 << pred_flag_index)) {
-        int currIsLongTerm     = refPicList[ref_idx_curr].isLongTerm[ref_idx];
+    *mv_rv = 0;
 
-        int colIsLongTerm =
-            refPicList[pred_flag_index].isLongTerm[(TAB_MVF(x, y).ref_idx[pred_flag_index])];
+    if ((avail & AVAIL_DL) == 0 || mvf_a0->pred_flag == PF_INTRA)
+        mvf_a0 = NULL;
+    else if ((mva = mvf_same_poc(rpl, pfi0, pfi1, poc0, mvf_a0)) != NULL && mvp_lx_flag == 0)
+        goto use_mva;
 
-        if (colIsLongTerm == currIsLongTerm) {
-            *mv = TAB_MVF(x, y).mv[pred_flag_index];
-            if (!currIsLongTerm)
-                dist_scale(s, mv, min_pu_width, x, y,
-                           pred_flag_index, ref_idx_curr, ref_idx);
-            return 1;
-        }
+    if ((avail & AVAIL_L) == 0 || mvf_a1->pred_flag == PF_INTRA)
+        mvf_a1 = NULL;
+
+    if (mva == NULL &&
+        (mva = mvf_same_poc(rpl, pfi0, pfi1, poc0, mvf_a1)) == NULL &&
+        (mva = mvf_other_poc(rpl, pfi0, pfi1, islt0, poc0, poc_cur, &mvt_a, mvf_a0)) == NULL)
+        mva = mvf_other_poc(rpl, pfi0, pfi1, islt0, poc0, poc_cur, &mvt_a, mvf_a1);
+
+    if (mvp_lx_flag == 0 && mva != NULL)
+        goto use_mva;
+
+    if ((avail & AVAIL_UR) == 0 || mvf_b0->pred_flag == PF_INTRA)
+        mvf_b0 = NULL;
+    if ((avail & AVAIL_U) == 0 || mvf_b1->pred_flag == PF_INTRA)
+        mvf_b1 = NULL;
+    if ((avail & AVAIL_UL) == 0 || mvf_b2->pred_flag == PF_INTRA)
+        mvf_b2 = NULL;
+
+    if ((mvb = mvf_same_poc(rpl, pfi0, pfi1, poc0, mvf_b0)) == NULL &&
+        (mvb = mvf_same_poc(rpl, pfi0, pfi1, poc0, mvf_b1)) == NULL)
+        mvb = mvf_same_poc(rpl, pfi0, pfi1, poc0, mvf_b2);
+
+    if (mvf_a0 == NULL && mvf_a1 == NULL) {
+        mva = mvb;
+        if (mvp_lx_flag == 0 && mva != NULL)
+            goto use_mva;
+
+        if ((mvb = mvf_other_poc(rpl, pfi0, pfi1, islt0, poc0, poc_cur, &mvt_b, mvf_b0)) == NULL &&
+            (mvb = mvf_other_poc(rpl, pfi0, pfi1, islt0, poc0, poc_cur, &mvt_b, mvf_b1)) == NULL)
+            mvb = mvf_other_poc(rpl, pfi0, pfi1, islt0, poc0, poc_cur, &mvt_b, mvf_b2);
     }
-    return 0;
+
+    if (mva == NULL) {
+        mva = mvb;
+        mvb = NULL;
+    }
+
+    if (mvb != NULL && *mva == *mvb)  // If A == B then ignore B
+        mvb = NULL;
+
+    if (mvp_lx_flag == 0 && mva != NULL) {
+        goto use_mva;
+    }
+    else if (mvp_lx_flag != 0 && mvb != NULL) {
+        *mv_rv = *mvb;
+    }
+    else if (s->sh.slice_temporal_mvp_enabled_flag && ((mvp_lx_flag == 0 && mva == NULL) || (mvp_lx_flag != 0 && mva != NULL))) {
+        temporal_luma_motion_vector(s, lc, x0, y0, nPbW,
+                                    nPbH, mv->ref_idx[LX],
+                                    mv_rv, LX);
+    }
+    return;
+
+use_mva:
+    *mv_rv = *mva;
+    return;
 }
 
-#define MP_MX(v, pred, mx)                                      \
-    mv_mp_mode_mx(s,                                            \
-                  (x ## v) >> s->ps.sps->log2_min_pu_size,         \
-                  (y ## v) >> s->ps.sps->log2_min_pu_size,         \
-                  pred, &mx, ref_idx_curr, ref_idx)
-
-#define MP_MX_LT(v, pred, mx)                                   \
-    mv_mp_mode_mx_lt(s,                                         \
-                     (x ## v) >> s->ps.sps->log2_min_pu_size,      \
-                     (y ## v) >> s->ps.sps->log2_min_pu_size,      \
-                     pred, &mx, ref_idx_curr, ref_idx)
-
-void ff_hevc_rpi_luma_mv_mvp_mode(const HEVCRpiContext * const s, HEVCRpiLocalContext *lc,
-                              int x0, int y0, int nPbW, int nPbH,
-                              int log2_cb_size, const unsigned int avail, int part_idx,
-                              int merge_idx, MvField * const mv,
-                              int mvp_lx_flag, int LX)
-{
-    const MvField *tab_mvf = s->ref->tab_mvf;
-    int isScaledFlag_L0 = 0;
-    int availableFlagLXA0 = 1;
-    int availableFlagLXB0 = 1;
-    int numMVPCandLX = 0;
-    int min_pu_width = s->ps.sps->min_pu_width;
-
-    int xA0, yA0;
-    int is_available_a0;
-    int xA1, yA1;
-    int is_available_a1;
-    int xB0, yB0;
-    int is_available_b0;
-    int xB1, yB1;
-    int is_available_b1;
-    int xB2, yB2;
-    int is_available_b2;
-
-    Mv mvpcand_list[2] = { { 0 } };
-    Mv mxA;
-    Mv mxB;
-    int ref_idx_curr;
-    int ref_idx = 0;
-    int pred_flag_index_l0;
-    int pred_flag_index_l1;
-
-    ref_idx_curr       = LX;
-    ref_idx            = mv->ref_idx[LX];
-    pred_flag_index_l0 = LX;
-    pred_flag_index_l1 = !LX;
-
-    // left bottom spatial candidate
-    xA0 = x0 - 1;
-    yA0 = y0 + nPbH;
-
-    is_available_a0 = AVAILABLE((avail & AVAIL_DL) != 0, A0);
-
-    //left spatial merge candidate
-    xA1    = x0 - 1;
-    yA1    = y0 + nPbH - 1;
-
-    is_available_a1 = AVAILABLE((avail & AVAIL_L), A1);
-    if (is_available_a0 || is_available_a1)
-        isScaledFlag_L0 = 1;
-
-    if (is_available_a0) {
-        if (MP_MX(A0, pred_flag_index_l0, mxA)) {
-            goto b_candidates;
-        }
-        if (MP_MX(A0, pred_flag_index_l1, mxA)) {
-            goto b_candidates;
-        }
-    }
-
-    if (is_available_a1) {
-        if (MP_MX(A1, pred_flag_index_l0, mxA)) {
-            goto b_candidates;
-        }
-        if (MP_MX(A1, pred_flag_index_l1, mxA)) {
-            goto b_candidates;
-        }
-    }
-
-    if (is_available_a0) {
-        if (MP_MX_LT(A0, pred_flag_index_l0, mxA)) {
-            goto b_candidates;
-        }
-        if (MP_MX_LT(A0, pred_flag_index_l1, mxA)) {
-            goto b_candidates;
-        }
-    }
-
-    if (is_available_a1) {
-        if (MP_MX_LT(A1, pred_flag_index_l0, mxA)) {
-            goto b_candidates;
-        }
-        if (MP_MX_LT(A1, pred_flag_index_l1, mxA)) {
-            goto b_candidates;
-        }
-    }
-    availableFlagLXA0 = 0;
-
-b_candidates:
-    // B candidates
-    // above right spatial merge candidate
-    xB0    = x0 + nPbW;
-    yB0    = y0 - 1;
-
-    is_available_b0 =  AVAILABLE((avail & AVAIL_UR) != 0, B0);
-
-    // above spatial merge candidate
-    xB1    = x0 + nPbW - 1;
-    yB1    = y0 - 1;
-    is_available_b1 = AVAILABLE((avail & AVAIL_U) != 0, B1);
-
-    // above left spatial merge candidate
-    xB2 = x0 - 1;
-    yB2 = y0 - 1;
-    is_available_b2 = AVAILABLE((avail & AVAIL_UL) != 0, B2);
-
-    // above right spatial merge candidate
-    if (is_available_b0) {
-        if (MP_MX(B0, pred_flag_index_l0, mxB)) {
-            goto scalef;
-        }
-        if (MP_MX(B0, pred_flag_index_l1, mxB)) {
-            goto scalef;
-        }
-    }
-
-    // above spatial merge candidate
-    if (is_available_b1) {
-        if (MP_MX(B1, pred_flag_index_l0, mxB)) {
-            goto scalef;
-        }
-        if (MP_MX(B1, pred_flag_index_l1, mxB)) {
-            goto scalef;
-        }
-    }
-
-    // above left spatial merge candidate
-    if (is_available_b2) {
-        if (MP_MX(B2, pred_flag_index_l0, mxB)) {
-            goto scalef;
-        }
-        if (MP_MX(B2, pred_flag_index_l1, mxB)) {
-            goto scalef;
-        }
-    }
-    availableFlagLXB0 = 0;
-
-scalef:
-    if (!isScaledFlag_L0) {
-        if (availableFlagLXB0) {
-            availableFlagLXA0 = 1;
-            mxA = mxB;
-        }
-        availableFlagLXB0 = 0;
-
-        // XB0 and L1
-        if (is_available_b0) {
-            availableFlagLXB0 = MP_MX_LT(B0, pred_flag_index_l0, mxB);
-            if (!availableFlagLXB0)
-                availableFlagLXB0 = MP_MX_LT(B0, pred_flag_index_l1, mxB);
-        }
-
-        if (is_available_b1 && !availableFlagLXB0) {
-            availableFlagLXB0 = MP_MX_LT(B1, pred_flag_index_l0, mxB);
-            if (!availableFlagLXB0)
-                availableFlagLXB0 = MP_MX_LT(B1, pred_flag_index_l1, mxB);
-        }
-
-        if (is_available_b2 && !availableFlagLXB0) {
-            availableFlagLXB0 = MP_MX_LT(B2, pred_flag_index_l0, mxB);
-            if (!availableFlagLXB0)
-                availableFlagLXB0 = MP_MX_LT(B2, pred_flag_index_l1, mxB);
-        }
-    }
-
-    if (availableFlagLXA0)
-        mvpcand_list[numMVPCandLX++] = mxA;
-
-    if (availableFlagLXB0 && (!availableFlagLXA0 || mxA.x != mxB.x || mxA.y != mxB.y))
-        mvpcand_list[numMVPCandLX++] = mxB;
-
-    //temporal motion vector prediction candidate
-    if (numMVPCandLX < 2 && s->sh.slice_temporal_mvp_enabled_flag &&
-        mvp_lx_flag == numMVPCandLX) {
-        Mv mv_col;
-        int available_col = temporal_luma_motion_vector(s, lc, x0, y0, nPbW,
-                                                        nPbH, ref_idx,
-                                                        &mv_col, LX);
-        if (available_col)
-            mvpcand_list[numMVPCandLX++] = mv_col;
-    }
-
-    mv->mv[LX] = mvpcand_list[mvp_lx_flag];
-}

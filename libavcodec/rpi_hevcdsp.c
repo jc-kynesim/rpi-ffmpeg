@@ -23,6 +23,7 @@
  */
 
 #include "rpi_hevcdsp.h"
+#include "rpi_hevc_mv.h"
 
 static const int8_t transform[32][32] = {
     { 64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,  64,
@@ -123,9 +124,9 @@ DECLARE_ALIGNED(16, const int8_t, ff_hevc_rpi_qpel_filters[3][16]) = {
 #include "rpi_hevcdsp_template.c"
 #undef BIT_DEPTH
 
-static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const MvField *curr, const MvField *neigh,
+static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const HEVCRpiMvField *curr, const HEVCRpiMvField *neigh,
                                                const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
-                                               int in_inc)
+                                               int in_inc0, int in_inc1)
 {
     int shift = 32;
     uint32_t bs = 0;
@@ -133,8 +134,13 @@ static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const MvFie
         int strength, out;
         int curr_refL0 = curr_rpl0[curr->ref_idx[0]];
         int curr_refL1 = curr_rpl1[curr->ref_idx[1]];
-        int neigh_refL0 = neigh_rpl0[neigh->ref_idx[0]];
-        int neigh_refL1 = neigh_rpl1[neigh->ref_idx[1]];
+        int nr_idx0 = neigh->ref_idx[0];
+        int nr_idx1 = neigh->ref_idx[1];
+        int neigh_refL0 = neigh_rpl0[nr_idx0];
+        int neigh_refL1 = neigh_rpl1[nr_idx1];
+
+        av_assert0(nr_idx0 >= 0 && nr_idx0 <=31);
+        av_assert0(nr_idx1 >= 0 && nr_idx1 <=31);
 
 #if 1 // This more directly matches the original implementation
         if (curr->pred_flag == PF_BI &&  neigh->pred_flag == PF_BI) {
@@ -142,24 +148,24 @@ static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const MvFie
             if (curr_refL0 == neigh_refL0 &&
                 curr_refL0 == curr_refL1 &&
                 neigh_refL0 == neigh_refL1) {
-                if ((FFABS(neigh->mv[0].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[0].y) >= 4 ||
-                     FFABS(neigh->mv[1].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[1].y) >= 4) &&
-                    (FFABS(neigh->mv[1].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[0].y) >= 4 ||
-                     FFABS(neigh->mv[0].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[1].y) >= 4))
+                if ((FFABS(MV_X(neigh->xy[0]) - MV_X(curr->xy[0])) >= 4 || FFABS(MV_Y(neigh->xy[0]) - MV_Y(curr->xy[0])) >= 4 ||
+                     FFABS(MV_X(neigh->xy[1]) - MV_X(curr->xy[1])) >= 4 || FFABS(MV_Y(neigh->xy[1]) - MV_Y(curr->xy[1])) >= 4) &&
+                    (FFABS(MV_X(neigh->xy[1]) - MV_X(curr->xy[0])) >= 4 || FFABS(MV_Y(neigh->xy[1]) - MV_Y(curr->xy[0])) >= 4 ||
+                     FFABS(MV_X(neigh->xy[0]) - MV_X(curr->xy[1])) >= 4 || FFABS(MV_Y(neigh->xy[0]) - MV_Y(curr->xy[1])) >= 4))
                     strength = 1;
                 else
                     strength = 0;
             } else if (neigh_refL0 == curr_refL0 &&
                        neigh_refL1 == curr_refL1) {
-                if (FFABS(neigh->mv[0].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[0].y) >= 4 ||
-                    FFABS(neigh->mv[1].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[1].y) >= 4)
+                if (FFABS(MV_X(neigh->xy[0]) - MV_X(curr->xy[0])) >= 4 || FFABS(MV_Y(neigh->xy[0]) - MV_Y(curr->xy[0])) >= 4 ||
+                    FFABS(MV_X(neigh->xy[1]) - MV_X(curr->xy[1])) >= 4 || FFABS(MV_Y(neigh->xy[1]) - MV_Y(curr->xy[1])) >= 4)
                     strength = 1;
                 else
                     strength = 0;
             } else if (neigh_refL1 == curr_refL0 &&
                        neigh_refL0 == curr_refL1) {
-                if (FFABS(neigh->mv[1].x - curr->mv[0].x) >= 4 || FFABS(neigh->mv[1].y - curr->mv[0].y) >= 4 ||
-                    FFABS(neigh->mv[0].x - curr->mv[1].x) >= 4 || FFABS(neigh->mv[0].y - curr->mv[1].y) >= 4)
+                if (FFABS(MV_X(neigh->xy[1]) - MV_X(curr->xy[0])) >= 4 || FFABS(MV_Y(neigh->xy[1]) - MV_Y(curr->xy[0])) >= 4 ||
+                    FFABS(MV_X(neigh->xy[0]) - MV_X(curr->xy[1])) >= 4 || FFABS(MV_Y(neigh->xy[0]) - MV_Y(curr->xy[1])) >= 4)
                     strength = 1;
                 else
                     strength = 0;
@@ -167,24 +173,24 @@ static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const MvFie
                 strength = 1;
             }
         } else if ((curr->pred_flag != PF_BI) && (neigh->pred_flag != PF_BI)){ // 1 MV
-            Mv curr_mv0, neigh_mv0;
+            MvXY curr_mv0, neigh_mv0;
 
             if (curr->pred_flag & 1) {
-                curr_mv0   = curr->mv[0];
+                curr_mv0   = curr->xy[0];
             } else {
-                curr_mv0   = curr->mv[1];
+                curr_mv0   = curr->xy[1];
                 curr_refL0 = curr_refL1;
             }
 
             if (neigh->pred_flag & 1) {
-                neigh_mv0   = neigh->mv[0];
+                neigh_mv0   = neigh->xy[0];
             } else {
-                neigh_mv0   = neigh->mv[1];
+                neigh_mv0   = neigh->xy[1];
                 neigh_refL0 = neigh_refL1;
             }
 
             if (curr_refL0 == neigh_refL0) {
-                if (FFABS(curr_mv0.x - neigh_mv0.x) >= 4 || FFABS(curr_mv0.y - neigh_mv0.y) >= 4)
+                if (FFABS(MV_X(curr_mv0) - MV_X(neigh_mv0)) >= 4 || FFABS(MV_Y(curr_mv0) - MV_Y(neigh_mv0)) >= 4)
                     strength = 1;
                 else
                     strength = 0;
@@ -228,8 +234,8 @@ static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const MvFie
         strength |= (((curr->pred_flag + 1) ^ (neigh->pred_flag + 1)) >> 2);
 #endif
 
-        curr += in_inc / sizeof (MvField);
-        neigh += in_inc / sizeof (MvField);
+        curr += in_inc0 / sizeof (HEVCRpiMvField);
+        neigh += in_inc1 / sizeof (HEVCRpiMvField);
 
         for (out = dup; out > 0; out--)
         {

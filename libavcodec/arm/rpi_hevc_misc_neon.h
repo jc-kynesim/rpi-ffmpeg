@@ -20,7 +20,7 @@
 #define AVCODEC_ARM_RPI_HEVC_MISC_H
 
 #include "config.h"
-#if HAVE_NEON_INLINE
+#if HAVE_NEON_INLINE && !CONFIG_THUMB
 
 static av_noinline void ff_hevc_rpi_copy_vert_v2h_neon(uint8_t *dst, const uint8_t *src,
                                                        int pixel_shift, int height,

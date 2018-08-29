@@ -29,7 +29,7 @@ void ff_hevc_rpi_hls_residual_coding(const HEVCRpiContext * const s, HEVCRpiLoca
                                 const int log2_trafo_size, const enum ScanType scan_idx,
                                 const int c_idx);
 
-void ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc);
+MvXY ff_hevc_rpi_hls_mvd_coding(HEVCRpiLocalContext * const lc);
 int ff_hevc_rpi_cabac_overflow(const HEVCRpiLocalContext * const lc);
 
 #define HEVC_BIN_SAO_MERGE_FLAG                         0

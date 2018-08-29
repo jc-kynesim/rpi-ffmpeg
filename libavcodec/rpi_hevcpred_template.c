@@ -28,7 +28,6 @@
 #include "rpi_hevcdec.h"
 #include "rpi_hevcpred.h"
 
-
 #define DUMP_PRED 0
 
 #define POS(x, y) src[(x) + stride * (y)]
@@ -162,31 +161,77 @@ static inline void extend_32(void * ptr, const unsigned int v, unsigned int n)
 
 // Beware that this inverts the avail ordering
 // For CIP it seems easier this way round
-static unsigned int cip_avail(const MvField * mvf, const int mvf_stride, const unsigned int log2_pu_size, const unsigned int avail, unsigned int size,
-                              unsigned int s0, unsigned int s1)
+static unsigned int cip_avail_l(const uint8_t * is_intra, const int i_stride, const unsigned int i_mask,
+                                const unsigned int log2_intra_bits, const unsigned int avail, unsigned int size,
+                              unsigned int s0, unsigned int odd_s)
 {
-    const unsigned int n = 1 << (log2_pu_size - 2);
+    const unsigned int n = 1 << log2_intra_bits;
     unsigned int fa = 0;
-    unsigned int i = 0;
+    unsigned int i;
 
     size >>= 2;   // Now in 4-pel units
     s0 >>= 2;
-    s1 >>= 2;
 
-    if ((avail & 4) != 0)
+    if ((avail & AVAIL_DL) != 0)
         fa |= ((1 << s0) - 1) << (size - s0);
-    if ((avail & 2) != 0)
-        fa |= ((1 << s1) - 1) << size;
-    if ((avail & 1) != 0)
+    if ((avail & AVAIL_L) != 0)
+        fa |= ((1 << size) - 1) << size;
+    if ((avail & AVAIL_UL) != 0)
         fa |= 1 << (size << 1);
 
-    for (i = 0; (fa >> i) != 0; i += n, mvf += mvf_stride) {
-        if ((fa & (((1 << n) - 1) << i)) != 0 && mvf->pred_flag != PF_INTRA)
-            fa &= ~(((1 << n) - 1) << i);
+    if (odd_s) {
+        if ((fa & 1) != 0 && (*is_intra & i_mask) == 0)
+            fa &= ~1;
+        is_intra += i_stride;
+    }
+
+    for (i = odd_s; (fa >> i) != 0; i += n, is_intra += i_stride) {
+        const unsigned int m = ((1 << n) - 1) << i;
+        if ((fa & m) != 0 && (*is_intra & i_mask) == 0)
+            fa &= ~m;
     }
 
     return fa;
 }
+
+static unsigned int cip_avail_u(const uint8_t * is_intra, unsigned int i_shift,
+                                const unsigned int log2_intra_bits, const unsigned int avail, unsigned int size,
+                                unsigned int s1, unsigned int odd_s)
+{
+    if ((avail & (AVAIL_U | AVAIL_UR)) == 0)
+    {
+        return 0;
+    }
+    else
+    {
+        const unsigned int n = 1 << log2_intra_bits;
+        unsigned int fa = 0;
+        unsigned int i;
+        unsigned int im = ((is_intra[1] << 8) | (is_intra[0])) >> i_shift;
+
+        size >>= 2;   // Now in 4-pel units
+        s1 >>= 2;
+
+        if ((avail & AVAIL_U) != 0)
+            fa |= ((1 << size) - 1);
+        if ((avail & AVAIL_UR) != 0)
+            fa |= ((1 << s1) - 1) << size;
+
+        if (odd_s) {
+            fa &= im | ~1;
+            im >>= 1;
+        }
+
+        for (i = odd_s; (fa >> i) != 0; i += n, im >>= 1) {
+            const unsigned int m = ((1 << n) - 1) << i;
+            if ((im & 1) == 0)
+                fa &= ~m;
+        }
+        return fa;
+    }
+}
+
+
 
 static inline unsigned int rmbd(unsigned int x)
 {
@@ -325,14 +370,6 @@ static void FUNC(cip_fill)(pixel * const left, pixel * const top,
 #else
 #define EXTEND(ptr, val, len) extend_32(ptr, val, len)
 #endif
-
-
-#define PU(x) \
-    ((x) >> s->ps.sps->log2_min_pu_size)
-#define MVF(x, y) \
-    (s->ref->tab_mvf[(x) + (y) * s->ps.sps->min_pu_width])
-#define MVF_PU(x, y) \
-    MVF(PU(x0 + ((x) * (1 << hshift))), PU(y0 + ((y) * (1 << vshift))))
 
 // Reqs:
 //
@@ -833,24 +870,31 @@ dc_only:
             src_ur += stripe_adj;
     }
 
+    // Can deal with I-slices in 'normal' code even if CIP
+    // This also means that we don't need to generate (elsewhere) is_intra
+    // for IRAP frames
     if (s->ps.pps->constrained_intra_pred_flag == 1 &&
-        s->sh.slice_type != HEVC_SLICE_I)  // Can deal with I-slices in 'normal' code
+        s->sh.slice_type != HEVC_SLICE_I)
     {
-        const unsigned int l2_pu_s = FFMAX(s->ps.sps->log2_min_pu_size - hshift, 2);
-        const unsigned int l2_pu_stride_s = l2_pu_s - (s->ps.sps->log2_min_pu_size - hshift);
+        // * If we ever actually care about CIP performance then we should
+        //   special case out size 4 stuff (can be done by 'normal') and
+        //   have 8-pel avail masks
+        unsigned int avail_l = cip_avail_l(s->is_intra + ((y + size * 2 - 1) >> (3 - vshift)) * s->ps.sps->pcm_width + ((x - 1) >> (6 - hshift)),
+                                           -(int)(s->ps.sps->pcm_width),
+                                           1 << (((x - 1) >> (3 - hshift)) & 7),
+                                           1 - hshift,
+                                           avail,
+                                           size,
+                                           FFMIN(size, ((s->ps.sps->height - y0) >> vshift) - size),
+                                           vshift != 0 ? 0 : (y >> 2) & 1);
 
-        unsigned int avail_l = cip_avail(&MVF_PU(-1, size * 2 - 1),
-                                         -(int)(s->ps.sps->min_pu_width << l2_pu_stride_s),
-                                         l2_pu_s,
-                                         avail >> AVAIL_S_UL,
-                                         size,
-                                         FFMIN(size, ((s->ps.sps->height - y0) >> vshift) - size), size);
-        unsigned int avail_u = cip_avail(&MVF_PU(0, -1),
-                                         1 << l2_pu_stride_s,
-                                         l2_pu_s,
-                                         avail << 1,
-                                         size,
-                                         size, FFMIN(size, ((s->ps.sps->width - x0) >> hshift) - size));
+        unsigned int avail_u = cip_avail_u(s->is_intra + ((y - 1) >> (3 - vshift)) * s->ps.sps->pcm_width + (x >> (6 - hshift)),
+                                           (x >> (3 - hshift)) & 7,
+                                           1 - hshift,
+                                           avail,
+                                           size,
+                                           FFMIN(size, ((s->ps.sps->width - x0) >> hshift) - size),
+                                           hshift != 0 ? 0 : (x >> 2) & 1);
 
         // Anything left?
         if ((avail_l | avail_u) == 0)
@@ -1463,16 +1507,7 @@ static void FUNC(pred_angular_3)(uint8_t *src, const uint8_t *top,
 #undef c_src_ptr_t
 #undef c_dst_ptr_t
 
-#undef EXTEND_LEFT_CIP
-#undef EXTEND_RIGHT_CIP
-#undef EXTEND_UP_CIP
-#undef EXTEND_DOWN_CIP
-#undef IS_INTRA
-#undef MVF_PU
-#undef MVF
-#undef PU
 #undef EXTEND
-#undef MIN_TB_ADDR_ZS
 #undef POS
 #undef PW
 
