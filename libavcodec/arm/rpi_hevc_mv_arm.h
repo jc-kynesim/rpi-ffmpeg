@@ -34,16 +34,16 @@ static inline int32_t mv_scale_xy_arm(int32_t xy, int td, int tb)
     "mov    %[td], #32                   \n\t"
     "smlabb %[td], %[t],  %[tb], %[td]   \n\t"
     "ssat   %[td], #13,   %[td], asr #6  \n\t"
-    "mov    %[t],  #127                  \n\t"
-    "smlabb %[tb], %[xy], %[td], %[t]    \n\t"
-    "smlatb %[t],  %[xy], %[td], %[t]    \n\t"
+    "mov    %[tb], #127                  \n\t"
+    "smlatb %[t],  %[xy], %[td], %[tb]   \n\t"
+    "smlabb %[tb], %[xy], %[td], %[tb]   \n\t"
 // This takes the sign of x & y for rounding at the "wrong" point
 // (i.e. after adding 127) but for the range of values (-1,-127)
 // where it does the wrong thing you get the right answer (0) anyway
-    "add    %[xy], %[tb], %[tb], lsr #31 \n\t"
     "add    %[t],  %[t],  %[t],  lsr #31 \n\t"
-    "ssat   %[xy], #16,   %[xy], asr #8  \n\t"
+    "add    %[xy], %[tb], %[tb], lsr #31 \n\t"
     "ssat   %[t],  #16,   %[t],  asr #8  \n\t"
+    "ssat   %[xy], #16,   %[xy], asr #8  \n\t"
     "pkhbt  %[xy], %[xy], %[t],  lsl #16 \n\t"
     :
          [t]"=&r"(t),
