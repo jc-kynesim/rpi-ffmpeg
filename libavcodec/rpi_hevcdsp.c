@@ -199,10 +199,10 @@ static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const HEVCR
         } else
             strength = 1;
 #else // This has exactly the same effect, but is more suitable for vectorisation
-        Mv curr_mv[2];
-        Mv neigh_mv[2];
-        memcpy(curr_mv, curr->mv, sizeof curr_mv);
-        memcpy(neigh_mv, neigh->mv, sizeof neigh_mv);
+        MvXY curr_mv[2];
+        MvXY neigh_mv[2];
+        memcpy(curr_mv, curr->xy, sizeof curr_mv);
+        memcpy(neigh_mv, neigh->xy, sizeof neigh_mv);
 
         if (!(curr->pred_flag & 2)) {
             curr_mv[1] = curr_mv[0];
@@ -224,12 +224,12 @@ static uint32_t hevc_deblocking_boundary_strengths(int pus, int dup, const HEVCR
         strength = 1;
 
         strength &= (neigh_refL0 != curr_refL0) | (neigh_refL1 != curr_refL1) |
-                (FFABS(neigh_mv[0].x - curr_mv[0].x) >= 4) | (FFABS(neigh_mv[0].y - curr_mv[0].y) >= 4) |
-                (FFABS(neigh_mv[1].x - curr_mv[1].x) >= 4) | (FFABS(neigh_mv[1].y - curr_mv[1].y) >= 4);
+                (FFABS(MV_X(neigh_mv[0]) - MV_X(curr_mv[0])) >= 4) | (FFABS(MV_Y(neigh_mv[0]) - MV_Y(curr_mv[0])) >= 4) |
+                (FFABS(MV_X(neigh_mv[1]) - MV_X(curr_mv[1])) >= 4) | (FFABS(MV_Y(neigh_mv[1]) - MV_Y(curr_mv[1])) >= 4);
 
         strength &= (neigh_refL1 != curr_refL0) | (neigh_refL0 != curr_refL1) |
-                (FFABS(neigh_mv[1].x - curr_mv[0].x) >= 4) | (FFABS(neigh_mv[1].y - curr_mv[0].y) >= 4) |
-                (FFABS(neigh_mv[0].x - curr_mv[1].x) >= 4) | (FFABS(neigh_mv[0].y - curr_mv[1].y) >= 4);
+                (FFABS(MV_X(neigh_mv[1]) - MV_X(curr_mv[0])) >= 4) | (FFABS(MV_Y(neigh_mv[1]) - MV_Y(curr_mv[0])) >= 4) |
+                (FFABS(MV_X(neigh_mv[0]) - MV_X(curr_mv[1])) >= 4) | (FFABS(MV_Y(neigh_mv[0]) - MV_Y(curr_mv[1])) >= 4);
 
         strength |= (((curr->pred_flag + 1) ^ (neigh->pred_flag + 1)) >> 2);
 #endif

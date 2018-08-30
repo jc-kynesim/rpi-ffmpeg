@@ -1091,23 +1091,21 @@ endfunc
 .endm
 
 
-#if 0 // NEON version
+#if 1 // NEON version
 
-@ ****** Doesn't cope with mult-stride yet
-
-/* uint32_t ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, const MvField *curr, const MvField *neigh,
+/* uint32_t ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, const HEVCRpiMvField *curr, const HEVCRpiMvField *neigh,
  *                                            const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
- *                                            int in_inc)
+ *                                            int in_inc0, int in_inc1)
  */
 function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         mov         ip, sp
-        push        {a2,v1-v8,lr}
-        ldm         ip, {v1-v5}
+        push        {a1-a3,v1-v8,lr}
+        ldm         ip, {v1-v6}
         cmp         a1, #2
         bls         2f
         vpush       {d8-d13}
         sub         v5, v5, #10
-        mov         v6, #32
+        sub         v6, v6, #10
 1:
         vld2.32     {d0[0], d2[0]}, [a3]!
         vld2.32     {d4[0], d6[0]}, [a4]!
@@ -1119,7 +1117,7 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         add         a2, v1, a2, lsl #2
         vld1.8      {d24[0]}, [a3], v5
         add         ip, v3, ip, lsl #2
-        vld1.8      {d25[0]}, [a4], v5
+        vld1.8      {d25[0]}, [a4], v6
         add         v8, v2, v8, lsl #2
         vld1.32     {d16[0]}, [a2]
         add         lr, v4, lr, lsl #2
@@ -1139,7 +1137,7 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         add         a2, v1, a2, lsl #2
         vld1.8      {d24[2]}, [a3], v5
         add         ip, v3, ip, lsl #2
-        vld1.8      {d25[2]}, [a4], v5
+        vld1.8      {d25[2]}, [a4], v6
         add         v8, v2, v8, lsl #2
         vld1.32     {d16[1]}, [a2]
         add         lr, v4, lr, lsl #2
@@ -1156,7 +1154,7 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         add         a2, v1, a2, lsl #2
         vld1.8      {d24[4]}, [a3], v5
         add         ip, v3, ip, lsl #2
-        vld1.8      {d25[4]}, [a4], v5
+        vld1.8      {d25[4]}, [a4], v6
         add         v8, v2, v8, lsl #2
         vld1.32     {d17[0]}, [a2]
         add         lr, v4, lr, lsl #2
@@ -1173,7 +1171,7 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         add         a2, v1, a2, lsl #2
         vld1.8      {d24[6]}, [a3], v5
         add         ip, v3, ip, lsl #2
-        vld1.8      {d25[6]}, [a4], v5
+        vld1.8      {d25[6]}, [a4], v6
         add         v8, v2, v8, lsl #2
         vld1.32     {d17[1]}, [a2]
         add         lr, v4, lr, lsl #2
@@ -1200,16 +1198,16 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         vtst.16     d30, d25, d12
         vtst.16     d31, d25, d13
         veor        d26, d8, d9
-          ldr         lr, [sp, 6*8]
+          ldr         lr, [sp, 6*8 + 1*4]
         vmovl.s16   q4, d28
         vmovl.s16   q5, d29
           teq         lr, #1
         vmovl.s16   q14, d30
-        it ne
-        lslne       v1, lr, #1
+          it ne
+          lslne       v1, lr, #1
         vmovl.s16   q15, d31
-        it ne
-        rsbne       v2, v1, #32
+          it ne
+          rsbne       v2, v1, #32
         vbif        q0, q1, q4
         vbif        q2, q3, q14
         vbif        q1, q0, q5
@@ -1262,7 +1260,6 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         vmov        v8, s1
         vmov.u16    ip, d0[1]
         vmov.u16    lr, d0[3]
-        sub         v6, #8
         lsl         a2, #30
         lsl         v8, #30
         lsl         ip, #30
@@ -1274,9 +1271,12 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         orr         v7, a2, v7, lsr #8
         bhi         1b
 
+        mov         a1, #32
+        ldr         a3, [sp, #6*8]
         vpop        {d8-d13}
-        mov         a1, v7, lsr v6
-        pop         {a2,v1-v8,pc}
+        sub         a1, a1, a3, lsl #1
+        mov         a1, v7, lsr a1
+        pop         {a2-a4,v1-v8,pc}
 10:
         @ Merge results into result word, with duplicates
         vmul.i16    d0, d1
@@ -1284,13 +1284,12 @@ function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         vmov        v8, s1
         vmov.u16    ip, d0[1]
         vmov.u16    lr, d0[3]
-        sub         v6, v6, v1, lsl #2
         lsl         a2, v2
         subs        a1, #4
         lsl         v8, v2
         lsl         ip, v2
         lsl         lr, v2
-        ldr         v2, [sp, #6*8 + 10*4 + 1*4]
+        ldr         v2, [sp, #6*8 + 12*4 + 1*4]
 T       lsr         a2, v1
 T       orr         a2, ip, a2
 A       orr         a2, ip, a2, lsr v1
@@ -1302,19 +1301,24 @@ A       orr         v8, lr, v8, lsr v1
 T       lsr         a2, ip
 T       orr         a2, v8, a2
 A       orr         a2, v8, a2, lsr ip
-        ldr         v1, [sp, #6*8 + 10*4]
+        ldr         v1, [sp, #6*8 + 12*4]
 T       lsr         v7, lr
 T       orr         v7, a2, v7
 A       orr         v7, a2, v7, lsr lr
         bhi         1b
 
+        mov         a1, #32
+        ldrd        a3, a4, [sp, #6*8]
         vpop        {d8-d13}
-        mov         a1, v7, lsr v6
-        pop         {a2,v1-v8,pc}
+        mls         a1, a3, a4, a1
+        mls         a1, a3, a4, a1
+        mov         a1, v7, lsr a1
+        pop         {a2-a4,v1-v8,pc}
 
 
 2:
         sub         v5, v5, #10
+        sub         v6, v6, #10
         vmov.u8     d16, #0
         blo         3f
         vld2.32     {d0[0], d1[0]}, [a3]!
@@ -1326,7 +1330,7 @@ A       orr         v7, a2, v7, lsr lr
         add         a2, v1, a2, lsl #2
         vld1.8      {d16[0]}, [a3], v5
         add         ip, v3, ip, lsl #2
-        vld1.8      {d16[4]}, [a4], v5
+        vld1.8      {d16[4]}, [a4], v6
         add         v8, v2, v8, lsl #2
         vld1.32     {d4[0]}, [a2]
         add         lr, v4, lr, lsl #2
@@ -1347,7 +1351,7 @@ A       orr         v7, a2, v7, lsr lr
         add         a2, v1, a2, lsl #2
         vld1.8      {d16[2]}, [a3], v5
         add         ip, v3, ip, lsl #2
-        vld1.8      {d16[6]}, [a4], v5
+        vld1.8      {d16[6]}, [a4], v6
         add         v8, v2, v8, lsl #2
         vld1.32     {d4[1]}, [a2]
         add         lr, v4, lr, lsl #2
@@ -1371,12 +1375,12 @@ A       orr         v7, a2, v7, lsr lr
         vtst.16     d22, d16, d18
         vadd.i16    d30, d16, d17
         vswp        d2, d3
-        ldr         lr, [sp]
+        ldr         lr, [sp, #1*4]
         vmovl.s16   q10, d20
-        teq         lr, #1
+          teq         lr, #1
         vmovl.s16   q11, d22
-        it ne
-        lslne       v1, lr, #1
+          it ne
+          lslne       v1, lr, #1
         vbif        d0, d1, d20
         vbif        d4, d6, d20
         vbif        d3, d2, d21
@@ -1402,8 +1406,8 @@ A       orr         v7, a2, v7, lsr lr
         vshrn.i32   d7, q11, #8
         vmovn.i32   d3, q10
         vand        q0, q3, q1
-        it ne
-        rsbne       v2, v1, #32
+          it ne
+          rsbne       v2, v1, #32
         vrev16.8    q3, q3
         vand        q0, q3
         vsra.u64    d30, #32
@@ -1422,7 +1426,7 @@ A       orr         v7, a2, v7, lsr lr
         vmov.u16    a2, d0[0]
         it eq
         orreq       a1, a2, a1, lsl #2
-        pop         {a2,v1-v8,pc}
+        pop         {a2-a4,v1-v8,pc}
 10:
         @ Construct result word, with duplicates
         cmp         a1, #2
@@ -1437,7 +1441,7 @@ T       itt eq
 T       lsleq       a1, v1
 T       orreq       a1, a2, a1
 A       orreq       a1, a2, a1, lsl v1
-        pop         {a2,v1-v8,pc}
+        pop         {a2-a4,v1-v8,pc}
 endfunc
 
 
@@ -1445,9 +1449,9 @@ endfunc
 #else // non-NEON version
 
 
-/* uint32_t ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, const MvField *curr, const MvField *neigh,
+/* uint32_t ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, const HEVCRpiMvField *curr, const HEVCRpiMvField *neigh,
  *                                            const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
- *                                            int in_inc)
+ *                                            int in_inc0, in_inc1)
  */
 function ff_hevc_rpi_deblocking_boundary_strengths_neon, export=1
         add         ip, sp, #4*4
@@ -1497,13 +1501,12 @@ A       orr         v7, v5, v7, lsr #2
 T       orr         v7, v5, v7
         bhi         11b
 
-        ldr         ip, [sp, #16*4]
-        ldr         v5, [sp, #17*4]
+        ldrd        v3, v4, [sp, #16*4]
         ldr         a2, [sp]
-        subs        a1, a1, #1
-        add         a3, a3, ip
         add         ip, sp, #16*4
-        add         a4, a4, v5
+        subs        a1, a1, #1
+        add         a3, a3, v3
+        add         a4, a4, v4
         bhi         1b
         mov         a1, v7, lsr v6
         pop         {a2-a4,v1-v8,pc}
