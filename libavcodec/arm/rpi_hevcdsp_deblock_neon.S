@@ -1091,7 +1091,10 @@ endfunc
 .endm
 
 
-#if 1 // NEON version
+@ The NEON version is faster under ideal circumstances (i.e. everything in L1)
+@ But in real world testing it is ~20% slower, presumably due to code size
+
+#if 0 // NEON version
 
 /* uint32_t ff_hevc_rpi_deblocking_boundary_strengths_neon(int pus, int dup, const HEVCRpiMvField *curr, const HEVCRpiMvField *neigh,
  *                                            const int *curr_rpl0, const int *curr_rpl1, const int *neigh_rpl0, const int *neigh_rpl1,
