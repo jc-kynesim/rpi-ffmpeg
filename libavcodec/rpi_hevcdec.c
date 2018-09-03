@@ -3185,16 +3185,17 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
                                 const unsigned int idx)
 {
     const unsigned int ctb_mask = ~(~0U << s->ps.sps->log2_ctb_size);
-    int xb_pu             = (x0 & ctb_mask) >> LOG2_MIN_PU_SIZE;
-    int yb_pu             = (y0 & ctb_mask) >> LOG2_MIN_PU_SIZE;
+    const unsigned int xb_pu = (x0 & ctb_mask) >> LOG2_MIN_PU_SIZE;
+    const unsigned int yb_pu = (y0 & ctb_mask) >> LOG2_MIN_PU_SIZE;
 
     // Up does not cross boundries so as we always scan 1 slice-tile-line in an
     // lc we can just keep 1 CTB lR stashes
+    // Left is reset to DC @ Start of Line/Tile/Slice in fill_job
     const unsigned int cand_up   = yb_pu == 0 ? INTRA_DC : lc->ipm_up[xb_pu];
-    const unsigned int cand_left = ((lc->ctb_avail & AVAIL_L) == 0  && xb_pu == 0) ? INTRA_DC : lc->ipm_left[yb_pu];
+    const unsigned int cand_left = lc->ipm_left[yb_pu];
 
-    int intra_pred_mode;
-    int a, b, c;
+    unsigned int intra_pred_mode;
+    unsigned int a, b, c;
 
     if (cand_left == cand_up) {
         if (cand_left < 2) {
@@ -3237,7 +3238,6 @@ static int luma_intra_pred_mode(const HEVCRpiContext * const s, HEVCRpiLocalCont
     }
 
     /* write the intra prediction units into the mv array */
-
     set_ipm(s, lc, x0, y0, log2_pu_size, intra_pred_mode);
     return intra_pred_mode;
 }
@@ -4325,17 +4325,19 @@ static int gen_entry_points(HEVCRpiContext * const s, const H2645NAL * const nal
 
 static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, unsigned int max_blocks)
 {
-    const int ctb_size = (1 << s->ps.sps->log2_ctb_size);
+    const unsigned int log2_ctb_size = s->ps.sps->log2_ctb_size;
+    const unsigned int ctb_size = (1 << log2_ctb_size);
     HEVCRpiJob * const jb = lc->jb0;
     int more_data = 1;
-    int ctb_addr_ts = lc->ts;
+    unsigned int ctb_addr_ts = lc->ts;
+    unsigned int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
+    unsigned int x_ctb = (ctb_addr_rs % s->ps.sps->ctb_width) << log2_ctb_size;
+    const unsigned int y_ctb = (ctb_addr_rs / s->ps.sps->ctb_width) << log2_ctb_size;
 
     lc->unit_done = 0;
+
     while (more_data && ctb_addr_ts < s->ps.sps->ctb_size)
     {
-        const int ctb_addr_rs = s->ps.pps->ctb_addr_ts_to_rs[ctb_addr_ts];
-        const int x_ctb = (ctb_addr_rs % s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
-        const int y_ctb = (ctb_addr_rs / s->ps.sps->ctb_width) << s->ps.sps->log2_ctb_size;
         int q_full;
         const unsigned int ctb_flags = s->ps.pps->ctb_ts_flags[ctb_addr_ts];
 
@@ -4343,7 +4345,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
 
         ff_hevc_rpi_cabac_init(s, lc, ctb_flags);
 
-        hls_sao_param(s, lc, x_ctb >> s->ps.sps->log2_ctb_size, y_ctb >> s->ps.sps->log2_ctb_size);
+        hls_sao_param(s, lc, x_ctb >> log2_ctb_size, y_ctb >> log2_ctb_size);
 
         s->deblock[ctb_addr_rs].beta_offset = s->sh.beta_offset;
         s->deblock[ctb_addr_rs].tc_offset   = s->sh.tc_offset;
@@ -4351,9 +4353,12 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
 
         // Zap stashes if navail
         if ((lc->ctb_avail & AVAIL_U) == 0)
-            zap_cabac_stash(s->cabac_stash_up + (x_ctb >> 3), s->ps.sps->log2_ctb_size - 3);
+            zap_cabac_stash(s->cabac_stash_up + (x_ctb >> 3), log2_ctb_size - 3);
         if ((lc->ctb_avail & AVAIL_L) == 0)
-            zap_cabac_stash(s->cabac_stash_left + (y_ctb >> 3), s->ps.sps->log2_ctb_size - 3);
+        {
+            memset(lc->ipm_left, INTRA_DC, IPM_TAB_SIZE);
+            zap_cabac_stash(s->cabac_stash_left + (y_ctb >> 3), log2_ctb_size - 3);
+        }
 #if MVF_STASH_WIDTH > 64
         // Restore left mvf stash at start of tile if not at start of line
         if ((ctb_flags & CTB_TS_FLAGS_SOTL) != 0 && x_ctb != 0 && !s->is_irap)
@@ -4375,7 +4380,7 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
         lc->tu.cu_chroma_qp_offset_wanted = 0;
 
         // Decode
-        more_data = hls_coding_quadtree(s, lc, x_ctb, y_ctb, s->ps.sps->log2_ctb_size, 0);
+        more_data = hls_coding_quadtree(s, lc, x_ctb, y_ctb, log2_ctb_size, 0);
 
         if (ff_hevc_rpi_cabac_overflow(lc))
         {
@@ -4402,8 +4407,8 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
         // --- Post CTB processing
 
         // Stash rpl top/left for deblock that needs to remember such things cross-slice
-        s->rpl_up[x_ctb >> s->ps.sps->log2_ctb_size] = s->refPicList;
-        s->rpl_left[y_ctb >> s->ps.sps->log2_ctb_size] = s->refPicList;
+        s->rpl_up[x_ctb >> log2_ctb_size] = s->refPicList;
+        s->rpl_left[y_ctb >> log2_ctb_size] = s->refPicList;
 
         if (!s->is_irap)
         {
@@ -4468,6 +4473,8 @@ static int fill_job(HEVCRpiContext * const s, HEVCRpiLocalContext *const lc, uns
 
         // Inc TS to next.
         ctb_addr_ts++;
+        ctb_addr_rs++;
+        x_ctb += ctb_size;
 
         if (q_full)
         {
@@ -4530,6 +4537,7 @@ static void movlc(HEVCRpiLocalContext *const dst_lc, HEVCRpiLocalContext *const 
     if (is_dep)
     {
         dst_lc->qPy_pred = src_lc->qPy_pred;
+        memcpy(dst_lc->ipm_left, src_lc->ipm_left, sizeof(src_lc->ipm_left));
         memcpy(dst_lc->cabac_state, src_lc->cabac_state, sizeof(src_lc->cabac_state));
         memcpy(dst_lc->stat_coeff, src_lc->stat_coeff, sizeof(src_lc->stat_coeff));
     }
@@ -4682,7 +4690,7 @@ static int rpi_run_one_line(HEVCRpiContext *const s, HEVCRpiLocalContext * const
     }
     else
     {
-        movlc(s->HEVClcList[0], lc, s->ps.pps->dependent_slice_segments_enabled_flag);
+        movlc(s->HEVClcList[0], lc, s->ps.pps->dependent_slice_segments_enabled_flag);  // * & not EoT
 #if MVF_STASH_WIDTH > 64
         // Horrid calculations to work out what we want but luckily this should almost never execute
         // **** Move to movlc
