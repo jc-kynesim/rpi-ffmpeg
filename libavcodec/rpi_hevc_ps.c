@@ -935,7 +935,7 @@ static int map_pixel_format(HEVCRpiSPS * const sps)
 static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const gb, unsigned int * const sps_id,
                       const int apply_defdispwin, AVBufferRef * const * const vps_list, AVCodecContext * const avctx)
 {
-    HEVCWindow *ow;
+    HEVCRpiWindow *ow;
     int ret = 0;
     int log2_diff_max_min_transform_block_size;
     int bit_depth_chroma, start, vui_present, sublayer_ordering_info;
@@ -1025,7 +1025,6 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
                sps->bit_depth, bit_depth_chroma);
         return AVERROR_INVALIDDATA;
     }
-    sps->bit_depth_chroma = bit_depth_chroma;
 
     ret = map_pixel_format(sps);
     if (ret < 0)
@@ -1218,11 +1217,7 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
                    "extended_precision_processing_flag not yet implemented\n");
 
             sps->intra_smoothing_disabled_flag       = get_bits1(gb);
-            sps->high_precision_offsets_enabled_flag  = get_bits1(gb);
-            if (sps->high_precision_offsets_enabled_flag)
-                av_log(avctx, AV_LOG_WARNING,
-                   "high_precision_offsets_enabled_flag not fully implemented\n");
-
+            sps->high_precision_offsets_enabled_flag = get_bits1(gb);
             sps->persistent_rice_adaptation_enabled_flag = get_bits1(gb);
 
             cabac_bypass_alignment_enabled_flag  = get_bits1(gb);
@@ -1269,6 +1264,7 @@ static int ff_hevc_rpi_parse_sps(HEVCRpiSPS * const sps, GetBitContext * const g
     sps->tb_mask       = (1 << (sps->log2_ctb_size - sps->log2_min_tb_size)) - 1;
 
     sps->qp_bd_offset = 6 * (sps->bit_depth - 8);
+    sps->wp_offset_half_range = (1U << (sps->high_precision_offsets_enabled_flag ? sps->bit_depth - 1 : 7));
 
     if (av_mod_uintp2(sps->width, sps->log2_min_cb_size) ||
         av_mod_uintp2(sps->height, sps->log2_min_cb_size)) {

@@ -1103,130 +1103,121 @@ static void default_pred_weight_table(HEVCRpiContext * const s)
       s->sh.luma_weight_l0[i] = 1;
       s->sh.luma_offset_l0[i] = 0;
       s->sh.chroma_weight_l0[i][0] = 1;
-      s->sh.chroma_offset_l0[i][0] = 0;
       s->sh.chroma_weight_l0[i][1] = 1;
+      s->sh.chroma_offset_l0[i][0] = 0;
       s->sh.chroma_offset_l0[i][1] = 0;
   }
   for (i = 0; i < s->sh.nb_refs[L1]; i++) {
       s->sh.luma_weight_l1[i] = 1;
       s->sh.luma_offset_l1[i] = 0;
       s->sh.chroma_weight_l1[i][0] = 1;
-      s->sh.chroma_offset_l1[i][0] = 0;
       s->sh.chroma_weight_l1[i][1] = 1;
+      s->sh.chroma_offset_l1[i][0] = 0;
       s->sh.chroma_offset_l1[i][1] = 0;
   }
 }
 
-static int pred_weight_table(HEVCRpiContext *s, GetBitContext *gb)
+static int get_weights(HEVCRpiContext * const s, GetBitContext * const gb,
+                       const unsigned int refs,
+                       int16_t * luma_weight,   int16_t * luma_offset,
+                       int16_t * chroma_weight, int16_t * chroma_offset)
 {
-    int i = 0;
-    int j = 0;
-    uint8_t luma_weight_l0_flag[16];
-    uint8_t chroma_weight_l0_flag[16];
-    uint8_t luma_weight_l1_flag[16];
-    uint8_t chroma_weight_l1_flag[16];
-    unsigned int luma_log2_weight_denom;
+    unsigned int luma_flags;
+    unsigned int chroma_flags;
+    unsigned int i;
+    const unsigned int wp_offset_bd_shift = s->ps.sps->high_precision_offsets_enabled_flag ? 0 : (s->ps.sps->bit_depth - 8);
+    const int wp_offset_half_range = s->ps.sps->wp_offset_half_range;
+    const unsigned int luma_weight_base = 1 << s->sh.luma_log2_weight_denom;
+    const unsigned int chroma_weight_base = 1 << s->sh.chroma_log2_weight_denom;
 
-    luma_log2_weight_denom = get_ue_golomb_long(gb);
-    if (luma_log2_weight_denom > 7) {
-        av_log(s->avctx, AV_LOG_ERROR, "luma_log2_weight_denom %d is invalid\n", luma_log2_weight_denom);
-        return AVERROR_INVALIDDATA;
-    }
-    s->sh.luma_log2_weight_denom = luma_log2_weight_denom;
-    if (ctx_cfmt(s) != 0) {
-        const unsigned int chroma_log2_weight_denom = luma_log2_weight_denom + get_se_golomb(gb);
-        if (chroma_log2_weight_denom > 7)
+    if (refs == 0)
+        return 0;
+
+    luma_flags = get_bits(gb, refs);
+    chroma_flags = ctx_cfmt(s) == 0 ? 0 : get_bits(gb, refs);
+    i = 1 << (refs - 1);
+
+    do
+    {
+        if ((luma_flags & i) != 0)
         {
-            av_log(s->avctx, AV_LOG_ERROR, "chroma_log2_weight_denom %d is invalid\n", chroma_log2_weight_denom);
-            return AVERROR_INVALIDDATA;
+            const int delta_weight = get_se_golomb(gb);
+            const int offset = get_se_golomb(gb);
+            if (delta_weight < -128 || delta_weight > 127 ||
+                offset < -wp_offset_half_range || offset >= wp_offset_half_range)
+            {
+                return AVERROR_INVALIDDATA;
+            }
+            *luma_weight++ = luma_weight_base + delta_weight;
+            *luma_offset++ = offset << wp_offset_bd_shift;
         }
-        s->sh.chroma_log2_weight_denom = chroma_log2_weight_denom;
-    }
+        else
+        {
+            *luma_weight++ = luma_weight_base;
+            *luma_offset++ = 0;
+        }
 
-    for (i = 0; i < s->sh.nb_refs[L0]; i++) {
-        luma_weight_l0_flag[i] = get_bits1(gb);
-        if (!luma_weight_l0_flag[i]) {
-            s->sh.luma_weight_l0[i] = 1 << s->sh.luma_log2_weight_denom;
-            s->sh.luma_offset_l0[i] = 0;
-        }
-    }
-    if (ctx_cfmt(s) != 0) {
-        for (i = 0; i < s->sh.nb_refs[L0]; i++)
-            chroma_weight_l0_flag[i] = get_bits1(gb);
-    } else {
-        for (i = 0; i < s->sh.nb_refs[L0]; i++)
-            chroma_weight_l0_flag[i] = 0;
-    }
-    for (i = 0; i < s->sh.nb_refs[L0]; i++) {
-        if (luma_weight_l0_flag[i]) {
-            int delta_luma_weight_l0 = get_se_golomb(gb);
-            s->sh.luma_weight_l0[i] = (1 << s->sh.luma_log2_weight_denom) + delta_luma_weight_l0;
-            s->sh.luma_offset_l0[i] = get_se_golomb(gb);
-        }
-        if (chroma_weight_l0_flag[i]) {
-            for (j = 0; j < 2; j++) {
-                int delta_chroma_weight_l0 = get_se_golomb(gb);
-                int delta_chroma_offset_l0 = get_se_golomb(gb);
+        if ((chroma_flags & i) != 0)
+        {
+            unsigned int j;
+            for (j = 0; j != 2; ++j)
+            {
+                const int delta_weight = get_se_golomb(gb);
+                const int delta_offset = get_se_golomb(gb);
+                const int weight = chroma_weight_base + delta_weight;
 
-                if (   (int8_t)delta_chroma_weight_l0 != delta_chroma_weight_l0
-                    || delta_chroma_offset_l0 < -(1<<17) || delta_chroma_offset_l0 > (1<<17)) {
+                if (delta_weight < -128 || delta_weight > 127 ||
+                    delta_offset < -4 * wp_offset_half_range || delta_offset >= 4 * wp_offset_half_range)
+                {
                     return AVERROR_INVALIDDATA;
                 }
 
-                s->sh.chroma_weight_l0[i][j] = (1 << s->sh.chroma_log2_weight_denom) + delta_chroma_weight_l0;
-                s->sh.chroma_offset_l0[i][j] = av_clip((delta_chroma_offset_l0 - ((128 * s->sh.chroma_weight_l0[i][j])
-                                                                                    >> s->sh.chroma_log2_weight_denom) + 128), -128, 127);
-            }
-        } else {
-            s->sh.chroma_weight_l0[i][0] = 1 << s->sh.chroma_log2_weight_denom;
-            s->sh.chroma_offset_l0[i][0] = 0;
-            s->sh.chroma_weight_l0[i][1] = 1 << s->sh.chroma_log2_weight_denom;
-            s->sh.chroma_offset_l0[i][1] = 0;
-        }
-    }
-    if (s->sh.slice_type == HEVC_SLICE_B) {
-        for (i = 0; i < s->sh.nb_refs[L1]; i++) {
-            luma_weight_l1_flag[i] = get_bits1(gb);
-            if (!luma_weight_l1_flag[i]) {
-                s->sh.luma_weight_l1[i] = 1 << s->sh.luma_log2_weight_denom;
-                s->sh.luma_offset_l1[i] = 0;
+                *chroma_weight++ = weight;
+                *chroma_offset++ = av_clip(
+                    wp_offset_half_range + delta_offset - ((wp_offset_half_range * weight) >> s->sh.chroma_log2_weight_denom),
+                    -wp_offset_half_range, wp_offset_half_range - 1) << wp_offset_bd_shift;
             }
         }
-        if (ctx_cfmt(s) != 0) {
-            for (i = 0; i < s->sh.nb_refs[L1]; i++)
-                chroma_weight_l1_flag[i] = get_bits1(gb);
-        } else {
-            for (i = 0; i < s->sh.nb_refs[L1]; i++)
-                chroma_weight_l1_flag[i] = 0;
+        else
+        {
+            *chroma_weight++ = chroma_weight_base;
+            *chroma_weight++ = chroma_weight_base;
+            *chroma_offset++ = 0;
+            *chroma_offset++ = 0;
         }
-        for (i = 0; i < s->sh.nb_refs[L1]; i++) {
-            if (luma_weight_l1_flag[i]) {
-                int delta_luma_weight_l1 = get_se_golomb(gb);
-                s->sh.luma_weight_l1[i] = (1 << s->sh.luma_log2_weight_denom) + delta_luma_weight_l1;
-                s->sh.luma_offset_l1[i] = get_se_golomb(gb);
-            }
-            if (chroma_weight_l1_flag[i]) {
-                for (j = 0; j < 2; j++) {
-                    int delta_chroma_weight_l1 = get_se_golomb(gb);
-                    int delta_chroma_offset_l1 = get_se_golomb(gb);
+    } while ((i >>= 1) != 0);
 
-                    if (   (int8_t)delta_chroma_weight_l1 != delta_chroma_weight_l1
-                        || delta_chroma_offset_l1 < -(1<<17) || delta_chroma_offset_l1 > (1<<17)) {
-                        return AVERROR_INVALIDDATA;
-                    }
+    return 0;
+}
 
-                    s->sh.chroma_weight_l1[i][j] = (1 << s->sh.chroma_log2_weight_denom) + delta_chroma_weight_l1;
-                    s->sh.chroma_offset_l1[i][j] = av_clip((delta_chroma_offset_l1 - ((128 * s->sh.chroma_weight_l1[i][j])
-                                                                                        >> s->sh.chroma_log2_weight_denom) + 128), -128, 127);
-                }
-            } else {
-                s->sh.chroma_weight_l1[i][0] = 1 << s->sh.chroma_log2_weight_denom;
-                s->sh.chroma_offset_l1[i][0] = 0;
-                s->sh.chroma_weight_l1[i][1] = 1 << s->sh.chroma_log2_weight_denom;
-                s->sh.chroma_offset_l1[i][1] = 0;
-            }
-        }
+static int pred_weight_table(HEVCRpiContext *s, GetBitContext *gb)
+{
+    int err;
+    const unsigned int luma_log2_weight_denom = get_ue_golomb_long(gb);
+    const unsigned int chroma_log2_weight_denom = (ctx_cfmt(s) == 0) ? 0 : luma_log2_weight_denom + get_se_golomb(gb);
+
+    if (luma_log2_weight_denom > 7 ||
+        chroma_log2_weight_denom > 7)
+    {
+        av_log(s->avctx, AV_LOG_ERROR, "Invalid prediction weight denom: luma=%d, chroma=%d\n",
+               luma_log2_weight_denom, chroma_log2_weight_denom);
+        return AVERROR_INVALIDDATA;
     }
+
+    s->sh.luma_log2_weight_denom = luma_log2_weight_denom;
+    s->sh.chroma_log2_weight_denom = chroma_log2_weight_denom;
+
+    if ((err = get_weights(s, gb, s->sh.nb_refs[L0],
+                s->sh.luma_weight_l0,      s->sh.luma_offset_l0,
+                s->sh.chroma_weight_l0[0], s->sh.chroma_offset_l0[0])) != 0 ||
+        (err = get_weights(s, gb, s->sh.nb_refs[L1],
+                s->sh.luma_weight_l1,      s->sh.luma_offset_l1,
+                s->sh.chroma_weight_l1[0], s->sh.chroma_offset_l1[0])) != 0)
+    {
+        av_log(s->avctx, AV_LOG_ERROR, "Invalid prediction weight or offset\n");
+        return err;
+    }
+
     return 0;
 }
 
@@ -1292,7 +1283,7 @@ static void export_stream_params(AVCodecContext *avctx, const HEVCRpiParamSets *
                                  const HEVCRpiSPS *sps)
 {
     const HEVCRpiVPS *vps = (const HEVCRpiVPS*)ps->vps_list[sps->vps_id]->data;
-    const HEVCWindow *ow = &sps->output_window;
+    const HEVCRpiWindow *ow = &sps->output_window;
     unsigned int num = 0, den = 0;
 
     avctx->pix_fmt             = sps->pix_fmt;
@@ -1693,15 +1684,15 @@ static int hls_slice_header(HEVCRpiContext * const s)
             }
 
             if ((s->ps.pps->weighted_pred_flag   && sh->slice_type == HEVC_SLICE_P) ||
-                (s->ps.pps->weighted_bipred_flag && sh->slice_type == HEVC_SLICE_B)) {
-                int ret = pred_weight_table(s, gb);
-                if (ret < 0)
+                (s->ps.pps->weighted_bipred_flag && sh->slice_type == HEVC_SLICE_B))
+            {
+                if ((ret = pred_weight_table(s, gb)) != 0)
                     return ret;
             }
             else
             {
-              // Give us unit weights
-              default_pred_weight_table(s);
+                // Give us unit weights
+                default_pred_weight_table(s);
             }
 
             sh->max_num_merge_cand = 5 - get_ue_golomb_long(gb);
@@ -2521,12 +2512,6 @@ static void rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
 #define get_mc_address_u(f) get_vc_address_u(f)
 #endif
 
-static inline int offset_depth_adj(const HEVCRpiContext *const s, const int wt)
-{
-    return s->ps.sps->high_precision_offsets_enabled_flag ? wt :
-           wt << (s->ps.sps->bit_depth - 8);
-}
-
 static void
 rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
            const int x0, const int y0,
@@ -2543,7 +2528,7 @@ rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
     const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
     const qpu_mc_src_addr_t src_vc_address_y = get_mc_address_y(src_frame);
     qpu_mc_dst_addr_t dst_addr = get_mc_address_y(s->frame) + y_off;
-    const uint32_t wo = PACK2(offset_depth_adj(s, weight_offset) * 2 + 1, weight_mul);
+    const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
     HEVCRpiInterPredEnv * const ipe = &jb->luma_ip;
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame);
 
@@ -2712,7 +2697,7 @@ rpi_pred_y_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const unsigned int ref_idx0 = mv_field->ref_idx[0];
     const unsigned int ref_idx1 = mv_field->ref_idx[1];
     const uint32_t wt_offset =
-        offset_depth_adj(s, s->sh.luma_offset_l0[ref_idx0] + s->sh.luma_offset_l1[ref_idx1]) + 1;
+        s->sh.luma_offset_l0[ref_idx0] + s->sh.luma_offset_l1[ref_idx1] + 1;
     const uint32_t wo1 = PACK2(wt_offset, s->sh.luma_weight_l0[ref_idx0]);
     const uint32_t wo2 = PACK2(wt_offset, s->sh.luma_weight_l1[ref_idx1]);
 
@@ -2840,8 +2825,8 @@ rpi_pred_c(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const qpu_mc_src_addr_t src_base_u = get_mc_address_u(src_frame);
     const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(MV_X(mv), 2 + hshift) << (1 - hshift)];
     const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(MV_Y(mv), 2 + vshift) << (1 - vshift)];
-    const uint32_t wo_u = PACK2(offset_depth_adj(s, c_offsets[0]) * 2 + 1, c_weights[0]);
-    const uint32_t wo_v = PACK2(offset_depth_adj(s, c_offsets[1]) * 2 + 1, c_weights[1]);
+    const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
+    const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
     qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     HEVCRpiInterPredEnv * const ipe = &jb->chroma_ip;
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame) + 1;
@@ -2906,8 +2891,8 @@ rpi_pred_c_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const int x2_c = x0_c + (MV_X(mv2) >> (2 + hshift)) - 1;
     const int y2_c = y0_c + (MV_Y(mv2) >> (2 + hshift)) - 1;
 
-    const uint32_t wo_u2 = PACK2(offset_depth_adj(s, c_offsets[0] + c_offsets2[0]) + 1, c_weights2[0]);
-    const uint32_t wo_v2 = PACK2(offset_depth_adj(s, c_offsets[1] + c_offsets2[1]) + 1, c_weights2[1]);
+    const uint32_t wo_u2 = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
+    const uint32_t wo_v2 = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
 
     const qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     const qpu_mc_src_addr_t src1_base = get_mc_address_u(src_frame);

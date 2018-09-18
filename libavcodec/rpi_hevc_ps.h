@@ -112,26 +112,26 @@ typedef struct RpiSliceHeader {
     int8_t slice_qp;
 
     uint8_t luma_log2_weight_denom;
-    int16_t chroma_log2_weight_denom;
+    uint8_t chroma_log2_weight_denom;
 
-    int16_t luma_weight_l0[16];
-    int16_t chroma_weight_l0[16][2];
-    int16_t chroma_weight_l1[16][2];
-    int16_t luma_weight_l1[16];
-
+    int16_t luma_weight_l0[16];     // -128, +255
     int16_t luma_offset_l0[16];
+    int16_t chroma_weight_l0[16][2];
     int16_t chroma_offset_l0[16][2];
 
+    int16_t luma_weight_l1[16];
     int16_t luma_offset_l1[16];
+    int16_t chroma_weight_l1[16][2];
     int16_t chroma_offset_l1[16][2];
+
 } RpiSliceHeader;
 
-typedef struct HEVCWindow {
-    unsigned int left_offset;
-    unsigned int right_offset;
-    unsigned int top_offset;
-    unsigned int bottom_offset;
-} HEVCWindow;
+typedef struct HEVCRpiWindow {
+    uint16_t left_offset;
+    uint16_t right_offset;
+    uint16_t top_offset;
+    uint16_t bottom_offset;
+} HEVCRpiWindow;
 
 typedef struct VUI {
     AVRational sar;
@@ -156,7 +156,7 @@ typedef struct VUI {
     int frame_field_info_present_flag;
 
     int default_display_window_flag;
-    HEVCWindow def_disp_win;
+    HEVCRpiWindow def_disp_win;
 
     int vui_timing_info_present_flag;
     uint32_t vui_num_units_in_tick;
@@ -228,16 +228,19 @@ typedef struct ScalingList {
 
 typedef struct HEVCRpiSPS {
     unsigned vps_id;
-    int chroma_format_idc;
+    uint8_t chroma_format_idc;
     uint8_t separate_colour_plane_flag;
 
-    HEVCWindow output_window;
+    HEVCRpiWindow output_window;
 
-    HEVCWindow pic_conf_win;
+    HEVCRpiWindow pic_conf_win;
 
-    int bit_depth;
-    int bit_depth_chroma;
-    int pixel_shift;
+    uint16_t wp_offset_half_range;  // WpOffsetHalfRange
+
+    uint8_t bit_depth;
+
+//    int bit_depth_chroma;  // We only support lum_bit_depth = chroma_bit_depth
+    uint8_t pixel_shift;
     enum AVPixelFormat pix_fmt;
 
     unsigned int log2_max_poc_lsb;
