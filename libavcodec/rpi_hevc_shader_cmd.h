@@ -38,8 +38,8 @@ typedef struct qpu_mc_pred_c_b_s {
     uint16_t w;
     uint32_t coeffs_x1;
     uint32_t coeffs_y1;
-    uint32_t weight_u1;
-    uint32_t weight_v1;
+    int16_t weight_u1;
+    int16_t weight_v1;
     qpu_mc_src_t next_src2;
     uint32_t coeffs_x2;
     uint32_t coeffs_y2;
@@ -55,7 +55,6 @@ typedef struct qpu_mc_pred_c_s_s {
     uint32_t pic_ch;            // C Height (== Y Height / 2)
     uint32_t stride2;
     uint32_t stride1;
-    uint32_t wdenom;
     qpu_mc_src_t next_src2;
     uint32_t next_fn;
 } qpu_mc_pred_c_s_t;
@@ -97,7 +96,6 @@ typedef struct qpu_mc_pred_y_s_s {
     uint16_t pic_w;
     uint32_t stride2;
     uint32_t stride1;
-    uint32_t wdenom;
     uint32_t next_fn;
 } qpu_mc_pred_y_s_t;
 
@@ -121,6 +119,8 @@ typedef union qpu_mc_pred_cmd_u {
 
 #define QPU_MC_PRED_N_Y10       12
 #define QPU_MC_PRED_N_C10       12
+
+#define QPU_MC_DENOM            7
 
 #pragma pack(pop)
 

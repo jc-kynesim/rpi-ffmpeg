@@ -13,7 +13,6 @@ typedef struct shader_track_s
     uint32_t height;
     uint32_t stride2;
     uint32_t stride1;
-    uint32_t wdenom;
 } shader_track_t;
 
 static int wtoidx(const unsigned int w)

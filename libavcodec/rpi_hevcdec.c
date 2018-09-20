@@ -1097,21 +1097,22 @@ fail:
 static void default_pred_weight_table(HEVCRpiContext * const s)
 {
   unsigned int i;
+  const unsigned int wt = 1 << QPU_MC_DENOM;
   s->sh.luma_log2_weight_denom = 0;
   s->sh.chroma_log2_weight_denom = 0;
   for (i = 0; i < s->sh.nb_refs[L0]; i++) {
-      s->sh.luma_weight_l0[i] = 1;
+      s->sh.luma_weight_l0[i] = wt;
       s->sh.luma_offset_l0[i] = 0;
-      s->sh.chroma_weight_l0[i][0] = 1;
-      s->sh.chroma_weight_l0[i][1] = 1;
+      s->sh.chroma_weight_l0[i][0] = wt;
+      s->sh.chroma_weight_l0[i][1] = wt;
       s->sh.chroma_offset_l0[i][0] = 0;
       s->sh.chroma_offset_l0[i][1] = 0;
   }
   for (i = 0; i < s->sh.nb_refs[L1]; i++) {
-      s->sh.luma_weight_l1[i] = 1;
+      s->sh.luma_weight_l1[i] = wt;
       s->sh.luma_offset_l1[i] = 0;
-      s->sh.chroma_weight_l1[i][0] = 1;
-      s->sh.chroma_weight_l1[i][1] = 1;
+      s->sh.chroma_weight_l1[i][0] = wt;
+      s->sh.chroma_weight_l1[i][1] = wt;
       s->sh.chroma_offset_l1[i][0] = 0;
       s->sh.chroma_offset_l1[i][1] = 0;
   }
@@ -1127,8 +1128,10 @@ static int get_weights(HEVCRpiContext * const s, GetBitContext * const gb,
     unsigned int i;
     const unsigned int wp_offset_bd_shift = s->ps.sps->high_precision_offsets_enabled_flag ? 0 : (s->ps.sps->bit_depth - 8);
     const int wp_offset_half_range = s->ps.sps->wp_offset_half_range;
-    const unsigned int luma_weight_base = 1 << s->sh.luma_log2_weight_denom;
-    const unsigned int chroma_weight_base = 1 << s->sh.chroma_log2_weight_denom;
+    const unsigned int luma_weight_base    = 1 << QPU_MC_DENOM;
+    const unsigned int chroma_weight_base  = 1 << QPU_MC_DENOM;
+    const unsigned int luma_weight_shift   = (QPU_MC_DENOM - s->sh.luma_log2_weight_denom);
+    const unsigned int chroma_weight_shift = (QPU_MC_DENOM - s->sh.chroma_log2_weight_denom);
 
     if (refs == 0)
         return 0;
@@ -1148,7 +1151,7 @@ static int get_weights(HEVCRpiContext * const s, GetBitContext * const gb,
             {
                 return AVERROR_INVALIDDATA;
             }
-            *luma_weight++ = luma_weight_base + delta_weight;
+            *luma_weight++ = luma_weight_base + (delta_weight << luma_weight_shift);
             *luma_offset++ = offset << wp_offset_bd_shift;
         }
         else
@@ -1164,7 +1167,6 @@ static int get_weights(HEVCRpiContext * const s, GetBitContext * const gb,
             {
                 const int delta_weight = get_se_golomb(gb);
                 const int delta_offset = get_se_golomb(gb);
-                const int weight = chroma_weight_base + delta_weight;
 
                 if (delta_weight < -128 || delta_weight > 127 ||
                     delta_offset < -4 * wp_offset_half_range || delta_offset >= 4 * wp_offset_half_range)
@@ -1172,9 +1174,10 @@ static int get_weights(HEVCRpiContext * const s, GetBitContext * const gb,
                     return AVERROR_INVALIDDATA;
                 }
 
-                *chroma_weight++ = weight;
+                *chroma_weight++ = chroma_weight_base + (delta_weight << chroma_weight_shift);
                 *chroma_offset++ = av_clip(
-                    wp_offset_half_range + delta_offset - ((wp_offset_half_range * weight) >> s->sh.chroma_log2_weight_denom),
+                    wp_offset_half_range + delta_offset -
+                        ((wp_offset_half_range * ((1 << s->sh.chroma_log2_weight_denom) + delta_weight)) >> s->sh.chroma_log2_weight_denom),
                     -wp_offset_half_range, wp_offset_half_range - 1) << wp_offset_bd_shift;
             }
         }
@@ -2512,6 +2515,17 @@ static void rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
 #define get_mc_address_u(f) get_vc_address_u(f)
 #endif
 
+static inline uint32_t pack_wo_p(const int off, const int mul)
+{
+    return PACK2(off * 2 + 1, mul);
+}
+
+static inline uint32_t pack_wo_b(const int off0, const int off1, const int mul)
+{
+    return PACK2(off0 + off1 + 1, mul);
+}
+
+
 static void
 rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
            const int x0, const int y0,
@@ -2528,7 +2542,7 @@ rpi_pred_y(const HEVCRpiContext *const s, HEVCRpiJob * const jb,
     const uint32_t     my2_mx2_my_mx = (my_mx << 16) | my_mx;
     const qpu_mc_src_addr_t src_vc_address_y = get_mc_address_y(src_frame);
     qpu_mc_dst_addr_t dst_addr = get_mc_address_y(s->frame) + y_off;
-    const uint32_t wo = PACK2(weight_offset * 2 + 1, weight_mul);
+    const uint32_t wo = pack_wo_p(weight_offset, weight_mul);
     HEVCRpiInterPredEnv * const ipe = &jb->luma_ip;
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame);
 
@@ -2696,10 +2710,8 @@ rpi_pred_y_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const uint32_t     my2_mx2_my_mx = (my2_mx2 << 16) | my_mx;
     const unsigned int ref_idx0 = mv_field->ref_idx[0];
     const unsigned int ref_idx1 = mv_field->ref_idx[1];
-    const uint32_t wt_offset =
-        s->sh.luma_offset_l0[ref_idx0] + s->sh.luma_offset_l1[ref_idx1] + 1;
-    const uint32_t wo1 = PACK2(wt_offset, s->sh.luma_weight_l0[ref_idx0]);
-    const uint32_t wo2 = PACK2(wt_offset, s->sh.luma_weight_l1[ref_idx1]);
+    const uint32_t wo1 = pack_wo_b(s->sh.luma_offset_l0[ref_idx0], s->sh.luma_offset_l1[ref_idx1], s->sh.luma_weight_l0[ref_idx0]);
+    const uint32_t wo2 = pack_wo_b(s->sh.luma_offset_l0[ref_idx0], s->sh.luma_offset_l1[ref_idx1], s->sh.luma_weight_l1[ref_idx1]);
 
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame);
     qpu_mc_dst_addr_t dst = get_mc_address_y(s->frame) + y_off;
@@ -2825,8 +2837,8 @@ rpi_pred_c(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const qpu_mc_src_addr_t src_base_u = get_mc_address_u(src_frame);
     const uint32_t x_coeffs = rpi_filter_coefs[av_mod_uintp2(MV_X(mv), 2 + hshift) << (1 - hshift)];
     const uint32_t y_coeffs = rpi_filter_coefs[av_mod_uintp2(MV_Y(mv), 2 + vshift) << (1 - vshift)];
-    const uint32_t wo_u = PACK2(c_offsets[0] * 2 + 1, c_weights[0]);
-    const uint32_t wo_v = PACK2(c_offsets[1] * 2 + 1, c_weights[1]);
+    const uint32_t wo_u = pack_wo_p(c_offsets[0], c_weights[0]);
+    const uint32_t wo_v = pack_wo_p(c_offsets[1], c_weights[1]);
     qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     HEVCRpiInterPredEnv * const ipe = &jb->chroma_ip;
     const unsigned int xshl = av_rpi_sand_frame_xshl(s->frame) + 1;
@@ -2891,8 +2903,8 @@ rpi_pred_c_b(const HEVCRpiContext * const s, HEVCRpiJob * const jb,
     const int x2_c = x0_c + (MV_X(mv2) >> (2 + hshift)) - 1;
     const int y2_c = y0_c + (MV_Y(mv2) >> (2 + hshift)) - 1;
 
-    const uint32_t wo_u2 = PACK2(c_offsets[0] + c_offsets2[0] + 1, c_weights2[0]);
-    const uint32_t wo_v2 = PACK2(c_offsets[1] + c_offsets2[1] + 1, c_weights2[1]);
+    const uint32_t wo_u2 = pack_wo_b(c_offsets[0], c_offsets2[0], c_weights2[0]);
+    const uint32_t wo_v2 = pack_wo_b(c_offsets[1], c_offsets2[1], c_weights2[1]);
 
     const qpu_mc_dst_addr_t dst_base_u = get_mc_address_u(s->frame) + c_off;
     const qpu_mc_src_addr_t src1_base = get_mc_address_u(src_frame);
@@ -3717,7 +3729,6 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
         u->pic_ch = pic_height_c;
         u->stride2 = av_rpi_sand_frame_stride2(s->frame);
         u->stride1 = av_rpi_sand_frame_stride1(s->frame);
-        u->wdenom = s->sh.chroma_log2_weight_denom;
         cp->last_l0 = &u->next_src1;
 
         u->next_fn = 0;
@@ -3744,7 +3755,6 @@ static void rpi_begin(const HEVCRpiContext * const s, HEVCRpiJob * const jb, con
         y->pic_w = pic_width_y;
         y->stride2 = av_rpi_sand_frame_stride2(s->frame);
         y->stride1 = av_rpi_sand_frame_stride1(s->frame);
-        y->wdenom = s->sh.luma_log2_weight_denom;
         y->next_fn = 0;
         yp->last_l0 = &y->next_src1;
         yp->last_l1 = &y->next_src2;
