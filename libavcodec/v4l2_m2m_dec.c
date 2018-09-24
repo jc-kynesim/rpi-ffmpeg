@@ -256,6 +256,41 @@ static av_cold int v4l2_decode_close(AVCodecContext *avctx)
     return ff_v4l2_m2m_codec_end(avctx->priv_data);
 }
 
+static void v4l2_decode_flush(AVCodecContext *avctx)
+{
+    V4L2m2mPriv *priv = avctx->priv_data;
+    V4L2m2mContext* s = priv->context;
+    V4L2Context* output = &s->output;
+    V4L2Context* capture = &s->capture;
+    int ret, i;
+
+    ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", output->name, ret);
+
+    ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMON);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON %s error: %d\n", output->name, ret);
+
+    for (i = 0; i < output->num_buffers; i++) {
+        if (output->buffers[i].status == V4L2BUF_IN_DRIVER)
+            output->buffers[i].status = V4L2BUF_AVAILABLE;
+    }
+
+    struct v4l2_decoder_cmd cmd = {
+        .cmd = V4L2_DEC_CMD_START,
+        .flags = 0,
+    };
+
+    ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
+
+    s->draining = 0;
+    output->done = 0;
+    capture->done = 0;
+}
+
 #define OFFSET(x) offsetof(V4L2m2mPriv, x)
 #define FLAGS AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
 
@@ -292,6 +327,7 @@ static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
         .init           = v4l2_decode_init, \
         .receive_frame  = v4l2_receive_frame, \
         .close          = v4l2_decode_close, \
+        .flush          = v4l2_decode_flush, \
         .bsfs           = bsf_name, \
         .capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
         .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_CLEANUP, \
