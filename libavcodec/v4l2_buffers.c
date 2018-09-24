@@ -435,6 +435,7 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 
         frame->data[0] = (uint8_t *) v4l2_get_drm_frame(avbuf);
         frame->format = AV_PIX_FMT_DRM_PRIME;
+        frame->hw_frames_ctx = av_buffer_ref(avbuf->context->frames_ref);
     } else {
         /* 1. get references to the actual data */
         for (i = 0; i < avbuf->num_planes; i++) {
@@ -634,6 +635,27 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
     avbuf->buf.memory = V4L2_MEMORY_MMAP;
     avbuf->buf.type = ctx->type;
     avbuf->buf.index = index;
+
+    if (buf_to_m2mctx(avbuf)->output_drm) {
+        AVHWFramesContext *hwframes;
+
+        av_buffer_unref(&ctx->frames_ref);
+
+        ctx->frames_ref = av_hwframe_ctx_alloc(buf_to_m2mctx(avbuf)->device_ref);
+        if (!ctx->frames_ref) {
+            ret = AVERROR(ENOMEM);
+            return ret;
+        }
+
+        hwframes = (AVHWFramesContext*)ctx->frames_ref->data;
+        hwframes->format = AV_PIX_FMT_DRM_PRIME;
+        hwframes->sw_format = ctx->av_pix_fmt;
+        hwframes->width = ctx->width;
+        hwframes->height = ctx->height;
+        ret = av_hwframe_ctx_init(ctx->frames_ref);
+        if (ret < 0)
+            return ret;
+    }
 
     if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
         avbuf->buf.length = VIDEO_MAX_PLANES;
