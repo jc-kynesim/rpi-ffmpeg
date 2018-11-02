@@ -50,9 +50,6 @@ typedef int vc_image_t_size_check[(sizeof(VC_IMAGE_T) == 64) * 2 - 1];
 extern int mbox_open(void);
 extern void mbox_close(int file_desc);
 
-extern unsigned mbox_mem_lock(int file_desc, unsigned handle);
-extern unsigned mbox_mem_unlock(int file_desc, unsigned handle);
-
 int mbox_get_image_params(int fd, VC_IMAGE_T * img);
 
 #endif

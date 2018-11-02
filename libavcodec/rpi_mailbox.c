@@ -63,44 +63,6 @@ static int mbox_property(int file_desc, void *buf)
    return ret_val;
 }
 
-unsigned mbox_mem_lock(int file_desc, unsigned handle)
-{
-   int i=0;
-   unsigned p[32];
-   p[i++] = 0; // size
-   p[i++] = 0x00000000; // process request
-
-   p[i++] = 0x3000d; // (the tag id)
-   p[i++] = 4; // (size of the buffer)
-   p[i++] = 4; // (size of the data)
-   p[i++] = handle;
-
-   p[i++] = 0x00000000; // end tag
-   p[0] = i*sizeof *p; // actual size
-
-   mbox_property(file_desc, p);
-   return p[5];
-}
-
-unsigned mbox_mem_unlock(int file_desc, unsigned handle)
-{
-   int i=0;
-   unsigned p[32];
-   p[i++] = 0; // size
-   p[i++] = 0x00000000; // process request
-
-   p[i++] = 0x3000e; // (the tag id)
-   p[i++] = 4; // (size of the buffer)
-   p[i++] = 4; // (size of the data)
-   p[i++] = handle;
-
-   p[i++] = 0x00000000; // end tag
-   p[0] = i*sizeof *p; // actual size
-
-   mbox_property(file_desc, p);
-   return p[5];
-}
-
 #define GET_VCIMAGE_PARAMS 0x30044
 
 int mbox_get_image_params(int fd, VC_IMAGE_T * img)
