@@ -9,7 +9,14 @@ RPI_DEFINES="-D__VCCOREVER__=0x4000000 -mfpu=neon-vfpv4"
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
 
+USR_PREFIX=`pwd`/install
+LIB_PREFIX=$USR_PREFIX/lib/arm-linux-gnueabihf
+INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
+
 ./configure --enable-cross-compile\
+ --prefix=$USR_PREFIX\
+ --libdir=$LIB_PREFIX\
+ --incdir=$INC_PREFIX\
  --arch=armv6t2\
  --cpu=cortex-a7\
  --target-os=linux\
