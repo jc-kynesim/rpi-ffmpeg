@@ -87,8 +87,8 @@ typedef struct AV1RawSequenceHeader {
     uint8_t  seq_level_idx[AV1_MAX_OPERATING_POINTS];
     uint8_t  seq_tier[AV1_MAX_OPERATING_POINTS];
     uint8_t  decoder_model_present_for_this_op[AV1_MAX_OPERATING_POINTS];
-    uint8_t  decoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
-    uint8_t  encoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
+    uint32_t decoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
+    uint32_t encoder_buffer_delay[AV1_MAX_OPERATING_POINTS];
     uint8_t  low_delay_mode_flag[AV1_MAX_OPERATING_POINTS];
     uint8_t  initial_display_delay_present_for_this_op[AV1_MAX_OPERATING_POINTS];
     uint8_t  initial_display_delay_minus_1[AV1_MAX_OPERATING_POINTS];
@@ -399,7 +399,10 @@ typedef struct CodedBitstreamAV1Context {
     AV1RawSequenceHeader *sequence_header;
     AVBufferRef          *sequence_header_ref;
 
-    int seen_frame_header;
+    int     seen_frame_header;
+    AVBufferRef *frame_header_ref;
+    uint8_t     *frame_header;
+    size_t       frame_header_size;
 
     int temporal_id;
     int spatial_id;
