@@ -284,7 +284,7 @@ static int gpu_init(gpu_env_t ** const gpu) {
     }
 
     // And the VPU code
-    if ((rv = gpu_malloc_internal(&ge->code_gm_ptr, sizeof(struct GPU), VCSM_CACHE_TYPE_NONE, "ffmpeg vpu code")) != 0)
+    if ((rv = gpu_malloc_internal(&ge->code_gm_ptr, sizeof(struct GPU), VCSM_CACHE_TYPE_VC, "ffmpeg vpu code")) != 0)
         return rv;
     ptr = (volatile struct GPU*)ge->code_gm_ptr.arm;
 
@@ -366,7 +366,7 @@ static inline gpu_env_t * gpu_ptr(void)
 // Therefore safe to use without data cache flushing.
 int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
 {
-    return gpu_malloc_internal(p, numbytes, VCSM_CACHE_TYPE_HOST, "ffmpeg uncached");
+    return gpu_malloc_internal(p, numbytes, VCSM_CACHE_TYPE_NONE, "ffmpeg uncached");
 }
 
 // This allocates data that will be
