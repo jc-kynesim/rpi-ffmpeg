@@ -5,6 +5,7 @@
  * Copyright (C) 2012 - 2103 Mickael Raulet
  * Copyright (C) 2012 - 2013 Gildas Cocherel
  * Copyright (C) 2013 Vittorio Giovara
+ * Copyright (C) 2018 John Cox for Raspberry Pi (Trading)
  *
  * This file is part of FFmpeg.
  *

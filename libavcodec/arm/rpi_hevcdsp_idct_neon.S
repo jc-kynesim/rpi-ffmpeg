@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014 Seppo Tomperi <seppo.tomperi@vtt.fi>
+ * Copyright (C) 2018 John Cox, Ben Avison for Raspberry Pi (Trading)
  *
  * This file is part of FFmpeg.
  *

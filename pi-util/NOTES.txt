@@ -25,10 +25,10 @@ not helped by the requirement to downsample to 8-bit before display on a
 Pi.
 
 It has had co-processor offload added for inter-pred and large block
-residual transform.  Various parts have had optimised ARM NEON assembler
+residual transform.  Various parts have had optimized ARM NEON assembler
 added and the existing ARM asm sections have been profiled and
-re-optimised for A53. The main C code has been substantially reworked at
-its lower levels in an attempt to optimise it and minimise memory
+re-optimized for A53. The main C code has been substantially reworked at
+its lower levels in an attempt to optimize it and minimize memory
 bandwidth. To some extent code paths that deal with frame types that it
 doesn't support have been pruned.
 

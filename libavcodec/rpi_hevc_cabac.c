@@ -3,6 +3,8 @@
  *
  * Copyright (C) 2012 - 2013 Guillaume Martres
  * Copyright (C) 2012 - 2013 Gildas Cocherel
+ * Copyright (C) 2012 - 2013 Gildas Cocherel
+ * Copyright (C) 2018 John Cox, Ben Avison, Peter de Rivaz for Raspberry Pi (Trading)
  *
  * This file is part of FFmpeg.
  *

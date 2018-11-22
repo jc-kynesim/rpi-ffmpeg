@@ -2,6 +2,7 @@
  * HEVC video decoder
  *
  * Copyright (C) 2012 - 2013 Guillaume Martres
+ * Copyright (C) 2018 John Cox for Raspberry Pi (Trading)
  *
  * This file is part of FFmpeg.
  *
