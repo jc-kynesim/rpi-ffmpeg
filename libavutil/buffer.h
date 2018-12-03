@@ -268,6 +268,11 @@ AVBufferPool *av_buffer_pool_init2(int size, void *opaque,
                                    void (*pool_free)(void *opaque));
 
 /**
+ * Free all available buffers in a buffer pool.
+ */
+ void av_buffer_pool_flush(AVBufferPool *pool);
+
+/**
  * Mark the pool as being available for freeing. It will actually be freed only
  * once all the allocated buffers associated with the pool are released. Thus it
  * is safe to call this function while some of the allocated buffers are still
