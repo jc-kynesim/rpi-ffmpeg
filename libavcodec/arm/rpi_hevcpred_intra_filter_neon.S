@@ -492,7 +492,7 @@ function ff_hevc_rpi_intra_filter_16_neon_16, export=1
         vldm       r5,  {d20-d23}
         bgt        1f
         bge        4f
-        cmp        r5,  #8
+        cmp        r12,  #8
         bge        3f
         vdup.16    d21, d20[3]
 3:      vdup.16    d22, d21[3]
