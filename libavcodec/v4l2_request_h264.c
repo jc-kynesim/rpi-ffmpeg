@@ -116,7 +116,8 @@ static uint8_t get_dpb_index(struct v4l2_ctrl_h264_decode_params *decode, const 
         struct v4l2_h264_dpb_entry *entry = &decode->dpb[i];
         if ((entry->flags & V4L2_H264_DPB_ENTRY_FLAG_VALID) &&
             entry->reference_ts == timestamp)
-            return i;
+            // TODO: signal reference type, possible using top 2 bits
+            return i | ((ref->reference & 3) << 6);
     }
 
     return 0;
