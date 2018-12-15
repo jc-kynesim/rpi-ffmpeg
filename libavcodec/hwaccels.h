@@ -47,6 +47,7 @@ extern const AVHWAccel ff_mpeg2_d3d11va_hwaccel;
 extern const AVHWAccel ff_mpeg2_d3d11va2_hwaccel;
 extern const AVHWAccel ff_mpeg2_nvdec_hwaccel;
 extern const AVHWAccel ff_mpeg2_dxva2_hwaccel;
+extern const AVHWAccel ff_mpeg2_v4l2request_hwaccel;
 extern const AVHWAccel ff_mpeg2_vaapi_hwaccel;
 extern const AVHWAccel ff_mpeg2_vdpau_hwaccel;
 extern const AVHWAccel ff_mpeg2_videotoolbox_hwaccel;
