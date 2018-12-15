@@ -80,6 +80,8 @@ typedef struct AVCodecHWConfigInternal {
     HW_CONFIG_HWACCEL(0, 0, 1, D3D11VA_VLD,  NONE,         ff_ ## codec ## _d3d11va_hwaccel)
 #define HWACCEL_XVMC(codec) \
     HW_CONFIG_HWACCEL(0, 0, 1, XVMC,         NONE,         ff_ ## codec ## _xvmc_hwaccel)
+#define HWACCEL_V4L2REQUEST(codec) \
+    HW_CONFIG_HWACCEL(1, 0, 0, DRM_PRIME,    DRM,          ff_ ## codec ## _v4l2request_hwaccel)
 
 #define HW_CONFIG_ENCODER(device, frames, ad_hoc, format, device_type_) \
     &(const AVCodecHWConfigInternal) { \
