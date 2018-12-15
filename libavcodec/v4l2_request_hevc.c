@@ -26,6 +26,7 @@
 typedef struct V4L2RequestControlsHEVC {
     struct v4l2_ctrl_hevc_sps sps;
     struct v4l2_ctrl_hevc_pps pps;
+    struct v4l2_ctrl_hevc_scaling_matrix scaling_matrix;
     struct v4l2_ctrl_hevc_slice_params slice_params[MAX_SLICES];
     int first_slice;
     int num_slices; //TODO: this should be in control
@@ -295,6 +296,22 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
 
     fill_sps(&controls->sps, h);
 
+    if (sl) {
+        for (int i = 0; i < 6; i++) {
+            for (int j = 0; j < 16; j++)
+                controls->scaling_matrix.scaling_list_4x4[i][j] = sl->sl[0][i][j];
+            for (int j = 0; j < 64; j++) {
+                controls->scaling_matrix.scaling_list_8x8[i][j]   = sl->sl[1][i][j];
+                controls->scaling_matrix.scaling_list_16x16[i][j] = sl->sl[2][i][j];
+                if (i < 2)
+                    controls->scaling_matrix.scaling_list_32x32[i][j] = sl->sl[3][i * 3][j];
+            }
+            controls->scaling_matrix.scaling_list_dc_coef_16x16[i] = sl->sl_dc[0][i];
+            if (i < 2)
+                controls->scaling_matrix.scaling_list_dc_coef_32x32[i] = sl->sl_dc[1][i * 3];
+        }
+    }
+
     /* ISO/IEC 23008-2, ITU-T Rec. H.265: Picture parameter set */
     controls->pps = (struct v4l2_ctrl_hevc_pps) {
         .num_extra_slice_header_bits = pps->num_extra_slice_header_bits,
@@ -397,6 +414,11 @@ static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
             .id = V4L2_CID_MPEG_VIDEO_HEVC_PPS,
             .ptr = &controls->pps,
             .size = sizeof(controls->pps),
+        },
+        {
+            .id = V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX,
+            .ptr = &controls->scaling_matrix,
+            .size = sizeof(controls->scaling_matrix),
         },
         {
             .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS,
