@@ -138,6 +138,9 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
         .bit_size = 0,
         .data_bit_offset = get_bits_count(&h->HEVClc->gb),
 
+        /* ISO/IEC 23008-2, ITU-T Rec. H.265: General slice segment header */
+        .slice_segment_addr = sh->slice_segment_addr,
+
         /* ISO/IEC 23008-2, ITU-T Rec. H.265: NAL unit header */
         .nal_unit_type = h->nal_unit_type,
         .nuh_temporal_id_plus1 = h->temporal_id + 1,
