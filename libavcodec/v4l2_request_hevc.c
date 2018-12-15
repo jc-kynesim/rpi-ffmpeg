@@ -225,6 +225,15 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
     }
 
     v4l2_request_hevc_fill_pred_table(h, &slice_params->pred_weight_table);
+
+    slice_params->num_entry_point_offsets = sh->num_entry_point_offsets;
+    if (slice_params->num_entry_point_offsets > 256) {
+        slice_params->num_entry_point_offsets = 256;
+        av_log(NULL, AV_LOG_ERROR, "%s: Currently only 256 entry points are supported, but slice has %d entry points.\n", __func__, sh->num_entry_point_offsets);
+    }
+
+    for (i = 0; i < slice_params->num_entry_point_offsets; i++)
+        slice_params->entry_point_offset_minus1[i] = sh->entry_point_offset[i] - 1;
 }
 
 static void fill_sps(struct v4l2_ctrl_hevc_sps *ctrl, const HEVCContext *h)
