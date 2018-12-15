@@ -2925,6 +2925,8 @@ h264_dxva2_hwaccel_deps="dxva2"
 h264_dxva2_hwaccel_select="h264_decoder"
 h264_nvdec_hwaccel_deps="nvdec"
 h264_nvdec_hwaccel_select="h264_decoder"
+h264_v4l2request_hwaccel_deps="v4l2_request h264_v4l2_request"
+h264_v4l2request_hwaccel_select="h264_decoder"
 h264_vaapi_hwaccel_deps="vaapi"
 h264_vaapi_hwaccel_select="h264_decoder"
 h264_vdpau_hwaccel_deps="vdpau"
@@ -6569,6 +6571,7 @@ if enabled v4l2_m2m; then
 fi
 
 check_func_headers "linux/media.h linux/videodev2.h" v4l2_timeval_to_ns
+check_cc h264_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_H264_SLICE;"
 check_cc mpeg2_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_MPEG2_SLICE;"
 
 check_headers sys/videoio.h
