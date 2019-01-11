@@ -777,16 +777,18 @@ unsigned ff_dxva2_get_surface_index(const AVCodecContext *avctx,
 #if CONFIG_D3D11VA
     if (avctx->pix_fmt == AV_PIX_FMT_D3D11)
         return (intptr_t)frame->data[1];
-    if (avctx->pix_fmt == AV_PIX_FMT_D3D11VA_VLD) {
+    if (avctx->pix_fmt == AV_PIX_FMT_D3D11VA_VLD && surface) {
         D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC viewDesc;
         ID3D11VideoDecoderOutputView_GetDesc((ID3D11VideoDecoderOutputView*) surface, &viewDesc);
         return viewDesc.Texture2D.ArraySlice;
     }
 #endif
 #if CONFIG_DXVA2
-    for (i = 0; i < DXVA_CONTEXT_COUNT(avctx, ctx); i++) {
-        if (avctx->pix_fmt == AV_PIX_FMT_DXVA2_VLD && ctx->dxva2.surface[i] == surface)
-            return i;
+    if (avctx->pix_fmt == AV_PIX_FMT_DXVA2_VLD) {
+        for (i = 0; i < DXVA_CONTEXT_COUNT(avctx, ctx); i++) {
+            if (ctx->dxva2.surface[i] == surface)
+                return i;
+        }
     }
 #endif
 
