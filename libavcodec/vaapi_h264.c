@@ -314,6 +314,11 @@ static int vaapi_h264_end_frame(AVCodecContext *avctx)
     H264SliceContext *sl = &h->slice_ctx[0];
     int ret;
 
+    if (pic->nb_slices == 0) {
+        ret = AVERROR_INVALIDDATA;
+        goto finish;
+    }
+
     ret = ff_vaapi_decode_issue(avctx, pic);
     if (ret < 0)
         goto finish;
