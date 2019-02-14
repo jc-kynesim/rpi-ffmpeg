@@ -19,6 +19,7 @@
 #include "h264dec.h"
 #include "hwconfig.h"
 #include "v4l2_request.h"
+#include "h264-ctrls.h"
 
 typedef struct V4L2RequestControlsH264 {
     struct v4l2_ctrl_h264_sps sps;
