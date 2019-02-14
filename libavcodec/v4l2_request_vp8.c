@@ -19,6 +19,7 @@
 #include "hwconfig.h"
 #include "v4l2_request.h"
 #include "vp8.h"
+#include "vp8-ctrls.h"
 
 typedef struct V4L2RequestControlsVP8 {
     struct v4l2_ctrl_vp8_frame_header ctrl;

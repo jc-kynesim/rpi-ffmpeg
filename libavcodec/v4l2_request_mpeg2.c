@@ -19,6 +19,7 @@
 #include "hwconfig.h"
 #include "mpegvideo.h"
 #include "v4l2_request.h"
+#include "mpeg2-ctrls.h"
 
 typedef struct V4L2RequestControlsMPEG2 {
     struct v4l2_ctrl_mpeg2_slice_params slice_params;
