@@ -303,7 +303,7 @@ static int v4l2_request_h264_decode_slice(AVCodecContext *avctx, const uint8_t *
         .pic_parameter_set_id = sl->pps_id,
         .colour_plane_id = 0, /* what is this? */
         .frame_num = h->poc.frame_num,
-        .idr_pic_id = 0, /* what is this? */
+        .idr_pic_id = sl->idr_pic_id,
         .pic_order_cnt_lsb = sl->poc_lsb,
         .delta_pic_order_cnt_bottom = sl->delta_poc_bottom,
         .delta_pic_order_cnt0 = sl->delta_poc[0],
