@@ -190,6 +190,8 @@ typedef struct H264SliceContext {
     int slice_type_nos;         ///< S free slice type (SI/SP are remapped to I/P)
     int slice_type_fixed;
 
+    int idr_pic_id;
+
     int qscale;
     int chroma_qp[2];   // QPc
     int qp_thresh;      ///< QP threshold to skip loopfilter
