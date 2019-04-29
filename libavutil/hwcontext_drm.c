@@ -43,6 +43,11 @@ static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
     AVDRMDeviceContext *hwctx = hwdev->hwctx;
     drmVersionPtr version;
 
+    if (device == NULL) {
+      hwctx->fd = -1;
+      return 0;
+    }
+
     hwctx->fd = open(device, O_RDWR);
     if (hwctx->fd < 0)
         return AVERROR(errno);
