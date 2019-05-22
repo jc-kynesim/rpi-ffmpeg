@@ -311,9 +311,9 @@ static int v4l2_request_h264_decode_slice(AVCodecContext *avctx, const uint8_t *
         .redundant_pic_cnt = sl->redundant_pic_count,
 
         /* Size in bits of dec_ref_pic_marking() syntax element. */
-        .dec_ref_pic_marking_bit_size = 0,
+        .dec_ref_pic_marking_bit_size = sl->ref_pic_marking_size_in_bits,
         /* Size in bits of pic order count syntax. */
-        .pic_order_cnt_bit_size = 0,
+        .pic_order_cnt_bit_size = sl->pic_order_cnt_bit_size,
 
         .cabac_init_idc = sl->cabac_init_idc,
         .slice_qp_delta = sl->qscale - pps->init_qp,
