@@ -176,6 +176,9 @@ static enum AVPixelFormat get_pixel_format(VP8Context *s)
 #if CONFIG_VP8_NVDEC_HWACCEL
         AV_PIX_FMT_CUDA,
 #endif
+#if CONFIG_VP8_V4L2REQUEST_HWACCEL
+        AV_PIX_FMT_DRM_PRIME,
+#endif
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NONE,
     };
@@ -198,7 +201,7 @@ int update_dimensions(VP8Context *s, int width, int height, int is_vp7)
             return ret;
     }
 
-    if (!s->actually_webp && !is_vp7) {
+    if (!s->actually_webp && !is_vp7 && s->pix_fmt == AV_PIX_FMT_NONE) {
         s->pix_fmt = get_pixel_format(s);
         if (s->pix_fmt < 0)
             return AVERROR(EINVAL);
@@ -2968,6 +2971,9 @@ AVCodec ff_vp8_decoder = {
 #endif
 #if CONFIG_VP8_NVDEC_HWACCEL
                                HWACCEL_NVDEC(vp8),
+#endif
+#if CONFIG_VP8_V4L2REQUEST_HWACCEL
+                               HWACCEL_V4L2REQUEST(vp8),
 #endif
                                NULL
                            },
