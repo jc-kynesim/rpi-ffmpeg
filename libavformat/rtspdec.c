@@ -57,7 +57,7 @@ static int rtsp_read_close(AVFormatContext *s)
 {
     RTSPState *rt = s->priv_data;
 
-    if (!(rt->rtsp_flags & RTSP_FLAG_LISTEN))
+    if (!(rt->rtsp_flags & RTSP_FLAG_LISTEN) && rt->rtsp_hd_out)
         ff_rtsp_send_cmd_async(s, "TEARDOWN", rt->control_uri, NULL);
 
     ff_rtsp_close_streams(s);
