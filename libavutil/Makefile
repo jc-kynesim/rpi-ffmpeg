@@ -65,6 +65,7 @@ HEADERS = adler32.h                                                     \
           rational.h                                                    \
           replaygain.h                                                  \
           ripemd.h                                                      \
+	  rpi_sand_fns.h                                                \
           samplefmt.h                                                   \
           sha.h                                                         \
           sha512.h                                                      \
@@ -82,6 +83,7 @@ HEADERS = adler32.h                                                     \
           tx.h                                                          \
 
 HEADERS-$(CONFIG_LZO)                   += lzo.h
+HEADERS-$(CONFIG-RPI)                   += rpi_sand_fn_pw.h
 
 ARCH_HEADERS = bswap.h                                                  \
                intmath.h                                                \
@@ -173,6 +175,7 @@ OBJS-$(CONFIG_QSV)                      += hwcontext_qsv.o
 OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o
 OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o
 OBJS-$(CONFIG_VDPAU)                    += hwcontext_vdpau.o
+OBJS-$(CONFIG_RPI)                      += rpi_sand_fns.o
 
 OBJS += $(COMPAT_OBJS:%=../compat/%)
 

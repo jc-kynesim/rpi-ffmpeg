@@ -6,6 +6,10 @@ HEADERS = ac3_parser.h                                                  \
           avcodec.h                                                     \
           avdct.h                                                       \
           avfft.h                                                       \
+          rpi_qpu.h                                                     \
+          rpi_mailbox.h                                                 \
+          rpi_zc.h                                                      \
+          rpi_ctrl_ffmpeg.h                                             \
           d3d11va.h                                                     \
           dirac.h                                                       \
           dv_profile.h                                                  \
@@ -49,6 +53,10 @@ OBJS = ac3_parser.o                                                     \
        qsv_api.o                                                        \
        raw.o                                                            \
        utils.o                                                          \
+       rpi_qpu.o                                                        \
+       rpi_mailbox.o                                                    \
+       rpi_zc.o                                                         \
+       rpi_ctrl_ffmpeg.o                                                \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 
@@ -368,6 +376,7 @@ OBJS-$(CONFIG_HCOM_DECODER)            += hcom.o
 OBJS-$(CONFIG_HEVC_DECODER)            += hevcdec.o hevc_mvs.o \
                                           hevc_cabac.o hevc_refs.o hevcpred.o    \
                                           hevcdsp.o hevc_filter.o hevc_data.o
+OBJS-$(CONFIG_RPI)                     += rpi_hevc.o
 OBJS-$(CONFIG_HEVC_AMF_ENCODER)        += amfenc_hevc.o
 OBJS-$(CONFIG_HEVC_CUVID_DECODER)      += cuviddec.o
 OBJS-$(CONFIG_HEVC_MEDIACODEC_DECODER) += mediacodecdec.o
