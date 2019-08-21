@@ -37,6 +37,7 @@ Authors: John Cox
 
 #include "libavutil/buffer_internal.h"
 #include <interface/vctypes/vc_image_types.h>
+#include <interface/vcsm/user-vcsm.h>
 
 #define TRACE_ALLOC 0
 
@@ -741,6 +742,12 @@ int av_rpi_zc_init(struct AVCodecContext * const s)
             return AVERROR(ENOMEM);
         }
 
+        if (vcsm_init_ex(0, -1) != 0)
+        {
+            av_log(NULL, AV_LOG_ERROR, "vcsm init failed\n");
+            return AVERROR(EINVAL);
+        }
+
         zc->refcount = 1;
         zc->old.get_buffer_context = s->get_buffer_context;
         zc->old.get_buffer2 = s->get_buffer2;
@@ -764,6 +771,8 @@ void av_rpi_zc_uninit(struct AVCodecContext * const s)
             s->get_buffer_context = zc->old.get_buffer_context;
             s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
             av_rpi_zc_env_free(zc);
+
+            vcsm_exit();
         }
     }
 }
