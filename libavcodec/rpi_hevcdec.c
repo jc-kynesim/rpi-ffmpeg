@@ -2492,16 +2492,22 @@ static void rpi_inter_pred_reset(HEVCRpiInterPredEnv * const ipe)
     }
 }
 
-static void rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
+static int rpi_inter_pred_alloc(HEVCRpiInterPredEnv * const ipe,
                                  const unsigned int n_max, const unsigned int n_grp,
                                  const unsigned int total_size, const unsigned int min_gap)
 {
+    int rv;
+
     memset(ipe, 0, sizeof(*ipe));
-    av_assert0((ipe->q = av_mallocz(n_max * sizeof(*ipe->q))) != NULL);
+    if ((ipe->q = av_mallocz(n_max * sizeof(*ipe->q))) == NULL)
+        return AVERROR(ENOMEM);
+
     ipe->n_grp = n_grp;
     ipe->min_gap = min_gap;
 
-    gpu_malloc_cached(total_size, &ipe->gptr);
+    if ((rv = gpu_malloc_cached(total_size, &ipe->gptr)) != 0)
+        av_freep(&ipe->q);
+    return rv;
 }
 
 
@@ -4048,12 +4054,16 @@ static HEVCRpiJob * job_new(void)
 {
     HEVCRpiJob * const jb = av_mallocz(sizeof(HEVCRpiJob));
 
+    if (jb == NULL)
+        return NULL;
+
     sem_init(&jb->sem, 0, 0);
     jb->rfe = rpi_cache_flush_init(&jb->flush_buf);
     ff_hevc_rpi_progress_init_wait(&jb->progress_wait);
 
     jb->intra.n = 0;
-    jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS);
+    if ((jb->intra.cmds = av_mallocz(sizeof(HEVCPredCmd) * RPI_MAX_PRED_CMDS)) == NULL)
+        goto fail1;
 
     // * Sizeof the union structure might be overkill but at the moment it
     //   is correct (it certainly isn't going to be too small)
@@ -4064,25 +4074,37 @@ static HEVCRpiJob * job_new(void)
     //   threshold even nearer the end, but I don't expect us to ever hit
     //   it on any real stream anyway.
 
-    rpi_inter_pred_alloc(&jb->chroma_ip,
+    if (rpi_inter_pred_alloc(&jb->chroma_ip,
                          QPU_N_MAX, QPU_N_GRP,
                          QPU_C_COMMANDS * sizeof(qpu_mc_pred_c_t) + QPU_C_SYNCS * sizeof(uint32_t),
-                         QPU_C_CMD_SLACK_PER_Q * sizeof(qpu_mc_pred_c_t) / 2);
-    rpi_inter_pred_alloc(&jb->luma_ip,
+                         QPU_C_CMD_SLACK_PER_Q * sizeof(qpu_mc_pred_c_t) / 2) != 0)
+        goto fail2;
+    if (rpi_inter_pred_alloc(&jb->luma_ip,
                          QPU_N_MAX,  QPU_N_GRP,
                          QPU_Y_COMMANDS * sizeof(qpu_mc_pred_y_t) + QPU_Y_SYNCS * sizeof(uint32_t),
-                         QPU_Y_CMD_SLACK_PER_Q * sizeof(qpu_mc_pred_y_t) / 2);
+                         QPU_Y_CMD_SLACK_PER_Q * sizeof(qpu_mc_pred_y_t) / 2) != 0)
+        goto fail3;
 
     return jb;
+
+fail3:
+    rpi_free_inter_pred(&jb->luma_ip);
+fail2:
+    av_freep(&jb->intra.cmds);
+fail1:
+    ff_hevc_rpi_progress_kill_wait(&jb->progress_wait);
+    rpi_cache_flush_finish(jb->rfe);
+    sem_destroy(&jb->sem);
+    return NULL;
 }
 
 static void job_delete(HEVCRpiJob * const jb)
 {
     worker_pic_free_one(jb);
     ff_hevc_rpi_progress_kill_wait(&jb->progress_wait);
-    av_freep(&jb->intra.cmds);
     rpi_free_inter_pred(&jb->chroma_ip);
     rpi_free_inter_pred(&jb->luma_ip);
+    av_freep(&jb->intra.cmds);
     rpi_cache_flush_finish(jb->rfe);  // Not really needed - should do nothing
     sem_destroy(&jb->sem);
     av_free(jb);
@@ -5889,6 +5911,11 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     avctx->internal->allocate_progress = 1;
 
+    if ((ret = hevc_init_context(avctx)) < 0)
+        return ret;
+
+    // Job allocation requires VCSM alloc to work so ensure that we have it
+    // initialised by this point
     {
         HEVCRpiJobGlobal * const jbg = jbg_new(FFMAX(avctx->thread_count * 3, 5));
         if (jbg == NULL)
@@ -5903,10 +5930,6 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
             return -1;
         }
     }
-
-    ret = hevc_init_context(avctx);
-    if (ret < 0)
-        return ret;
 
     hevc_init_worker(s);
 
