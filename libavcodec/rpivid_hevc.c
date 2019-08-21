@@ -11,11 +11,11 @@
 #include "avcodec.h"
 #include "hwaccel.h"
 
-#include "rpi_hevc.h"
+#include "rpivid_hevc.h"
 #include "rpi_zc.h"
 #include "rpi_qpu.h"
 
-#include "rpi_ctrl_ffmpeg.h"
+#include "rpivid_axi.h"
 
 #define _GNU_SOURCE
 #include <unistd.h>

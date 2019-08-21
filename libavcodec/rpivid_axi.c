@@ -35,7 +35,7 @@
 
 
 #include "rpi_qpu.h"
-#include "rpi_ctrl_ffmpeg.h"
+#include "rpivid_axi.h"
 
 // argon block doesn't see VC sdram alias bits
 #define MANGLE(x) ((x) &~0xc0000000)

@@ -4,8 +4,8 @@
 // interface when using ffmpeg.
 //
 
-#ifndef __CTRL_FFMPEG_H__
-#define __CTRL_FFMPEG_H__
+#ifndef LIBAVCODEC_RPIVID_AXI_H
+#define LIBAVCODEC_RPIVID_AXI_H
 
 #include <stdint.h>
 
@@ -26,4 +26,4 @@ void rpi_apb_dump_regs(void *id, uint16_t addr, int num);
 void rpi_axi_dump(void *id, uint64_t addr, uint32_t size);
 void rpi_axi_flush(void *id, int mode);
 
-#endif // __CTRL_FILES_H__
+#endif // LIBAVCODEC_RPIVID_AXI_H
