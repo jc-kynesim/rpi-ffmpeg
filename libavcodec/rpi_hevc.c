@@ -717,7 +717,7 @@ static int rpi_hevc_end_frame(AVCodecContext *avctx) {
         }
         // Send phase 1 commands (cache flush on real hardware)
         rpi->axi_write(rpi->id, ((uint64_t)a64)<<6, rpi->cmd_len * sizeof(struct RPI_CMD), rpi->cmd_fifo);
-        rpi->axi_flush(rpi->id, 3);
+        rpi->axi_flush(rpi->id, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
         phase1_begin(rpi, s, thread_idx);
         // Trigger command FIFO
         rpi->apb_write(rpi->id, RPI_CFNUM, rpi->cmd_len);
@@ -846,7 +846,8 @@ static int rpi_hevc_end_frame(AVCodecContext *avctx) {
     //
     // * Even better would be to have better lock/unlock control in ZC for external access
     {
-        rpi_cache_flush_env_t * fe = rpi_cache_flush_init();
+        rpi_cache_buf_t cbuf;
+        rpi_cache_flush_env_t * const fe = rpi_cache_flush_init(&cbuf);
         rpi_cache_flush_add_frame(fe, f, RPI_CACHE_FLUSH_MODE_INVALIDATE);
         rpi_cache_flush_finish(fe);
     }

@@ -1,5 +1,42 @@
+/*
+Copyright (c) 2018 Raspberry Pi (Trading) Ltd.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the copyright holder nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Authors: John Cox, Ben Avison
+*/
+
 #ifndef RPI_QPU_H
 #define RPI_QPU_H
+
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
+#include "interface/vmcs_host/vc_vchi_gpuserv.h"
+#pragma GCC diagnostic pop
+
 
 #define RPI_ONE_BUF 1
 
@@ -126,9 +163,13 @@ static inline GPU_MEM_PTR_T get_gpu_mem_ptr_v(const AVFrame * const frame) {
 struct rpi_cache_flush_env_s;
 typedef struct rpi_cache_flush_env_s rpi_cache_flush_env_t;
 
-rpi_cache_flush_env_t * rpi_cache_flush_init(void);
+typedef struct {uint32_t t[33];} rpi_cache_buf_t;
+
+rpi_cache_flush_env_t * rpi_cache_flush_init(rpi_cache_buf_t * const buf);
 // Free env without flushing
 void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe);
+// Do the accumulated flush & clear but do not free the env
+int rpi_cache_flush_execute(rpi_cache_flush_env_t * const rfe);
 // Do the accumulated flush & free the env
 int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe);
 
@@ -168,6 +209,7 @@ typedef struct HEVCRpiQpu {
 int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth);
 
 uint32_t qpu_fn(const int * const mc_fn);
+uint32_t qpu_dummy(void);
 
 #define QPU_N_GRP    4
 #define QPU_N_MAX    12
@@ -182,12 +224,22 @@ typedef struct vq_wait_s * vpu_qpu_wait_h;
 struct vpu_qpu_job_env_s;
 typedef struct vpu_qpu_job_env_s * vpu_qpu_job_h;
 
-vpu_qpu_job_h vpu_qpu_job_new(void);
+#define VPU_QPU_JOB_MAX 4
+struct vpu_qpu_job_env_s
+{
+  unsigned int n;
+  unsigned int mask;
+  struct gpu_job_s j[VPU_QPU_JOB_MAX];
+};
+typedef struct vpu_qpu_job_env_s vpu_qpu_job_env_t;
+
+vpu_qpu_job_h vpu_qpu_job_init(vpu_qpu_job_env_t * const buf);
 void vpu_qpu_job_delete(const vpu_qpu_job_h vqj);
 void vpu_qpu_job_add_vpu(const vpu_qpu_job_h vqj, const uint32_t vpu_code,
   const unsigned r0, const unsigned r1, const unsigned r2, const unsigned r3, const unsigned r4, const unsigned r5);
 void vpu_qpu_job_add_qpu(const vpu_qpu_job_h vqj, const unsigned int n, const uint32_t * const mail);
 void vpu_qpu_job_add_sync_this(const vpu_qpu_job_h vqj, vpu_qpu_wait_h * const wait_h);
+int vpu_qpu_job_add_sync_sem(vpu_qpu_job_env_t * const vqj, sem_t * const sem);
 int vpu_qpu_job_start(const vpu_qpu_job_h vqj);
 int vpu_qpu_job_finish(const vpu_qpu_job_h vqj);
 
@@ -199,7 +251,6 @@ void vpu_qpu_wait(vpu_qpu_wait_h * const wait_h);
 int vpu_qpu_init(void);
 void vpu_qpu_term(void);
 
-extern int gpu_get_mailbox(void);
 void gpu_ref(void);
 void gpu_unref(void);
 

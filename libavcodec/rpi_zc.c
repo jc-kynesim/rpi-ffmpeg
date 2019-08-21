@@ -246,9 +246,21 @@ typedef struct AVZcEnv
 
 } ZcEnv;
 
+// Get mailbox fd - should be in a lock when called
+// Rely on process close to close it
+static int mbox_fd()
+{
+    static int fd = -1;
+    if (fd != -1)
+        return fd;
+    return (fd = mbox_open());
+}
+
 AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
     const int format, const unsigned int video_width, const unsigned int video_height)
 {
+    static pthread_mutex_t sand_lock = PTHREAD_MUTEX_INITIALIZER;
+
     AVRpiZcFrameGeometry geo;
 
     switch (format)
@@ -280,7 +292,6 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
         {
             const unsigned int stripe_w = 128;
 
-            static pthread_mutex_t sand_lock = PTHREAD_MUTEX_INITIALIZER;
             static VC_IMAGE_T img = {0};
 
             // Given the overhead of calling the mailbox keep a stashed
@@ -296,9 +307,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
                     .height = video_height
                 };
 
-                gpu_ref();
-                mbox_get_image_params(gpu_get_mailbox(), &new_img);
-                gpu_unref();
+                mbox_get_image_params(mbox_fd(), &new_img);
                 img = new_img;
             }
 
@@ -351,9 +360,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
                     .height = video_height
                 };
 
-                gpu_ref();
-                mbox_get_image_params(gpu_get_mailbox(), &new_img);
-                gpu_unref();
+                mbox_get_image_params(mbox_fd(), &new_img);
                 img = new_img;
             }
 
@@ -394,9 +401,7 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
                     .height = video_height
                 };
 
-                gpu_ref();
-                mbox_get_image_params(gpu_get_mailbox(), &new_img);
-                gpu_unref();
+                mbox_get_image_params(mbox_fd(), &new_img);
                 img = new_img;
             }
 

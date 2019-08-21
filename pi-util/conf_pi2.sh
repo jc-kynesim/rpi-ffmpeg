@@ -20,7 +20,6 @@ RPI_TARGET=arm-linux-gnueabihf
  --disable-thumb\
  --enable-mmal\
  --enable-rpi\
- --enable-shared\
  --extra-cflags="-g $RPI_KEEPS $RPI_DEFS $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFS $RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS -Wl,-rpath=/opt/vc/lib,-rpath-link=$RPI_OPT_VC/lib,-rpath=/lib,-rpath=/usr/lib,-rpath-link=$RPI_TOOLROOT/lib,-rpath-link=$RPI_TOOLROOT/lib"\
@@ -29,6 +28,8 @@ RPI_TARGET=arm-linux-gnueabihf
  --prefix=$RPI_INSTALL_BASE \
  --libdir=$RPI_INSTALL_BASE/lib/$RPI_TARGET \
  --extra-libs="-ldl"
+
+# --enable-shared\
 
 # --disable-decoders --enable-decoder=hevc --disable-hwaccels --enable-hwaccel=hevc_rpi --disable-encoders --enable-encoder=rawvideo --enable-muxer=rawvideo \
 # --enable-extra-warnings\

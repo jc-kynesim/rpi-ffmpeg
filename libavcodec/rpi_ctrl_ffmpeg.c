@@ -2,11 +2,6 @@
 #include "libavcodec/avcodec.h"
 #include "libavutil/avassert.h"
 
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <inttypes.h>
-
 //  How to access GPIO registers from C-code on the Raspberry-Pi
 //  Example program
 //  15-January-2012
@@ -14,8 +9,8 @@
 
 // Access from ARM Running Linux
 
-#include <assert.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -28,9 +23,18 @@
 
 #include <unistd.h>
 #include <pthread.h>
+
+
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #include <interface/vcsm/user-vcsm.h>
 #include <bcm_host.h>
-#include "rpi_mailbox.h"
+#pragma GCC diagnostic pop
+
+
+#include "rpi_qpu.h"
 #include "rpi_ctrl_ffmpeg.h"
 
 // argon block doesn't see VC sdram alias bits
@@ -41,77 +45,11 @@
 #define AXI_MEM_SIZE (64*1024*1024)
 #endif
 
-#define PAGE_SIZE (4*1024)
 #define BLOCK_SIZE (0x10000)
 #define CACHED 0
 #define VERBOSE 0
 
 static inline void __DMB2(void) {}//{ asm volatile ("dmb" ::: "memory"); }
-
-
-// GPU memory alloc fns (internal)
-typedef struct gpu_mem_ptr_s {
-  unsigned char *arm; // Pointer to memory mapped on ARM side
-  int vc_handle;   // Videocore handle of relocatable memory
-  int vcsm_handle; // Handle for use by VCSM
-  unsigned int vc;       // Address for use in GPU code
-  unsigned int numbytes; // Size of memory block
-} GPU_MEM_PTR_T;
-
-typedef enum
-{
-    RPI_CACHE_FLUSH_MODE_INVALIDATE     = 1,
-    RPI_CACHE_FLUSH_MODE_WRITEBACK      = 2,
-    RPI_CACHE_FLUSH_MODE_WB_INVALIDATE  = 3
-} rpi_cache_flush_mode_t;
-
-// GPU_MEM_PTR_T alloc fns
-static int gpu_malloc_cached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
-  p->numbytes = (numbytes + 255) & ~255;  // Round up
-  p->vcsm_handle = vcsm_malloc_cache(p->numbytes, VCSM_CACHE_TYPE_HOST | 0x80, (char *)"Video Frame" );
-  av_assert0(p->vcsm_handle);
-  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
-  av_assert0(p->vc_handle);
-  p->arm = vcsm_lock(p->vcsm_handle);
-  av_assert0(p->arm);
-  p->vc = mbox_mem_lock(mb, p->vc_handle);
-  av_assert0(p->vc);
-  printf("***** %s, %d\n", __func__, numbytes);
-
-  return 0;
-}
-
-static int gpu_malloc_uncached_internal(const int mb, const int numbytes, GPU_MEM_PTR_T * const p) {
-  p->numbytes = numbytes;
-  p->vcsm_handle = vcsm_malloc_cache(numbytes, VCSM_CACHE_TYPE_NONE | 0x80, (char *)"Video Frame" );
-  av_assert0(p->vcsm_handle);
-  p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle);
-  av_assert0(p->vc_handle);
-  p->arm = vcsm_lock(p->vcsm_handle);
-  av_assert0(p->arm);
-  p->vc = mbox_mem_lock(mb, p->vc_handle);
-  av_assert0(p->vc);
-  printf("***** %s, %d\n", __func__, numbytes);
-  return 0;
-}
-
-static void gpu_free_internal(const int mb, GPU_MEM_PTR_T * const p) {
-  mbox_mem_unlock(mb, p->vc_handle);
-  vcsm_unlock_ptr(p->arm);
-  vcsm_free(p->vcsm_handle);
-  memset(p, 0, sizeof(*p));  // Ensure we crash hard if we try and use this again
-  printf("***** %s\n", __func__);
-}
-
-static void gpu_clean_invalidate(GPU_MEM_PTR_T * const p, int mode) {
-  struct vcsm_user_clean_invalid_s iocache = {};
-  iocache.s[0].handle = p->vcsm_handle;
-  iocache.s[0].cmd = mode;
-  iocache.s[0].addr = (int) p->arm;
-  iocache.s[0].size  = p->numbytes;
-  vcsm_clean_invalid( &iocache );
-  printf("***** %s mode:%d\n", __func__, mode);
-}
 
 //
 // Set up a memory regions to access periperhals
@@ -154,7 +92,6 @@ static void release_io(void *gpio_map)
 
 struct RPI_DEBUG {
     FILE *fp_reg;
-    int mbox;
     GPU_MEM_PTR_T axi;
     void *read_buf;
     int32_t read_buf_size, read_buf_used;
@@ -381,23 +318,23 @@ void rpi_axi_flush(void *id, int mode) {
     struct RPI_DEBUG *rpi = (struct RPI_DEBUG *) id;
     if (CACHED)
     {
-        gpu_clean_invalidate(&rpi->axi, mode);
+        rpi_cache_buf_t cbuf;
+        rpi_cache_flush_env_t * const rfe = rpi_cache_flush_init(&cbuf);
+        rpi_cache_flush_add_gm_ptr(rfe, &rpi->axi, mode);
+        rpi_cache_flush_finish(rfe);
     }
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
 const char * rpi_ctrl_ffmpeg_init(const char *hwaccel_device, void **id) {
-    struct RPI_DEBUG *rpi = calloc(1, sizeof(struct RPI_DEBUG));
-    (void) hwaccel_device;
+    struct RPI_DEBUG * const rpi = calloc(1, sizeof(struct RPI_DEBUG));
     const char * rv = NULL;
 
-    printf("%s\n id=%p\n", __FUNCTION__, rpi);
+    (void) hwaccel_device;
 
     if (!rpi)
         return "out of memory";
-
-    rpi->mbox = -1;
 
     bcm_host_init();
     vcsm_init();
@@ -416,19 +353,15 @@ const char * rpi_ctrl_ffmpeg_init(const char *hwaccel_device, void **id) {
         goto fail;
     }
 
-    if ((rpi->mbox = mbox_open()) < 0)
-    {
-      rv = "Failed to open mbox";
-      goto fail;
-    }
-
-    if ((CACHED ? gpu_malloc_cached_internal:gpu_malloc_uncached_internal)(rpi->mbox, AXI_MEM_SIZE, &rpi->axi) != 0)
+    if ((CACHED ? gpu_malloc_cached : gpu_malloc_uncached)(AXI_MEM_SIZE, &rpi->axi) != 0)
     {
         rv = "out of memory";
         goto fail;
     }
 
+    if (VERBOSE)
     fprintf(rpi->fp_reg, "A 100000000 apb:%p axi.arm:%p axi.vc:%08x\n", rpi->apb, rpi->axi.arm, MANGLE(rpi->axi.vc));
+
     *id = rpi;
     return 0;
 
@@ -439,11 +372,9 @@ fail:
 
 void rpi_ctrl_ffmpeg_free(void *id) {
     struct RPI_DEBUG *rpi = (struct RPI_DEBUG *) id;
-    if (rpi->mbox >= 0)
-    {
-        gpu_free_internal(rpi->mbox, &rpi->axi);
-        mbox_close(rpi->mbox);
-    }
+
+    gpu_free(&rpi->axi);
+
     if (rpi->interrupt != NULL)
         release_io((void *)rpi->interrupt);
     if (rpi->apb != NULL)

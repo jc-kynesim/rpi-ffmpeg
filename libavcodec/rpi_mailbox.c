@@ -25,8 +25,6 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#if 1//defined(RPI) || defined (RPI_DISPLAY)
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -34,7 +32,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <unistd.h>
 #include <assert.h>
 #include <stdint.h>
-#include <errno.h>
 #include <sys/ioctl.h>
 
 #include <linux/ioctl.h>
@@ -64,44 +61,6 @@ static int mbox_property(int file_desc, void *buf)
       printf("%04x: 0x%08x\n", i*sizeof *p, p[i]);
 #endif
    return ret_val;
-}
-
-unsigned mbox_mem_lock(int file_desc, unsigned handle)
-{
-   int i=0;
-   unsigned p[32];
-   p[i++] = 0; // size
-   p[i++] = 0x00000000; // process request
-
-   p[i++] = 0x3000d; // (the tag id)
-   p[i++] = 4; // (size of the buffer)
-   p[i++] = 4; // (size of the data)
-   p[i++] = handle;
-
-   p[i++] = 0x00000000; // end tag
-   p[0] = i*sizeof *p; // actual size
-
-   mbox_property(file_desc, p);
-   return p[5];
-}
-
-unsigned mbox_mem_unlock(int file_desc, unsigned handle)
-{
-   int i=0;
-   unsigned p[32];
-   p[i++] = 0; // size
-   p[i++] = 0x00000000; // process request
-
-   p[i++] = 0x3000e; // (the tag id)
-   p[i++] = 4; // (size of the buffer)
-   p[i++] = 4; // (size of the data)
-   p[i++] = handle;
-
-   p[i++] = 0x00000000; // end tag
-   p[0] = i*sizeof *p; // actual size
-
-   mbox_property(file_desc, p);
-   return p[5];
 }
 
 #define GET_VCIMAGE_PARAMS 0x30044
@@ -136,7 +95,7 @@ int mbox_open() {
    // open a char device file used for communicating with kernel mbox driver
    file_desc = open(DEVICE_FILE_NAME, 0);
    if (file_desc < 0) {
-      printf("Can't open device file: %s (%d)\n", DEVICE_FILE_NAME, errno);
+      printf("Can't open device file: %s\n", DEVICE_FILE_NAME);
       printf("Try creating a device file with: sudo mknod %s c %d 0\n", DEVICE_FILE_NAME, MAJOR_NUM);
    }
    return file_desc;
@@ -145,6 +104,4 @@ int mbox_open() {
 void mbox_close(int file_desc) {
   close(file_desc);
 }
-
-#endif
 
