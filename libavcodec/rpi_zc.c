@@ -1,7 +1,7 @@
 #include "config.h"
 
 #include "libavcodec/avcodec.h"
-#include "rpi_qpu.h"
+#include "rpi_mem.h"
 #include "rpi_mailbox.h"
 #include "rpi_zc.h"
 #include "libavutil/avassert.h"
@@ -28,9 +28,13 @@ typedef struct ZcPool
 
 typedef struct ZcPoolEnt
 {
-    // It is important that we start with gmem as other bits of code will expect to see that
-    unsigned int vcsm_handle;
     size_t numbytes;
+
+    unsigned int vcsm_handle;
+    unsigned int vc_handle;
+    void * map_arm;
+    unsigned int map_vc;
+
     unsigned int n;
     struct ZcPoolEnt * next;
     struct ZcPool * pool;
@@ -55,9 +59,10 @@ static inline int av_rpi_is_sand_frame(const AVFrame * const frame)
     return av_rpi_is_sand_format(frame->format);
 }
 
+
 static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)
 {
-    ZcPoolEnt * const zp = av_malloc(sizeof(ZcPoolEnt));
+    ZcPoolEnt * const zp = av_mallocz(sizeof(ZcPoolEnt));
 
     // Round up to 4k & add 4k
     const unsigned int alloc_size = (req_size + ALLOC_PAD + ALLOC_ROUND - 1) & ~(ALLOC_ROUND - 1);
@@ -75,7 +80,7 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req
         av_log(NULL, AV_LOG_ERROR, "av_gpu_malloc_cached(%d) failed\n", alloc_size);
         goto fail1;
     }
-
+#if 0
     // If GPU alloced then lock here and now to prevent slow mapping
     // ops when we assign to a buf
     if (pool->keep_locked)
@@ -87,6 +92,7 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req
             goto fail1;
         }
     }
+#endif
 
 #if TRACE_ALLOC
     printf("%s: Alloc %#x bytes @ h=%d\n", __func__, alloc_size, zp->vcsm_handle);
@@ -94,7 +100,6 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req
 
     pool->numbytes = alloc_size;
     zp->numbytes = alloc_size;
-    zp->next = NULL;
     zp->pool = pool;
     zp->n = pool->n++;
     return zp;
@@ -111,10 +116,13 @@ static void zc_pool_ent_free(ZcPoolEnt * const zp)
     printf("%s: Free %#x bytes @ h=%d\n", __func__, zp->numbytes, zp->vcsm_handle);
 #endif
 
-    if (zp->pool->keep_locked)
-        vcsm_unlock_hdl(zp->vcsm_handle);
     if (zp->vcsm_handle != 0)
+    {
+        // VC addr & handle need no dealloc
+        if (zp->map_arm != NULL)
+            vcsm_unlock_hdl(zp->vcsm_handle);
         vcsm_free(zp->vcsm_handle);
+    }
     av_free(zp);
 }
 
@@ -191,10 +199,42 @@ static void zc_pool_free(ZcPoolEnt * const zp)
     }
 }
 
-static void zc_pool_freev(void * v)
+static void zc_pool_free_v(void * v)
 {
     zc_pool_free(v);
 }
+
+static unsigned int zc_pool_ent_vcsm_handle_v(void * v)
+{
+    ZcPoolEnt * zp = v;
+    return zp->vcsm_handle;
+}
+
+static unsigned int zc_pool_ent_vc_handle_v(void * v)
+{
+    ZcPoolEnt * zp = v;
+    if (zp->vc_handle == 0)
+        zp->vc_handle = vcsm_vc_hdl_from_hdl(zp->vcsm_handle);
+    return zp->vc_handle;
+}
+
+static void * zc_pool_ent_map_arm_v(void * v)
+{
+    ZcPoolEnt * zp = v;
+    if (zp->map_arm == NULL)
+        zp->map_arm = vcsm_lock(zp->vcsm_handle);
+    return zp->map_arm;
+}
+
+static unsigned int zc_pool_ent_map_vc_v(void * v)
+{
+    ZcPoolEnt * zp = v;
+    if (zp->map_vc == 0)
+        zp->map_vc = vcsm_vc_addr_from_hdl(zp->vcsm_handle);
+    return zp->map_vc;
+}
+
+
 
 static ZcPool *
 zc_pool_new(const int keep_locked)
@@ -246,6 +286,15 @@ typedef struct AVZcEnv
     av_rpi_zc_free_pool_fn_t * free_pool;
 
 } ZcEnv;
+
+static const av_rpi_zc_buf_fn_tab_t zc_pool_buf_fns = {
+    .free        = zc_pool_free_v,
+    .vcsm_handle = zc_pool_ent_vcsm_handle_v,
+    .vc_handle   = zc_pool_ent_vc_handle_v,
+    .map_arm     = zc_pool_ent_map_arm_v,
+    .map_vc      = zc_pool_ent_map_vc_v,
+};
+
 
 // Get mailbox fd - should be in a lock when called
 // Rely on process close to close it
@@ -443,7 +492,7 @@ static AVBufferRef * rpi_buf_pool_alloc(void * v, size_t size)
         goto fail0;
     }
 
-    if ((buf = av_rpi_zc_buf(size, zp->vcsm_handle, noff, zc_pool_freev, zp)) == NULL)
+    if ((buf = av_rpi_zc_buf(size, 0, zp, &zc_pool_buf_fns)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "av_rpi_zc_buf() failed\n");
         goto fail2;
@@ -614,7 +663,7 @@ static AVBufferRef * zc_sand64_16_to_sand128(struct AVCodecContext * const s,
 
 typedef struct ZcBufEnv {
     GPU_MEM_PTR_T gmem;
-    void (*free_fn)(void * v);
+    const av_rpi_zc_buf_fn_tab_t * fn;
     void * v;
 } ZcBufEnv;
 
@@ -623,11 +672,8 @@ static void rpi_free_zc_buf(void * opaque, uint8_t * data)
     if (opaque != NULL)
     {
         ZcBufEnv * const zbe = opaque;
-        void (*free_fn)(void *v) = zbe->free_fn;
+        void (*free_fn)(void *v) = zbe->fn->free;
         void * v = zbe->v;
-
-        if (zbe->gmem.arm != NULL)
-            vcsm_unlock_hdl(zbe->gmem.vcsm_handle);
 
         free(zbe);
 
@@ -656,35 +702,41 @@ void * av_rpi_zc_buf_v(AVBufferRef * const buf)
     return zbe == NULL ? NULL : zbe->v;
 }
 
-AVBufferRef * av_rpi_zc_buf(size_t numbytes, unsigned int vcsm_handle, int addr_offset, void (*free_fn)(void * v), void * v)
+AVBufferRef * av_rpi_zc_buf(size_t numbytes, int addr_offset, void * v, const av_rpi_zc_buf_fn_tab_t * fn_tab)
 {
     AVBufferRef *buf;
     ZcBufEnv * zbe;
     uint8_t * arm_ptr;
 
-    if (vcsm_handle == 0 ||
-        (zbe = calloc(1, sizeof(ZcBufEnv))) == NULL)
+    if ((zbe = calloc(1, sizeof(ZcBufEnv))) == NULL)
         return NULL;
 
+    zbe->fn = fn_tab;
+    zbe->v = v;
     zbe->gmem.numbytes = numbytes;
-    zbe->gmem.vcsm_handle = vcsm_handle;
+
+    if ((zbe->gmem.vcsm_handle = zbe->fn->vcsm_handle(zbe->v)) == 0)
+    {
+        av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vcsm_handle\n");
+        goto fail;
+    }
 
     // For now init all this here
     // Later we may avoid some parts (in particular arm addr lock) unless
     // actually wanted
-    if ((arm_ptr = vcsm_lock(zbe->gmem.vcsm_handle)) == NULL)
+    if ((arm_ptr = zbe->fn->map_arm(zbe->v)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "ZC: Failed to lock vcsm_handle %u\n", zbe->gmem.vcsm_handle);
         goto fail;
     }
 
     zbe->gmem.arm = arm_ptr + addr_offset;
-    if ((zbe->gmem.vc_handle = vcsm_vc_hdl_from_hdl(zbe->gmem.vcsm_handle)) == 0)
+    if ((zbe->gmem.vc_handle = zbe->fn->vc_handle(zbe->v)) == 0)
     {
         av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vc handle from vcsm_handle %u\n", zbe->gmem.vcsm_handle);
         goto fail;
     }
-    if ((zbe->gmem.vc = vcsm_vc_addr_from_hdl(zbe->gmem.vcsm_handle)) == 0)
+    if ((zbe->gmem.vc = zbe->fn->map_vc(zbe->v)) == 0)
     {
         av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vc addr from vcsm_handle %u\n", zbe->gmem.vcsm_handle);
         goto fail;
@@ -695,9 +747,6 @@ AVBufferRef * av_rpi_zc_buf(size_t numbytes, unsigned int vcsm_handle, int addr_
         av_log(NULL, AV_LOG_ERROR, "ZC: Failed av_buffer_create\n");
         goto fail;
     }
-
-    zbe->free_fn = free_fn;
-    zbe->v = v;
 
     return buf;
 

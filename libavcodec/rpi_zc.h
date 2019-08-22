@@ -141,7 +141,16 @@ int av_rpi_zc_init_local(struct AVCodecContext * const s);
 void av_rpi_zc_uninit_local(struct AVCodecContext * const s);
 
 
-AVBufferRef * av_rpi_zc_buf(size_t numbytes, unsigned int vcsm_handle, int offset, void (*free_fn)(void * v), void * v);
+typedef struct av_rpi_zc_buf_fn_tab_s {
+    void (* free)(void * v);
+
+    unsigned int (* vcsm_handle)(void * v);
+    unsigned int (* vc_handle)(void * v);
+    void * (* map_arm)(void * v);
+    unsigned int (* map_vc)(void * v);
+} av_rpi_zc_buf_fn_tab_t;
+
+AVBufferRef * av_rpi_zc_buf(size_t numbytes, int addr_offset, void * v, const av_rpi_zc_buf_fn_tab_t * fn_tab);
 void * av_rpi_zc_buf_v(AVBufferRef * const buf);
 
 #endif
