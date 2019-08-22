@@ -34,7 +34,7 @@
 #pragma GCC diagnostic pop
 
 
-#include "rpi_qpu.h"
+#include "rpi_mem.h"
 #include "rpivid_axi.h"
 
 // argon block doesn't see VC sdram alias bits

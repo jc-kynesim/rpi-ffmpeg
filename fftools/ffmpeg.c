@@ -95,7 +95,6 @@
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_util_params.h>
 #pragma GCC diagnostic pop
-#include "libavcodec/rpi_qpu.h"
 #include "libavutil/rpi_sand_fns.h"
 #include "libavcodec/rpi_zc.h"
 #endif

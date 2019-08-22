@@ -45,6 +45,7 @@
 #include "profiles.h"
 #include "hwaccel.h"
 
+#include "rpi_zc_frames.h"
 #include "rpi_qpu.h"
 #include "rpi_hevc_shader.h"
 #include "rpi_hevc_shader_cmd.h"

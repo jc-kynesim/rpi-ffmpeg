@@ -28,8 +28,6 @@ Authors: John Cox
 */
 
 
-#define KLUDGE_NO_TRANSFORM 1
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,12 +43,11 @@ Authors: John Cox
 #include <interface/vcsm/user-vcsm.h>
 
 #include "rpi_mailbox.h"
+#include "rpi_mem.h"
 #include "rpi_qpu.h"
-#if !KLUDGE_NO_TRANSFORM
 #include "rpi_hevc_shader.h"
 #include "rpi_hevc_transform8.h"
 #include "rpi_hevc_transform10.h"
-#endif
 #include "libavutil/rpi_sand_fns.h"
 
 // Trace time spent waiting for GPU (VPU/QPU) (1=Yes, 0=No)
@@ -71,7 +68,6 @@ Authors: John Cox
 
 #define vcos_verify_ge0(x) ((x)>=0)
 
-#if !KLUDGE_NO_TRANSFORM
 // Size in 32bit words
 #define QPU_CODE_SIZE 4098
 #define VPU_CODE_SIZE 16384
@@ -120,7 +116,6 @@ struct GPU
     unsigned int vpu_code10[VPU_CODE_SIZE];
     short transMatrix2even[16*16*2];
 };
-#endif
 
 struct rpi_cache_flush_env_s {
   struct vcsm_user_clean_invalid2_s v;
@@ -165,11 +160,9 @@ typedef struct gpu_env_s
     int open_count;
     int init_count;
     int vpu_i_cache_flushed;
-#if !KLUDGE_NO_TRANSFORM
     GPU_MEM_PTR_T qpu_code_gm_ptr;
     GPU_MEM_PTR_T code_gm_ptr;
     GPU_MEM_PTR_T dummy_gm_ptr;
-#endif
     vq_wait_pool_t wait_pool;
 #if RPI_TRACE_TIME_VPU_QPU_WAIT
     trace_time_wait_t ttw;
@@ -278,11 +271,9 @@ static void gpu_term(void)
 
     vc_gpuserv_deinit();
 
-#if !KLUDGE_NO_TRANSFORM
     gpu_free_internal(&ge->code_gm_ptr);
     gpu_free_internal(&ge->qpu_code_gm_ptr);
     gpu_free_internal(&ge->dummy_gm_ptr);
-#endif
 
     vcsm_exit();
 
@@ -306,7 +297,6 @@ static int gpu_init(gpu_env_t ** const gpu) {
 
     vcsm_init();
 
-#if !KLUDGE_NO_TRANSFORM
     // Now copy over the QPU code into GPU memory
     if ((rv = gpu_malloc_internal(&ge->qpu_code_gm_ptr, QPU_CODE_SIZE * 4, VCSM_CACHE_TYPE_NONE, "ffmpeg qpu code")) != 0)
       return rv;
@@ -343,7 +333,6 @@ static int gpu_init(gpu_env_t ** const gpu) {
     if ((rv = gpu_malloc_internal(&ge->dummy_gm_ptr, 0x4000, VCSM_CACHE_TYPE_NONE, "ffmpeg dummy frame")) != 0)
         return rv;
     memset(ge->dummy_gm_ptr.arm, 0x80, 0x4000);
-#endif
 
     *gpu = ge;
     return 0;
@@ -393,31 +382,6 @@ static inline gpu_env_t * gpu_ptr(void)
     return gpu;
 }
 
-// Public gpu fns
-
-// Allocate memory on GPU
-// Fills in structure <p> containing ARM pointer, videocore handle, videocore memory address, numbytes
-// Returns 0 on success.
-// This allocates memory that will not be cached in ARM's data cache.
-// Therefore safe to use without data cache flushing.
-int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p)
-{
-    return gpu_malloc_internal(p, numbytes, VCSM_CACHE_TYPE_NONE, "ffmpeg uncached");
-}
-
-// This allocates data that will be
-//    Cached in ARM L2
-//    Uncached in VPU L2
-int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
-{
-    return gpu_malloc_internal(p, numbytes, VCSM_CACHE_TYPE_HOST, "ffmpeg cached");
-}
-
-void gpu_free(GPU_MEM_PTR_T * const p) {
-    gpu_free_internal(p);
-}
-
-#if !KLUDGE_NO_TRANSFORM
 unsigned int vpu_get_fn(const unsigned int bit_depth) {
   uint32_t a = 0;
 
@@ -440,7 +404,6 @@ unsigned int vpu_get_constants(void) {
   av_assert1(gpu != NULL);
   return (gpu->code_gm_ptr.vc + offsetof(struct GPU,transMatrix2even));
 }
-#endif
 
 void gpu_ref(void)
 {
@@ -453,178 +416,6 @@ void gpu_unref(void)
   gpu_env_t * const ge = gpu_lock();
   gpu_unlock_unref(ge);
 }
-
-// ----------------------------------------------------------------------------
-//
-// Cache flush functions
-
-#define CACHE_EL_MAX ((sizeof(rpi_cache_buf_t) - sizeof (struct vcsm_user_clean_invalid2_s)) / sizeof (struct vcsm_user_clean_invalid2_block_s))
-
-rpi_cache_flush_env_t * rpi_cache_flush_init(rpi_cache_buf_t * const buf)
-{
-  rpi_cache_flush_env_t * const rfe = (rpi_cache_flush_env_t *)buf;
-  rfe->v.op_count = 0;
-  return rfe;
-}
-
-void rpi_cache_flush_abort(rpi_cache_flush_env_t * const rfe)
-{
-  // Nothing needed
-}
-
-int rpi_cache_flush_execute(rpi_cache_flush_env_t * const rfe)
-{
-    int rc = 0;
-    if (rfe->v.op_count != 0) {
-        if (vcsm_clean_invalid2(&rfe->v) != 0)
-        {
-          av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid2 failed: errno=%d\n", errno);
-          rc = -1;
-        }
-        rfe->v.op_count = 0;
-    }
-    return rc;
-}
-
-int rpi_cache_flush_finish(rpi_cache_flush_env_t * const rfe)
-{
-  int rc = rpi_cache_flush_execute(rfe);;
-
-  return rc;
-}
-
-inline void rpi_cache_flush_add_gm_blocks(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
-  const unsigned int offset0, const unsigned int block_size, const unsigned int blocks, const unsigned int block_stride)
-{
-  struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
-
-  av_assert1(rfe->v.op_count <= CACHE_EL_MAX);
-
-  b->invalidate_mode = mode;
-  b->block_count = blocks;
-  b->start_address = gm->arm + offset0;
-  b->block_size = block_size;
-  b->inter_block_stride = block_stride;
-}
-
-void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
-  const unsigned int offset, const unsigned int size)
-{
-  // Deal with empty pointer trivially
-  if (gm == NULL || size == 0)
-    return;
-
-  av_assert1(offset <= gm->numbytes);
-  av_assert1(size <= gm->numbytes);
-  av_assert1(offset + size <= gm->numbytes);
-
-  rpi_cache_flush_add_gm_blocks(rfe, gm, mode, offset, size, 1, 0);
-}
-
-void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode)
-{
-  rpi_cache_flush_add_gm_blocks(rfe, gm, mode, 0, gm->numbytes, 1, 0);
-}
-
-
-void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode)
-{
-#if !RPI_ONE_BUF
-#error Fixme! (NIF)
-#endif
-  if (gpu_is_buf1(frame)) {
-    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf1_gmem(frame), mode);
-  }
-  else
-  {
-    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf3_gmem(frame, 0), mode);
-    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf3_gmem(frame, 1), mode);
-    rpi_cache_flush_add_gm_ptr(rfe, gpu_buf3_gmem(frame, 2), mode);
-  }
-}
-
-// Flush an area of a frame
-// Width, height, x0, y0 in luma pels
-void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const unsigned int mode,
-  const unsigned int x0, const unsigned int y0, const unsigned int width, const unsigned int height,
-  const unsigned int uv_shift, const int do_luma, const int do_chroma)
-{
-  const unsigned int y_offset = frame->linesize[0] * y0;
-  const unsigned int y_size = frame->linesize[0] * height;
-  // Round UV up/down to get everything
-  const unsigned int uv_rnd = (1U << uv_shift) >> 1;
-  const unsigned int uv_offset = frame->linesize[1] * (y0 >> uv_shift);
-  const unsigned int uv_size = frame->linesize[1] * ((y0 + height + uv_rnd) >> uv_shift) - uv_offset;
-
-#if 0
-  // *** frame->height is cropped height so not good
-  // As all unsigned they will also reject -ve
-  // Test individually as well as added to reject overflow
-  av_assert0(start_line <= (unsigned int)frame->height);  // ***** frame height cropped
-  av_assert0(n <= (unsigned int)frame->height);
-  av_assert0(start_line + n <= (unsigned int)frame->height);
-#endif
-
-  if (!gpu_is_buf1(frame))
-  {
-    if (do_luma) {
-      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 0), mode, y_offset, y_size);
-    }
-    if (do_chroma) {
-      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 1), mode, uv_offset, uv_size);
-      rpi_cache_flush_add_gm_range(rfe, gpu_buf3_gmem(frame, 2), mode, uv_offset, uv_size);
-    }
-  }
-  else if (!av_rpi_is_sand_frame(frame))
-  {
-    const GPU_MEM_PTR_T * const gm = gpu_buf1_gmem(frame);
-    if (do_luma) {
-      rpi_cache_flush_add_gm_range(rfe, gm, mode, (frame->data[0] - gm->arm) + y_offset, y_size);
-    }
-    if (do_chroma) {
-      rpi_cache_flush_add_gm_range(rfe, gm, mode, (frame->data[1] - gm->arm) + uv_offset, uv_size);
-      rpi_cache_flush_add_gm_range(rfe, gm, mode, (frame->data[2] - gm->arm) + uv_offset, uv_size);
-    }
-  }
-  else
-  {
-    const unsigned int stride1 = av_rpi_sand_frame_stride1(frame);
-    const unsigned int stride2 = av_rpi_sand_frame_stride2(frame);
-    const unsigned int xshl = av_rpi_sand_frame_xshl(frame);
-    const unsigned int xleft = x0 & ~((stride1 >> xshl) - 1);
-    const unsigned int block_count = (((x0 + width - xleft) << xshl) + stride1 - 1) / stride1;  // Same for Y & C
-    av_assert1(rfe->v.op_count + do_chroma + do_luma < CACHE_EL_MAX);
-
-    if (do_chroma)
-    {
-      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
-      b->invalidate_mode = mode;
-      b->block_count = block_count;
-      b->start_address = av_rpi_sand_frame_pos_c(frame, xleft >> 1, y0 >> 1);
-      b->block_size = uv_size;
-      b->inter_block_stride = stride1 * stride2;
-    }
-    if (do_luma)
-    {
-      struct vcsm_user_clean_invalid2_block_s * const b = rfe->v.s + rfe->v.op_count++;
-      b->invalidate_mode = mode;
-      b->block_count = block_count;
-      b->start_address = av_rpi_sand_frame_pos_y(frame, xleft, y0);
-      b->block_size = y_size;
-      b->inter_block_stride = stride1 * stride2;
-    }
-  }
-}
-
-// Call this to clean and invalidate a region of memory
-void rpi_cache_flush_one_gm_ptr(const GPU_MEM_PTR_T *const p, const rpi_cache_flush_mode_t mode)
-{
-  rpi_cache_buf_t cbuf;
-  rpi_cache_flush_env_t * rfe = rpi_cache_flush_init(&cbuf);
-  rpi_cache_flush_add_gm_ptr(rfe, p, mode);
-  rpi_cache_flush_finish(rfe);
-}
-
 
 // ----------------------------------------------------------------------------
 
@@ -941,7 +732,6 @@ void vpu_qpu_term()
   gpu_unlock_unref(ge);
 }
 
-#if !KLUDGE_NO_TRANSFORM
 uint32_t qpu_fn(const int * const mc_fn)
 {
   return gpu->qpu_code_gm_ptr.vc + ((const char *)mc_fn - (const char *)ff_hevc_rpi_shader);
@@ -987,4 +777,4 @@ int rpi_hevc_qpu_init_fn(HEVCRpiQpu * const qf, const unsigned int bit_depth)
   }
   return 0;
 }
-#endif
+
