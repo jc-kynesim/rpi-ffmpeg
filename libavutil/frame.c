@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config.h"
+
 #include "channel_layout.h"
 #include "avassert.h"
 #include "buffer.h"
@@ -25,7 +27,7 @@
 #include "imgutils.h"
 #include "mem.h"
 #include "samplefmt.h"
-#if CONFIG_RPI
+#if CONFIG_SAND
 #include "rpi_sand_fns.h"
 #endif
 
@@ -896,7 +898,7 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
         (frame->crop_top + frame->crop_bottom) >= frame->height)
         return AVERROR(ERANGE);
 
-#if CONFIG_RPI
+#if CONFIG_SAND
     // Sand cannot be cropped - do not try
     if (av_rpi_is_sand_format(frame->format))
         return 0;

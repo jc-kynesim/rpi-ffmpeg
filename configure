@@ -1869,6 +1869,7 @@ FEATURE_LIST="
     gray
     hardcoded_tables
     omx_rpi
+    rpi
     runtime_cpudetect
     safe_bitstream_reader
     shared
@@ -2721,6 +2722,8 @@ hap_decoder_select="snappy texturedsp"
 hap_encoder_deps="libsnappy"
 hap_encoder_select="texturedspenc"
 hevc_decoder_select="bswapdsp cabac golomb hevcparse videodsp"
+hevc_rpi_decoder_deps="rpi"
+hevc_rpi_decoder_select="hevc_decoder sand"
 huffyuv_decoder_select="bswapdsp huffyuvdsp llviddsp"
 huffyuv_encoder_select="bswapdsp huffman huffyuvencdsp llvidencdsp"
 hymt_decoder_select="huffyuv_decoder"

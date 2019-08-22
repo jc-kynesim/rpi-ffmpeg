@@ -29,6 +29,12 @@
 #endif
 
 #include "config.h"
+
+#if CONFIG_RPI
+#define RPI_DISPLAY
+#define RPI_DISPLAY_ALL 0
+#endif
+
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
@@ -90,6 +96,7 @@
 #include <interface/mmal/util/mmal_util_params.h>
 #pragma GCC diagnostic pop
 #include "libavcodec/rpi_qpu.h"
+#include "libavutil/rpi_sand_fns.h"
 #include "libavcodec/rpi_zc.h"
 #endif
 
@@ -415,14 +422,14 @@ static void display_exit(rpi_display_env_t ** const pde)
         if (de->conn != NULL) {
             mmal_connection_destroy(de->conn);
         }
+        if (de->rpi_pool != NULL) {
+            mmal_port_pool_destroy(de->display->input[0], de->rpi_pool);
+        }
         if (de->isp != NULL) {
             mmal_component_destroy(de->isp);
         }
         if (de->display != NULL) {
             mmal_component_destroy(de->display);
-        }
-        if (de->rpi_pool != NULL) {
-            mmal_port_pool_destroy(de->display->input[0], de->rpi_pool);
         }
 
         av_free(de);
@@ -1346,7 +1353,9 @@ static void do_video_out(OutputFile *of,
     if (next_picture && ist != NULL)
     {
         if (rpi_display_env == NULL)
-            rpi_display_env = display_init(next_picture->format, 0, 0, next_picture->width, next_picture->height);
+            rpi_display_env = display_init(next_picture->format, 0, 0,
+                                           next_picture->width - next_picture->crop_right,
+                                           next_picture->height - next_picture->crop_bottom);
         display_frame(ist->dec_ctx, rpi_display_env, next_picture);
     }
 #endif
@@ -2422,8 +2431,8 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame)
                        ifilter->channel_layout != frame->channel_layout;
         break;
     case AVMEDIA_TYPE_VIDEO:
-        need_reinit |= ifilter->width  != frame->width ||
-                       ifilter->height != frame->height;
+        need_reinit |= ifilter->width  != av_frame_cropped_width(frame) ||
+                       ifilter->height != av_frame_cropped_height(frame);
         break;
     }
 

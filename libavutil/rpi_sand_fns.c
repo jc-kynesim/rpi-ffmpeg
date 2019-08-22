@@ -72,7 +72,6 @@ static void cpy16_to_8(uint8_t * dst, const uint8_t * _src, unsigned int n, cons
 }
 #endif
 
-
 // Fetches a single patch - offscreen fixup not done here
 // w <= stride1
 // unclipped

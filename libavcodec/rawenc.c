@@ -33,7 +33,7 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/avassert.h"
-#if CONFIG_RPI
+#if CONFIG_SAND
 #include "libavutil/rpi_sand_fns.h"
 #endif
 
@@ -54,7 +54,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
-#if CONFIG_RPI
+#if CONFIG_SAND
 static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame)
 {
@@ -131,7 +131,7 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
 {
     int ret;
 
-#if CONFIG_RPI
+#if CONFIG_SAND
     if (av_rpi_is_sand_frame(frame)) {
         ret = av_rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) :
             av_rpi_is_sand16_frame(frame) ? raw_sand16_as_yuv420(avctx, pkt, frame) :
