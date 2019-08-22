@@ -876,7 +876,7 @@ static void ffmpeg_cleanup(int ret)
         av_freep(&ist->hwaccel_device);
         av_freep(&ist->dts_buffer);
 #ifdef RPI_DISPLAY
-        av_rpi_zc_uninit(ist->dec_ctx);
+        av_rpi_zc_uninit_local(ist->dec_ctx);
 #endif
         avcodec_free_context(&ist->dec_ctx);
 
@@ -3198,7 +3198,7 @@ static int init_input_stream(int ist_index, char *error, int error_len)
 
 #ifdef RPI_DISPLAY
         // Overrides the above get_buffer2
-        av_rpi_zc_init(ist->dec_ctx);
+        av_rpi_zc_init_local(ist->dec_ctx);
 #endif
 
         ist->dec_ctx->thread_safe_callbacks = 1;

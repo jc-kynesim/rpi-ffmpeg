@@ -124,7 +124,6 @@ int av_rpi_zc_in_use(const struct AVCodecContext * const s);
 // Init ZC into a context
 // There is nothing magic in this fn - it just packages setting
 // get_buffer2 & get_buffer_context
-int av_rpi_zc_init(struct AVCodecContext * const s);
 
 typedef AVBufferRef * av_rpi_zc_alloc_buf_fn_t(void * pool_env, size_t size);
 typedef void av_rpi_zc_free_pool_fn_t(void * pool_env);
@@ -136,8 +135,10 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
 // Free ZC from a context
 // There is nothing magic in this fn - it just packages unsetting
 // get_buffer2 & get_buffer_context
-void av_rpi_zc_uninit(struct AVCodecContext * const s);
+void av_rpi_zc_uninit2(struct AVCodecContext * const s);
 
+int av_rpi_zc_init_local(struct AVCodecContext * const s);
+void av_rpi_zc_uninit_local(struct AVCodecContext * const s);
 
 
 AVBufferRef * av_rpi_zc_buf(size_t numbytes, unsigned int vcsm_handle, int offset, void (*free_fn)(void * v), void * v);

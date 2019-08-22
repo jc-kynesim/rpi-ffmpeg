@@ -1039,14 +1039,7 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
         return AVERROR_EXTERNAL;
     }
 
-#if defined(RPI_DISPLAY)
-  #include "rpi_zc.h"
-    // Whilst FFmpegs init fn is only called once the close fn is called as
-    // many times as we have threads (init_thread_copy is called for the
-    // threads).  So to match init & term put the init here where it will be
-    // called by both init & copy
-    av_rpi_zc_init(avctx);
-#endif
+    av_rpi_zc_init_local(avctx);
 
     pthread_mutex_init(&rpi->mutex_phase1, NULL);
     pthread_mutex_init(&rpi->mutex_phase2, NULL);
@@ -1070,6 +1063,8 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     pthread_mutex_destroy(&rpi->mutex_phase1);
     pthread_mutex_destroy(&rpi->mutex_phase2);
     if (rpi->id && rpi->ctrl_ffmpeg_free) rpi->ctrl_ffmpeg_free(rpi->id);
+
+    av_rpi_zc_uninit_local(avctx);
     return 0;
 }
 

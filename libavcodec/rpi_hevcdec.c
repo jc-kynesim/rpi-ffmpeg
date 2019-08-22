@@ -5738,7 +5738,7 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
     // This must be after we free off the DPB
     // * If the outer code is still holding any frames hopefully it will
     //   have its own ref to zc
-    av_rpi_zc_uninit(avctx);
+    av_rpi_zc_uninit_local(avctx);
 
     return 0;
 }
@@ -5760,7 +5760,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     // many times as we have threads (init_thread_copy is called for the
     // threads).  So to match init & term put the init here where it will be
     // called by both init & copy
-    av_rpi_zc_init(avctx);
+    av_rpi_zc_init_local(avctx);
 
     if (vpu_qpu_init() != 0)
         goto fail;

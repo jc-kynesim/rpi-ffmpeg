@@ -874,7 +874,25 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
     return 0;
 }
 
-int av_rpi_zc_init(struct AVCodecContext * const s)
+void av_rpi_zc_uninit2(struct AVCodecContext * const s)
+{
+    if (av_rpi_zc_in_use(s))
+    {
+        ZcEnv * const zc = s->get_buffer_context;
+        if (--zc->refcount == 0)
+        {
+            s->get_buffer2 = zc->old.get_buffer2;
+            s->get_buffer_context = zc->old.get_buffer_context;
+            s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
+
+            zc->free_pool(zc->pool_env);
+            av_free(zc);
+
+        }
+    }
+}
+
+int av_rpi_zc_init_local(struct AVCodecContext * const s)
 {
     int use_cma;
     ZcPool * pool_env = NULL;
@@ -895,24 +913,9 @@ int av_rpi_zc_init(struct AVCodecContext * const s)
     return av_rpi_zc_init2(s, pool_env, rpi_buf_pool_alloc, zc_pool_delete_v);
 }
 
-void av_rpi_zc_uninit(struct AVCodecContext * const s)
+void av_rpi_zc_uninit_local(struct AVCodecContext * const s)
 {
-    if (av_rpi_zc_in_use(s))
-    {
-        ZcEnv * const zc = s->get_buffer_context;
-        if (--zc->refcount == 0)
-        {
-            s->get_buffer2 = zc->old.get_buffer2;
-            s->get_buffer_context = zc->old.get_buffer_context;
-            s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
-
-            zc->free_pool(zc->pool_env);
-            av_free(zc);
-
-        }
-
-        vcsm_exit();
-    }
+    av_rpi_zc_uninit2(s);
+    vcsm_exit();
 }
-
 
