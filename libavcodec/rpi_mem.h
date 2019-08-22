@@ -66,13 +66,14 @@ typedef enum
     RPI_CACHE_FLUSH_MODE_WB_INVALIDATE  = 3
 } rpi_cache_flush_mode_t;
 
+struct AVFrame;
 void rpi_cache_flush_add_gm_ptr(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const rpi_cache_flush_mode_t mode);
 void rpi_cache_flush_add_gm_range(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const rpi_cache_flush_mode_t mode,
   const unsigned int offset, const unsigned int size);
 void rpi_cache_flush_add_gm_blocks(rpi_cache_flush_env_t * const rfe, const GPU_MEM_PTR_T * const gm, const unsigned int mode,
   const unsigned int offset0, const unsigned int block_size, const unsigned int blocks, const unsigned int block_stride);
-void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const rpi_cache_flush_mode_t mode);
-void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const AVFrame * const frame, const rpi_cache_flush_mode_t mode,
+void rpi_cache_flush_add_frame(rpi_cache_flush_env_t * const rfe, const struct AVFrame * const frame, const rpi_cache_flush_mode_t mode);
+void rpi_cache_flush_add_frame_block(rpi_cache_flush_env_t * const rfe, const struct AVFrame * const frame, const rpi_cache_flush_mode_t mode,
   const unsigned int x0, const unsigned int y0, const unsigned int width, const unsigned int height,
   const unsigned int uv_shift, const int do_luma, const int do_chroma);
 

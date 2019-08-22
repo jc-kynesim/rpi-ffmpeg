@@ -1,5 +1,5 @@
 #include "config.h"
-#if 1 //defined(RPI) //|| defined (RPI_DISPLAY)
+
 #include "libavcodec/avcodec.h"
 #include "rpi_qpu.h"
 #include "rpi_mailbox.h"
@@ -89,7 +89,7 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req
     }
 
 #if TRACE_ALLOC
-    printf("%s: Alloc %#x bytes @ %p\n", __func__, zp->gmem.numbytes, zp->gmem.arm);
+    printf("%s: Alloc %#x bytes @ h=%d\n", __func__, alloc_size, zp->vcsm_handle);
 #endif
 
     pool->numbytes = alloc_size;
@@ -108,7 +108,7 @@ fail0:
 static void zc_pool_ent_free(ZcPoolEnt * const zp)
 {
 #if TRACE_ALLOC
-    printf("%s: Free %#x bytes @ %p\n", __func__, zp->gmem.numbytes, zp->gmem.arm);
+    printf("%s: Free %#x bytes @ h=%d\n", __func__, zp->numbytes, zp->vcsm_handle);
 #endif
 
     if (zp->pool->keep_locked)
@@ -174,7 +174,7 @@ static void zc_pool_free(ZcPoolEnt * const zp)
     {
         pthread_mutex_lock(&pool->lock);
 #if TRACE_ALLOC
-        printf("%s: Recycle %#x, %#x\n", __func__, pool->numbytes, zp->gmem.numbytes);
+        printf("%s: Recycle %#x, %#x\n", __func__, pool->numbytes, zp->numbytes);
 #endif
 
         if (pool->numbytes == zp->numbytes)
@@ -190,6 +190,7 @@ static void zc_pool_free(ZcPoolEnt * const zp)
         }
     }
 }
+
 static void zc_pool_freev(void * v)
 {
     zc_pool_free(v);
@@ -248,7 +249,7 @@ typedef struct AVZcEnv
 
 // Get mailbox fd - should be in a lock when called
 // Rely on process close to close it
-static int mbox_fd()
+static int mbox_fd(void)
 {
     static int fd = -1;
     if (fd != -1)
@@ -896,8 +897,6 @@ int av_rpi_zc_init(struct AVCodecContext * const s)
 
 void av_rpi_zc_uninit(struct AVCodecContext * const s)
 {
-    vcsm_exit();
-
     if (av_rpi_zc_in_use(s))
     {
         ZcEnv * const zc = s->get_buffer_context;
@@ -910,10 +909,10 @@ void av_rpi_zc_uninit(struct AVCodecContext * const s)
             zc->free_pool(zc->pool_env);
             av_free(zc);
 
-            vcsm_exit();
         }
+
+        vcsm_exit();
     }
 }
 
-#endif  // RPI
 

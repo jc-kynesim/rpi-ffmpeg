@@ -32,13 +32,16 @@ Authors: John Cox
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "libavutil/avassert.h"
 
 #include "config.h"
+
+#include "libavutil/avassert.h"
+#include "libavutil/rpi_sand_fns.h"
 
 #include <interface/vcsm/user-vcsm.h>
 
 #include "rpi_mem.h"
+#include "rpi_zc_frames.h"
 
 struct rpi_cache_flush_env_s {
   struct vcsm_user_clean_invalid2_s v;

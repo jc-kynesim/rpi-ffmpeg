@@ -14,6 +14,7 @@
 #include "rpivid_hevc.h"
 #include "rpi_zc.h"
 #include "rpi_mem.h"
+#include "rpi_zc_frames.h"
 
 #include "rpivid_axi.h"
 
