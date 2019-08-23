@@ -176,6 +176,7 @@ if __name__ == '__main__':
     with open(args.csv, 'rt') as csvfile:
         csva = [a for a in csv.reader(csvfile, ConfCSVDialect())]
 
+    is_pi4 = args.pi4 or os.path.exists("/dev/rpivid-hevcmem")
 
-    doconf(csva, args.tests, args.test_root, args.vcodec, args.pi4)
+    doconf(csva, args.tests, args.test_root, args.vcodec, is_pi4)
 
