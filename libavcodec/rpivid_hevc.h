@@ -154,7 +154,59 @@ struct RPI_BIT {
 
 //////////////////////////////////////////////////////////////////////////////
 
+struct RPI_T;
+
+typedef struct dec_env_s {
+    const AVCodecContext * avctx;
+    struct RPI_T * rpi;
+
+    struct dec_env_s * phase_next;
+    sem_t phase_wait;
+
+    struct RPI_BIT *bit_fifo;
+    struct RPI_CMD *cmd_fifo;
+    int         bit_len, bit_max;
+    int         cmd_len, cmd_max;
+    int         max_pu_msgs;
+    int         max_coeff64;
+    int         thread_order;
+    int         decode_order;
+    int         phase1_order;
+    int         phase2_order;
+pthread_mutex_t mutex_phase1;
+pthread_mutex_t mutex_phase2;
+    uint8_t     scaling_factors[NUM_SCALING_FACTORS];
+struct RPI_PROB probabilities;
+    int         num_slice_msgs;
+    uint16_t    slice_msgs[2*HEVC_MAX_REFS*8+3];
+    int         pubase64;
+    int         pustep64;
+    int         coeffbase64;
+    int         coeffstep64;
+    int         PicWidthInCtbsY;
+    int         PicHeightInCtbsY;
+    int         mvframebytes64;
+    int         mvstorage64;
+    int         colstride64;
+    int         mvstride64;
+    int         colbase64;
+    int         mvbase64;
+    uint32_t    reg_slicestart;
+    int         collocated_from_l0_flag;
+    int         max_num_merge_cand;
+    int         RefPicList[2][HEVC_MAX_REFS];
+    int         collocated_ref_idx;
+    int         wpp_entry_x;
+    int         wpp_entry_y;
+} dec_env_t;
+
 typedef struct RPI_T {
+    dec_env_t ** dec_envs;
+
+    pthread_mutex_t phase_lock;
+    dec_env_t * phase1_req;
+    dec_env_t * phase2_req;
+
 struct RPI_BIT *bit_fifo;
 struct RPI_CMD *cmd_fifo;
     int         bit_len, bit_max;
@@ -178,12 +230,6 @@ struct RPI_PROB probabilities;
     int         coeffstep64;
     int         PicWidthInCtbsY;
     int         PicHeightInCtbsY;
-#ifdef AXI_BUFFERS
-    int         lumabytes64;
-    int         framebytes64;
-    int         lumastride64;
-    int         chromastride64;
-#endif
     int         mvframebytes64;
     int         mvstorage64;
     int         colstride64;

@@ -144,54 +144,6 @@ static void read_rect(RPI_T *rpi, char *buf, int addr64, int height, int bytes_p
     rpi->axi_read_rx(rpi->id, bytes_per_line*height, buf);
 }
 
-#ifdef AXI_BUFFERS
-//////////////////////////////////////////////////////////////////////////////
-// Copy YUV output data to FFMPEG frame buffer
-
-static void copy_luma(char *buf, int bpl, int height, int x, uint8_t *data, int linesize) {
-    int y;
-    for (y=0; y<height; y++)
-        memcpy(data+y*linesize+x, buf+bpl*y, FFMIN(bpl, linesize-x));
-}
-
-static void copy_chroma(char *buf, int bpl, int height, int x, uint8_t *u, uint8_t *v, int linesize) {
-    int i, j, y;
-    for (y=0; y<height; y++, buf+=bpl) for (j=x,i=0; i<bpl && j<linesize; j++) {
-        u[y*linesize+j] = buf[i++];
-        v[y*linesize+j] = buf[i++];
-    }
-}
-
-static void copy_luma10(char *buf, int bpl, int height, int x, uint8_t *data, int linesize) {
-    int i, j, y;
-    for (y=0; y<height; y++) {
-        uint32_t *src = (uint32_t*) (buf+y*bpl);
-        uint16_t *dst = (uint16_t*) (data+y*linesize);
-        for (j=x,i=0; i<bpl/4; i++) {
-            dst[j] = (src[i]>> 0)&0x3ff; if(++j==linesize/2) break;
-            dst[j] = (src[i]>>10)&0x3ff; if(++j==linesize/2) break;
-            dst[j] = (src[i]>>20)&0x3ff; if(++j==linesize/2) break;
-        }
-    }
-}
-
-static void copy_chroma10(char *buf, int bpl, int height, int x, uint8_t *u8, uint8_t *v8, int linesize) {
-    int i, j, y;
-    for (y=0; y<height; y++) {
-        uint32_t *src = (uint32_t *) (buf+y*bpl);
-        uint16_t *u16 = (uint16_t *) (u8+y*linesize);
-        uint16_t *v16 = (uint16_t *) (v8+y*linesize);
-        for (j=x,i=0; i<bpl/4; i++) {
-            u16[j] = (src[i]>> 0)&0x3ff;
-            v16[j] = (src[i]>>10)&0x3ff; if(++j==linesize/2) break;
-            u16[j] = (src[i]>>20)&0x3ff; i++;
-            v16[j] = (src[i]>> 0)&0x3ff; if(++j==linesize/2) break;
-            u16[j] = (src[i]>>10)&0x3ff;
-            v16[j] = (src[i]>>20)&0x3ff; if(++j==linesize/2) break;
-        }
-    }
-}
-#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // Phase 1 command and bit FIFOs
@@ -253,14 +205,6 @@ static void alloc_picture_space(RPI_T *rpi, HEVCContext *s, int thread_idx) {
 
     rpi->PicWidthInCtbsY  = (sps->width + CtbSizeY - 1) / CtbSizeY;  //7-15
     rpi->PicHeightInCtbsY = (sps->height + CtbSizeY - 1) / CtbSizeY;  //7-17
-#ifdef AXI_BUFFERS
-    rpi->lumabytes64 = ((sps->height+64) * ((sps->width+95)/96) * 2);
-    rpi->framebytes64 = ((rpi->lumabytes64 * 3)/2);
-    rpi->lumastride64 = ((sps->height+64) * 128) / 64;
-    rpi->chromastride64 = (((sps->height+64) * 128 ) / 2) / 64;
-
-    x64 += 17 * rpi->framebytes64;
-#endif
 
     // collocated reads/writes
     if (sps->sps_temporal_mvp_enabled_flag) {
@@ -529,6 +473,140 @@ static int get_thread_idx(RPI_T *rpi, AVCodecContext *avctx) {
     return idx;
 }
 
+// Doesn't attempt to remove from context as we should only do this at the end
+// of time or on create error
+static void
+dec_env_delete(dec_env_t * const de)
+{
+    av_freep(&de->cmd_fifo);
+    av_freep(&de->bit_fifo);
+
+    sem_delete(&de->phase_wait, 0, 0);
+    av_free(de);
+}
+
+static dec_env_t *
+dec_env_new(const AVCodecContext * const avctx, RPI_T * const rpi)
+{
+    dec_env_t * const de = av_mallocz(sizeof(*de));
+    int i;
+
+    if (de == NULL)
+        return NULL;
+
+    de->rpi = rpi;
+    de->avctx = avctx;
+    sem_init(&de->phase_wait, 0, 0);
+
+    // Initial PU/COEFF stream buffer sizes chosen so jellyfish40.265 requires 1 overflow/restart
+    de->max_pu_msgs = 2+340; // 7.2 says at most 1611 messages per CTU
+    de->max_coeff64 = 2+1404;
+
+    if ((de->cmd_fifo = malloc((rpi->cmd_max=1024)*sizeof(struct RPI_CMD))) == NULL)
+        goto fail;
+
+    if ((de->bit_fifo = malloc((rpi->bit_max=1024)*sizeof(struct RPI_BIT))) == NULL)
+        goto fail;
+
+    pthread_mutex_lock(&rpi->phase_lock); // Abuse - not worth creating a lock just for this
+    for (i = 0; i != avctx->thread_count; ++i) {
+        if (rpi->dec_envs[i] == NULL)
+        {
+            rpi->dec_envs[i] = de;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&rpi->phase_lock);
+
+    if (i == avctx->thread_count) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to find a slot for hw thread context\n");
+        goto fail;
+    }
+
+    return de;
+
+fail:
+    dec_env_delete(de);
+    return NULL;
+}
+
+
+static dec_env_t *
+dec_env_get(AVCodecContext * const avctx, RPI_T * const rpi)
+{
+    dec_env_t * de = NULL;
+    for (int i = 0; i != avctx->thread_count; ++i) {
+        if (rpi->dec_envs[i] == NULL)
+        {
+            de = dec_env_new(avctx, rpi);
+            break;
+        }
+        if (rpi->dec_envs[i]->avctx == avctx)
+        {
+            de = rpi->dec_envs[i];
+            break;
+        }
+    }
+    return de;
+}
+
+//----------------------------------------------------------------------------
+
+
+
+int wait_phase(RPI_T * const rpi, dec_env_t * const de, dec_env_t ** const q)
+{
+    int rv = 0;
+
+    pthread_mutex_lock(&rpi->phase_lock);
+    de->phase_next = *q;
+    *q = de;
+    pthread_mutex_unlock(&rpi->phase_lock);
+
+    if (de->phase_next != NULL) {
+        while ((rv = sem_wait(&rpi->phase_wait)) == -1 && errno == EINTR)
+            /* Loop */;
+    }
+
+    return rv;
+}
+
+static void
+post_phase(dec_env_t * const de, dec_env_t ** q)
+{
+    pthread_mutex_lock(&rpi->phase_lock);
+
+    dec_env_t * next_de = NULL;
+    int next_poc = MAX_INT;
+
+    while (*q != NULL) {
+        dec_env_t * const t_de = *q;
+
+        if (t_de == de) {
+            // This is us - remove from Q
+            // Do not null out current phase_next yet
+            *q = t_de->phase_next;
+        }
+        else {
+            // Scan for lowest waiting POC to poke
+            HEVCContext * const t_s = t_de->avctx->priv_data;
+            if (t_s->poc <= next_poc) {
+                next_poc = t_s->poc;
+                next_de = t_de;
+            }
+        }
+        q = t_de->phase_next;
+    }
+
+    de->phase_next = NULL; // Tidy
+    pthread_mutex_unlock(&rpi->phase_lock);
+
+    if (next_de != NULL)
+        sem_post(&next_de->phase_wait);
+}
+
+
+
 //////////////////////////////////////////////////////////////////////////////
 // Start frame
 
@@ -745,7 +823,6 @@ static int rpi_hevc_end_frame(AVCodecContext *avctx) {
     rpi->apb_write_addr(rpi->id, RPI_COEFFRBASE, rpi->coeffbase64[thread_idx]);
     rpi->apb_write(rpi->id, RPI_COEFFRSTRIDE, rpi->coeffstep64);
 
-#if !defined(AXI_BUFFERS)
 #define MANGLE(x) (((x) &~0xc0000000)>>6)
 {
     const AVRpiZcRefPtr fr_buf = f ? av_rpi_zc_ref(avctx, f, f->format, 0) : NULL;
@@ -757,15 +834,7 @@ static int rpi_hevc_end_frame(AVCodecContext *avctx) {
     rpi->apb_write(rpi->id, RPI_OUTCSTRIDE, f->linesize[3] * 128 / 64);
     av_rpi_zc_unref(fr_buf);
 }
-#else
-    // Output frame and reference picture locations
-    rpi->apb_write_addr(rpi->id, RPI_OUTYBASE, CurrentPicture * rpi->framebytes64);
-    rpi->apb_write_addr(rpi->id, RPI_OUTCBASE, CurrentPicture * rpi->framebytes64 + rpi->lumabytes64);
-    rpi->apb_write(rpi->id, RPI_OUTYSTRIDE, rpi->lumastride64);
-    rpi->apb_write(rpi->id, RPI_OUTCSTRIDE, rpi->chromastride64);
-#endif
 
-#if !defined(AXI_BUFFERS)
 {
     SliceHeader *sh = &s->sh;
     int rIdx;
@@ -795,15 +864,6 @@ static int rpi_hevc_end_frame(AVCodecContext *avctx) {
         av_rpi_zc_unref(fr_buf);
     }
 }
-#else
-    for(i=0; i<16; i++) {
-        int pic = i < CurrentPicture ? i : i+1;
-        rpi->apb_write_addr(rpi->id, 0x9000+16*i, pic * rpi->framebytes64);
-        rpi->apb_write(rpi->id, 0x9004+16*i, rpi->lumastride64);
-        rpi->apb_write_addr(rpi->id, 0x9008+16*i, pic * rpi->framebytes64 + rpi->lumabytes64);
-        rpi->apb_write(rpi->id, 0x900C+16*i, rpi->chromastride64);
-    }
-#endif
 
     rpi->apb_write(rpi->id, RPI_CONFIG2,
           (sps->bit_depth                             << 0) // BitDepthY
@@ -853,25 +913,6 @@ static int rpi_hevc_end_frame(AVCodecContext *avctx) {
         rpi_cache_flush_finish(fe);
     }
 //printf("%s: %dx%d %d\n", __FUNCTION__, f->width, f->height, f->linesize[0]);
-#if defined(AXI_BUFFERS)
-    // Copy YUV output frame
-    av_assert0(buf = malloc(128*sps->height));
-    a64 = AXI_BASE64 + CurrentPicture * rpi->framebytes64;
-    for(x=0; x<sps->width; x+=jump) {
-        int bpl = bytes_per_line(sps, jump, x);
-        read_rect(rpi, buf, a64, sps->height, bpl);
-        (sps->bit_depth>8?copy_luma10:copy_luma)(buf, bpl, sps->height, x, f->data[0], f->linesize[0]);
-        a64 += rpi->lumastride64;
-    }
-    a64 = AXI_BASE64 + CurrentPicture * rpi->framebytes64 + rpi->lumabytes64;
-    for(x=0; x<sps->width; x+=jump) {
-        int bpl = bytes_per_line(sps, jump, x);
-        read_rect(rpi, buf, a64, sps->height/2, bpl);
-        (sps->bit_depth>8?copy_chroma10:copy_chroma)(buf, bpl, sps->height/2, x/2, f->data[1], f->data[2], f->linesize[1]);
-        a64 += rpi->chromastride64;
-    }
-    free(buf);
-#endif
     rpi->thread_avctx[thread_idx] = 0;
     pthread_mutex_unlock(&rpi->mutex_phase2);
 
@@ -1040,6 +1081,16 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
     }
 
     av_rpi_zc_init_local(avctx);
+
+    printf("%s: threads=%d\n", __func__, avctx->thread_count);
+
+    rpi->phase1_req = NULL;
+    rpi->phase2_req = NULL;
+    pthread_mutex_init(&rpi->phase_lock, NULL);
+    if ((rpi->dec_envs = av_mallocz(sizeof(dec_env_t *) * avctx->thread_count)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to alloc %d dec envs\n", avctx->thread_count);
+        return AVERROR(ENOMEM);
+    }
 
     pthread_mutex_init(&rpi->mutex_phase1, NULL);
     pthread_mutex_init(&rpi->mutex_phase2, NULL);
