@@ -47,7 +47,7 @@
 
 #define BLOCK_SIZE (0x10000)
 #define CACHED 0
-#define VERBOSE 0
+#define VERBOSE 1
 
 static inline void __DMB2(void) {}//{ asm volatile ("dmb" ::: "memory"); }
 

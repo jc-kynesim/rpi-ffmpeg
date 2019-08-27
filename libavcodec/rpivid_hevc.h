@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 #include "hevc.h"
 #include "hevcdec.h"
@@ -162,7 +163,6 @@ typedef struct dec_env_s {
 
     struct dec_env_s * phase_next;
     sem_t phase_wait;
-
     struct RPI_BIT *bit_fifo;
     struct RPI_CMD *cmd_fifo;
     int         bit_len, bit_max;
@@ -207,6 +207,7 @@ typedef struct RPI_T {
     dec_env_t * phase1_req;
     dec_env_t * phase2_req;
 
+#if 0
 struct RPI_BIT *bit_fifo;
 struct RPI_CMD *cmd_fifo;
     int         bit_len, bit_max;
@@ -243,7 +244,7 @@ struct RPI_PROB probabilities;
     int         collocated_ref_idx;
     int         wpp_entry_x;
     int         wpp_entry_y;
-
+#endif
     void *      dl_handle;
     void *      id;
     char *   (* ctrl_ffmpeg_init) (const char *hwaccel_device, void **id);
