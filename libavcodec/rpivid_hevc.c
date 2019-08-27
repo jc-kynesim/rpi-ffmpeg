@@ -213,7 +213,7 @@ static int alloc_stream_space(dec_env_t * const de, const HEVCContext *s) {
     x64 += de->PicHeightInCtbsY*stride64 ;
 
     stride64 = de->max_coeff64;
-    de->coeffbase64 = x64 + de->PicHeightInCtbsY*stride64;
+    de->coeffbase64 = x64;
     de->coeffstep64 = stride64;
     x64 += de->PicHeightInCtbsY*stride64;
 
