@@ -8,6 +8,7 @@
 
 #include "hevc.h"
 #include "hevcdec.h"
+#include "rpi_mem.h"
 
 #define MAX_THREADS 50
 #define NUM_SCALING_FACTORS 4064
@@ -161,6 +162,8 @@ typedef struct dec_env_s {
     const AVCodecContext * avctx;
     struct RPI_T * rpi;
 
+    GPU_MEM_PTR_T gbuf;
+
     struct dec_env_s * phase_next;
     sem_t phase_wait;
     struct RPI_BIT *bit_fifo;
@@ -207,6 +210,10 @@ typedef struct RPI_T {
     dec_env_t * phase1_req;
     dec_env_t * phase2_req;
 
+    volatile uint32_t * regs;
+    volatile uint32_t * ints;
+
+
 #if 0
 struct RPI_BIT *bit_fifo;
 struct RPI_CMD *cmd_fifo;
@@ -245,22 +252,22 @@ struct RPI_PROB probabilities;
     int         wpp_entry_x;
     int         wpp_entry_y;
 #endif
-    void *      dl_handle;
-    void *      id;
-    char *   (* ctrl_ffmpeg_init) (const char *hwaccel_device, void **id);
-    void     (* apb_write)        (void *id, uint16_t addr, uint32_t data);
-    void     (* apb_write_addr)   (void *id, uint16_t addr, uint32_t data);
-    uint32_t (* apb_read)         (void *id, uint16_t addr);
-    void     (* apb_read_drop)    (void *id, uint16_t addr);
-    void     (* axi_write)        (void *id, uint64_t addr, uint32_t size, const void *buf);
-    void     (* axi_read_alloc)   (void *id, uint32_t size);
-    void     (* axi_read_tx)      (void *id, uint64_t addr, uint32_t size);
-    void     (* axi_read_rx)      (void *id, uint32_t size, void *buf);
-    uint64_t (* axi_get_addr)     (void *id);
-    void     (* apb_dump_regs)    (void *id, uint16_t addr, int num);
-    void     (* axi_dump)         (void *id, uint64_t addr, uint32_t size);
-    void     (* axi_flush)        (void *id, int mode);
-    void     (* wait_interrupt)   (void *id, int phase);
-    void     (* ctrl_ffmpeg_free) (void *id);
+//    void *      dl_handle;
+//    void *      id;
+//    char *   (* ctrl_ffmpeg_init) (const char *hwaccel_device, void **id);
+//    void     (* apb_write)        (void *id, uint16_t addr, uint32_t data);
+//    void     (* apb_write_addr)   (void *id, uint16_t addr, uint32_t data);
+//    uint32_t (* apb_read)         (void *id, uint16_t addr);
+//    void     (* apb_read_drop)    (void *id, uint16_t addr);
+//    void     (* axi_write)        (void *id, uint64_t addr, uint32_t size, const void *buf);
+//    void     (* axi_read_alloc)   (void *id, uint32_t size);
+//    void     (* axi_read_tx)      (void *id, uint64_t addr, uint32_t size);
+//    void     (* axi_read_rx)      (void *id, uint32_t size, void *buf);
+//    uint64_t (* axi_get_addr)     (void *id);
+//    void     (* apb_dump_regs)    (void *id, uint16_t addr, int num);
+//    void     (* axi_dump)         (void *id, uint64_t addr, uint32_t size);
+//    void     (* axi_flush)        (void *id, int mode);
+//    void     (* wait_interrupt)   (void *id, int phase);
+//    void     (* ctrl_ffmpeg_free) (void *id);
 
 } RPI_T;

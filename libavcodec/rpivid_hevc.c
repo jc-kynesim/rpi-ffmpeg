@@ -3,7 +3,9 @@
 // Copyright (c) June 2017 Raspberry Pi Ltd
 
 #include <stdio.h>
-#include <dlfcn.h>
+//#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 
 #include "fftools/ffmpeg.h"
 #include "libavutil/avassert.h"
@@ -18,6 +20,10 @@
 
 #include "rpivid_axi.h"
 
+#define OPT_GBUF_CACHED 0
+
+#define GBUF_SIZE (16 << 20)
+
 #define _GNU_SOURCE
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -28,6 +34,161 @@ long syscall(long number, ...);
 static inline int gettid(void)
 {
     return syscall(SYS_gettid);
+}
+
+//============================================================================
+
+#define TRACE_DEV 1
+
+#define REGS_NAME "/dev/argon-hevcmem"
+#define REGS_SIZE 0x10000
+#define INTS_NAME "/dev/argon-intcmem"
+#define INTS_SIZE 0x10000  // 4 is probably enough but we are going to alloc a page anyway
+
+static volatile uint32_t * map_dev(AVCodecContext * const avctx, const char * const dev_name, size_t size)
+{
+    void *gpio_map;
+    int  mem_fd;
+
+    /* open /dev/mem */
+    if ((mem_fd = open(dev_name, O_RDWR|O_SYNC) ) < 0) {
+        av_log(avctx, AV_LOG_WARNING, "can't open %s\n", dev_name);
+        return NULL;
+    }
+
+    // Now map it
+    gpio_map = mmap(
+       NULL,
+       size,
+       PROT_READ|PROT_WRITE,
+       MAP_SHARED,
+       mem_fd,
+       0
+    );
+
+    close(mem_fd);  // No longer need the FD
+
+    if (gpio_map == MAP_FAILED) {
+        av_log(avctx, AV_LOG_WARNING, "GPIO mapping failed");
+        return NULL;
+    }
+
+    return (volatile uint32_t *)gpio_map;
+}
+
+static void unmap_devp(volatile uint32_t ** const p_gpio_map, size_t size)
+{
+    volatile uint32_t * const gpio_map = *p_gpio_map;
+    if (gpio_map != NULL) {
+        *p_gpio_map = NULL;
+        munmap((void *)gpio_map, size);
+    }
+}
+
+#define MANGLE(x) ((x) &~0xc0000000)
+#define MANGLE64(x) (MANGLE(x)>>6)
+
+static inline void apb_write_addr(const RPI_T * const rpi, const dec_env_t * const de, const uint32_t addr, const uint32_t data)
+{
+#if TRACE_DEV
+    printf("P %x %08x\n", addr, data);
+#endif
+
+    rpi->regs[addr >> 2] = data + (MANGLE(de->gbuf.vc) >> 6);
+}
+
+static inline void apb_write(const RPI_T * const rpi, const uint32_t addr, const uint32_t data)
+{
+#if TRACE_DEV
+    printf("W %x %08x\n", addr, data);
+#endif
+
+    rpi->regs[addr >> 2] = data;
+}
+
+static inline uint32_t apb_read(const RPI_T * const rpi, const uint32_t addr)
+{
+    const uint32_t v = rpi->regs[addr >> 2];
+#if TRACE_DEV
+    printf("R %x (=%x)\n", addr, v);
+#endif
+    return v;
+}
+
+static inline void axi_write(const dec_env_t * const de, uint32_t dst64, size_t len, const void * src)
+{
+#if TRACE_DEV
+    printf("L %08x %08x\n", dst64 << 6, len);
+#endif
+
+    av_assert0((dst64 << 6) + len <= de->gbuf.numbytes);
+
+    memcpy(de->gbuf.arm + (dst64 << 6), src, len);
+}
+
+static uint32_t axi_addr64(const dec_env_t * const de, const uint32_t a64)
+{
+    return a64 + (MANGLE(de->gbuf.vc) >> 6);
+}
+
+static inline void axi_flush(const dec_env_t * const de, size_t len)
+{
+    // ****
+}
+
+#define ARG_IC_ICTRL_ACTIVE1_INT_SET                   0x00000001
+#define ARG_IC_ICTRL_ACTIVE1_EDGE_SET                  0x00000002
+#define ARG_IC_ICTRL_ACTIVE1_EN_SET                    0x00000004
+#define ARG_IC_ICTRL_ACTIVE1_STATUS_SET                0x00000008
+#define ARG_IC_ICTRL_ACTIVE2_INT_SET                   0x00000010
+#define ARG_IC_ICTRL_ACTIVE2_EDGE_SET                  0x00000020
+#define ARG_IC_ICTRL_ACTIVE2_EN_SET                    0x00000040
+#define ARG_IC_ICTRL_ACTIVE2_STATUS_SET                0x00000080
+
+static inline void int_wait(const RPI_T * const rpi, const unsigned int phase)
+{
+    const uint32_t mask_reset = phase == 1 ? ~ARG_IC_ICTRL_ACTIVE2_INT_SET : ~ARG_IC_ICTRL_ACTIVE1_INT_SET;
+    const uint32_t mask_done = phase == 1 ? ARG_IC_ICTRL_ACTIVE1_INT_SET : ARG_IC_ICTRL_ACTIVE2_INT_SET;
+    uint32_t ival;
+
+    while (((ival = rpi->ints[0]) & mask_done) == 0) {
+        usleep(1000);
+    }
+    rpi->ints[0] = ival & mask_reset;
+}
+
+static void apb_dump_regs(const RPI_T * const rpi, uint16_t addr, int num) {
+    int i;
+
+    for (i=0; i<num; i++)
+    {
+        if ((i%4)==0)
+          printf("%08x: ", 0x7eb00000 + addr + 4*i);
+
+        printf("%08x", rpi->regs[(addr>>2)+i]);
+
+        if ((i%4)==3 || i+1 == num)
+            printf("\n");
+        else
+            printf(" ");
+    }
+}
+
+static void axi_dump(const dec_env_t * const de, uint64_t addr, uint32_t size) {
+    int i;
+
+    for (i=0; i<size>>2; i++)
+    {
+        if ((i%4)==0)
+            printf("%08x: ", MANGLE(de->gbuf.vc) + (uint32_t)addr + 4*i);
+
+        printf("%08x", ((uint32_t*)de->gbuf.arm)[(addr>>2)+i]);
+
+        if ((i%4)==3 || i+1 == size>>2)
+            printf("\n");
+        else
+            printf(" ");
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -224,10 +385,10 @@ static int alloc_stream_space(dec_env_t * const de, const HEVCContext *s) {
 // Start or restart phase 1
 
 static void phase1_begin(const RPI_T * const rpi, const dec_env_t * const de) {
-    rpi->apb_write_addr(rpi->id, RPI_PUWBASE, de->pubase64);
-    rpi->apb_write(rpi->id, RPI_PUWSTRIDE, de->pustep64);
-    rpi->apb_write_addr(rpi->id, RPI_COEFFWBASE, de->coeffbase64);
-    rpi->apb_write(rpi->id, RPI_COEFFWSTRIDE, de->coeffstep64);
+    apb_write_addr(rpi, de, RPI_PUWBASE, de->pubase64);
+    apb_write(rpi, RPI_PUWSTRIDE, de->pustep64);
+    apb_write_addr(rpi, de, RPI_COEFFWBASE, de->coeffbase64);
+    apb_write(rpi, RPI_COEFFWSTRIDE, de->coeffstep64);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -238,10 +399,10 @@ static int check_status(const RPI_T * const rpi, dec_env_t * const de) {
 
     // this is the definition of successful completion of phase 1
     // it assures that status register is zero and all blocks in each tile have completed
-    if (rpi->apb_read(rpi->id, RPI_CFSTATUS) == rpi->apb_read(rpi->id, RPI_CFNUM))
-	return 0;
+    if (apb_read(rpi, RPI_CFSTATUS) == apb_read(rpi, RPI_CFNUM))
+        return 0;
 
-    status = rpi->apb_read(rpi->id, RPI_STATUS);
+    status = apb_read(rpi, RPI_STATUS);
 
     p = (status>>4)&1;
     c = (status>>3)&1;
@@ -451,6 +612,8 @@ static void hwaccel_mutex(AVCodecContext *avctx, int (*action) (pthread_mutex_t 
 static void
 dec_env_delete(dec_env_t * const de)
 {
+    gpu_free(&de->gbuf);
+
     av_freep(&de->cmd_fifo);
     av_freep(&de->bit_fifo);
 
@@ -463,9 +626,26 @@ dec_env_new(AVCodecContext * const avctx, RPI_T * const rpi)
 {
     dec_env_t * const de = av_mallocz(sizeof(*de));
     int i;
+    int rv;
 
     if (de == NULL)
         return NULL;
+
+#if OPT_GBUF_CACHED
+    rv = gpu_malloc_cached(GBUF_SIZE, &de->gbuf);
+#else
+    rv = gpu_malloc_uncached(GBUF_SIZE, &de->gbuf);
+#endif
+
+#if TRACE_DEV
+    printf("A %x arm=%p vc=%08x\n", de->gbuf.numbytes, de->gbuf.arm, de->gbuf.vc);
+#endif
+
+    if (rv != 0) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to allocate GPU mem (%d) for thread\n", GBUF_SIZE);
+        av_free(de);
+        return NULL;
+    }
 
     de->rpi = rpi;
     de->avctx = avctx;
@@ -770,21 +950,26 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
                 status = -1;
                 break;
             }
-            rpi->axi_write(rpi->id, ((uint64_t)a64)<<6, de->bit_fifo[i].len, de->bit_fifo[i].ptr);
-            de->cmd_fifo[de->bit_fifo[i].cmd].data = a64 + (rpi->axi_get_addr(rpi->id)>>6); // Set BFBASE
+            axi_write(de, a64, de->bit_fifo[i].len, de->bit_fifo[i].ptr);
+            de->cmd_fifo[de->bit_fifo[i].cmd].data = axi_addr64(de, a64); // Set BFBASE
             a64 += (de->bit_fifo[i].len+63)/64;
         }
         // Send phase 1 commands (cache flush on real hardware)
-        rpi->axi_write(rpi->id, ((uint64_t)a64)<<6, de->cmd_len * sizeof(struct RPI_CMD), de->cmd_fifo);
-        rpi->axi_flush(rpi->id, RPI_CACHE_FLUSH_MODE_WB_INVALIDATE);
+        axi_write(de, a64, de->cmd_len * sizeof(struct RPI_CMD), de->cmd_fifo);
+
+        printf("a64=%08x, <<6=%08x, +vc=%08x\n", a64, a64 << 6, (a64 << 6) + de->gbuf.vc);
+        axi_flush(de, (a64 << 6) + de->cmd_len * sizeof(struct RPI_CMD));
+
         phase1_begin(rpi, de);
         // Trigger command FIFO
-        rpi->apb_write(rpi->id, RPI_CFNUM, de->cmd_len);
-        rpi->apb_dump_regs(rpi->id, 0x0, 32);
-        rpi->apb_dump_regs(rpi->id, 0x8000, 24);
-        rpi->axi_dump(rpi->id, ((uint64_t)a64)<<6, de->cmd_len * sizeof(struct RPI_CMD));
-        rpi->apb_write_addr(rpi->id, RPI_CFBASE, a64);
-        rpi->wait_interrupt(rpi->id, 1);
+        apb_write(rpi, RPI_CFNUM, de->cmd_len);
+        apb_dump_regs(rpi, 0x0, 32);
+        apb_dump_regs(rpi, 0x8000, 24);
+        axi_dump(de, ((uint64_t)a64)<<6, de->cmd_len * sizeof(struct RPI_CMD));
+        apb_write_addr(rpi, de, RPI_CFBASE, a64);
+        printf("P1 start\n");
+        int_wait(rpi, 1);
+        printf("P1 done\n");
         status = check_status(rpi, de);
         if (status != 1) break; // No PU/COEFF overflow?
     }
@@ -801,20 +986,19 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     wait_phase(rpi, de, &rpi->phase2_req);
 
-    rpi->apb_write_addr(rpi->id, RPI_PURBASE, de->pubase64);
-    rpi->apb_write(rpi->id, RPI_PURSTRIDE, de->pustep64);
-    rpi->apb_write_addr(rpi->id, RPI_COEFFRBASE, de->coeffbase64);
-    rpi->apb_write(rpi->id, RPI_COEFFRSTRIDE, de->coeffstep64);
+    apb_write_addr(rpi, de, RPI_PURBASE, de->pubase64);
+    apb_write(rpi, RPI_PURSTRIDE, de->pustep64);
+    apb_write_addr(rpi, de, RPI_COEFFRBASE, de->coeffbase64);
+    apb_write(rpi, RPI_COEFFRSTRIDE, de->coeffstep64);
 
-#define MANGLE(x) (((x) &~0xc0000000)>>6)
     {
 //        const AVRpiZcRefPtr fr_buf = f ? av_rpi_zc_ref(avctx, f, f->format, 0) : NULL;
 //        uint32_t handle = fr_buf ? av_rpi_zc_vc_handle(fr_buf):0;
 //    printf("%s cur:%d fr:%p handle:%d YUV:%x:%x ystride:%d ustride:%d ah:%d\n", __FUNCTION__, CurrentPicture, f, handle, get_vc_address_y(f), get_vc_address_u(f), f->linesize[0], f->linesize[1],  f->linesize[3]);
-        rpi->apb_write(rpi->id, RPI_OUTYBASE, MANGLE(get_vc_address_y(f)));
-        rpi->apb_write(rpi->id, RPI_OUTCBASE, MANGLE(get_vc_address_u(f)));
-        rpi->apb_write(rpi->id, RPI_OUTYSTRIDE, f->linesize[3] * 128 / 64);
-        rpi->apb_write(rpi->id, RPI_OUTCSTRIDE, f->linesize[3] * 128 / 64);
+        apb_write(rpi, RPI_OUTYBASE, MANGLE64(get_vc_address_y(f)));
+        apb_write(rpi, RPI_OUTCBASE, MANGLE64(get_vc_address_u(f)));
+        apb_write(rpi, RPI_OUTYSTRIDE, f->linesize[3] * 128 / 64);
+        apb_write(rpi, RPI_OUTCSTRIDE, f->linesize[3] * 128 / 64);
 //        av_rpi_zc_unref(fr_buf);
     }
 
@@ -822,10 +1006,10 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         const SliceHeader * const sh = &s->sh;
         int rIdx;
         for(i=0; i<16; i++) {
-            rpi->apb_write(rpi->id, 0x9000+16*i, 0);
-            rpi->apb_write(rpi->id, 0x9004+16*i, 0);
-            rpi->apb_write(rpi->id, 0x9008+16*i, 0);
-            rpi->apb_write(rpi->id, 0x900C+16*i, 0);
+            apb_write(rpi, 0x9000+16*i, 0);
+            apb_write(rpi, 0x9004+16*i, 0);
+            apb_write(rpi, 0x9008+16*i, 0);
+            apb_write(rpi, 0x900C+16*i, 0);
         }
 
         for(i=L0; i<=L1; i++)
@@ -841,16 +1025,16 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 //                const AVRpiZcRefPtr fr_buf = fr ? av_rpi_zc_ref(avctx, fr, fr->format, 0) : NULL;
 //                uint32_t handle = fr_buf ? av_rpi_zc_vc_handle(fr_buf):0;
             //        printf("%s pic:%d (%d,%d,%d) fr:%p handle:%d YUV:%x:%x\n", __FUNCTION__, adjusted_pic, i, rIdx, pic, fr, handle, get_vc_address_y(fr), get_vc_address_u(fr));
-                rpi->apb_write(rpi->id, 0x9000+16*adjusted_pic, MANGLE(get_vc_address_y(fr)));
-                rpi->apb_write(rpi->id, 0x9008+16*adjusted_pic, MANGLE(get_vc_address_u(fr)));
-                rpi->apb_write(rpi->id, RPI_OUTYSTRIDE, fr->linesize[3] * 128 / 64);
-                rpi->apb_write(rpi->id, RPI_OUTCSTRIDE, fr->linesize[3] * 128 / 64);
+                apb_write(rpi, 0x9000+16*adjusted_pic, MANGLE64(get_vc_address_y(fr)));
+                apb_write(rpi, 0x9008+16*adjusted_pic, MANGLE64(get_vc_address_u(fr)));
+                apb_write(rpi, RPI_OUTYSTRIDE, fr->linesize[3] * 128 / 64);
+                apb_write(rpi, RPI_OUTCSTRIDE, fr->linesize[3] * 128 / 64);
 //                av_rpi_zc_unref(fr_buf);
             }
         }
     }
 
-    rpi->apb_write(rpi->id, RPI_CONFIG2,
+    apb_write(rpi, RPI_CONFIG2,
           (sps->bit_depth                             << 0) // BitDepthY
         + (sps->bit_depth                             << 4) // BitDepthC
        + ((sps->bit_depth>8)                          << 8) // BitDepthY
@@ -865,23 +1049,29 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
        + ((pps->cb_qp_offset&31)                      <<21)
        + ((pps->cr_qp_offset&31)                      <<26));
 
-    rpi->apb_write(rpi->id, RPI_FRAMESIZE, (sps->height<<16) + sps->width);
-    rpi->apb_write(rpi->id, RPI_CURRPOC, s->poc);
+    apb_write(rpi, RPI_FRAMESIZE, (sps->height<<16) + sps->width);
+    apb_write(rpi, RPI_CURRPOC, s->poc);
 
     // collocated reads/writes
     if (sps->sps_temporal_mvp_enabled_flag) {
-        rpi->apb_write(rpi->id, RPI_COLSTRIDE, de->colstride64);
-        rpi->apb_write(rpi->id, RPI_MVSTRIDE,  de->mvstride64);
-        rpi->apb_write_addr(rpi->id, RPI_MVBASE,  de->mvbase64);
-        rpi->apb_write_addr(rpi->id, RPI_COLBASE, de->colbase64);
+        apb_write(rpi, RPI_COLSTRIDE, de->colstride64);
+        apb_write(rpi, RPI_MVSTRIDE,  de->mvstride64);
+        apb_write_addr(rpi, de, RPI_MVBASE,  de->mvbase64);
+        apb_write_addr(rpi, de, RPI_COLBASE, de->colbase64);
     }
 
-    rpi->apb_dump_regs(rpi->id, 0x0, 32);
-    rpi->apb_dump_regs(rpi->id, 0x8000, 24);
+    apb_dump_regs(rpi, 0x0, 32);
+    apb_dump_regs(rpi, 0x8000, 24);
 
-    rpi->apb_write(rpi->id, RPI_NUMROWS, de->PicHeightInCtbsY);
-    rpi->apb_read_drop(rpi->id, RPI_NUMROWS); // Read back to confirm write has reached block
-    rpi->wait_interrupt(rpi->id, 2);
+    apb_write(rpi, RPI_NUMROWS, de->PicHeightInCtbsY);
+    apb_read(rpi, RPI_NUMROWS); // Read back to confirm write has reached block
+
+    printf("Phase 2 start\n");
+
+    sleep(1);
+
+    int_wait(rpi, 2);
+    printf("Phase 2 done\n");
 
     post_phase(rpi, de, &rpi->phase2_req);
 
@@ -1015,62 +1205,26 @@ static int rpi_hevc_decode_slice(
 
 //////////////////////////////////////////////////////////////////////////////
 // Bind to socket client
-
+#if 0
 static int open_socket_client(RPI_T *rpi, const char *so) {
      *(void **) &rpi->ctrl_ffmpeg_init = rpi_ctrl_ffmpeg_init;
-     *(void **) &rpi->apb_write        = rpi_apb_write;
-     *(void **) &rpi->apb_write_addr   = rpi_apb_write_addr;
-     *(void **) &rpi->apb_read         = rpi_apb_read;
-     *(void **) &rpi->apb_read_drop    = rpi_apb_read_drop;
-     *(void **) &rpi->axi_write        = rpi_axi_write;
-     *(void **) &rpi->axi_read_alloc   = rpi_axi_read_alloc;
-     *(void **) &rpi->axi_read_tx      = rpi_axi_read_tx;
-     *(void **) &rpi->axi_read_rx      = rpi_axi_read_rx;
-     *(void **) &rpi->axi_get_addr     = rpi_axi_get_addr;
-     *(void **) &rpi->apb_dump_regs    = rpi_apb_dump_regs;
-     *(void **) &rpi->axi_dump         = rpi_axi_dump;
-     *(void **) &rpi->axi_flush        = rpi_axi_flush;
+//     *(void **) &rpi->apb_write        = rpi_apb_write;
+//     *(void **) &rpi->apb_write_addr   = rpi_apb_write_addr;
+//     *(void **) &rpi->apb_read         = rpi_apb_read;
+//     *(void **) &rpi->apb_read_drop    = rpi_apb_read_drop;
+//     *(void **) &rpi->axi_write        = rpi_axi_write;
+//     *(void **) &rpi->axi_read_alloc   = rpi_axi_read_alloc;
+//     *(void **) &rpi->axi_read_tx      = rpi_axi_read_tx;
+//     *(void **) &rpi->axi_read_rx      = rpi_axi_read_rx;
+//     *(void **) &rpi->axi_get_addr     = rpi_axi_get_addr;
+//     *(void **) &rpi->apb_dump_regs    = rpi_apb_dump_regs;
+//     *(void **) &rpi->axi_dump         = rpi_axi_dump;
+//     *(void **) &rpi->axi_flush        = rpi_axi_flush;
      *(void **) &rpi->wait_interrupt   = rpi_wait_interrupt;
      *(void **) &rpi->ctrl_ffmpeg_free = rpi_ctrl_ffmpeg_free;
     return 1;
 }
-
-//////////////////////////////////////////////////////////////////////////////
-
-static int rpi_hevc_init(AVCodecContext *avctx) {
-    RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
-    const char *err;
-
-    if (avctx->width>4096 || avctx->height>4096) {
-        av_log(NULL, AV_LOG_FATAL, "Picture size %dx%d exceeds 4096x4096 maximum for HWAccel\n", avctx->width, avctx->height);
-        return AVERROR(ENOTSUP);
-    }
-
-    if (!open_socket_client(rpi, NULL)) {
-        av_log(NULL, AV_LOG_FATAL, "%s\n", dlerror());
-        return AVERROR_EXTERNAL;
-    }
-
-    err = rpi->ctrl_ffmpeg_init(NULL, &rpi->id);
-    if (err) {
-        av_log(NULL, AV_LOG_FATAL, "Could not connect to RPI server: %s\n", err);
-        return AVERROR_EXTERNAL;
-    }
-
-    av_rpi_zc_init_local(avctx);
-
-    printf("%s: threads=%d\n", __func__, avctx->thread_count);
-
-    rpi->phase1_req = NULL;
-    rpi->phase2_req = NULL;
-    pthread_mutex_init(&rpi->phase_lock, NULL);
-    if ((rpi->dec_envs = av_mallocz(sizeof(dec_env_t *) * avctx->thread_count)) == NULL) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to alloc %d dec envs\n", avctx->thread_count);
-        return AVERROR(ENOMEM);
-    }
-
-    return 0;
-}
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -1082,11 +1236,59 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     }
     av_freep(&rpi->dec_envs);
 
+    unmap_devp(&rpi->regs, REGS_SIZE);
+    unmap_devp(&rpi->ints, INTS_SIZE);
+#if 0
     if (rpi->id && rpi->ctrl_ffmpeg_free)
         rpi->ctrl_ffmpeg_free(rpi->id);
-
+#endif
     av_rpi_zc_uninit_local(avctx);
     return 0;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+static int rpi_hevc_init(AVCodecContext *avctx) {
+    RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
+//    const char *err;
+
+    if (avctx->width>4096 || avctx->height>4096) {
+        av_log(NULL, AV_LOG_FATAL, "Picture size %dx%d exceeds 4096x4096 maximum for HWAccel\n", avctx->width, avctx->height);
+        return AVERROR(ENOTSUP);
+    }
+#if 0
+    open_socket_client(rpi, NULL);
+
+    err = rpi->ctrl_ffmpeg_init(NULL, &rpi->id);
+    if (err) {
+        av_log(NULL, AV_LOG_FATAL, "Could not connect to RPI server: %s\n", err);
+        return AVERROR_EXTERNAL;
+    }
+#endif
+    av_rpi_zc_init_local(avctx);
+
+    printf("%s: threads=%d\n", __func__, avctx->thread_count);
+
+    rpi->phase1_req = NULL;
+    rpi->phase2_req = NULL;
+    pthread_mutex_init(&rpi->phase_lock, NULL);
+
+    if ((rpi->regs = map_dev(avctx, REGS_NAME, REGS_SIZE)) == NULL ||
+        (rpi->ints = map_dev(avctx, INTS_NAME, INTS_SIZE)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to open rpivid devices\n");
+        goto fail;
+    }
+
+    if ((rpi->dec_envs = av_mallocz(sizeof(dec_env_t *) * avctx->thread_count)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to alloc %d dec envs\n", avctx->thread_count);
+        goto fail;
+    }
+
+    return 0;
+
+fail:
+    rpi_hevc_free(avctx);
+    return AVERROR_EXTERNAL;
 }
 
 //////////////////////////////////////////////////////////////////////////////

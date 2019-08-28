@@ -47,7 +47,7 @@
 
 #define BLOCK_SIZE (0x10000)
 #define CACHED 0
-#define VERBOSE 1
+#define VERBOSE 0
 
 static inline void __DMB2(void) {}//{ asm volatile ("dmb" ::: "memory"); }
 
@@ -75,9 +75,11 @@ static void *setup_io(const char *dev, unsigned long base)
       base
    );
 
+   close(mem_fd);
+
    if (gpio_map == MAP_FAILED) {
        av_log(NULL, AV_LOG_WARNING, "GPIO mapping failed");
-       close(mem_fd);
+//       close(mem_fd);
        return NULL;
    }
 
