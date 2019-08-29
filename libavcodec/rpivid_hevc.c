@@ -38,7 +38,7 @@ static inline int gettid(void)
 
 //============================================================================
 
-#define TRACE_DEV 1
+#define TRACE_DEV 0
 
 #define REGS_NAME "/dev/argon-hevcmem"
 #define REGS_SIZE 0x10000
@@ -85,8 +85,13 @@ static void unmap_devp(volatile uint32_t ** const p_gpio_map, size_t size)
     }
 }
 
-#define MANGLE(x) ((x) &~0xc0000000)
-#define MANGLE64(x) (MANGLE(x)>>6)
+#define MANGLE(x) ((x) &~0xc0000000)          // ** If x is ever a 64 bit thing this will need fixing!
+#define MANGLE64(x) (uint32_t)(MANGLE(x)>>6)
+
+static inline void apb_write_vc_addr(const RPI_T *const rpi, const uint32_t addr, const vid_vc_addr_t data)
+{
+    rpi->regs[addr >> 2] = MANGLE64(data);
+}
 
 static inline void apb_write_addr(const RPI_T * const rpi, const dec_env_t * const de, const uint32_t addr, const uint32_t data)
 {
@@ -157,6 +162,7 @@ static inline void int_wait(const RPI_T * const rpi, const unsigned int phase)
     rpi->ints[0] = ival & mask_reset;
 }
 
+#if TRACE_DEV
 static void apb_dump_regs(const RPI_T * const rpi, uint16_t addr, int num) {
     int i;
 
@@ -190,6 +196,7 @@ static void axi_dump(const dec_env_t * const de, uint64_t addr, uint32_t size) {
             printf(" ");
     }
 }
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -349,7 +356,7 @@ static void alloc_picture_space(dec_env_t * const de, const HEVCContext * const 
 
     de->PicWidthInCtbsY  = (sps->width + CtbSizeY - 1) / CtbSizeY;  //7-15
     de->PicHeightInCtbsY = (sps->height + CtbSizeY - 1) / CtbSizeY;  //7-17
-
+#if 0
     // collocated reads/writes
     if (sps->sps_temporal_mvp_enabled_flag) {
         // 128 bits = 16 bytes per MV, one for every 16*16
@@ -360,7 +367,7 @@ static void alloc_picture_space(dec_env_t * const de, const HEVCContext * const 
         de->colstride64 = collocatedStride64;
         de->mvstride64 = collocatedStride64;
     }
-
+#endif
     de->pubase64 = x64;
 }
 
@@ -780,8 +787,20 @@ static int rpi_hevc_start_frame(
         return -1;
     }
 
+    de->decode_order = rpi->decode_order++;
+
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
     hwaccel_mutex(avctx, pthread_mutex_unlock);
+
+
+    // Enforcing phase 1 order precludes busy waiting for phase 2
+    for (;;) {
+        pthread_mutex_lock  (&rpi->mutex_phase1);
+        if (de->decode_order == rpi->phase1_order) break;
+        pthread_mutex_unlock(&rpi->mutex_phase1);
+    }
+    rpi->phase1_order++;
+
 
     alloc_picture_space(de, s);
     de->bit_len = 0;
@@ -890,9 +909,9 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
 
     // collocated reads/writes
     if (sps->sps_temporal_mvp_enabled_flag) {
-        int CurrentPicture = s->ref - s->DPB;
-        int colPic = de->RefPicList[sh->slice_type==HEVC_SLICE_B && de->collocated_from_l0_flag==0][de->collocated_ref_idx];
-
+        de->dpbno_col = sh->slice_type == HEVC_SLICE_I ? 0 :
+            de->RefPicList[sh->slice_type==HEVC_SLICE_B && de->collocated_from_l0_flag==0][de->collocated_ref_idx];
+#if 0
         de->mvbase64 = de->mvstorage64 + CurrentPicture * de->mvframebytes64;
         if (sh->slice_type==HEVC_SLICE_I) {
             // Collocated picture not well defined here.  Use mvbase or previous value
@@ -901,6 +920,7 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
         }
         else
             de->colbase64 = de->mvstorage64 + colPic * de->mvframebytes64;
+#endif
     }
 }
 
@@ -912,12 +932,14 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     const HEVCContext * const s = avctx->priv_data;
     const HEVCPPS * const pps = s->ps.pps;
     const HEVCSPS * const sps = s->ps.sps;
+    const SliceHeader * const sh = &s->sh;
     dec_env_t * const de = dec_env_get(avctx,  rpi);
 //    int jump = sps->bit_depth>8?96:128;
 //    int CurrentPicture = s->ref - s->DPB;
     AVFrame * const f = s->ref->frame;
     int last_x = pps->col_bd[pps->num_tile_columns]-1;
     int last_y = pps->row_bd[pps->num_tile_rows]-1;
+    const unsigned int dpbno_cur = s->ref - s->DPB;
 
     int i, a64;
 //    char *buf;
@@ -930,6 +952,35 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         return -1;
     }
 
+#if 0
+    // Wait for frames
+    // ***********************************
+
+    {
+        atomic_int *progress = s->ref->tf.progress ? (atomic_int*)s->ref->tf.progress->data : NULL;
+        printf("POC=%d, Seq=%d, Our progress=%d\n",
+               s->ref->poc, s->ref->sequence,
+               progress == NULL ? -999 : atomic_load_explicit(&progress[1], memory_order_acquire));
+    }
+
+    printf("Pre-wait [%p]\n", de);
+    for(i=L0; i<=L1; i++)
+    {
+        for (unsigned int rIdx=0; rIdx <sh->nb_refs[i]; rIdx++)
+        {
+            HEVCFrame *f1 = s->ref->refPicList[i].ref[rIdx];
+
+            atomic_int *progress = f1->tf.progress ? (atomic_int*)f1->tf.progress->data : NULL;
+
+            printf("Check L%d:R%d POC=%d,Seq=%d: progress=%d\n", i, rIdx, f1->poc, f1->sequence,
+                   progress == NULL ? -999 : atomic_load_explicit(&progress[1], memory_order_acquire));
+
+            ff_thread_await_progress(&f1->tf, 2, 1);
+        }
+    }
+    printf("Post-wait [%p]\n", de);
+#endif
+
     // End of phase 1 command compilation
     if (pps->entropy_coding_sync_enabled_flag) {
         if (de->wpp_entry_x<2 && de->PicWidthInCtbsY>2)
@@ -938,7 +989,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     p1_apb_write(de, RPI_STATUS, 1 + (last_x<<5) + (last_y<<18));
 
     // Phase 1 ...
-    wait_phase(rpi, de, &rpi->phase1_req);
+//    wait_phase(rpi, de, &rpi->phase1_req);
 
     for (;;) {
         // (Re-)allocate PU/COEFF stream space
@@ -957,34 +1008,41 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         // Send phase 1 commands (cache flush on real hardware)
         axi_write(de, a64, de->cmd_len * sizeof(struct RPI_CMD), de->cmd_fifo);
 
-        printf("a64=%08x, <<6=%08x, +vc=%08x\n", a64, a64 << 6, (a64 << 6) + de->gbuf.vc);
         axi_flush(de, (a64 << 6) + de->cmd_len * sizeof(struct RPI_CMD));
 
         phase1_begin(rpi, de);
         // Trigger command FIFO
         apb_write(rpi, RPI_CFNUM, de->cmd_len);
+#if TRACE_DEV
         apb_dump_regs(rpi, 0x0, 32);
         apb_dump_regs(rpi, 0x8000, 24);
         axi_dump(de, ((uint64_t)a64)<<6, de->cmd_len * sizeof(struct RPI_CMD));
+#endif
         apb_write_addr(rpi, de, RPI_CFBASE, a64);
         printf("P1 start\n");
         int_wait(rpi, 1);
         printf("P1 done\n");
         status = check_status(rpi, de);
         if (status != 1) break; // No PU/COEFF overflow?
+        av_assert0(0);
     }
 
-    post_phase(rpi, de, &rpi->phase1_req);
+    pthread_mutex_unlock(&rpi->mutex_phase1);
+//    post_phase(rpi, de, &rpi->phase1_req);
 
     if (status != 0) {
         av_log(avctx, AV_LOG_WARNING, "Phase 1 decode error\n");
         goto fail;
     }
 
-    // Wait for frames
-    // ***********************************
-
-    wait_phase(rpi, de, &rpi->phase2_req);
+//    wait_phase(rpi, de, &rpi->phase2_req);
+    printf("Phase 2 start [%p]\n", de);
+    for (;;) {
+        pthread_mutex_lock  (&rpi->mutex_phase2);
+        if (de->decode_order == rpi->phase2_order) break;
+        pthread_mutex_unlock(&rpi->mutex_phase2);
+    }
+    rpi->phase2_order++;
 
     apb_write_addr(rpi, de, RPI_PURBASE, de->pubase64);
     apb_write(rpi, RPI_PURSTRIDE, de->pustep64);
@@ -995,42 +1053,40 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 //        const AVRpiZcRefPtr fr_buf = f ? av_rpi_zc_ref(avctx, f, f->format, 0) : NULL;
 //        uint32_t handle = fr_buf ? av_rpi_zc_vc_handle(fr_buf):0;
 //    printf("%s cur:%d fr:%p handle:%d YUV:%x:%x ystride:%d ustride:%d ah:%d\n", __FUNCTION__, CurrentPicture, f, handle, get_vc_address_y(f), get_vc_address_u(f), f->linesize[0], f->linesize[1],  f->linesize[3]);
-        apb_write(rpi, RPI_OUTYBASE, MANGLE64(get_vc_address_y(f)));
-        apb_write(rpi, RPI_OUTCBASE, MANGLE64(get_vc_address_u(f)));
+        apb_write_vc_addr(rpi, RPI_OUTYBASE, get_vc_address_y(f));
+        apb_write_vc_addr(rpi, RPI_OUTCBASE, get_vc_address_u(f));
         apb_write(rpi, RPI_OUTYSTRIDE, f->linesize[3] * 128 / 64);
         apb_write(rpi, RPI_OUTCSTRIDE, f->linesize[3] * 128 / 64);
 //        av_rpi_zc_unref(fr_buf);
     }
 
-    {
-        const SliceHeader * const sh = &s->sh;
-        int rIdx;
-        for(i=0; i<16; i++) {
-            apb_write(rpi, 0x9000+16*i, 0);
-            apb_write(rpi, 0x9004+16*i, 0);
-            apb_write(rpi, 0x9008+16*i, 0);
-            apb_write(rpi, 0x900C+16*i, 0);
-        }
+    for(i=0; i<16; i++) {
+        apb_write(rpi, 0x9000+16*i, 0);
+        apb_write(rpi, 0x9004+16*i, 0);
+        apb_write(rpi, 0x9008+16*i, 0);
+        apb_write(rpi, 0x900C+16*i, 0);
+    }
 
-        for(i=L0; i<=L1; i++)
+    for(i=L0; i<=L1; i++)
+    {
+        for (unsigned int rIdx=0; rIdx <sh->nb_refs[i]; rIdx++)
         {
-            for(rIdx=0; rIdx <sh->nb_refs[i]; rIdx++) {
-                const HEVCFrame *f1 = s->ref->refPicList[i].ref[rIdx];
-                const HEVCFrame *c = s->ref; // CurrentPicture
-                int pic = f1 - s->DPB;
-                // Make sure pictures are in range 0 to 15
-                int adjusted_pic = f1<c? pic : pic-1;
-                const struct HEVCFrame *hevc = &s->DPB[pic];
-                const AVFrame *fr = hevc ? hevc->frame : NULL;
+            const HEVCFrame *f1 = s->ref->refPicList[i].ref[rIdx];
+            const HEVCFrame *c = s->ref; // CurrentPicture
+            int pic = f1 - s->DPB;
+            // Make sure pictures are in range 0 to 15
+            int adjusted_pic = f1<c? pic : pic-1;
+            const struct HEVCFrame *hevc = &s->DPB[pic];
+            const AVFrame *fr = hevc ? hevc->frame : NULL;
 //                const AVRpiZcRefPtr fr_buf = fr ? av_rpi_zc_ref(avctx, fr, fr->format, 0) : NULL;
 //                uint32_t handle = fr_buf ? av_rpi_zc_vc_handle(fr_buf):0;
-            //        printf("%s pic:%d (%d,%d,%d) fr:%p handle:%d YUV:%x:%x\n", __FUNCTION__, adjusted_pic, i, rIdx, pic, fr, handle, get_vc_address_y(fr), get_vc_address_u(fr));
-                apb_write(rpi, 0x9000+16*adjusted_pic, MANGLE64(get_vc_address_y(fr)));
-                apb_write(rpi, 0x9008+16*adjusted_pic, MANGLE64(get_vc_address_u(fr)));
-                apb_write(rpi, RPI_OUTYSTRIDE, fr->linesize[3] * 128 / 64);
-                apb_write(rpi, RPI_OUTCSTRIDE, fr->linesize[3] * 128 / 64);
+        //        printf("%s pic:%d (%d,%d,%d) fr:%p handle:%d YUV:%x:%x\n", __FUNCTION__, adjusted_pic, i, rIdx, pic, fr, handle, get_vc_address_y(fr), get_vc_address_u(fr));
+            av_assert0(adjusted_pic >= 0 && adjusted_pic < 16);
+            apb_write_vc_addr(rpi, 0x9000+16*adjusted_pic, get_vc_address_y(fr));
+            apb_write_vc_addr(rpi, 0x9008+16*adjusted_pic, get_vc_address_u(fr));
+//                apb_write(rpi, RPI_OUTYSTRIDE, fr->linesize[3] * 128 / 64);
+//                apb_write(rpi, RPI_OUTCSTRIDE, fr->linesize[3] * 128 / 64);
 //                av_rpi_zc_unref(fr_buf);
-            }
         }
     }
 
@@ -1054,26 +1110,28 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     // collocated reads/writes
     if (sps->sps_temporal_mvp_enabled_flag) {
-        apb_write(rpi, RPI_COLSTRIDE, de->colstride64);
-        apb_write(rpi, RPI_MVSTRIDE,  de->mvstride64);
-        apb_write_addr(rpi, de, RPI_MVBASE,  de->mvbase64);
-        apb_write_addr(rpi, de, RPI_COLBASE, de->colbase64);
+        av_assert0(de->dpbno_col < RPIVID_COL_PICS);
+        av_assert0(dpbno_cur < RPIVID_COL_PICS);
+
+        apb_write(rpi, RPI_COLSTRIDE, rpi->col_stride64);
+        apb_write(rpi, RPI_MVSTRIDE,  rpi->col_stride64);
+        apb_write_vc_addr(rpi, RPI_MVBASE,  rpi->gcolbuf.vc + dpbno_cur * rpi->col_picsize);
+        apb_write_vc_addr(rpi, RPI_COLBASE, rpi->gcolbuf.vc + de->dpbno_col * rpi->col_picsize);
     }
 
+#if TRACE_DEV
     apb_dump_regs(rpi, 0x0, 32);
     apb_dump_regs(rpi, 0x8000, 24);
+#endif
 
     apb_write(rpi, RPI_NUMROWS, de->PicHeightInCtbsY);
     apb_read(rpi, RPI_NUMROWS); // Read back to confirm write has reached block
 
-    printf("Phase 2 start\n");
-
-    sleep(1);
 
     int_wait(rpi, 2);
-    printf("Phase 2 done\n");
+    printf("Phase 2 done [%p]: POC=%d, Seq=%d\n", de, s->ref->poc, s->ref->sequence);
 
-    post_phase(rpi, de, &rpi->phase2_req);
+//    post_phase(rpi, de, &rpi->phase2_req);
 
     // Flush frame for CPU access
     // Arguably the best place would be at the start of phase 2 but here
@@ -1088,6 +1146,9 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
 
 fail:
+//    ff_thread_report_progress(&s->ref->tf, 2, 1);
+
+    pthread_mutex_unlock(&rpi->mutex_phase2);
     hwaccel_mutex(avctx, pthread_mutex_lock);
 
     return 0;
@@ -1269,6 +1330,12 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
 
     printf("%s: threads=%d\n", __func__, avctx->thread_count);
 
+    pthread_mutex_init(&rpi->mutex_phase1, NULL);
+    pthread_mutex_init(&rpi->mutex_phase2, NULL);
+    rpi->decode_order = 0;
+    rpi->phase1_order = 0;
+    rpi->phase2_order = 0;
+
     rpi->phase1_req = NULL;
     rpi->phase2_req = NULL;
     pthread_mutex_init(&rpi->phase_lock, NULL);
@@ -1282,6 +1349,13 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
     if ((rpi->dec_envs = av_mallocz(sizeof(dec_env_t *) * avctx->thread_count)) == NULL) {
         av_log(avctx, AV_LOG_ERROR, "Failed to alloc %d dec envs\n", avctx->thread_count);
         goto fail;
+    }
+
+    {
+        const size_t colstride = ((avctx->width + 63) & ~63);
+        rpi->col_picsize = colstride * (((avctx->height + 63) & ~63) >> 4);
+        rpi->col_stride64 = colstride >> 6;
+        gpu_malloc_uncached(rpi->col_picsize * RPIVID_COL_PICS, &rpi->gcolbuf);
     }
 
     return 0;

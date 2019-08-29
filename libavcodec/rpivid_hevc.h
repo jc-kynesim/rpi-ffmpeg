@@ -18,6 +18,8 @@
 #define PROB_BACKUP ((20<<12) + (20<<6) + (0<<0))
 #define PROB_RELOAD ((20<<12) + (20<<0) + (0<<6))
 
+#define RPIVID_COL_PICS 17  // 16 ref & current
+
 //////////////////////////////////////////////////////////////////////////////
 
 #define RPI_SPS0         0
@@ -158,6 +160,12 @@ struct RPI_BIT {
 
 struct RPI_T;
 
+// Actual addressability is 38bits but we can only alloc in the bottom 32
+// currently - when passed to rpivid h/w the address is always >> 6 so will
+// fit in 32 bit there
+// At some point we may weant to make this uint64_t
+typedef uint32_t vid_vc_addr_t;
+
 typedef struct dec_env_s {
     const AVCodecContext * avctx;
     struct RPI_T * rpi;
@@ -182,18 +190,13 @@ pthread_mutex_t mutex_phase2;
 struct RPI_PROB probabilities;
     int         num_slice_msgs;
     uint16_t    slice_msgs[2*HEVC_MAX_REFS*8+3];
-    int         pubase64;
+    uint32_t    pubase64;
     int         pustep64;
     int         coeffbase64;
     int         coeffstep64;
     int         PicWidthInCtbsY;
     int         PicHeightInCtbsY;
-    int         mvframebytes64;
-    int         mvstorage64;
-    int         colstride64;
-    int         mvstride64;
-    int         colbase64;
-    int         mvbase64;
+    unsigned int dpbno_col;
     uint32_t    reg_slicestart;
     int         collocated_from_l0_flag;
     int         max_num_merge_cand;
@@ -213,6 +216,15 @@ typedef struct RPI_T {
     volatile uint32_t * regs;
     volatile uint32_t * ints;
 
+    GPU_MEM_PTR_T gcolbuf;
+    uint32_t    col_stride64;
+    size_t      col_picsize;
+
+    int         decode_order;
+    int         phase1_order;
+    int         phase2_order;
+pthread_mutex_t mutex_phase1;
+pthread_mutex_t mutex_phase2;
 
 #if 0
 struct RPI_BIT *bit_fifo;
