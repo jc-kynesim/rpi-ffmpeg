@@ -221,10 +221,12 @@ typedef struct RPI_T {
     size_t      col_picsize;
 
     int         decode_order;
+#if 0
     int         phase1_order;
     int         phase2_order;
 pthread_mutex_t mutex_phase1;
 pthread_mutex_t mutex_phase2;
+#endif
 
 #if 0
 struct RPI_BIT *bit_fifo;
