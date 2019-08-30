@@ -595,26 +595,6 @@ static void new_entry_point(dec_env_t * const de, const HEVCContext * const s,
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// Workaround for 3 December 2016 commit 8dfba25ce89b62c80ba83e2116d549176c376144
-// https://github.com/libav/libav/commit/8dfba25ce89b62c80ba83e2116d549176c376144
-// This commit prevents multi-threaded hardware acceleration by locking hwaccel_mutex
-// around codec->decode() calls.  Workaround is to unlock and relock before returning.
-
-static void hwaccel_mutex(AVCodecContext *avctx, int (*action) (pthread_mutex_t *)) {
-#if 0
-    struct FrameThreadContext {
-        void *foo1, *foo2; // must match struct layout in pthread_frame.c
-        pthread_mutex_t foo3, hwaccel_mutex;
-    };
-    struct PerThreadContext {
-        struct FrameThreadContext *parent;
-    };
-    struct PerThreadContext *p = avctx->internal->thread_ctx;
-    if (avctx->thread_count>1) action(&p->parent->hwaccel_mutex);
-#endif
-}
-
-//////////////////////////////////////////////////////////////////////////////
 
 // Doesn't attempt to remove from context as we should only do this at the end
 // of time or on create error
@@ -812,7 +792,6 @@ static int rpi_hevc_start_frame(
     de->decode_order = rpi->decode_order++;
 
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
-    hwaccel_mutex(avctx, pthread_mutex_unlock);
 
     alloc_picture_space(de, s);
     de->bit_len = 0;
@@ -1026,7 +1005,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         for (unsigned int rIdx=0; rIdx <sh->nb_refs[i]; rIdx++)
         {
             HEVCFrame *f1 = s->ref->refPicList[i].ref[rIdx];
-            ff_thread_await_progress(&f1->tf, 2, 1);
+            ff_thread_await_progress(&f1->tf, 2, 0);
         }
     }
 
@@ -1122,10 +1101,6 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
 
 fail:
-    ff_thread_report_progress(&s->ref->tf, 2, 1);
-
-    hwaccel_mutex(avctx, pthread_mutex_lock);
-
 #if TRACE_ENTRY
     printf(">>> %s[%p]\n", __func__, de);
 #endif
