@@ -5905,10 +5905,25 @@ static int hevc_update_thread_context(AVCodecContext *dst,
 }
 #endif
 
+#include <sys/stat.h>
+static int qpu_ok(void)
+{
+    static int is_pi3 = -1;
+    if (is_pi3 == -1)
+    {
+        struct stat sb;
+        is_pi3 = (stat("/dev/rpivid-intcmem", &sb) != 0);
+    }
+    return is_pi3;
+}
+
 static av_cold int hevc_decode_init(AVCodecContext *avctx)
 {
     HEVCRpiContext *s = avctx->priv_data;
     int ret;
+
+    if (!qpu_ok())
+        return -1;
 
     avctx->internal->allocate_progress = 1;
 

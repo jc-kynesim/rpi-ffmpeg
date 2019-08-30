@@ -3095,11 +3095,8 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
     }
 
 fail:
-    if (ret >= 0 && s->avctx->hwaccel) {
-        if (s->ref && (ret = s->avctx->hwaccel->end_frame(s->avctx)) < 0) {
-            av_log(s->avctx, AV_LOG_ERROR,
-                   "hardware accelerator failed to decode picture\n");
-        }
+    if (ret < 0 && s->avctx->hwaccel && s->avctx->hwaccel->abort_frame) {
+        s->avctx->hwaccel->abort_frame(s->avctx);
     }
 
     if (s->ref && s->threads_type == FF_THREAD_FRAME)
@@ -3233,7 +3230,14 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
     if (ret < 0)
         return ret;
 
-    if (!avctx->hwaccel) {
+    if (avctx->hwaccel) {
+        if (s->ref && (ret = avctx->hwaccel->end_frame(avctx)) < 0) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "hardware accelerator failed to decode picture\n");
+            ff_hevc_unref_frame(s, s->ref, ~0);
+            return ret;
+        }
+    } else {
         /* verify the SEI checksum */
         if (avctx->err_recognition & AV_EF_CRCCHECK && s->is_decoded &&
             s->sei.picture_hash.is_md5) {

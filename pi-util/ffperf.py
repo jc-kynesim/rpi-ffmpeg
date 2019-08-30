@@ -40,7 +40,9 @@ class tstats:
         stats = tstats()
         stats.name = name
         start_time = time.clock_gettime(time.CLOCK_MONOTONIC);
-        cproc = subprocess.Popen(["./ffmpeg", "-t", "30", "-i", prefix + name,
+        cproc = subprocess.Popen(["./ffmpeg",
+                                  "-hwaccel", "rpi",
+                                  "-t", "30", "-i", prefix + name,
                                   "-f", "null", os.devnull], bufsize=-1, stdout=flog, stderr=flog);
         pinfo = os.wait4(cproc.pid, 0)
         end_time = time.clock_gettime(time.CLOCK_MONOTONIC);

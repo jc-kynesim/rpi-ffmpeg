@@ -166,7 +166,16 @@ struct RPI_T;
 // At some point we may weant to make this uint64_t
 typedef uint32_t vid_vc_addr_t;
 
+typedef enum rpivid_decode_state_e {
+    RPIVID_DECODE_NEW = 0,
+    RPIVID_DECODE_START,
+    RPIVID_DECODE_SLICE,
+    RPIVID_DECODE_END,
+} rpivid_decode_state_t;
+
 typedef struct dec_env_s {
+    rpivid_decode_state_t state;
+
     const AVCodecContext * avctx;
     struct RPI_T * rpi;
 
@@ -180,12 +189,7 @@ typedef struct dec_env_s {
     int         cmd_len, cmd_max;
     int         max_pu_msgs;
     int         max_coeff64;
-    int         thread_order;
     int         decode_order;
-    int         phase1_order;
-    int         phase2_order;
-pthread_mutex_t mutex_phase1;
-pthread_mutex_t mutex_phase2;
     uint8_t     scaling_factors[NUM_SCALING_FACTORS];
 struct RPI_PROB probabilities;
     int         num_slice_msgs;
@@ -206,6 +210,11 @@ struct RPI_PROB probabilities;
     int         wpp_entry_y;
 } dec_env_t;
 
+typedef struct phase_wait_env_s {
+    unsigned int last_seq;
+    dec_env_t * q;
+} phase_wait_env_t;
+
 typedef struct RPI_T {
     atomic_int ref_count;
     sem_t ref_zero;
@@ -213,8 +222,9 @@ typedef struct RPI_T {
     dec_env_t ** dec_envs;
 
     pthread_mutex_t phase_lock;
-    dec_env_t * phase1_req;
-    dec_env_t * phase2_req;
+
+    phase_wait_env_t phase1_req;
+    phase_wait_env_t phase2_req;
 
     volatile uint32_t * regs;
     volatile uint32_t * ints;

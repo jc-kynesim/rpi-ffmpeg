@@ -713,19 +713,21 @@ dec_env_release(RPI_T * const rpi, dec_env_t * const de)
 
 //----------------------------------------------------------------------------
 
-
-
 static int
-wait_phase(RPI_T * const rpi, dec_env_t * const de, dec_env_t ** const q)
+wait_phase(RPI_T * const rpi, dec_env_t * const de, phase_wait_env_t * const p)
 {
     int rv = 0;
+    int needs_wait = 0;
 
     pthread_mutex_lock(&rpi->phase_lock);
-    de->phase_next = *q;
-    *q = de;
+    if (p->last_seq + 1 != de->decode_order) {
+        de->phase_next = p->q;
+        p->q = de;
+        needs_wait = 1;
+    }
     pthread_mutex_unlock(&rpi->phase_lock);
 
-    if (de->phase_next != NULL) {
+    if (needs_wait) {
         while ((rv = sem_wait(&de->phase_wait)) == -1 && errno == EINTR)
             /* Loop */;
     }
@@ -734,32 +736,27 @@ wait_phase(RPI_T * const rpi, dec_env_t * const de, dec_env_t ** const q)
 }
 
 static void
-post_phase(RPI_T * const rpi, dec_env_t * const de, dec_env_t ** q)
+post_phase(RPI_T * const rpi, dec_env_t * const de, phase_wait_env_t * const p)
 {
     dec_env_t * next_de = NULL;
-    int next_order = INT_MAX;
+    dec_env_t ** q = &p->q;
 
     pthread_mutex_lock(&rpi->phase_lock);
 
+    p->last_seq = de->decode_order;
     while (*q != NULL) {
         dec_env_t * const t_de = *q;
 
-        if (t_de == de) {
+        if (t_de->decode_order == p->last_seq + 1) {
             // This is us - remove from Q
-            // Do not null out current phase_next yet
             *q = t_de->phase_next;
-        }
-        else {
-            // Scan for lowest waiting decode to poke
-            if (t_de->decode_order <= next_order) {
-                next_order = t_de->decode_order;
-                next_de = t_de;
-            }
+            t_de->phase_next = NULL; // Tidy
+            next_de = t_de;
+            break;
         }
         q = &t_de->phase_next;
     }
 
-    de->phase_next = NULL; // Tidy
     pthread_mutex_unlock(&rpi->phase_lock);
 
     if (next_de != NULL)
@@ -779,6 +776,7 @@ static int rpi_hevc_start_frame(
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
     dec_env_t * const de = dec_env_get(avctx, rpi);
     const HEVCContext * const s = avctx->priv_data;
+    unsigned int next_order;
 
 #if TRACE_ENTRY
     printf("<<< %s[%p]\n", __func__, de);
@@ -789,9 +787,16 @@ static int rpi_hevc_start_frame(
         return -1;
     }
 
-    de->decode_order = rpi->decode_order++;
+    next_order = ++rpi->decode_order;
 
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+
+    if (de->state != RPIVID_DECODE_NEW && de->state != RPIVID_DECODE_END) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Unexpected state transition: %d", __func__, de->state);
+        return -1;
+    }
+    de->state = RPIVID_DECODE_START;
+    de->decode_order = next_order;
 
     alloc_picture_space(de, s);
     de->bit_len = 0;
@@ -921,6 +926,48 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
     }
 }
 
+
+//////////////////////////////////////////////////////////////////////////////
+
+static void rpi_hevc_abort_frame(AVCodecContext * const avctx) {
+    RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
+    dec_env_t * const de = dec_env_get(avctx,  rpi);
+
+#if TRACE_ENTRY
+    printf("<<< %s[%p]\n", __func__, de);
+#endif
+
+    if (de == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Cannot find find context for thread\n", __func__);
+        return -1;
+    }
+
+    switch (de->state) {
+        case RPIVID_DECODE_NEW:
+        case RPIVID_DECODE_END:
+            // Expected transition
+            break;
+
+        case RPIVID_DECODE_SLICE:
+            // Error transition
+            // Run through the phases
+            av_log(avctx, AV_LOG_INFO, "Error in decode - aborting\n");
+            wait_phase(rpi, de, &rpi->phase1_req);
+            post_phase(rpi, de, &rpi->phase1_req);
+            wait_phase(rpi, de, &rpi->phase2_req);
+            post_phase(rpi, de, &rpi->phase2_req);
+            break;
+
+        case RPIVID_DECODE_START:
+        default:
+            av_log(avctx, AV_LOG_ERROR, "%s: Unexpected state transition: %d", __func__, de->state);
+            return -1;
+    }
+    de->state = RPIVID_DECODE_NEW;
+
+    dec_env_release(rpi, de);
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // End frame
 
@@ -947,6 +994,12 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         av_log(avctx, AV_LOG_ERROR, "%s: Cannot find find context for thread\n", __func__);
         return -1;
     }
+
+    if (de->state != RPIVID_DECODE_SLICE) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Unexpected state: %d\n", __func__, de->state);
+        return -1;
+    }
+    de->state = RPIVID_DECODE_END;
 
     // End of phase 1 command compilation
     if (pps->entropy_coding_sync_enabled_flag) {
@@ -1010,6 +1063,14 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
 
     wait_phase(rpi, de, &rpi->phase2_req);
+
+    {
+        static int last_order = 0;
+        if (de->decode_order != last_order + 1) {
+            printf("OOO decode %d->%d\n", last_order, de->decode_order);
+        }
+        last_order = de->decode_order;
+    }
 
     apb_write_addr(rpi, de, RPI_PURBASE, de->pubase64);
     apb_write(rpi, RPI_PURSTRIDE, de->pustep64);
@@ -1211,6 +1272,12 @@ static int rpi_hevc_decode_slice(
         return -1;
     }
 
+    if (de->state != RPIVID_DECODE_START && de->state != RPIVID_DECODE_SLICE) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Unexpected state: %d\n", __func__, de->state);
+        return -1;
+    }
+    de->state = RPIVID_DECODE_SLICE;
+
     ff_hevc_cabac_init(s, ctb_addr_ts);
     if (s->ps.sps->scaling_list_enable_flag)
         populate_scaling_factors(de, s);
@@ -1318,8 +1385,8 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
     atomic_store(&rpi->ref_count, 1);
     sem_init(&rpi->ref_zero, 0, 0);
 
-    rpi->phase1_req = NULL;
-    rpi->phase2_req = NULL;
+//    rpi->phase1_req = NULL;
+//    rpi->phase2_req = NULL;
     pthread_mutex_init(&rpi->phase_lock, NULL);
 
     if ((rpi->regs = map_dev(avctx, REGS_NAME, REGS_SIZE)) == NULL ||
@@ -1361,6 +1428,7 @@ const AVHWAccel ff_hevc_rpi4_8_hwaccel = {
     //.alloc_frame    = rpi_hevc_alloc_frame,
     .start_frame    = rpi_hevc_start_frame,
     .end_frame      = rpi_hevc_end_frame,
+    .abort_frame    = rpi_hevc_abort_frame,
     .decode_slice   = rpi_hevc_decode_slice,
     .init           = rpi_hevc_init,
     .uninit         = rpi_hevc_free,
@@ -1376,6 +1444,7 @@ const AVHWAccel ff_hevc_rpi4_10_hwaccel = {
     //.alloc_frame    = rpi_hevc_alloc_frame,
     .start_frame    = rpi_hevc_start_frame,
     .end_frame      = rpi_hevc_end_frame,
+    .abort_frame    = rpi_hevc_abort_frame,
     .decode_slice   = rpi_hevc_decode_slice,
     .init           = rpi_hevc_init,
     .uninit         = rpi_hevc_free,
