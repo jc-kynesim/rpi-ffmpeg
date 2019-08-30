@@ -207,6 +207,9 @@ struct RPI_PROB probabilities;
 } dec_env_t;
 
 typedef struct RPI_T {
+    atomic_int ref_count;
+    sem_t ref_zero;
+
     dec_env_t ** dec_envs;
 
     pthread_mutex_t phase_lock;

@@ -39,6 +39,7 @@ static inline int gettid(void)
 //============================================================================
 
 #define TRACE_DEV 0
+#define TRACE_ENTRY 0
 
 #define REGS_NAME "/dev/argon-hevcmem"
 #define REGS_SIZE 0x10000
@@ -155,7 +156,6 @@ static inline void int_wait(const RPI_T * const rpi, const unsigned int phase)
     const uint32_t mask_reset = phase == 1 ? ~ARG_IC_ICTRL_ACTIVE2_INT_SET : ~ARG_IC_ICTRL_ACTIVE1_INT_SET;
     const uint32_t mask_done = phase == 1 ? ARG_IC_ICTRL_ACTIVE1_INT_SET : ARG_IC_ICTRL_ACTIVE2_INT_SET;
     uint32_t ival;
-
     while (((ival = rpi->ints[0]) & mask_done) == 0) {
         usleep(1000);
     }
@@ -601,6 +601,7 @@ static void new_entry_point(dec_env_t * const de, const HEVCContext * const s,
 // around codec->decode() calls.  Workaround is to unlock and relock before returning.
 
 static void hwaccel_mutex(AVCodecContext *avctx, int (*action) (pthread_mutex_t *)) {
+#if 0
     struct FrameThreadContext {
         void *foo1, *foo2; // must match struct layout in pthread_frame.c
         pthread_mutex_t foo3, hwaccel_mutex;
@@ -610,6 +611,7 @@ static void hwaccel_mutex(AVCodecContext *avctx, int (*action) (pthread_mutex_t 
     };
     struct PerThreadContext *p = avctx->internal->thread_ctx;
     if (avctx->thread_count>1) action(&p->parent->hwaccel_mutex);
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -695,6 +697,14 @@ static dec_env_t *
 dec_env_get(AVCodecContext * const avctx, RPI_T * const rpi)
 {
     dec_env_t * de = NULL;
+    const int ref_count = atomic_fetch_add(&rpi->ref_count, 1);
+
+    if (ref_count <= 0) {
+        // Already dead
+        av_log(avctx, AV_LOG_ERROR, "RPIVID called whilst dead\n");;
+        return NULL;
+    }
+
     for (int i = 0; i != avctx->thread_count; ++i) {
         if (rpi->dec_envs[i] == NULL)
         {
@@ -708,6 +718,17 @@ dec_env_get(AVCodecContext * const avctx, RPI_T * const rpi)
         }
     }
     return de;
+}
+
+// Call at end of fn
+// Used to ensure we aren't in a worker thead when killed
+static void
+dec_env_release(RPI_T * const rpi, dec_env_t * const de)
+{
+    const int n = atomic_fetch_sub(&rpi->ref_count, 1);
+    if (n == 1) {
+        sem_post(&rpi->ref_zero);
+    }
 }
 
 //----------------------------------------------------------------------------
@@ -779,7 +800,9 @@ static int rpi_hevc_start_frame(
     dec_env_t * const de = dec_env_get(avctx, rpi);
     const HEVCContext * const s = avctx->priv_data;
 
-//    printf("<<< %s[%p]\n", __func__, de);
+#if TRACE_ENTRY
+    printf("<<< %s[%p]\n", __func__, de);
+#endif
 
     if (de == NULL) {
         av_log(avctx, AV_LOG_ERROR, "%s: Cannot find find context for thread\n", __func__);
@@ -791,19 +814,15 @@ static int rpi_hevc_start_frame(
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
     hwaccel_mutex(avctx, pthread_mutex_unlock);
 
-#if 0
-    // Enforcing phase 1 order precludes busy waiting for phase 2
-    for (;;) {
-        pthread_mutex_lock  (&rpi->mutex_phase1);
-        if (de->decode_order == rpi->phase1_order) break;
-        pthread_mutex_unlock(&rpi->mutex_phase1);
-    }
-    rpi->phase1_order++;
-#endif
-
     alloc_picture_space(de, s);
     de->bit_len = 0;
     de->cmd_len = 0;
+
+#if TRACE_ENTRY
+    printf(">>> %s[%p]\n", __func__, de);
+#endif
+
+    dec_env_release(rpi, de);
     return 0;
 }
 
@@ -941,7 +960,9 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     int i, a64;
     int status = 1;
 
-//    printf("<<< %s[%p]\n", __func__, de);
+#if TRACE_ENTRY
+    printf("<<< %s[%p]\n", __func__, de);
+#endif
 
     if (de == NULL) {
         av_log(avctx, AV_LOG_ERROR, "%s: Cannot find find context for thread\n", __func__);
@@ -1105,6 +1126,11 @@ fail:
 
     hwaccel_mutex(avctx, pthread_mutex_lock);
 
+#if TRACE_ENTRY
+    printf(">>> %s[%p]\n", __func__, de);
+#endif
+
+    dec_env_release(rpi, de);
     return 0;
 }
 
@@ -1202,8 +1228,9 @@ static int rpi_hevc_decode_slice(
     const HEVCPPS *pps = s->ps.pps;
     int ctb_addr_ts = pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
 
-//    printf("<<< %s[%p]\n", __func__, de);
-
+#if TRACE_ENTRY
+    printf("<<< %s[%p]\n", __func__, de);
+#endif
     if (de == NULL) {
         av_log(avctx, AV_LOG_ERROR, "%s: Cannot find find context for thread\n", __func__);
         return -1;
@@ -1215,6 +1242,10 @@ static int rpi_hevc_decode_slice(
     populate_prob_tables(de, s);
     pps->entropy_coding_sync_enabled_flag? wpp_decode_slice(de, s, ctb_addr_ts)
                                              : decode_slice(de, s, ctb_addr_ts);
+#if TRACE_ENTRY
+    printf(">>> %s[%p]\n", __func__, de);
+#endif
+    dec_env_release(rpi, de);
     return 0;
 }
 
@@ -1246,6 +1277,30 @@ static int open_socket_client(RPI_T *rpi, const char *so) {
 static int rpi_hevc_free(AVCodecContext *avctx) {
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
 
+#if TRACE_ENTRY
+    printf("<<< %s\n", __func__);
+#endif
+
+    dec_env_release(rpi, NULL);
+
+    // Wait for everything else to stop
+    {
+        struct timespec tt;
+        clock_gettime(CLOCK_REALTIME, &tt);
+        tt.tv_sec += 2;
+        while (sem_timedwait(&rpi->ref_zero, &tt) == -1) {
+            const int err = errno;
+            if (err == ETIMEDOUT) {
+                av_log(avctx, AV_LOG_FATAL, "Rpivid worker threads still running\n");
+                return -1;
+            }
+            if (err != EINTR) {
+                av_log(avctx, AV_LOG_ERROR, "Unexpected error %d waiting for work thread to stop\n", err);
+                break;
+            }
+        }
+    }
+
     for (int i; i < avctx->thread_count && rpi->dec_envs[i] != NULL; ++i) {
         dec_env_delete(rpi->dec_envs[i]);
     }
@@ -1255,11 +1310,12 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
 
     unmap_devp(&rpi->regs, REGS_SIZE);
     unmap_devp(&rpi->ints, INTS_SIZE);
-#if 0
-    if (rpi->id && rpi->ctrl_ffmpeg_free)
-        rpi->ctrl_ffmpeg_free(rpi->id);
-#endif
+
     av_rpi_zc_uninit_local(avctx);
+
+#if TRACE_ENTRY
+    printf(">>> %s\n", __func__);
+#endif
     return 0;
 }
 
@@ -1269,28 +1325,23 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
 //    const char *err;
 
+#if TRACE_ENTRY
+    printf("<<< %s\n", __func__);
+#endif
+
     if (avctx->width>4096 || avctx->height>4096) {
         av_log(NULL, AV_LOG_FATAL, "Picture size %dx%d exceeds 4096x4096 maximum for HWAccel\n", avctx->width, avctx->height);
         return AVERROR(ENOTSUP);
     }
-#if 0
-    open_socket_client(rpi, NULL);
 
-    err = rpi->ctrl_ffmpeg_init(NULL, &rpi->id);
-    if (err) {
-        av_log(NULL, AV_LOG_FATAL, "Could not connect to RPI server: %s\n", err);
-        return AVERROR_EXTERNAL;
-    }
-#endif
+    memset(rpi, 0, sizeof(*rpi));
+
     av_rpi_zc_init_local(avctx);
 
-    printf("%s: threads=%d\n", __func__, avctx->thread_count);
-
-//    pthread_mutex_init(&rpi->mutex_phase1, NULL);
-//    pthread_mutex_init(&rpi->mutex_phase2, NULL);
     rpi->decode_order = 0;
-//    rpi->phase1_order = 0;
-//    rpi->phase2_order = 0;
+
+    atomic_store(&rpi->ref_count, 1);
+    sem_init(&rpi->ref_zero, 0, 0);
 
     rpi->phase1_req = NULL;
     rpi->phase2_req = NULL;
@@ -1339,7 +1390,7 @@ const AVHWAccel ff_hevc_rpi4_8_hwaccel = {
     .init           = rpi_hevc_init,
     .uninit         = rpi_hevc_free,
     .priv_data_size = sizeof(RPI_T),
-    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE,
+    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_MT_SAFE,
 };
 
 const AVHWAccel ff_hevc_rpi4_10_hwaccel = {
@@ -1354,6 +1405,6 @@ const AVHWAccel ff_hevc_rpi4_10_hwaccel = {
     .init           = rpi_hevc_init,
     .uninit         = rpi_hevc_free,
     .priv_data_size = sizeof(RPI_T),
-    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE,
+    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_MT_SAFE,
 };
 
