@@ -36,6 +36,19 @@ static inline int gettid(void)
     return syscall(SYS_gettid);
 }
 
+inline unsigned int rnd64(unsigned int x)
+{
+    return (x + 63) & ~63;
+}
+
+inline int rpi_sem_wait(sem_t * const sem)
+{
+    int rv;
+    while ((rv = sem_wait(sem)) != 0 && errno == EINTR)
+        /* Loop */;
+    return rv;
+}
+
 //============================================================================
 
 #define TRACE_DEV 0
@@ -638,6 +651,8 @@ dec_env_new(AVCodecContext * const avctx, RPI_T * const rpi)
 
     de->rpi = rpi;
     de->avctx = avctx;
+    de->phase_no = RPIVID_PHASE_NEW;
+
     sem_init(&de->phase_wait, 0, 0);
 
     // Initial PU/COEFF stream buffer sizes chosen so jellyfish40.265 requires 1 overflow/restart
@@ -714,10 +729,11 @@ dec_env_release(RPI_T * const rpi, dec_env_t * const de)
 //----------------------------------------------------------------------------
 
 static int
-wait_phase(RPI_T * const rpi, dec_env_t * const de, phase_wait_env_t * const p)
+wait_phase(RPI_T * const rpi, dec_env_t * const de, const int phase_no)
 {
     int rv = 0;
     int needs_wait = 0;
+    phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
 
     pthread_mutex_lock(&rpi->phase_lock);
     if (p->last_seq + 1 != de->decode_order) {
@@ -732,13 +748,15 @@ wait_phase(RPI_T * const rpi, dec_env_t * const de, phase_wait_env_t * const p)
             /* Loop */;
     }
 
+    de->phase_no = phase_no;
     return rv;
 }
 
 static void
-post_phase(RPI_T * const rpi, dec_env_t * const de, phase_wait_env_t * const p)
+post_phase(RPI_T * const rpi, dec_env_t * const de, const int phase_no)
 {
     dec_env_t * next_de = NULL;
+    phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
     dec_env_t ** q = &p->q;
 
     pthread_mutex_lock(&rpi->phase_lock);
@@ -763,7 +781,16 @@ post_phase(RPI_T * const rpi, dec_env_t * const de, phase_wait_env_t * const p)
         sem_post(&next_de->phase_wait);
 }
 
-
+// Wait & signal stuff s.t. threads in other phases can continue
+static void
+abort_phases(RPI_T * const rpi, dec_env_t * const de)
+{
+    for (int i = de->phase_no + 1; i < RPIVID_PHASE_NEW; ++i) {
+        wait_phase(rpi, de, i);
+        post_phase(rpi, de, i);
+    }
+    de->phase_no = RPIVID_PHASE_NEW;
+}
 
 //////////////////////////////////////////////////////////////////////////////
 // Start frame
@@ -776,7 +803,6 @@ static int rpi_hevc_start_frame(
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
     dec_env_t * const de = dec_env_get(avctx, rpi);
     const HEVCContext * const s = avctx->priv_data;
-    unsigned int next_order;
 
 #if TRACE_ENTRY
     printf("<<< %s[%p]\n", __func__, de);
@@ -787,7 +813,8 @@ static int rpi_hevc_start_frame(
         return -1;
     }
 
-    next_order = ++rpi->decode_order;
+    de->phase_no = RPIVID_PHASE_START;
+    de->decode_order = ++rpi->decode_order;  // *** atomic?
 
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
 
@@ -796,7 +823,6 @@ static int rpi_hevc_start_frame(
         return -1;
     }
     de->state = RPIVID_DECODE_START;
-    de->decode_order = next_order;
 
     alloc_picture_space(de, s);
     de->bit_len = 0;
@@ -939,7 +965,7 @@ static void rpi_hevc_abort_frame(AVCodecContext * const avctx) {
 
     if (de == NULL) {
         av_log(avctx, AV_LOG_ERROR, "%s: Cannot find find context for thread\n", __func__);
-        return -1;
+        return;
     }
 
     switch (de->state) {
@@ -950,19 +976,16 @@ static void rpi_hevc_abort_frame(AVCodecContext * const avctx) {
 
         case RPIVID_DECODE_SLICE:
             // Error transition
-            // Run through the phases
             av_log(avctx, AV_LOG_INFO, "Error in decode - aborting\n");
-            wait_phase(rpi, de, &rpi->phase1_req);
-            post_phase(rpi, de, &rpi->phase1_req);
-            wait_phase(rpi, de, &rpi->phase2_req);
-            post_phase(rpi, de, &rpi->phase2_req);
             break;
 
         case RPIVID_DECODE_START:
         default:
             av_log(avctx, AV_LOG_ERROR, "%s: Unexpected state transition: %d", __func__, de->state);
-            return -1;
+            break;
     }
+
+    abort_phases(rpi, de);
     de->state = RPIVID_DECODE_NEW;
 
     dec_env_release(rpi, de);
@@ -982,8 +1005,9 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     int last_x = pps->col_bd[pps->num_tile_columns]-1;
     int last_y = pps->row_bd[pps->num_tile_rows]-1;
     const unsigned int dpbno_cur = s->ref - s->DPB;
+    vid_vc_addr_t cmds_vc;
+    unsigned int i;
 
-    int i, a64;
     int status = 1;
 
 #if TRACE_ENTRY
@@ -1008,27 +1032,58 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
     p1_apb_write(de, RPI_STATUS, 1 + (last_x<<5) + (last_y<<18));
 
-    // Phase 1 ...
-    wait_phase(rpi, de, &rpi->phase1_req);
+    // Phase 0
+    wait_phase(rpi, de, 0);
+    rpi_sem_wait(&rpi->bitbuf_sem);
 
-    for (;;) {
-        // (Re-)allocate PU/COEFF stream space
-        a64 = alloc_stream_space(de, s);
-        // Send bitstream data
-        for (i=0; i < de->bit_len; i++) {
-            if ((unsigned int)a64 + (((unsigned int)de->bit_fifo[i].len + 31) >> 6) > (1U << 20)) {
-                av_log(avctx, AV_LOG_ERROR, "Out of HEVC intermediate memory - maybe too many threads");
+    // Copy cmds & bits into gpu side buffer
+    // Layout: CMDS, BITS
+    {
+        uint8_t * const armbase = rpi->gbitbufs[rpi->bitbuf_no].arm;
+        vid_vc_addr_t vcbase = rpi->gbitbufs[rpi->bitbuf_no].vc;
+        unsigned int cmd_bytes = de->cmd_len * sizeof(struct RPI_CMD);
+
+        uint8_t * p = armbase + rnd64(cmd_bytes);
+        uint8_t * const eobits = armbase + rpi->gbitbufs[rpi->bitbuf_no].numbytes;
+
+        cmds_vc = vcbase;
+
+        // Copy all the bits & update bitstream cmds to point at the right bits
+        for (i = 0; i < de->bit_len; ++i)
+        {
+            const unsigned int seg_len = de->bit_fifo[i].len;
+
+            if (p + seg_len > eobits) {
                 status = -1;
                 break;
             }
-            axi_write(de, a64, de->bit_fifo[i].len, de->bit_fifo[i].ptr);
-            de->cmd_fifo[de->bit_fifo[i].cmd].data = axi_addr64(de, a64); // Set BFBASE
-            a64 += (de->bit_fifo[i].len+63)/64;
-        }
-        // Send phase 1 commands (cache flush on real hardware)
-        axi_write(de, a64, de->cmd_len * sizeof(struct RPI_CMD), de->cmd_fifo);
 
-        axi_flush(de, (a64 << 6) + de->cmd_len * sizeof(struct RPI_CMD));
+            memcpy(p, de->bit_fifo[i].ptr, seg_len);
+            de->cmd_fifo[de->bit_fifo[i].cmd].data = MANGLE64((p - armbase) + vcbase);
+
+            p += rnd64(seg_len);
+        }
+
+        memcpy(armbase, de->cmd_fifo, cmd_bytes);
+    }
+
+    if (++rpi->bitbuf_no >= RPIVID_BITBUFS)
+        rpi->bitbuf_no = 0;
+
+    post_phase(rpi, de, 0);
+
+    if (status < 0) {
+        sem_post(&rpi->bitbuf_sem);
+        av_log(avctx, AV_LOG_ERROR, "Out of HEVC bit/cmd memory");
+        goto fail;
+    }
+
+    // Phase 1 ...
+    wait_phase(rpi, de, 1);
+
+    do {
+        // (Re-)allocate PU/COEFF stream space
+        alloc_stream_space(de, s);
 
         phase1_begin(rpi, de);
         // Trigger command FIFO
@@ -1038,14 +1093,14 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         apb_dump_regs(rpi, 0x8000, 24);
         axi_dump(de, ((uint64_t)a64)<<6, de->cmd_len * sizeof(struct RPI_CMD));
 #endif
-        apb_write_addr(rpi, de, RPI_CFBASE, a64);
+        apb_write_vc_addr(rpi, RPI_CFBASE, cmds_vc);
+
         int_wait(rpi, 1);
         status = check_status(rpi, de);
-        if (status != 1) break; // No PU/COEFF overflow?
-    }
+    } while (status == 1);
 
-//    pthread_mutex_unlock(&rpi->mutex_phase1);
-    post_phase(rpi, de, &rpi->phase1_req);
+    sem_post(&rpi->bitbuf_sem);
+    post_phase(rpi, de, 1);
 
     if (status != 0) {
         av_log(avctx, AV_LOG_WARNING, "Phase 1 decode error\n");
@@ -1062,7 +1117,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         }
     }
 
-    wait_phase(rpi, de, &rpi->phase2_req);
+    wait_phase(rpi, de, 2);
 
     {
         static int last_order = 0;
@@ -1147,7 +1202,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     int_wait(rpi, 2);
 
-    post_phase(rpi, de, &rpi->phase2_req);
+    post_phase(rpi, de, 2);
 
     // Flush frame for CPU access
     // Arguably the best place would be at the start of phase 2 but here
@@ -1162,6 +1217,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
 
 fail:
+    abort_phases(rpi, de);  // Dummy any unresolved phases
+
 #if TRACE_ENTRY
     printf(">>> %s[%p]\n", __func__, de);
 #endif
@@ -1350,10 +1407,17 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
 
     gpu_free(&rpi->gcolbuf);
 
+    for (unsigned int i = 0; i != RPIVID_BITBUFS; ++i) {
+        gpu_free(rpi->gbitbufs + i);
+    }
+
     unmap_devp(&rpi->regs, REGS_SIZE);
     unmap_devp(&rpi->ints, INTS_SIZE);
 
     av_rpi_zc_uninit_local(avctx);
+
+    sem_destroy(&rpi->ref_zero);
+    sem_destroy(&rpi->bitbuf_sem);
 
 #if TRACE_ENTRY
     printf(">>> %s\n", __func__);
@@ -1385,8 +1449,8 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
     atomic_store(&rpi->ref_count, 1);
     sem_init(&rpi->ref_zero, 0, 0);
 
-//    rpi->phase1_req = NULL;
-//    rpi->phase2_req = NULL;
+    sem_init(&rpi->bitbuf_sem, 0, RPIVID_BITBUFS);
+
     pthread_mutex_init(&rpi->phase_lock, NULL);
 
     if ((rpi->regs = map_dev(avctx, REGS_NAME, REGS_SIZE)) == NULL ||
@@ -1407,6 +1471,14 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
         if (gpu_malloc_uncached(rpi->col_picsize * RPIVID_COL_PICS, &rpi->gcolbuf) != 0)
         {
             av_log(avctx, AV_LOG_ERROR, "Failed to allocate col mv buffer\n");
+            goto fail;
+        }
+    }
+
+    for (unsigned int i = 0; i != RPIVID_BITBUFS; ++i) {
+        if (gpu_malloc_uncached(RPIVID_BITBUF_SIZE, rpi->gbitbufs + i) != 0)
+        {
+            av_log(avctx, AV_LOG_ERROR, "Failed to allocate bitbuf %d\n", i);
             goto fail;
         }
     }

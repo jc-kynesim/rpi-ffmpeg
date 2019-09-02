@@ -19,6 +19,8 @@
 #define PROB_RELOAD ((20<<12) + (20<<0) + (0<<6))
 
 #define RPIVID_COL_PICS 17  // 16 ref & current
+#define RPIVID_BITBUFS  2               // Bit + Cmd bufs (phase1 only)
+#define RPIVID_BITBUF_SIZE (4 << 20)    // Bit + Cmd buf size
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -181,11 +183,12 @@ typedef struct dec_env_s {
 
     GPU_MEM_PTR_T gbuf;
 
+    int phase_no;
     struct dec_env_s * phase_next;
     sem_t phase_wait;
     struct RPI_BIT *bit_fifo;
     struct RPI_CMD *cmd_fifo;
-    int         bit_len, bit_max;
+    unsigned int bit_len, bit_max;
     int         cmd_len, cmd_max;
     int         max_pu_msgs;
     int         max_coeff64;
@@ -210,6 +213,10 @@ struct RPI_PROB probabilities;
     int         wpp_entry_y;
 } dec_env_t;
 
+#define RPIVID_PHASES 3
+#define RPIVID_PHASE_NEW (RPIVID_PHASES) // Phase before we have inced decode order
+#define RPIVID_PHASE_START (-1)          // Phase after we have inced decode_order
+
 typedef struct phase_wait_env_s {
     unsigned int last_seq;
     dec_env_t * q;
@@ -222,9 +229,7 @@ typedef struct RPI_T {
     dec_env_t ** dec_envs;
 
     pthread_mutex_t phase_lock;
-
-    phase_wait_env_t phase1_req;
-    phase_wait_env_t phase2_req;
+    phase_wait_env_t phase_reqs[RPIVID_PHASES];
 
     volatile uint32_t * regs;
     volatile uint32_t * ints;
@@ -233,68 +238,9 @@ typedef struct RPI_T {
     uint32_t    col_stride64;
     size_t      col_picsize;
 
-    int         decode_order;
-#if 0
-    int         phase1_order;
-    int         phase2_order;
-pthread_mutex_t mutex_phase1;
-pthread_mutex_t mutex_phase2;
-#endif
+    unsigned int bitbuf_no;
+    sem_t       bitbuf_sem;
+    GPU_MEM_PTR_T gbitbufs[RPIVID_BITBUFS];
 
-#if 0
-struct RPI_BIT *bit_fifo;
-struct RPI_CMD *cmd_fifo;
-    int         bit_len, bit_max;
-    int         cmd_len, cmd_max;
-    int         max_pu_msgs;
-    int         max_coeff64;
-AVCodecContext *thread_avctx[MAX_THREADS];
-    int         thread_order[MAX_THREADS];
     int         decode_order;
-    int         phase1_order;
-    int         phase2_order;
-pthread_mutex_t mutex_phase1;
-pthread_mutex_t mutex_phase2;
-    uint8_t     scaling_factors[NUM_SCALING_FACTORS];
-struct RPI_PROB probabilities;
-    int         num_slice_msgs;
-    uint16_t    slice_msgs[2*HEVC_MAX_REFS*8+3];
-    int         pubase64[MAX_THREADS];
-    int         pustep64;
-    int         coeffbase64[MAX_THREADS];
-    int         coeffstep64;
-    int         PicWidthInCtbsY;
-    int         PicHeightInCtbsY;
-    int         mvframebytes64;
-    int         mvstorage64;
-    int         colstride64;
-    int         mvstride64;
-    int         colbase64[MAX_THREADS];
-    int         mvbase64[MAX_THREADS];
-    uint32_t    reg_slicestart;
-    int         collocated_from_l0_flag;
-    int         max_num_merge_cand;
-    int         RefPicList[2][HEVC_MAX_REFS];
-    int         collocated_ref_idx;
-    int         wpp_entry_x;
-    int         wpp_entry_y;
-#endif
-//    void *      dl_handle;
-//    void *      id;
-//    char *   (* ctrl_ffmpeg_init) (const char *hwaccel_device, void **id);
-//    void     (* apb_write)        (void *id, uint16_t addr, uint32_t data);
-//    void     (* apb_write_addr)   (void *id, uint16_t addr, uint32_t data);
-//    uint32_t (* apb_read)         (void *id, uint16_t addr);
-//    void     (* apb_read_drop)    (void *id, uint16_t addr);
-//    void     (* axi_write)        (void *id, uint64_t addr, uint32_t size, const void *buf);
-//    void     (* axi_read_alloc)   (void *id, uint32_t size);
-//    void     (* axi_read_tx)      (void *id, uint64_t addr, uint32_t size);
-//    void     (* axi_read_rx)      (void *id, uint32_t size, void *buf);
-//    uint64_t (* axi_get_addr)     (void *id);
-//    void     (* apb_dump_regs)    (void *id, uint16_t addr, int num);
-//    void     (* axi_dump)         (void *id, uint64_t addr, uint32_t size);
-//    void     (* axi_flush)        (void *id, int mode);
-//    void     (* wait_interrupt)   (void *id, int phase);
-//    void     (* ctrl_ffmpeg_free) (void *id);
-
 } RPI_T;
