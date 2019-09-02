@@ -180,13 +180,9 @@ typedef enum rpivid_decode_state_e {
 } rpivid_decode_state_t;
 
 typedef struct dec_env_s {
-    rpivid_decode_state_t state;
-
     const AVCodecContext * avctx;
-    struct RPI_T * rpi;
 
-//    GPU_MEM_PTR_T gbuf;
-
+    rpivid_decode_state_t state;
     int phase_no;
     struct dec_env_s * phase_next;
     sem_t phase_wait;
@@ -201,12 +197,8 @@ typedef struct dec_env_s {
 struct RPI_PROB probabilities;
     int         num_slice_msgs;
     uint16_t    slice_msgs[2*HEVC_MAX_REFS*8+3];
-//    uint32_t    pubase64;
-//    int         pustep64;
-//    int         coeffbase64;
-//    int         coeffstep64;
-    int         PicWidthInCtbsY;
-    int         PicHeightInCtbsY;
+    unsigned int PicWidthInCtbsY;
+    unsigned int PicHeightInCtbsY;
     unsigned int dpbno_col;
     uint32_t    reg_slicestart;
     int         collocated_from_l0_flag;
@@ -239,7 +231,7 @@ typedef struct RPI_T {
     volatile uint32_t * ints;
 
     GPU_MEM_PTR_T gcolbuf;
-    uint32_t    col_stride64;
+    unsigned int col_stride;
     size_t      col_picsize;
 
     unsigned int bitbuf_no;

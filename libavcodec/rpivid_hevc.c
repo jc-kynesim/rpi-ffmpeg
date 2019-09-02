@@ -18,8 +18,6 @@
 #include "rpi_mem.h"
 #include "rpi_zc_frames.h"
 
-#include "rpivid_axi.h"
-
 #define OPT_GBUF_CACHED 0
 
 #define GBUF_SIZE (16 << 20)
@@ -107,16 +105,10 @@ static inline void apb_write_vc_addr(const RPI_T *const rpi, const uint32_t addr
     rpi->regs[addr >> 2] = MANGLE64(data);
 }
 
-#if 0
-static inline void apb_write_addr(const RPI_T * const rpi, const dec_env_t * const de, const uint32_t addr, const uint32_t data)
+static inline void apb_write_vc_len(const RPI_T *const rpi, const uint32_t addr, const unsigned int data)
 {
-#if TRACE_DEV
-    printf("P %x %08x\n", addr, data);
-#endif
-
-    rpi->regs[addr >> 2] = data + (MANGLE(de->gbuf.vc) >> 6);
+    rpi->regs[addr >> 2] = data >> 6;  // ?? rnd64 - but not currently needed
 }
-#endif
 
 static inline void apb_write(const RPI_T * const rpi, const uint32_t addr, const uint32_t data)
 {
@@ -135,29 +127,6 @@ static inline uint32_t apb_read(const RPI_T * const rpi, const uint32_t addr)
 #endif
     return v;
 }
-
-#if 0
-static inline void axi_write(const dec_env_t * const de, uint32_t dst64, size_t len, const void * src)
-{
-#if TRACE_DEV
-    printf("L %08x %08x\n", dst64 << 6, len);
-#endif
-
-    av_assert0((dst64 << 6) + len <= de->gbuf.numbytes);
-
-    memcpy(de->gbuf.arm + (dst64 << 6), src, len);
-}
-
-static uint32_t axi_addr64(const dec_env_t * const de, const uint32_t a64)
-{
-    return a64 + (MANGLE(de->gbuf.vc) >> 6);
-}
-
-static inline void axi_flush(const dec_env_t * const de, size_t len)
-{
-    // ****
-}
-#endif
 
 #define ARG_IC_ICTRL_ACTIVE1_INT_SET                   0x00000001
 #define ARG_IC_ICTRL_ACTIVE1_EDGE_SET                  0x00000002
@@ -364,62 +333,13 @@ static int ctb_to_slice_w_h (unsigned int ctb, int ctb_size, int width, unsigned
 }
 
 //////////////////////////////////////////////////////////////////////////////
-
-static void alloc_picture_space(dec_env_t * const de, const HEVCContext * const s)
-{
-    const HEVCSPS * const sps = s->ps.sps;
-    int CtbSizeY = 1<<sps->log2_ctb_size;
-    int x64 = AXI_BASE64;
-
-    de->PicWidthInCtbsY  = (sps->width + CtbSizeY - 1) / CtbSizeY;  //7-15
-    de->PicHeightInCtbsY = (sps->height + CtbSizeY - 1) / CtbSizeY;  //7-17
-#if 0
-    // collocated reads/writes
-    if (sps->sps_temporal_mvp_enabled_flag) {
-        // 128 bits = 16 bytes per MV, one for every 16*16
-        int collocatedStride64 = (de->PicWidthInCtbsY * (CtbSizeY/16) * 16 + 63)>>6;
-        de->mvframebytes64 = de->PicHeightInCtbsY * (CtbSizeY/16) * collocatedStride64;
-        de->mvstorage64 = x64;
-        x64 += de->mvframebytes64 * 17; // Leave space for 17 reference pictures
-        de->colstride64 = collocatedStride64;
-        de->mvstride64 = collocatedStride64;
-    }
-#endif
-//    de->pubase64 = x64;
-}
-
-#if 0
-static int alloc_stream_space(dec_env_t * const de, const HEVCContext *s) {
-    int stride64;
-    int x64 = de->pubase64;
-
-    stride64 = 1 + (de->max_pu_msgs*2*de->PicWidthInCtbsY)/64;
-    de->pubase64 = x64;
-    de->pustep64 = stride64;
-    x64 += de->PicHeightInCtbsY*stride64 ;
-
-    stride64 = de->max_coeff64;
-    de->coeffbase64 = x64;
-    de->coeffstep64 = stride64;
-    x64 += de->PicHeightInCtbsY*stride64;
-
-    return x64;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-// Start or restart phase 1
-
-static void phase1_begin(const RPI_T * const rpi, const dec_env_t * const de) {
-    apb_write_addr(rpi, de, RPI_PUWBASE, de->pubase64);
-    apb_write(rpi, RPI_PUWSTRIDE, de->pustep64);
-    apb_write_addr(rpi, de, RPI_COEFFWBASE, de->coeffbase64);
-    apb_write(rpi, RPI_COEFFWSTRIDE, de->coeffstep64);
-}
-#endif
-
-//////////////////////////////////////////////////////////////////////////////
 // Handle PU and COEFF stream overflow
 
+
+// Returns:
+//  0  OK
+//  1  PU or Coeff overflow (max updated)
+//  2  Other error
 static int check_status(const RPI_T * const rpi, dec_env_t * const de) {
     int status, c, p;
 
@@ -634,30 +554,10 @@ dec_env_new(AVCodecContext * const avctx, RPI_T * const rpi)
 {
     dec_env_t * const de = av_mallocz(sizeof(*de));
     int i;
-    int rv;
 
     if (de == NULL)
         return NULL;
 
-#if 0
-#if OPT_GBUF_CACHED
-    rv = gpu_malloc_cached(GBUF_SIZE, &de->gbuf);
-#else
-    rv = gpu_malloc_uncached(GBUF_SIZE, &de->gbuf);
-#endif
-
-#if TRACE_DEV
-    printf("A %x arm=%p vc=%08x\n", de->gbuf.numbytes, de->gbuf.arm, de->gbuf.vc);
-#endif
-
-    if (rv != 0) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to allocate GPU mem (%d) for thread\n", GBUF_SIZE);
-        av_free(de);
-        return NULL;
-    }
-#endif
-
-    de->rpi = rpi;
     de->avctx = avctx;
     de->phase_no = RPIVID_PHASE_NEW;
 
@@ -811,6 +711,8 @@ static int rpi_hevc_start_frame(
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
     dec_env_t * const de = dec_env_get(avctx, rpi);
     const HEVCContext * const s = avctx->priv_data;
+    const HEVCSPS * const sps = s->ps.sps;
+    const unsigned int CtbSizeY = 1U << sps->log2_ctb_size;
 
 #if TRACE_ENTRY
     printf("<<< %s[%p]\n", __func__, de);
@@ -832,7 +734,8 @@ static int rpi_hevc_start_frame(
     }
     de->state = RPIVID_DECODE_START;
 
-    alloc_picture_space(de, s);
+    de->PicWidthInCtbsY  = (sps->width + CtbSizeY - 1) / CtbSizeY;  //7-15
+    de->PicHeightInCtbsY = (sps->height + CtbSizeY - 1) / CtbSizeY;  //7-17
     de->bit_len = 0;
     de->cmd_len = 0;
 
@@ -947,16 +850,6 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
     if (sps->sps_temporal_mvp_enabled_flag) {
         de->dpbno_col = sh->slice_type == HEVC_SLICE_I ? 0 :
             de->RefPicList[sh->slice_type==HEVC_SLICE_B && de->collocated_from_l0_flag==0][de->collocated_ref_idx];
-#if 0
-        de->mvbase64 = de->mvstorage64 + CurrentPicture * de->mvframebytes64;
-        if (sh->slice_type==HEVC_SLICE_I) {
-            // Collocated picture not well defined here.  Use mvbase or previous value
-            if (sh->first_slice_in_pic_flag)
-                de->colbase64 = de->mvbase64; // Ensure we don't read garbage
-        }
-        else
-            de->colbase64 = de->mvstorage64 + colPic * de->mvframebytes64;
-#endif
     }
 }
 
@@ -1100,13 +993,11 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         pu_stride = rnd64(de->max_pu_msgs * 2 * de->PicWidthInCtbsY); // ?? +64
         coeff_base_vc = pu_base_vc + pu_stride * de->PicHeightInCtbsY;
         coeff_stride = de->max_coeff64 * 64;
-//        alloc_stream_space(de, s);
 
         apb_write_vc_addr(rpi, RPI_PUWBASE, pu_base_vc);
-        apb_write(rpi, RPI_PUWSTRIDE, pu_stride >> 6);
+        apb_write_vc_len(rpi, RPI_PUWSTRIDE, pu_stride);
         apb_write_vc_addr(rpi, RPI_COEFFWBASE, coeff_base_vc);
-        apb_write(rpi, RPI_COEFFWSTRIDE, coeff_stride >> 6);
-//        phase1_begin(rpi, de);
+        apb_write_vc_len(rpi, RPI_COEFFWSTRIDE, coeff_stride);
 
         // Trigger command FIFO
         apb_write(rpi, RPI_CFNUM, de->cmd_len);
@@ -1133,29 +1024,17 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         goto fail;
     }
 
-#if 0
-    // Wait for frames
-    for(i=L0; i<=L1; i++)
-    {
-        for (unsigned int rIdx=0; rIdx <sh->nb_refs[i]; rIdx++)
-        {
-            HEVCFrame *f1 = s->ref->refPicList[i].ref[rIdx];
-            ff_thread_await_progress(&f1->tf, 2, 0);
-        }
-    }
-#endif
-
     wait_phase(rpi, de, 2);
 
     apb_write_vc_addr(rpi, RPI_PURBASE, pu_base_vc);
-    apb_write(rpi, RPI_PURSTRIDE, pu_stride >> 6);
+    apb_write_vc_len(rpi, RPI_PURSTRIDE, pu_stride);
     apb_write_vc_addr(rpi, RPI_COEFFRBASE, coeff_base_vc);
-    apb_write(rpi, RPI_COEFFRSTRIDE, coeff_stride >> 6);
+    apb_write_vc_len(rpi, RPI_COEFFRSTRIDE, coeff_stride);
 
     apb_write_vc_addr(rpi, RPI_OUTYBASE, get_vc_address_y(f));
     apb_write_vc_addr(rpi, RPI_OUTCBASE, get_vc_address_u(f));
-    apb_write(rpi, RPI_OUTYSTRIDE, f->linesize[3] * 128 / 64);
-    apb_write(rpi, RPI_OUTCSTRIDE, f->linesize[3] * 128 / 64);
+    apb_write_vc_len(rpi, RPI_OUTYSTRIDE, f->linesize[3] * 128);
+    apb_write_vc_len(rpi, RPI_OUTCSTRIDE, f->linesize[3] * 128);
 
     for(i=0; i<16; i++) {
         apb_write(rpi, 0x9000+16*i, 0);
@@ -1206,8 +1085,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         av_assert0(de->dpbno_col < RPIVID_COL_PICS);
         av_assert0(dpbno_cur < RPIVID_COL_PICS);
 
-        apb_write(rpi, RPI_COLSTRIDE, rpi->col_stride64);
-        apb_write(rpi, RPI_MVSTRIDE,  rpi->col_stride64);
+        apb_write_vc_len(rpi, RPI_COLSTRIDE, rpi->col_stride);
+        apb_write_vc_len(rpi, RPI_MVSTRIDE,  rpi->col_stride);
         apb_write_vc_addr(rpi, RPI_MVBASE,  rpi->gcolbuf.vc + dpbno_cur * rpi->col_picsize);
         apb_write_vc_addr(rpi, RPI_COLBASE, rpi->gcolbuf.vc + de->dpbno_col * rpi->col_picsize);
     }
@@ -1370,29 +1249,6 @@ static int rpi_hevc_decode_slice(
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// Bind to socket client
-#if 0
-static int open_socket_client(RPI_T *rpi, const char *so) {
-     *(void **) &rpi->ctrl_ffmpeg_init = rpi_ctrl_ffmpeg_init;
-//     *(void **) &rpi->apb_write        = rpi_apb_write;
-//     *(void **) &rpi->apb_write_addr   = rpi_apb_write_addr;
-//     *(void **) &rpi->apb_read         = rpi_apb_read;
-//     *(void **) &rpi->apb_read_drop    = rpi_apb_read_drop;
-//     *(void **) &rpi->axi_write        = rpi_axi_write;
-//     *(void **) &rpi->axi_read_alloc   = rpi_axi_read_alloc;
-//     *(void **) &rpi->axi_read_tx      = rpi_axi_read_tx;
-//     *(void **) &rpi->axi_read_rx      = rpi_axi_read_rx;
-//     *(void **) &rpi->axi_get_addr     = rpi_axi_get_addr;
-//     *(void **) &rpi->apb_dump_regs    = rpi_apb_dump_regs;
-//     *(void **) &rpi->axi_dump         = rpi_axi_dump;
-//     *(void **) &rpi->axi_flush        = rpi_axi_flush;
-     *(void **) &rpi->wait_interrupt   = rpi_wait_interrupt;
-     *(void **) &rpi->ctrl_ffmpeg_free = rpi_ctrl_ffmpeg_free;
-    return 1;
-}
-#endif
-
-//////////////////////////////////////////////////////////////////////////////
 
 static int rpi_hevc_free(AVCodecContext *avctx) {
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
@@ -1490,15 +1346,12 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
         goto fail;
     }
 
+    rpi->col_stride = rnd64(avctx->width);
+    rpi->col_picsize = rpi->col_stride * (((avctx->height + 63) & ~63) >> 4);
+    if (gpu_malloc_uncached(rpi->col_picsize * RPIVID_COL_PICS, &rpi->gcolbuf) != 0)
     {
-        const size_t colstride = ((avctx->width + 63) & ~63);
-        rpi->col_picsize = colstride * (((avctx->height + 63) & ~63) >> 4);
-        rpi->col_stride64 = colstride >> 6;
-        if (gpu_malloc_uncached(rpi->col_picsize * RPIVID_COL_PICS, &rpi->gcolbuf) != 0)
-        {
-            av_log(avctx, AV_LOG_ERROR, "Failed to allocate col mv buffer\n");
-            goto fail;
-        }
+        av_log(avctx, AV_LOG_ERROR, "Failed to allocate col mv buffer\n");
+        goto fail;
     }
 
     for (unsigned int i = 0; i != RPIVID_BITBUFS; ++i) {

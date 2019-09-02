@@ -6,7 +6,6 @@ HEADERS = ac3_parser.h                                                  \
           avcodec.h                                                     \
           avdct.h                                                       \
           avfft.h                                                       \
-          rpivid_axi.h                                                  \
           rpi_zc.h                                                      \
           d3d11va.h                                                     \
           dirac.h                                                       \
@@ -54,7 +53,6 @@ OBJS = ac3_parser.o                                                     \
        rpi_qpu.o                                                        \
        rpi_mailbox.o                                                    \
        rpi_zc.o                                                         \
-       rpivid_axi.o                                                     \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 
