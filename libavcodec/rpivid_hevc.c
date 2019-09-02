@@ -107,6 +107,7 @@ static inline void apb_write_vc_addr(const RPI_T *const rpi, const uint32_t addr
     rpi->regs[addr >> 2] = MANGLE64(data);
 }
 
+#if 0
 static inline void apb_write_addr(const RPI_T * const rpi, const dec_env_t * const de, const uint32_t addr, const uint32_t data)
 {
 #if TRACE_DEV
@@ -115,6 +116,7 @@ static inline void apb_write_addr(const RPI_T * const rpi, const dec_env_t * con
 
     rpi->regs[addr >> 2] = data + (MANGLE(de->gbuf.vc) >> 6);
 }
+#endif
 
 static inline void apb_write(const RPI_T * const rpi, const uint32_t addr, const uint32_t data)
 {
@@ -134,6 +136,7 @@ static inline uint32_t apb_read(const RPI_T * const rpi, const uint32_t addr)
     return v;
 }
 
+#if 0
 static inline void axi_write(const dec_env_t * const de, uint32_t dst64, size_t len, const void * src)
 {
 #if TRACE_DEV
@@ -154,6 +157,7 @@ static inline void axi_flush(const dec_env_t * const de, size_t len)
 {
     // ****
 }
+#endif
 
 #define ARG_IC_ICTRL_ACTIVE1_INT_SET                   0x00000001
 #define ARG_IC_ICTRL_ACTIVE1_EDGE_SET                  0x00000002
@@ -381,9 +385,10 @@ static void alloc_picture_space(dec_env_t * const de, const HEVCContext * const 
         de->mvstride64 = collocatedStride64;
     }
 #endif
-    de->pubase64 = x64;
+//    de->pubase64 = x64;
 }
 
+#if 0
 static int alloc_stream_space(dec_env_t * const de, const HEVCContext *s) {
     int stride64;
     int x64 = de->pubase64;
@@ -410,6 +415,7 @@ static void phase1_begin(const RPI_T * const rpi, const dec_env_t * const de) {
     apb_write_addr(rpi, de, RPI_COEFFWBASE, de->coeffbase64);
     apb_write(rpi, RPI_COEFFWSTRIDE, de->coeffstep64);
 }
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 // Handle PU and COEFF stream overflow
@@ -614,7 +620,7 @@ static void new_entry_point(dec_env_t * const de, const HEVCContext * const s,
 static void
 dec_env_delete(dec_env_t * const de)
 {
-    gpu_free(&de->gbuf);
+//    gpu_free(&de->gbuf);
 
     av_freep(&de->cmd_fifo);
     av_freep(&de->bit_fifo);
@@ -633,6 +639,7 @@ dec_env_new(AVCodecContext * const avctx, RPI_T * const rpi)
     if (de == NULL)
         return NULL;
 
+#if 0
 #if OPT_GBUF_CACHED
     rv = gpu_malloc_cached(GBUF_SIZE, &de->gbuf);
 #else
@@ -648,6 +655,7 @@ dec_env_new(AVCodecContext * const avctx, RPI_T * const rpi)
         av_free(de);
         return NULL;
     }
+#endif
 
     de->rpi = rpi;
     de->avctx = avctx;
@@ -1006,6 +1014,10 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     int last_y = pps->row_bd[pps->num_tile_rows]-1;
     const unsigned int dpbno_cur = s->ref - s->DPB;
     vid_vc_addr_t cmds_vc;
+    vid_vc_addr_t pu_base_vc;
+    unsigned int pu_stride;
+    vid_vc_addr_t coeff_base_vc;
+    unsigned int coeff_stride;
     unsigned int i;
 
     int status = 1;
@@ -1080,12 +1092,22 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     // Phase 1 ...
     wait_phase(rpi, de, 1);
+    rpi_sem_wait(&rpi->coeffbuf_sem);
 
     do {
         // (Re-)allocate PU/COEFF stream space
-        alloc_stream_space(de, s);
+        pu_base_vc = rpi->gcoeffbufs[rpi->coeffbuf_no].vc;
+        pu_stride = rnd64(de->max_pu_msgs * 2 * de->PicWidthInCtbsY); // ?? +64
+        coeff_base_vc = pu_base_vc + pu_stride * de->PicHeightInCtbsY;
+        coeff_stride = de->max_coeff64 * 64;
+//        alloc_stream_space(de, s);
 
-        phase1_begin(rpi, de);
+        apb_write_vc_addr(rpi, RPI_PUWBASE, pu_base_vc);
+        apb_write(rpi, RPI_PUWSTRIDE, pu_stride >> 6);
+        apb_write_vc_addr(rpi, RPI_COEFFWBASE, coeff_base_vc);
+        apb_write(rpi, RPI_COEFFWSTRIDE, coeff_stride >> 6);
+//        phase1_begin(rpi, de);
+
         // Trigger command FIFO
         apb_write(rpi, RPI_CFNUM, de->cmd_len);
 #if TRACE_DEV
@@ -1099,14 +1121,19 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         status = check_status(rpi, de);
     } while (status == 1);
 
+    if (++rpi->coeffbuf_no >= RPIVID_COEFFBUFS)
+        rpi->coeffbuf_no = 0;
+
     sem_post(&rpi->bitbuf_sem);
     post_phase(rpi, de, 1);
 
     if (status != 0) {
+        sem_post(&rpi->coeffbuf_sem);
         av_log(avctx, AV_LOG_WARNING, "Phase 1 decode error\n");
         goto fail;
     }
 
+#if 0
     // Wait for frames
     for(i=L0; i<=L1; i++)
     {
@@ -1116,21 +1143,14 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
             ff_thread_await_progress(&f1->tf, 2, 0);
         }
     }
+#endif
 
     wait_phase(rpi, de, 2);
 
-    {
-        static int last_order = 0;
-        if (de->decode_order != last_order + 1) {
-            printf("OOO decode %d->%d\n", last_order, de->decode_order);
-        }
-        last_order = de->decode_order;
-    }
-
-    apb_write_addr(rpi, de, RPI_PURBASE, de->pubase64);
-    apb_write(rpi, RPI_PURSTRIDE, de->pustep64);
-    apb_write_addr(rpi, de, RPI_COEFFRBASE, de->coeffbase64);
-    apb_write(rpi, RPI_COEFFRSTRIDE, de->coeffstep64);
+    apb_write_vc_addr(rpi, RPI_PURBASE, pu_base_vc);
+    apb_write(rpi, RPI_PURSTRIDE, pu_stride >> 6);
+    apb_write_vc_addr(rpi, RPI_COEFFRBASE, coeff_base_vc);
+    apb_write(rpi, RPI_COEFFRSTRIDE, coeff_stride >> 6);
 
     apb_write_vc_addr(rpi, RPI_OUTYBASE, get_vc_address_y(f));
     apb_write_vc_addr(rpi, RPI_OUTCBASE, get_vc_address_u(f));
@@ -1202,6 +1222,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     int_wait(rpi, 2);
 
+    sem_post(&rpi->coeffbuf_sem);
     post_phase(rpi, de, 2);
 
     // Flush frame for CPU access
@@ -1410,6 +1431,9 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     for (unsigned int i = 0; i != RPIVID_BITBUFS; ++i) {
         gpu_free(rpi->gbitbufs + i);
     }
+    for (unsigned int i = 0; i != RPIVID_COEFFBUFS; ++i) {
+        gpu_free(rpi->gcoeffbufs + i);
+    }
 
     unmap_devp(&rpi->regs, REGS_SIZE);
     unmap_devp(&rpi->ints, INTS_SIZE);
@@ -1417,6 +1441,7 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     av_rpi_zc_uninit_local(avctx);
 
     sem_destroy(&rpi->ref_zero);
+    sem_destroy(&rpi->coeffbuf_sem);
     sem_destroy(&rpi->bitbuf_sem);
 
 #if TRACE_ENTRY
@@ -1449,7 +1474,8 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
     atomic_store(&rpi->ref_count, 1);
     sem_init(&rpi->ref_zero, 0, 0);
 
-    sem_init(&rpi->bitbuf_sem, 0, RPIVID_BITBUFS);
+    sem_init(&rpi->bitbuf_sem,   0, RPIVID_BITBUFS);
+    sem_init(&rpi->coeffbuf_sem, 0, RPIVID_COEFFBUFS);
 
     pthread_mutex_init(&rpi->phase_lock, NULL);
 
@@ -1479,6 +1505,14 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
         if (gpu_malloc_uncached(RPIVID_BITBUF_SIZE, rpi->gbitbufs + i) != 0)
         {
             av_log(avctx, AV_LOG_ERROR, "Failed to allocate bitbuf %d\n", i);
+            goto fail;
+        }
+    }
+
+    for (unsigned int i = 0; i != RPIVID_COEFFBUFS; ++i) {
+        if (gpu_malloc_uncached(RPIVID_COEFFBUF_SIZE, rpi->gcoeffbufs + i) != 0)
+        {
+            av_log(avctx, AV_LOG_ERROR, "Failed to allocate coeffbuf %d\n", i);
             goto fail;
         }
     }

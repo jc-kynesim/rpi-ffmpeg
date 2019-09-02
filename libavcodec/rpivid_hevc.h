@@ -19,8 +19,12 @@
 #define PROB_RELOAD ((20<<12) + (20<<0) + (0<<6))
 
 #define RPIVID_COL_PICS 17  // 16 ref & current
-#define RPIVID_BITBUFS  2               // Bit + Cmd bufs (phase1 only)
-#define RPIVID_BITBUF_SIZE (4 << 20)    // Bit + Cmd buf size
+
+#define RPIVID_BITBUFS          2          // Bit + Cmd bufs (phase 0 & 1)
+#define RPIVID_BITBUF_SIZE      (4 << 20)  // Bit + Cmd buf size
+
+#define RPIVID_COEFFBUFS        3          // PU + Coeff bufs (phase 1 & 2)
+#define RPIVID_COEFFBUF_SIZE    (16 << 20) // PU + Coeff buf size
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -181,7 +185,7 @@ typedef struct dec_env_s {
     const AVCodecContext * avctx;
     struct RPI_T * rpi;
 
-    GPU_MEM_PTR_T gbuf;
+//    GPU_MEM_PTR_T gbuf;
 
     int phase_no;
     struct dec_env_s * phase_next;
@@ -197,10 +201,10 @@ typedef struct dec_env_s {
 struct RPI_PROB probabilities;
     int         num_slice_msgs;
     uint16_t    slice_msgs[2*HEVC_MAX_REFS*8+3];
-    uint32_t    pubase64;
-    int         pustep64;
-    int         coeffbase64;
-    int         coeffstep64;
+//    uint32_t    pubase64;
+//    int         pustep64;
+//    int         coeffbase64;
+//    int         coeffstep64;
     int         PicWidthInCtbsY;
     int         PicHeightInCtbsY;
     unsigned int dpbno_col;
@@ -241,6 +245,10 @@ typedef struct RPI_T {
     unsigned int bitbuf_no;
     sem_t       bitbuf_sem;
     GPU_MEM_PTR_T gbitbufs[RPIVID_BITBUFS];
+
+    unsigned int coeffbuf_no;
+    sem_t       coeffbuf_sem;
+    GPU_MEM_PTR_T gcoeffbufs[RPIVID_COEFFBUFS];
 
     int         decode_order;
 } RPI_T;
