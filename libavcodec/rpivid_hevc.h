@@ -18,7 +18,7 @@
 #define PROB_BACKUP ((20<<12) + (20<<6) + (0<<0))
 #define PROB_RELOAD ((20<<12) + (20<<0) + (0<<6))
 
-#define RPIVID_COL_PICS 17  // 16 ref & current
+#define RPIVID_COL_PICS 17                 // 16 ref & current
 
 #define RPIVID_BITBUFS          2          // Bit + Cmd bufs (phase 0 & 1)
 #define RPIVID_BITBUF_SIZE      (4 << 20)  // Bit + Cmd buf size
@@ -183,30 +183,31 @@ typedef struct dec_env_s {
     const AVCodecContext * avctx;
 
     rpivid_decode_state_t state;
-    int phase_no;
-    struct dec_env_s * phase_next;
-    sem_t phase_wait;
+    unsigned int    decode_order;
+
+    int             phase_no;           // Current phase (i.e. the last one we waited for)
+    struct dec_env_s * phase_wait_q_next;
+    sem_t           phase_wait;
+
     struct RPI_BIT *bit_fifo;
     struct RPI_CMD *cmd_fifo;
-    unsigned int bit_len, bit_max;
-    int         cmd_len, cmd_max;
-    int         max_pu_msgs;
-    int         max_coeff64;
-    int         decode_order;
-    uint8_t     scaling_factors[NUM_SCALING_FACTORS];
-struct RPI_PROB probabilities;
-    int         num_slice_msgs;
-    uint16_t    slice_msgs[2*HEVC_MAX_REFS*8+3];
-    unsigned int PicWidthInCtbsY;
-    unsigned int PicHeightInCtbsY;
-    unsigned int dpbno_col;
-    uint32_t    reg_slicestart;
-    int         collocated_from_l0_flag;
-    int         max_num_merge_cand;
-    int         RefPicList[2][HEVC_MAX_REFS];
-    int         collocated_ref_idx;
-    int         wpp_entry_x;
-    int         wpp_entry_y;
+    unsigned int    bit_len, bit_max;
+    unsigned int    cmd_len, cmd_max;
+    unsigned int    max_pu_msgs;
+    struct RPI_PROB probabilities;
+    unsigned int    num_slice_msgs;
+    unsigned int    PicWidthInCtbsY;
+    unsigned int    PicHeightInCtbsY;
+    unsigned int    dpbno_col;
+    uint32_t        reg_slicestart;
+    int             collocated_from_l0_flag;
+    unsigned int    max_num_merge_cand;
+    unsigned int    collocated_ref_idx;
+    unsigned int    wpp_entry_x;
+    unsigned int    wpp_entry_y;
+    uint16_t        slice_msgs[2*HEVC_MAX_REFS*8+3];
+    uint8_t         scaling_factors[NUM_SCALING_FACTORS];
+    unsigned int    RefPicList[2][HEVC_MAX_REFS];
 } dec_env_t;
 
 #define RPIVID_PHASES 3
@@ -214,15 +215,15 @@ struct RPI_PROB probabilities;
 #define RPIVID_PHASE_START (-1)          // Phase after we have inced decode_order
 
 typedef struct phase_wait_env_s {
-    unsigned int last_seq;
-    dec_env_t * q;
-} phase_wait_env_t;
+    unsigned int    last_order;
+    dec_env_t *     q;
+} phase_wait_env_t;                      // Single linked list of threads waiting for this phase
 
 typedef struct RPI_T {
-    atomic_int ref_count;
-    sem_t ref_zero;
+    atomic_int      ref_count;
+    sem_t           ref_zero;
 
-    dec_env_t ** dec_envs;
+    dec_env_t **    dec_envs;
 
     pthread_mutex_t phase_lock;
     phase_wait_env_t phase_reqs[RPIVID_PHASES];
@@ -230,17 +231,17 @@ typedef struct RPI_T {
     volatile uint32_t * regs;
     volatile uint32_t * ints;
 
-    GPU_MEM_PTR_T gcolbuf;
-    unsigned int col_stride;
-    size_t      col_picsize;
+    GPU_MEM_PTR_T   gcolbuf;
+    unsigned int    col_stride;
+    size_t          col_picsize;
 
-    unsigned int bitbuf_no;
-    sem_t       bitbuf_sem;
-    GPU_MEM_PTR_T gbitbufs[RPIVID_BITBUFS];
+    unsigned int    bitbuf_no;
+    sem_t           bitbuf_sem;
+    GPU_MEM_PTR_T   gbitbufs[RPIVID_BITBUFS];
 
-    unsigned int coeffbuf_no;
-    sem_t       coeffbuf_sem;
-    GPU_MEM_PTR_T gcoeffbufs[RPIVID_COEFFBUFS];
+    unsigned int    coeffbuf_no;
+    sem_t           coeffbuf_sem;
+    GPU_MEM_PTR_T   gcoeffbufs[RPIVID_COEFFBUFS];
 
-    int         decode_order;
+    unsigned int    decode_order;
 } RPI_T;

@@ -566,7 +566,6 @@ dec_env_new(AVCodecContext * const avctx, RPI_T * const rpi)
 
     // Initial PU/COEFF stream buffer sizes chosen so jellyfish40.265 requires 1 overflow/restart
     de->max_pu_msgs = 2+340; // 7.2 says at most 1611 messages per CTU
-    de->max_coeff64 = 2+1404;
 
     if ((de->cmd_fifo = malloc((de->cmd_max=1024)*sizeof(struct RPI_CMD))) == NULL)
         goto fail;
@@ -645,8 +644,8 @@ wait_phase(RPI_T * const rpi, dec_env_t * const de, const int phase_no)
     phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
 
     pthread_mutex_lock(&rpi->phase_lock);
-    if (p->last_seq + 1 != de->decode_order) {
-        de->phase_next = p->q;
+    if (p->last_order + 1 != de->decode_order) {
+        de->phase_wait_q_next = p->q;
         p->q = de;
         needs_wait = 1;
     }
@@ -670,18 +669,18 @@ post_phase(RPI_T * const rpi, dec_env_t * const de, const int phase_no)
 
     pthread_mutex_lock(&rpi->phase_lock);
 
-    p->last_seq = de->decode_order;
+    p->last_order = de->decode_order;
     while (*q != NULL) {
         dec_env_t * const t_de = *q;
 
-        if (t_de->decode_order == p->last_seq + 1) {
+        if (t_de->decode_order == p->last_order + 1) {
             // This is us - remove from Q
-            *q = t_de->phase_next;
-            t_de->phase_next = NULL; // Tidy
+            *q = t_de->phase_wait_q_next;
+            t_de->phase_wait_q_next = NULL; // Tidy
             next_de = t_de;
             break;
         }
-        q = &t_de->phase_next;
+        q = &t_de->phase_wait_q_next;
     }
 
     pthread_mutex_unlock(&rpi->phase_lock);
@@ -930,7 +929,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
     de->state = RPIVID_DECODE_END;
 
-    // End of phase 1 command compilation
+    // End of command compilation
     {
         const unsigned int last_x = pps->col_bd[pps->num_tile_columns]-1;
         const unsigned int last_y = pps->row_bd[pps->num_tile_rows]-1;
@@ -941,7 +940,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         p1_apb_write(de, RPI_STATUS, 1 + (last_x<<5) + (last_y<<18));
     }
 
-    // Phase 0
+    // Phase 0 ---------------------------------------------------------------
+
     wait_phase(rpi, de, 0);
     rpi_sem_wait(&rpi->bitbuf_sem);
 
@@ -993,7 +993,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     if (status < 0)
         goto fail;
 
-    // Phase 1 ...
+    // Phase 1 ---------------------------------------------------------------
+
     wait_phase(rpi, de, 1);
     rpi_sem_wait(&rpi->coeffbuf_sem);
 
@@ -1069,6 +1070,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     if (status != 0)
         goto fail;
+
+    // Phase 2 ---------------------------------------------------------------
 
     wait_phase(rpi, de, 2);
 
