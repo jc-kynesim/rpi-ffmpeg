@@ -337,11 +337,13 @@ static int ctb_to_slice_w_h (unsigned int ctb, int ctb_size, int width, unsigned
 
 
 // Returns:
+// -2 Other error
+// -1 Out of coeff space
 //  0  OK
-//  1  PU or Coeff overflow (max updated)
-//  2  Other error
+//  1  Out of PU space
+
 static int check_status(const RPI_T * const rpi, dec_env_t * const de) {
-    int status, c, p;
+    uint32_t status;
 
     // this is the definition of successful completion of phase 1
     // it assures that status register is zero and all blocks in each tile have completed
@@ -350,14 +352,13 @@ static int check_status(const RPI_T * const rpi, dec_env_t * const de) {
 
     status = apb_read(rpi, RPI_STATUS);
 
-    p = (status>>4)&1;
-    c = (status>>3)&1;
-    if (p|c) { // overflow?
-        if (p) de->max_pu_msgs += de->max_pu_msgs/2;
-        if (c) de->max_coeff64 += de->max_coeff64/2;
+    if ((status & 8) != 0)
+        return -1;
+
+    if ((status & 0x10) != 0)
         return 1;
-    }
-    return 2;
+
+    return -2;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -903,8 +904,6 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     const SliceHeader * const sh = &s->sh;
     dec_env_t * const de = dec_env_get(avctx,  rpi);
     AVFrame * const f = s->ref->frame;
-    int last_x = pps->col_bd[pps->num_tile_columns]-1;
-    int last_y = pps->row_bd[pps->num_tile_rows]-1;
     const unsigned int dpbno_cur = s->ref - s->DPB;
     vid_vc_addr_t cmds_vc;
     vid_vc_addr_t pu_base_vc;
@@ -912,8 +911,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     vid_vc_addr_t coeff_base_vc;
     unsigned int coeff_stride;
     unsigned int i;
-
-    int status = 1;
+    int rv = 0;
+    int status = 0;
 
 #if TRACE_ENTRY
     printf("<<< %s[%p]\n", __func__, de);
@@ -921,21 +920,26 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     if (de == NULL) {
         av_log(avctx, AV_LOG_ERROR, "%s: Cannot find find context for thread\n", __func__);
-        return -1;
+        return AVERROR_BUG;  // Should never happen
     }
 
     if (de->state != RPIVID_DECODE_SLICE) {
         av_log(avctx, AV_LOG_ERROR, "%s: Unexpected state: %d\n", __func__, de->state);
-        return -1;
+        rv = AVERROR_UNKNOWN;
+        goto fail;
     }
     de->state = RPIVID_DECODE_END;
 
     // End of phase 1 command compilation
-    if (pps->entropy_coding_sync_enabled_flag) {
-        if (de->wpp_entry_x<2 && de->PicWidthInCtbsY>2)
-            wpp_pause(de, last_y);
+    {
+        const unsigned int last_x = pps->col_bd[pps->num_tile_columns]-1;
+        const unsigned int last_y = pps->row_bd[pps->num_tile_rows]-1;
+        if (pps->entropy_coding_sync_enabled_flag) {
+            if (de->wpp_entry_x<2 && de->PicWidthInCtbsY>2)
+                wpp_pause(de, last_y);
+        }
+        p1_apb_write(de, RPI_STATUS, 1 + (last_x<<5) + (last_y<<18));
     }
-    p1_apb_write(de, RPI_STATUS, 1 + (last_x<<5) + (last_y<<18));
 
     // Phase 0
     wait_phase(rpi, de, 0);
@@ -972,27 +976,45 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         memcpy(armbase, de->cmd_fifo, cmd_bytes);
     }
 
-    if (++rpi->bitbuf_no >= RPIVID_BITBUFS)
-        rpi->bitbuf_no = 0;
+    if (status == 0)
+    {
+        if (++rpi->bitbuf_no >= RPIVID_BITBUFS)
+            rpi->bitbuf_no = 0;
+    }
+    else
+    {
+        sem_post(&rpi->bitbuf_sem);
+        av_log(avctx, AV_LOG_ERROR, "Out of HEVC bit/cmd memory\n");
+        rv = AVERROR_BUFFER_TOO_SMALL;
+    }
 
     post_phase(rpi, de, 0);
 
-    if (status < 0) {
-        sem_post(&rpi->bitbuf_sem);
-        av_log(avctx, AV_LOG_ERROR, "Out of HEVC bit/cmd memory");
+    if (status < 0)
         goto fail;
-    }
 
     // Phase 1 ...
     wait_phase(rpi, de, 1);
     rpi_sem_wait(&rpi->coeffbuf_sem);
 
-    do {
+    for (;;)
+    {
         // (Re-)allocate PU/COEFF stream space
+        const unsigned int total_size = rpi->gcoeffbufs[rpi->coeffbuf_no].numbytes;
+        unsigned int pu_size;
+
         pu_base_vc = rpi->gcoeffbufs[rpi->coeffbuf_no].vc;
-        pu_stride = rnd64(de->max_pu_msgs * 2 * de->PicWidthInCtbsY); // ?? +64
-        coeff_base_vc = pu_base_vc + pu_stride * de->PicHeightInCtbsY;
-        coeff_stride = de->max_coeff64 * 64;
+        pu_stride = rnd64(de->max_pu_msgs * 2 * de->PicWidthInCtbsY);
+        pu_size = pu_stride * de->PicHeightInCtbsY;
+
+        if (pu_size > total_size) {
+            status = -1;
+            break;
+        }
+
+        // Allocate all remaining space to coeff
+        coeff_base_vc = pu_base_vc + pu_size;
+        coeff_stride = ((total_size - pu_size) / de->PicHeightInCtbsY) & ~63;  // Round down to multiple of 64
 
         apb_write_vc_addr(rpi, RPI_PUWBASE, pu_base_vc);
         apb_write_vc_len(rpi, RPI_PUWSTRIDE, pu_stride);
@@ -1009,20 +1031,44 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         apb_write_vc_addr(rpi, RPI_CFBASE, cmds_vc);
 
         int_wait(rpi, 1);
-        status = check_status(rpi, de);
-    } while (status == 1);
 
-    if (++rpi->coeffbuf_no >= RPIVID_COEFFBUFS)
-        rpi->coeffbuf_no = 0;
+        status = check_status(rpi, de);
+
+        if (status != 1)
+            break;
+
+        // Status 1 means out of PU space so try again with more
+        // If we ran out of Coeff space then we are out of memory - we could possibly realloc?
+        de->max_pu_msgs += de->max_pu_msgs / 2;
+    }
+
+    // Inc inside the phase 1 lock, but only inc if we succeeded otherwise we
+    // may reuse a live buffer when we kick the coeff sem
+    if (status == 0)
+    {
+        if (++rpi->coeffbuf_no >= RPIVID_COEFFBUFS)
+            rpi->coeffbuf_no = 0;
+    }
+    else
+    {
+        sem_post(&rpi->coeffbuf_sem);
+        if (status == -1)
+        {
+            av_log(avctx, AV_LOG_ERROR, "Out of pu + coeff intermediate memory\n");
+            rv = AVERROR_BUFFER_TOO_SMALL;
+        }
+        else
+        {
+            av_log(avctx, AV_LOG_WARNING, "Phase 1 decode error\n");
+            rv = AVERROR_INVALIDDATA;
+        }
+    }
 
     sem_post(&rpi->bitbuf_sem);
     post_phase(rpi, de, 1);
 
-    if (status != 0) {
-        sem_post(&rpi->coeffbuf_sem);
-        av_log(avctx, AV_LOG_WARNING, "Phase 1 decode error\n");
+    if (status != 0)
         goto fail;
-    }
 
     wait_phase(rpi, de, 2);
 
@@ -1116,15 +1162,22 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         rpi_cache_flush_finish(fe);
     }
 
-fail:
-    abort_phases(rpi, de);  // Dummy any unresolved phases
-
 #if TRACE_ENTRY
-    printf(">>> %s[%p]\n", __func__, de);
+    printf(">>> %s[%p] OK\n", __func__, de);
 #endif
 
     dec_env_release(rpi, de);
     return 0;
+
+fail:
+    abort_phases(rpi, de);  // Dummy any unresolved phases
+
+#if TRACE_ENTRY
+    printf(">>> %s[%p] FAIL\n", __func__, de);
+#endif
+
+    dec_env_release(rpi, de);
+    return rv;
 }
 
 //////////////////////////////////////////////////////////////////////////////
