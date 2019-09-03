@@ -65,6 +65,10 @@ typedef struct AVRpiZcFrameGeometry
     unsigned int stripes;   // Number of stripes (sand)
     unsigned int bytes_per_pel;
     int stripe_is_yc;       // A single stripe is Y then C (false for tall sand)
+
+    int format;                 // Requested format
+    unsigned int video_width;   // Requested width
+    unsigned int video_height;  // Requested height
 } AVRpiZcFrameGeometry;
 
 
@@ -108,16 +112,6 @@ int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref);
 // If fr_ref is NULL then this will NOP
 void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref);
 
-#if 0
-// Allocate an environment for the buffer pool used by the ZC code
-// This should be put in avctx->get_buffer_context so it can be found by
-// av_rpi_zc_get_buffer2 when it is called from ffmpeg
-AVZcEnvPtr av_rpi_zc_env_alloc(const int use_cma);
-
-// Allocate the environment used by the ZC code
-void av_rpi_zc_env_free(AVZcEnvPtr);
-#endif
-
 // Test to see if the context is using zc (checks get_buffer2)
 int av_rpi_zc_in_use(const struct AVCodecContext * const s);
 
@@ -125,7 +119,8 @@ int av_rpi_zc_in_use(const struct AVCodecContext * const s);
 // There is nothing magic in this fn - it just packages setting
 // get_buffer2 & get_buffer_context
 
-typedef AVBufferRef * av_rpi_zc_alloc_buf_fn_t(void * pool_env, size_t size);
+typedef AVBufferRef * av_rpi_zc_alloc_buf_fn_t(void * pool_env, size_t size,
+                                               const AVRpiZcFrameGeometry * geo);
 typedef void av_rpi_zc_free_pool_fn_t(void * pool_env);
 
 int av_rpi_zc_init2(struct AVCodecContext * const s,

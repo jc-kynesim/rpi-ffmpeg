@@ -42,7 +42,6 @@ typedef struct ZcPoolEnt
 
 #define ALLOC_PAD       0
 #define ALLOC_ROUND     0x1000
-#define ALLOC_N_OFFSET  0
 #define STRIDE_ROUND    64
 #define STRIDE_OR       0
 
@@ -311,7 +310,11 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
 {
     static pthread_mutex_t sand_lock = PTHREAD_MUTEX_INITIALIZER;
 
-    AVRpiZcFrameGeometry geo;
+    AVRpiZcFrameGeometry geo = {
+        .format       = format,
+        .video_width  = video_width,
+        .video_height = video_height
+    };
 
     switch (format)
     {
@@ -469,23 +472,19 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
         }
 
         default:
-            memset(&geo, 0, sizeof(geo));
             break;
     }
     return geo;
 }
 
 
-static AVBufferRef * rpi_buf_pool_alloc(void * v, size_t size)
+static AVBufferRef * rpi_buf_pool_alloc(void * v, size_t size, const AVRpiZcFrameGeometry * geo)
 {
     ZcPool * const pool = v;
     ZcPoolEnt *const zp = zc_pool_alloc(pool, size);
     AVBufferRef * buf;
-#if ALLOC_N_OFFSET != 0
-    const int noff = (zp->n * ALLOC_N_OFFSET) & (ALLOC_PAD - 1);
-#else
-    const int noff = 0;
-#endif
+
+    (void)geo;  // geo ignored here
 
     if (zp == NULL) {
         av_log(NULL, AV_LOG_ERROR, "zc_pool_alloc(%d) failed\n", size);
@@ -529,7 +528,7 @@ static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
 
 //    printf("Do local alloc: format=%#x, %dx%d: %u\n", frame->format, frame->width, frame->height, size_pic);
 
-    if ((buf = zc->alloc_buf(zc->pool_env, size_pic)) == NULL)
+    if ((buf = zc->alloc_buf(zc->pool_env, size_pic, &geo)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "rpi_get_display_buffer: Failed to get buffer from pool\n");
         return AVERROR(ENOMEM);
