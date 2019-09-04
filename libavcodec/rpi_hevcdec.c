@@ -5702,7 +5702,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 #endif
 
     hevc_exit_worker(s);
-    vpu_qpu_term();
     for (i = 0; i != 2; ++i) {
         ff_hevc_rpi_progress_kill_state(s->progress_states + i);
     }
@@ -5735,6 +5734,10 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
 
     ff_h2645_packet_uninit(&s->pkt);
 
+    if (s->qpu_init_ok)
+        vpu_qpu_term();
+    s->qpu_init_ok = 0;
+
     // This must be after we free off the DPB
     // * If the outer code is still holding any frames hopefully it will
     //   have its own ref to zc
@@ -5764,6 +5767,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     if (vpu_qpu_init() != 0)
         goto fail;
+    s->qpu_init_ok = 0;
 
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
     {

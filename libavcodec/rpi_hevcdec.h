@@ -670,6 +670,7 @@ typedef struct HEVCRpiContext {
     AVCodecContext *avctx;
 
     uint8_t             threads_type;
+    char qpu_init_ok;
 
     /** 1 if the independent slice segment header was successfully parsed */
     uint8_t slice_initialized;
