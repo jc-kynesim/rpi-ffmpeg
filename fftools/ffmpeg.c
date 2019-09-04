@@ -23,11 +23,6 @@
  * multimedia converter based on the FFmpeg libraries
  */
 
-#ifdef RPI
-//#define RPI_DISPLAY
-#define RPI_DISPLAY_ALL 0
-#endif
-
 #include "config.h"
 
 #if CONFIG_RPI
