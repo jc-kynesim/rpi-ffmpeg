@@ -3,8 +3,9 @@
 // Copyright (c) June 2017 Raspberry Pi Ltd
 
 #include <stdio.h>
-//#include <dlfcn.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <sys/mman.h>
 
 #include "fftools/ffmpeg.h"
@@ -13,7 +14,8 @@
 #include "avcodec.h"
 #include "hwaccel.h"
 
-#include "rpivid_hevc.h"
+#include "hevc.h"
+#include "hevcdec.h"
 #include "rpi_zc.h"
 #include "rpi_mem.h"
 #include "rpi_zc_frames.h"
@@ -21,6 +23,251 @@
 #define OPT_GBUF_CACHED 0
 
 #define GBUF_SIZE (16 << 20)
+
+#define MAX_THREADS 50
+#define NUM_SCALING_FACTORS 4064
+
+#define AXI_BASE64 0
+
+#define PROB_BACKUP ((20<<12) + (20<<6) + (0<<0))
+#define PROB_RELOAD ((20<<12) + (20<<0) + (0<<6))
+
+#define RPIVID_COL_PICS 17                 // 16 ref & current
+
+#define RPIVID_BITBUFS          2          // Bit + Cmd bufs (phase 0 & 1)
+#define RPIVID_BITBUF_SIZE      (4 << 20)  // Bit + Cmd buf size
+
+#define RPIVID_COEFFBUFS        3          // PU + Coeff bufs (phase 1 & 2)
+#define RPIVID_COEFFBUF_SIZE    (16 << 20) // PU + Coeff buf size
+
+//////////////////////////////////////////////////////////////////////////////
+//
+// Register offsets
+
+#define RPI_SPS0         0
+#define RPI_SPS1         4
+#define RPI_PPS          8
+#define RPI_SLICE        12
+#define RPI_TILESTART    16
+#define RPI_TILEEND      20
+#define RPI_SLICESTART   24
+#define RPI_MODE         28
+#define RPI_LEFT0        32
+#define RPI_LEFT1        36
+#define RPI_LEFT2        40
+#define RPI_LEFT3        44
+#define RPI_QP           48
+#define RPI_CONTROL      52
+#define RPI_STATUS       56
+#define RPI_VERSION      60
+#define RPI_BFBASE       64
+#define RPI_BFNUM        68
+#define RPI_BFCONTROL    72
+#define RPI_BFSTATUS     76
+#define RPI_PUWBASE      80
+#define RPI_PUWSTRIDE    84
+#define RPI_COEFFWBASE   88
+#define RPI_COEFFWSTRIDE 92
+#define RPI_SLICECMDS    96
+#define RPI_BEGINTILEEND 100
+#define RPI_TRANSFER     104
+#define RPI_CFBASE       108
+#define RPI_CFNUM        112
+#define RPI_CFSTATUS     116
+
+#define RPI_PURBASE       0x8000
+#define RPI_PURSTRIDE     0x8004
+#define RPI_COEFFRBASE    0x8008
+#define RPI_COEFFRSTRIDE  0x800C
+#define RPI_NUMROWS       0x8010
+#define RPI_CONFIG2       0x8014
+#define RPI_OUTYBASE      0x8018
+#define RPI_OUTYSTRIDE    0x801C
+#define RPI_OUTCBASE      0x8020
+#define RPI_OUTCSTRIDE    0x8024
+#define RPI_STATUS2       0x8028
+#define RPI_FRAMESIZE     0x802C
+#define RPI_MVBASE        0x8030
+#define RPI_MVSTRIDE      0x8034
+#define RPI_COLBASE       0x8038
+#define RPI_COLSTRIDE     0x803C
+#define RPI_CURRPOC       0x8040
+
+//////////////////////////////////////////////////////////////////////////////
+
+struct FFM_PROB {
+    uint8_t  sao_merge_flag                   [ 1];
+    uint8_t  sao_type_idx                     [ 1];
+    uint8_t  split_coding_unit_flag           [ 3];
+    uint8_t  cu_transquant_bypass_flag        [ 1];
+    uint8_t  skip_flag                        [ 3];
+    uint8_t  cu_qp_delta                      [ 3];
+    uint8_t  pred_mode_flag                   [ 1];
+    uint8_t  part_mode                        [ 4];
+    uint8_t  prev_intra_luma_pred_flag        [ 1];
+    uint8_t  intra_chroma_pred_mode           [ 2];
+    uint8_t  merge_flag                       [ 1];
+    uint8_t  merge_idx                        [ 1];
+    uint8_t  inter_pred_idc                   [ 5];
+    uint8_t  ref_idx_l0                       [ 2];
+    uint8_t  ref_idx_l1                       [ 2];
+    uint8_t  abs_mvd_greater0_flag            [ 2];
+    uint8_t  abs_mvd_greater1_flag            [ 2];
+    uint8_t  mvp_lx_flag                      [ 1];
+    uint8_t  no_residual_data_flag            [ 1];
+    uint8_t  split_transform_flag             [ 3];
+    uint8_t  cbf_luma                         [ 2];
+    uint8_t  cbf_cb_cr                        [ 4];
+    uint8_t  transform_skip_flag/*[][]*/      [ 2];
+    uint8_t  explicit_rdpcm_flag/*[][]*/      [ 2];
+    uint8_t  explicit_rdpcm_dir_flag/*[][]*/  [ 2];
+    uint8_t  last_significant_coeff_x_prefix  [18];
+    uint8_t  last_significant_coeff_y_prefix  [18];
+    uint8_t  significant_coeff_group_flag     [ 4];
+    uint8_t  significant_coeff_flag           [44];
+    uint8_t  coeff_abs_level_greater1_flag    [24];
+    uint8_t  coeff_abs_level_greater2_flag    [ 6];
+    uint8_t  log2_res_scale_abs               [ 8];
+    uint8_t  res_scale_sign_flag              [ 2];
+    uint8_t  cu_chroma_qp_offset_flag         [ 1];
+    uint8_t  cu_chroma_qp_offset_idx          [ 1];
+} __attribute__((packed));
+
+//////////////////////////////////////////////////////////////////////////////
+
+struct RPI_PROB {
+    uint8_t  SAO_MERGE_FLAG             [ 1];
+    uint8_t  SAO_TYPE_IDX               [ 1];
+    uint8_t  SPLIT_FLAG                 [ 3];
+    uint8_t  CU_SKIP_FLAG               [ 3];
+    uint8_t  CU_TRANSQUANT_BYPASS_FLAG  [ 1];
+    uint8_t  PRED_MODE                  [ 1];
+    uint8_t  PART_SIZE                  [ 4];
+    uint8_t  INTRA_PRED_MODE            [ 1];
+    uint8_t  CHROMA_PRED_MODE           [ 1];
+    uint8_t  MERGE_FLAG_EXT             [ 1];
+    uint8_t  MERGE_IDX_EXT              [ 1];
+    uint8_t  INTER_DIR                  [ 5];
+    uint8_t  REF_PIC                    [ 2];
+    uint8_t  MVP_IDX                    [ 1];
+    uint8_t  MVD                        [ 2];
+    uint8_t  QT_ROOT_CBF                [ 1];
+    uint8_t  TRANS_SUBDIV_FLAG          [ 3];
+    uint8_t  QT_CBF                     [ 6];
+    uint8_t  DQP                        [ 2];
+    uint8_t  ONE_FLAG                   [24];
+    uint8_t  LASTX                      [18];
+    uint8_t  LASTY                      [18];
+    uint8_t  SIG_CG_FLAG                [ 4];
+    uint8_t  ABS_FLAG                   [ 6];
+    uint8_t  TRANSFORMSKIP_FLAG         [ 2];
+    uint8_t  SIG_FLAG                   [42];
+    uint8_t  SIG_FLAG_unused            [ 2];
+} __attribute__((packed));
+
+//////////////////////////////////////////////////////////////////////////////
+
+struct RPI_CMD {
+    uint32_t addr;
+    uint32_t data;
+} __attribute__((packed));
+
+struct RPI_BIT {
+    int         cmd;
+    const void *ptr;
+    int         len;
+};
+
+//////////////////////////////////////////////////////////////////////////////
+
+struct RPI_T;
+
+// Actual addressability is 38bits but we can only alloc in the bottom 32
+// currently - when passed to rpivid h/w the address is always >> 6 so will
+// fit in 32 bit there
+// At some point we may weant to make this uint64_t
+typedef uint32_t vid_vc_addr_t;
+
+typedef enum rpivid_decode_state_e {
+    RPIVID_DECODE_NEW = 0,
+    RPIVID_DECODE_START,
+    RPIVID_DECODE_SLICE,
+    RPIVID_DECODE_END,
+} rpivid_decode_state_t;
+
+typedef struct dec_env_s {
+    const AVCodecContext * avctx;
+
+    rpivid_decode_state_t state;
+    unsigned int    decode_order;
+
+    int             phase_no;           // Current phase (i.e. the last one we waited for)
+    struct dec_env_s * phase_wait_q_next;
+    sem_t           phase_wait;
+
+    struct RPI_BIT *bit_fifo;
+    struct RPI_CMD *cmd_fifo;
+    unsigned int    bit_len, bit_max;
+    unsigned int    cmd_len, cmd_max;
+    unsigned int    max_pu_msgs;
+    struct RPI_PROB probabilities;
+    unsigned int    num_slice_msgs;
+    unsigned int    PicWidthInCtbsY;
+    unsigned int    PicHeightInCtbsY;
+    unsigned int    dpbno_col;
+    uint32_t        reg_slicestart;
+    int             collocated_from_l0_flag;
+    unsigned int    max_num_merge_cand;
+    unsigned int    collocated_ref_idx;
+    unsigned int    wpp_entry_x;
+    unsigned int    wpp_entry_y;
+    uint16_t        slice_msgs[2*HEVC_MAX_REFS*8+3];
+    uint8_t         scaling_factors[NUM_SCALING_FACTORS];
+    unsigned int    RefPicList[2][HEVC_MAX_REFS];
+} dec_env_t;
+
+#define RPIVID_PHASES 3
+#define RPIVID_PHASE_NEW (RPIVID_PHASES) // Phase before we have inced decode order
+#define RPIVID_PHASE_START (-1)          // Phase after we have inced decode_order
+
+#define OPT_PHASE_TIMING 0
+
+typedef struct phase_wait_env_s {
+    unsigned int    last_order;
+    dec_env_t *     q;
+#if OPT_PHASE_TIMING
+    uint64_t phase_time;
+    uint64_t time_in_phase;
+    uint64_t time_out_phase;
+#endif
+} phase_wait_env_t;                      // Single linked list of threads waiting for this phase
+
+typedef struct RPI_T {
+    atomic_int      ref_count;
+    sem_t           ref_zero;
+
+    dec_env_t **    dec_envs;
+
+    pthread_mutex_t phase_lock;
+    phase_wait_env_t phase_reqs[RPIVID_PHASES];
+
+    volatile uint32_t * regs;
+    volatile uint32_t * ints;
+
+    GPU_MEM_PTR_T   gcolbuf;
+    unsigned int    col_stride;
+    size_t          col_picsize;
+
+    unsigned int    bitbuf_no;
+    sem_t           bitbuf_sem;
+    GPU_MEM_PTR_T   gbitbufs[RPIVID_BITBUFS];
+
+    unsigned int    coeffbuf_no;
+    sem_t           coeffbuf_sem;
+    GPU_MEM_PTR_T   gcoeffbufs[RPIVID_COEFFBUFS];
+
+    unsigned int    decode_order;
+} RPI_T;
 
 #define _GNU_SOURCE
 #include <unistd.h>
@@ -34,12 +281,20 @@ static inline int gettid(void)
     return syscall(SYS_gettid);
 }
 
-inline unsigned int rnd64(unsigned int x)
+static uint64_t tus64(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+
+static inline unsigned int rnd64(unsigned int x)
 {
     return (x + 63) & ~63;
 }
 
-inline int rpi_sem_wait(sem_t * const sem)
+static inline int rpi_sem_wait(sem_t * const sem)
 {
     int rv;
     while ((rv = sem_wait(sem)) != 0 && errno == EINTR)
@@ -636,10 +891,11 @@ dec_env_release(RPI_T * const rpi, dec_env_t * const de)
 
 //----------------------------------------------------------------------------
 
+// Wait for a slot in the given phase
+// Any error return is probably fatal
 static int
 wait_phase(RPI_T * const rpi, dec_env_t * const de, const int phase_no)
 {
-    int rv = 0;
     int needs_wait = 0;
     phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
 
@@ -652,12 +908,16 @@ wait_phase(RPI_T * const rpi, dec_env_t * const de, const int phase_no)
     pthread_mutex_unlock(&rpi->phase_lock);
 
     if (needs_wait) {
-        while ((rv = sem_wait(&de->phase_wait)) == -1 && errno == EINTR)
-            /* Loop */;
+        while (sem_wait(&de->phase_wait) == -1)
+        {
+            int err;
+            if ((err = errno) != EINTR)
+                return AVERROR(err);
+        }
     }
 
     de->phase_no = phase_no;
-    return rv;
+    return 0;
 }
 
 static void
@@ -698,6 +958,31 @@ abort_phases(RPI_T * const rpi, dec_env_t * const de)
         post_phase(rpi, de, i);
     }
     de->phase_no = RPIVID_PHASE_NEW;
+}
+
+// Start timing for phase
+// Stats only - no actual effect
+static inline void tstart_phase(RPI_T * const rpi, const int phase_no)
+{
+#if OPT_PHASE_TIMING
+    phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
+    const int64_t now = tus64();
+    if (p->phase_time != 0)
+        p->time_out_phase += now - p->phase_time;
+    p->phase_time = now;
+#endif
+}
+
+// End timing for phase
+// Stats only - no actual effect
+static inline void tend_phase(RPI_T * const rpi, const int phase_no)
+{
+#if OPT_PHASE_TIMING
+    phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
+    const int64_t now = tus64();
+    p->time_in_phase += now - p->phase_time;
+    p->phase_time = now;
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -944,6 +1229,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     wait_phase(rpi, de, 0);
     rpi_sem_wait(&rpi->bitbuf_sem);
+    tstart_phase(rpi, 0);
 
     // Copy cmds & bits into gpu side buffer
     // Layout: CMDS, BITS
@@ -988,6 +1274,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         rv = AVERROR_BUFFER_TOO_SMALL;
     }
 
+    tend_phase(rpi, 0);
     post_phase(rpi, de, 0);
 
     if (status < 0)
@@ -997,6 +1284,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     wait_phase(rpi, de, 1);
     rpi_sem_wait(&rpi->coeffbuf_sem);
+    tstart_phase(rpi, 1);
 
     for (;;)
     {
@@ -1065,6 +1353,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         }
     }
 
+    tend_phase(rpi, 1);
     sem_post(&rpi->bitbuf_sem);
     post_phase(rpi, de, 1);
 
@@ -1074,6 +1363,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     // Phase 2 ---------------------------------------------------------------
 
     wait_phase(rpi, de, 2);
+    tstart_phase(rpi, 2);
 
     apb_write_vc_addr(rpi, RPI_PURBASE, pu_base_vc);
     apb_write_vc_len(rpi, RPI_PURSTRIDE, pu_stride);
@@ -1150,6 +1440,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     int_wait(rpi, 2);
 
+    tend_phase(rpi, 2);
     sem_post(&rpi->coeffbuf_sem);
     post_phase(rpi, de, 2);
 
@@ -1332,6 +1623,21 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
             }
         }
     }
+
+#if OPT_PHASE_TIMING
+    {
+        unsigned int i;
+        for (i = 0; i != RPIVID_PHASES; ++i) {
+            const phase_wait_env_t * const p = rpi->phase_reqs + i;
+            av_log(avctx, AV_LOG_INFO, "Phase %u: In %3u.%06u, Out %3u.%06u\n", i,
+                   (unsigned int)(p->time_in_phase / 1000000), (unsigned int)(p->time_in_phase % 1000000),
+                   (unsigned int)(p->time_out_phase / 1000000), (unsigned int)(p->time_out_phase % 1000000));
+
+        }
+    }
+#endif
+
+
 
     for (int i; i < avctx->thread_count && rpi->dec_envs[i] != NULL; ++i) {
         dec_env_delete(rpi->dec_envs[i]);
