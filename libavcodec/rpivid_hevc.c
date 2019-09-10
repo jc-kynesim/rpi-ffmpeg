@@ -20,11 +20,8 @@
 #include "rpi_mem.h"
 #include "rpi_zc_frames.h"
 
-#define OPT_GBUF_CACHED 0
+#define OPT_PHASE_TIMING 0      // Generate stats for phase usage
 
-#define GBUF_SIZE (16 << 20)
-
-#define MAX_THREADS 50
 #define NUM_SCALING_FACTORS 4064
 
 #define AXI_BASE64 0
@@ -230,7 +227,11 @@ typedef struct dec_env_s {
 #define RPIVID_PHASE_NEW (RPIVID_PHASES) // Phase before we have inced decode order
 #define RPIVID_PHASE_START (-1)          // Phase after we have inced decode_order
 
-#define OPT_PHASE_TIMING 0
+#if OPT_PHASE_TIMING
+static const unsigned int time_thresholds[8] = {
+    10, 15, 20, 30, 45, 60, 75, 90
+};
+#endif
 
 typedef struct phase_wait_env_s {
     unsigned int    last_order;
@@ -239,6 +240,10 @@ typedef struct phase_wait_env_s {
     uint64_t phase_time;
     uint64_t time_in_phase;
     uint64_t time_out_phase;
+    unsigned int time_bins[9];
+    unsigned int time_bins3[9];
+    uint64_t time3[3];
+    unsigned int i3;
 #endif
 } phase_wait_env_t;                      // Single linked list of threads waiting for this phase
 
@@ -269,25 +274,14 @@ typedef struct RPI_T {
     unsigned int    decode_order;
 } RPI_T;
 
-#define _GNU_SOURCE
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-
-long syscall(long number, ...);
-
-static inline int gettid(void)
-{
-    return syscall(SYS_gettid);
-}
-
+#if OPT_PHASE_TIMING
 static uint64_t tus64(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
-
+#endif
 
 static inline unsigned int rnd64(unsigned int x)
 {
@@ -979,9 +973,26 @@ static inline void tend_phase(RPI_T * const rpi, const int phase_no)
 {
 #if OPT_PHASE_TIMING
     phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
-    const int64_t now = tus64();
-    p->time_in_phase += now - p->phase_time;
+    const uint64_t now = tus64();
+    const uint64_t in_time = now - p->phase_time;
+    uint64_t in_time3;
+    unsigned int i;
+
+    p->time_in_phase += in_time;
     p->phase_time = now;
+    p->time3[p->i3] = in_time;
+    p->i3 = p->i3 < 3 ? p->i3 + 1 : 0;
+    in_time3 = p->time3[0] + p->time3[1] + p->time3[2];
+    for (i = 0; i != 9; ++i) {
+        if (time_thresholds[i] * 1000 > in_time)
+            break;
+    }
+    ++p->time_bins[i];
+    for (i = 0; i != 9; ++i) {
+        if (time_thresholds[i] * 3000 > in_time3)
+            break;
+    }
+    ++p->time_bins3[i];
 #endif
 }
 
@@ -1632,6 +1643,15 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
             av_log(avctx, AV_LOG_INFO, "Phase %u: In %3u.%06u, Out %3u.%06u\n", i,
                    (unsigned int)(p->time_in_phase / 1000000), (unsigned int)(p->time_in_phase % 1000000),
                    (unsigned int)(p->time_out_phase / 1000000), (unsigned int)(p->time_out_phase % 1000000));
+            av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d        >\n",
+                   time_thresholds[0], time_thresholds[1], time_thresholds[2], time_thresholds[3],
+                   time_thresholds[4], time_thresholds[5], time_thresholds[6], time_thresholds[7]);
+            av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d %7d\n",
+                   p->time_bins[0],  p->time_bins[1], p->time_bins[2], p->time_bins[3],
+                   p->time_bins[4],  p->time_bins[5], p->time_bins[6], p->time_bins[7], p->time_bins[8]);
+            av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d %7d\n",
+                   p->time_bins3[0],  p->time_bins3[1], p->time_bins3[2], p->time_bins3[3],
+                   p->time_bins3[4],  p->time_bins3[5], p->time_bins3[6], p->time_bins3[7], p->time_bins3[8]);
 
         }
     }
