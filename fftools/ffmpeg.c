@@ -2674,6 +2674,8 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
         if (ist->dec_ctx->codec_id == AV_CODEC_ID_H264) {
             ist->st->codecpar->video_delay = ist->dec_ctx->has_b_frames;
         } else
+        {
+#if 0
             av_log(ist->dec_ctx, AV_LOG_WARNING,
                    "video_delay is larger in decoder than demuxer %d > %d.\n"
                    "If you want to help, upload a sample "
@@ -2681,6 +2683,8 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
                    "and contact the ffmpeg-devel mailing list. (ffmpeg-devel@ffmpeg.org)\n",
                    ist->dec_ctx->has_b_frames,
                    ist->st->codecpar->video_delay);
+#endif
+        }
     }
 
     if (ret != AVERROR_EOF)
