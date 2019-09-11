@@ -19,6 +19,8 @@
 #include "rpi_zc.h"
 #include "rpi_mem.h"
 #include "rpi_zc_frames.h"
+#include "rpi_mailbox.h"
+
 
 #define OPT_PHASE_TIMING 0      // Generate stats for phase usage
 
@@ -206,7 +208,6 @@ typedef struct dec_env_s {
     struct RPI_CMD *cmd_fifo;
     unsigned int    bit_len, bit_max;
     unsigned int    cmd_len, cmd_max;
-    unsigned int    max_pu_msgs;
     struct RPI_PROB probabilities;
     unsigned int    num_slice_msgs;
     unsigned int    PicWidthInCtbsY;
@@ -267,11 +268,13 @@ typedef struct RPI_T {
     sem_t           bitbuf_sem;
     GPU_MEM_PTR_T   gbitbufs[RPIVID_BITBUFS];
 
+    unsigned int    max_pu_msgs;
     unsigned int    coeffbuf_no;
     sem_t           coeffbuf_sem;
     GPU_MEM_PTR_T   gcoeffbufs[RPIVID_COEFFBUFS];
 
     unsigned int    decode_order;
+    int             mbox_fd;
 } RPI_T;
 
 #if OPT_PHASE_TIMING
@@ -813,9 +816,6 @@ dec_env_new(AVCodecContext * const avctx, RPI_T * const rpi)
 
     sem_init(&de->phase_wait, 0, 0);
 
-    // Initial PU/COEFF stream buffer sizes chosen so jellyfish40.265 requires 1 overflow/restart
-    de->max_pu_msgs = 2+340; // 7.2 says at most 1611 messages per CTU
-
     if ((de->cmd_fifo = malloc((de->cmd_max=1024)*sizeof(struct RPI_CMD))) == NULL)
         goto fail;
 
@@ -1304,7 +1304,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         unsigned int pu_size;
 
         pu_base_vc = rpi->gcoeffbufs[rpi->coeffbuf_no].vc;
-        pu_stride = rnd64(de->max_pu_msgs * 2 * de->PicWidthInCtbsY);
+        pu_stride = rnd64(rpi->max_pu_msgs * 2 * de->PicWidthInCtbsY);
         pu_size = pu_stride * de->PicHeightInCtbsY;
 
         if (pu_size > total_size) {
@@ -1339,7 +1339,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
         // Status 1 means out of PU space so try again with more
         // If we ran out of Coeff space then we are out of memory - we could possibly realloc?
-        de->max_pu_msgs += de->max_pu_msgs / 2;
+        rpi->max_pu_msgs += rpi->max_pu_msgs / 2;
     }
 
     // Inc inside the phase 1 lock, but only inc if we succeeded otherwise we
@@ -1654,6 +1654,7 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
                    p->time_bins3[4],  p->time_bins3[5], p->time_bins3[6], p->time_bins3[7], p->time_bins3[8]);
 
         }
+        av_log(avctx, AV_LOG_INFO, "PU max=%d\n", rpi->max_pu_msgs);
     }
 #endif
 
@@ -1682,6 +1683,9 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     sem_destroy(&rpi->coeffbuf_sem);
     sem_destroy(&rpi->bitbuf_sem);
 
+    mbox_release_clock(rpi->mbox_fd);
+    mbox_close(rpi->mbox_fd);
+
 #if TRACE_ENTRY
     printf(">>> %s\n", __func__);
 #endif
@@ -1705,9 +1709,16 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
 
     memset(rpi, 0, sizeof(*rpi));
 
+    rpi->mbox_fd = mbox_open();
+    mbox_request_clock(rpi->mbox_fd);
+
     av_rpi_zc_init_local(avctx);
 
     rpi->decode_order = 0;
+
+    // Initial PU/COEFF stream buffer split chosen as worst case seen so far
+    rpi->max_pu_msgs = 768; // 7.2 says at most 1611 messages per CTU
+
 
     atomic_store(&rpi->ref_count, 1);
     sem_init(&rpi->ref_zero, 0, 0);

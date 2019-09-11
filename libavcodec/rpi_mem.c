@@ -125,7 +125,7 @@ int rpi_cache_flush_execute(rpi_cache_flush_env_t * const rfe)
     if (rfe->v.op_count != 0) {
         if (vcsm_clean_invalid2(&rfe->v) != 0)
         {
-          av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid2 failed: errno=%d\n", errno);
+//          av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid2 failed: errno=%d\n", errno);
           rc = -1;
         }
         rfe->v.op_count = 0;

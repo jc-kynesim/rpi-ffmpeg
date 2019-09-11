@@ -89,6 +89,33 @@ int mbox_get_image_params(int fd, VC_IMAGE_T * img)
     return rv;
 }
 
+
+#define SET_CLOCK_RATE 0x00038002
+#define GET_MAX_CLOCK 0x00030004
+#define CLOCK_HEVC 11
+
+static int mbox_property_generic(int fd, unsigned command, unsigned *word0, unsigned *word1)
+{
+    uint32_t buf[32];
+    uint32_t * p = buf;
+    int rv;
+
+    *p++ = 0; // size
+    *p++ = 0; // process request
+    *p++ = command;
+    *p++ = 8;
+    *p++ = 8;
+    *p++ = *word0;
+    *p++ = *word1;
+    *p++ = 0;  // End tag
+    buf[0] = (p - buf) * sizeof(*p);
+
+    rv = mbox_property(fd, buf);
+    *word0 = buf[6];
+    *word1 = buf[7];
+    return rv;
+}
+
 int mbox_open() {
    int file_desc;
 
@@ -105,3 +132,24 @@ void mbox_close(int file_desc) {
   close(file_desc);
 }
 
+int mbox_request_clock(int fd) {
+   int rv;
+   unsigned word0, word1 = 0;
+   word0 = CLOCK_HEVC;
+   rv = mbox_property_generic(fd, GET_MAX_CLOCK, &word0, &word1);
+   if (rv != 0)
+      return rv;
+   word1 = word0;
+   word0 = CLOCK_HEVC;
+   rv = mbox_property_generic(fd, SET_CLOCK_RATE, &word0, &word1);
+   return rv;
+}
+
+int mbox_release_clock(int fd) {
+  int rv;
+  unsigned word0, word1 = 0;
+  word0 = CLOCK_HEVC;
+  word1 = 0;
+  rv = mbox_property_generic(fd, SET_CLOCK_RATE, &word0, &word1);
+  return rv;
+}
