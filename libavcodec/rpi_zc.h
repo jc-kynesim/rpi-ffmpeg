@@ -93,7 +93,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags);
 //   If maycopy=1 && the src frame is in a form where we can easily copy
 //     the data, then allocate a new buffer and copy the data into it
 //   Otherwise return NULL
-AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
+AVRpiZcRefPtr av_rpi_zc_ref(void * const logging_context,
     const struct AVFrame * const frame, const enum AVPixelFormat expected_format, const int maycopy);
 
 // Get the vc_handle from the frame ref

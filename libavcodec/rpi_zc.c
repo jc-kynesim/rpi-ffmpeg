@@ -8,8 +8,14 @@
 #include <pthread.h>
 
 #include "libavutil/buffer_internal.h"
+
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+#include <bcm_host.h>
 #include <interface/vctypes/vc_image_types.h>
 #include <interface/vcsm/user-vcsm.h>
+#pragma GCC diagnostic pop
 
 #define TRACE_ALLOC 0
 #define OPT_PREFER_CMA 0
@@ -754,7 +760,7 @@ fail:
     return NULL;
 }
 
-AVRpiZcRefPtr av_rpi_zc_ref(struct AVCodecContext * const s,
+AVRpiZcRefPtr av_rpi_zc_ref(void * const s,
     const AVFrame * const frame, const enum AVPixelFormat expected_format, const int maycopy)
 {
     assert(s != NULL);
@@ -945,6 +951,8 @@ int av_rpi_zc_init_local(struct AVCodecContext * const s)
     int use_cma;
     ZcPool * pool_env = NULL;
 
+    bcm_host_init();
+
     if (vcsm_init_ex(OPT_PREFER_CMA ? 1 : 0, -1) == 0)
         use_cma = 0;
     else if (vcsm_init_ex(OPT_PREFER_CMA ? 0 : 1, -1) == 0)
@@ -965,5 +973,6 @@ void av_rpi_zc_uninit_local(struct AVCodecContext * const s)
 {
     av_rpi_zc_uninit2(s);
     vcsm_exit();
+    bcm_host_deinit();
 }
 
