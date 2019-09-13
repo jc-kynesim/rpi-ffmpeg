@@ -51,6 +51,7 @@
 #include "libavutil/rpi_sand_fns.h"
 #include "libavcodec/rpi_zc.h"
 
+#define TRACE_ALL 0
 
 #define NUM_BUFFERS 4
 #define RPI_DISPLAY_ALL 0
