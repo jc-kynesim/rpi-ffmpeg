@@ -13,6 +13,7 @@
 #include "libavutil/imgutils.h"
 #include "avcodec.h"
 #include "hwaccel.h"
+#include "decode.h"
 
 #include "hevc.h"
 #include "hevcdec.h"
@@ -253,6 +254,7 @@ typedef struct RPI_T {
     sem_t           ref_zero;
 
     dec_env_t **    dec_envs;
+    AVZcEnvPtr      zc;
 
     pthread_mutex_t phase_lock;
     phase_wait_env_t phase_reqs[RPIVID_PHASES];
@@ -275,6 +277,7 @@ typedef struct RPI_T {
 
     unsigned int    decode_order;
     int             mbox_fd;
+    int             gpu_init_type;
 } RPI_T;
 
 #if OPT_PHASE_TIMING
@@ -1608,6 +1611,40 @@ static int rpi_hevc_decode_slice(
 
 //////////////////////////////////////////////////////////////////////////////
 
+static int rpivid_hevc_alloc_frame(AVCodecContext *s, AVFrame *frame)
+{
+    RPI_T * const rpi = s->internal->hwaccel_priv_data;
+    int rv;
+
+    if (av_rpi_zc_in_use(s))
+    {
+        rv = s->get_buffer2(s, frame, 0);
+    }
+    else
+    {
+        if (rpi->zc == NULL) {
+            pthread_mutex_lock(&rpi->phase_lock); // Abuse - not worth creating a lock just for this
+            // Alloc inside lock to make sure we only ever alloc one
+            if (rpi->zc == NULL) {
+                rpi->zc = av_rpi_zc_int_env_alloc();
+            }
+            pthread_mutex_unlock(&rpi->phase_lock);
+        }
+        rv = (rpi->zc == NULL) ? AVERROR(ENOMEM) :
+            rpi_get_display_buffer(rpi->zc, frame);
+    }
+
+    if (rv == 0 &&
+        (rv = ff_attach_decode_data(frame)) < 0)
+    {
+        av_frame_unref(frame);
+    }
+
+    return rv;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
 static int rpi_hevc_free(AVCodecContext *avctx) {
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
 
@@ -1665,6 +1702,8 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     }
     av_freep(&rpi->dec_envs);
 
+    av_rpi_zc_int_env_free(rpi->zc);
+
     gpu_free(&rpi->gcolbuf);
 
     for (unsigned int i = 0; i != RPIVID_BITBUFS; ++i) {
@@ -1677,14 +1716,17 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     unmap_devp(&rpi->regs, REGS_SIZE);
     unmap_devp(&rpi->ints, INTS_SIZE);
 
-    av_rpi_zc_uninit_local(avctx);
+    if (rpi->gpu_init_type > 0)
+        rpi_mem_gpu_uninit();
+
+    if (rpi->mbox_fd >= 0) {
+        mbox_release_clock(rpi->mbox_fd);
+        mbox_close(rpi->mbox_fd);
+    }
 
     sem_destroy(&rpi->ref_zero);
     sem_destroy(&rpi->coeffbuf_sem);
     sem_destroy(&rpi->bitbuf_sem);
-
-    mbox_release_clock(rpi->mbox_fd);
-    mbox_close(rpi->mbox_fd);
 
 #if TRACE_ENTRY
     printf(">>> %s\n", __func__);
@@ -1709,11 +1751,7 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
 
     memset(rpi, 0, sizeof(*rpi));
 
-    rpi->mbox_fd = mbox_open();
-    mbox_request_clock(rpi->mbox_fd);
-
-    av_rpi_zc_init_local(avctx);
-
+    rpi->mbox_fd = -1;
     rpi->decode_order = 0;
 
     // Initial PU/COEFF stream buffer split chosen as worst case seen so far
@@ -1728,9 +1766,21 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
 
     pthread_mutex_init(&rpi->phase_lock, NULL);
 
+    if ((rpi->mbox_fd = mbox_open()) < 0)
+    {
+        av_log(avctx, AV_LOG_ERROR, "Failed to open mailbox\n");
+        goto fail;
+    }
+    mbox_request_clock(rpi->mbox_fd);
+
     if ((rpi->regs = map_dev(avctx, REGS_NAME, REGS_SIZE)) == NULL ||
         (rpi->ints = map_dev(avctx, INTS_NAME, INTS_SIZE)) == NULL) {
         av_log(avctx, AV_LOG_ERROR, "Failed to open rpivid devices\n");
+        goto fail;
+    }
+
+    if ((rpi->gpu_init_type = rpi_mem_gpu_init(0)) < 0) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to init GPU\n");
         goto fail;
     }
 
@@ -1777,7 +1827,7 @@ const AVHWAccel ff_hevc_rpi4_8_hwaccel = {
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_HEVC,
     .pix_fmt        = AV_PIX_FMT_RPI4_8,
-    //.alloc_frame    = rpi_hevc_alloc_frame,
+    .alloc_frame    = rpivid_hevc_alloc_frame,
     .start_frame    = rpi_hevc_start_frame,
     .end_frame      = rpi_hevc_end_frame,
     .abort_frame    = rpi_hevc_abort_frame,
@@ -1793,7 +1843,7 @@ const AVHWAccel ff_hevc_rpi4_10_hwaccel = {
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_HEVC,
     .pix_fmt        = AV_PIX_FMT_RPI4_10,
-    //.alloc_frame    = rpi_hevc_alloc_frame,
+    .alloc_frame    = rpivid_hevc_alloc_frame,
     .start_frame    = rpi_hevc_start_frame,
     .end_frame      = rpi_hevc_end_frame,
     .abort_frame    = rpi_hevc_abort_frame,

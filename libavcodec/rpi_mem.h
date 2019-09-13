@@ -39,10 +39,15 @@ typedef struct gpu_mem_ptr_s {
 } GPU_MEM_PTR_T;
 
 // General GPU functions
+
+#define GPU_INIT_GPU 1
+#define GPU_INIT_CMA 2
+
 extern int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p);
 extern int gpu_malloc_uncached(int numbytes, GPU_MEM_PTR_T *p);
 extern void gpu_free(GPU_MEM_PTR_T * const p);
-
+int rpi_mem_gpu_init(const unsigned int flags);
+void rpi_mem_gpu_uninit(void);
 
 // Cache flush stuff
 

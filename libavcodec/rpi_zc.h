@@ -132,6 +132,10 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
 // get_buffer2 & get_buffer_context
 void av_rpi_zc_uninit2(struct AVCodecContext * const s);
 
+void av_rpi_zc_int_env_free(AVZcEnvPtr zc);
+AVZcEnvPtr av_rpi_zc_int_env_alloc(void);
+int rpi_get_display_buffer(const AVZcEnvPtr zc, AVFrame * const frame);
+
 int av_rpi_zc_init_local(struct AVCodecContext * const s);
 void av_rpi_zc_uninit_local(struct AVCodecContext * const s);
 

@@ -12,13 +12,11 @@
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files
 #pragma GCC diagnostic ignored "-Wredundant-decls"
-#include <bcm_host.h>
 #include <interface/vctypes/vc_image_types.h>
 #include <interface/vcsm/user-vcsm.h>
 #pragma GCC diagnostic pop
 
 #define TRACE_ALLOC 0
-#define OPT_PREFER_CMA 0
 #define DEBUG_ALWAYS_KEEP_LOCKED 0
 
 struct ZcPoolEnt;
@@ -523,7 +521,7 @@ static AVBufferRef * rpi_buf_pool_alloc(ZcPool * const pool, int size)
 }
 #endif
 
-static int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
+int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
 {
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->format, frame->width, frame->height);
     const unsigned int size_y = geo.stride_y * geo.height_y;
@@ -861,29 +859,49 @@ void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref)
     }
 }
 
-#if 0
-AVZcEnvPtr av_rpi_zc_env_alloc(const int keep_locked)
+AVZcEnvPtr av_rpi_zc_int_env_alloc(void)
 {
-    ZcEnv * const zc = av_mallocz(sizeof(ZcEnv));
-    if (zc == NULL)
+    ZcEnv * zc;
+    ZcPool * pool_env;
+    int gpu_type;
+
+    if ((gpu_type = rpi_mem_gpu_init(0)) < 0)
+        return NULL;
+
+    if ((zc = av_mallocz(sizeof(ZcEnv))) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "av_rpi_zc_env_alloc: Context allocation failed\n");
-        return NULL;
+        goto fail1;
     }
 
-    zc_pool_init(&zc->pool, keep_locked);
+    if ((pool_env = zc_pool_new(gpu_type != GPU_INIT_CMA || DEBUG_ALWAYS_KEEP_LOCKED)) == NULL)
+        goto fail2;
+
+    *zc = (ZcEnv){
+        .refcount = 1,
+        .pool_env = pool_env,
+        .alloc_buf = rpi_buf_pool_alloc,
+        .free_pool = zc_pool_delete_v
+    };
+
     return zc;
+
+fail2:
+    free(zc);
+fail1:
+    rpi_mem_gpu_uninit();
+    return NULL;
 }
 
-void av_rpi_zc_env_free(AVZcEnvPtr zc)
+void av_rpi_zc_int_env_free(AVZcEnvPtr zc)
 {
     if (zc != NULL)
     {
-        zc_pool_destroy(&zc->pool);
+        zc->free_pool(zc->pool_env);
         av_free(zc);
     }
 }
-#endif
+
 
 int av_rpi_zc_in_use(const struct AVCodecContext * const s)
 {
@@ -946,33 +964,36 @@ void av_rpi_zc_uninit2(struct AVCodecContext * const s)
     }
 }
 
+
 int av_rpi_zc_init_local(struct AVCodecContext * const s)
 {
-    int use_cma;
-    ZcPool * pool_env = NULL;
+    int rv;
+    ZcPool * pool_env;
 
-    bcm_host_init();
+    if ((rv = rpi_mem_gpu_init(0)) < 0)
+        return rv;
 
-    if (vcsm_init_ex(OPT_PREFER_CMA ? 1 : 0, -1) == 0)
-        use_cma = 0;
-    else if (vcsm_init_ex(OPT_PREFER_CMA ? 0 : 1, -1) == 0)
-        use_cma = 1;
-    else
-        return AVERROR(EINVAL);
-
-    if ((pool_env = zc_pool_new(!use_cma || DEBUG_ALWAYS_KEEP_LOCKED)) == NULL)
+    if ((pool_env = zc_pool_new(rv != GPU_INIT_CMA || DEBUG_ALWAYS_KEEP_LOCKED)) == NULL)
     {
-        vcsm_exit();
-        return AVERROR(ENOMEM);
+        rv = AVERROR(ENOMEM);
+        goto fail1;
     }
 
-    return av_rpi_zc_init2(s, pool_env, rpi_buf_pool_alloc, zc_pool_delete_v);
+    if ((rv = av_rpi_zc_init2(s, pool_env, rpi_buf_pool_alloc, zc_pool_delete_v)) < 0)
+        goto fail2;
+
+    return 0;
+
+fail2:
+    zc_pool_delete_v(pool_env);
+fail1:
+    rpi_mem_gpu_uninit();
+    return rv;
 }
 
 void av_rpi_zc_uninit_local(struct AVCodecContext * const s)
 {
     av_rpi_zc_uninit2(s);
-    vcsm_exit();
-    bcm_host_deinit();
+    rpi_mem_gpu_uninit();
 }
 

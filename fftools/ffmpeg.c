@@ -71,10 +71,6 @@
 # include "libavfilter/buffersrc.h"
 # include "libavfilter/buffersink.h"
 
-#if CONFIG_RPI
-#include "libavcodec/rpi_zc.h"
-#endif
-
 #if HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
 #include <sys/types.h>
@@ -606,9 +602,6 @@ static void ffmpeg_cleanup(int ret)
         av_freep(&ist->filters);
         av_freep(&ist->hwaccel_device);
         av_freep(&ist->dts_buffer);
-#if CONFIG_RPI
-        av_rpi_zc_uninit_local(ist->dec_ctx);
-#endif
         avcodec_free_context(&ist->dec_ctx);
 
         av_freep(&input_streams[i]);
@@ -2893,7 +2886,6 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
     return *p;
 }
 
-#if !CONFIG_RPI
 static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 {
     InputStream *ist = s->opaque;
@@ -2920,12 +2912,7 @@ static int init_input_stream(int ist_index, char *error, int error_len)
 
         ist->dec_ctx->opaque                = ist;
         ist->dec_ctx->get_format            = get_format;
-#if !CONFIG_RPI
         ist->dec_ctx->get_buffer2           = get_buffer;
-#else
-        // Overrides the above get_buffer2
-        av_rpi_zc_init_local(ist->dec_ctx);
-#endif
 
         ist->dec_ctx->thread_safe_callbacks = 1;
 

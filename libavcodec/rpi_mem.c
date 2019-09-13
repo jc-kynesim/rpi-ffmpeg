@@ -38,10 +38,19 @@ Authors: John Cox
 #include "libavutil/avassert.h"
 #include "libavutil/rpi_sand_fns.h"
 
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+#include <bcm_host.h>
+#include <interface/vctypes/vc_image_types.h>
 #include <interface/vcsm/user-vcsm.h>
+#pragma GCC diagnostic pop
 
 #include "rpi_mem.h"
 #include "rpi_zc_frames.h"
+
+
+#define OPT_PREFER_CMA 0
 
 struct rpi_cache_flush_env_s {
   struct vcsm_user_clean_invalid2_s v;
@@ -99,6 +108,30 @@ int gpu_malloc_cached(int numbytes, GPU_MEM_PTR_T *p)
 
 void gpu_free(GPU_MEM_PTR_T * const p) {
     gpu_free_internal(p);
+}
+
+void rpi_mem_gpu_uninit(void)
+{
+    vcsm_exit();
+    bcm_host_deinit();
+}
+
+int rpi_mem_gpu_init(const unsigned int flags)
+{
+    int use_cma;
+
+    (void)flags;
+
+    bcm_host_init();
+
+    if (vcsm_init_ex(OPT_PREFER_CMA ? 1 : 0, -1) == 0)
+        use_cma = 0;
+    else if (vcsm_init_ex(OPT_PREFER_CMA ? 0 : 1, -1) == 0)
+        use_cma = 1;
+    else
+        return AVERROR(EINVAL);
+
+    return use_cma + 1;
 }
 
 // ----------------------------------------------------------------------------
