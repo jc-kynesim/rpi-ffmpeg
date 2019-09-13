@@ -24,7 +24,6 @@
  */
 
 #include "config.h"
-
 #include <ctype.h>
 #include <string.h>
 #include <math.h>
@@ -168,7 +167,6 @@ static int restore_tty;
 #if HAVE_THREADS
 static void free_input_threads(void);
 #endif
-
 
 /* sub2video hack:
    Convert subtitles to video with alpha to insert them in filter graphs.
@@ -581,6 +579,7 @@ static void ffmpeg_cleanup(int ret)
             }
             av_fifo_freep(&ost->muxing_queue);
         }
+
         av_freep(&output_streams[i]);
     }
 #if HAVE_THREADS
@@ -590,7 +589,6 @@ static void ffmpeg_cleanup(int ret)
         avformat_close_input(&input_files[i]->ctx);
         av_freep(&input_files[i]);
     }
-
     for (i = 0; i < nb_input_streams; i++) {
         InputStream *ist = input_streams[i];
 
@@ -602,6 +600,7 @@ static void ffmpeg_cleanup(int ret)
         av_freep(&ist->filters);
         av_freep(&ist->hwaccel_device);
         av_freep(&ist->dts_buffer);
+
         avcodec_free_context(&ist->dec_ctx);
 
         av_freep(&input_streams[i]);
@@ -632,7 +631,6 @@ static void ffmpeg_cleanup(int ret)
     }
     term_exit();
     ffmpeg_exited = 1;
-
 }
 
 void remove_avoptions(AVDictionary **a, AVDictionary *b)
@@ -2913,7 +2911,6 @@ static int init_input_stream(int ist_index, char *error, int error_len)
         ist->dec_ctx->opaque                = ist;
         ist->dec_ctx->get_format            = get_format;
         ist->dec_ctx->get_buffer2           = get_buffer;
-
         ist->dec_ctx->thread_safe_callbacks = 1;
 
         av_opt_set_int(ist->dec_ctx, "refcounted_frames", 1, 0);
