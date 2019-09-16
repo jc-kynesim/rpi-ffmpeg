@@ -34,6 +34,7 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/stereo3d.h"
 
+#include "decode.h"
 #include "bswapdsp.h"
 #include "bytestream.h"
 #include "golomb.h"
@@ -5738,11 +5739,6 @@ static av_cold int hevc_decode_free(AVCodecContext *avctx)
         vpu_qpu_term();
     s->qpu_init_ok = 0;
 
-    // This must be after we free off the DPB
-    // * If the outer code is still holding any frames hopefully it will
-    //   have its own ref to zc
-    av_rpi_zc_uninit_local(avctx);
-
     return 0;
 }
 
@@ -5763,7 +5759,6 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     // many times as we have threads (init_thread_copy is called for the
     // threads).  So to match init & term put the init here where it will be
     // called by both init & copy
-    av_rpi_zc_init_local(avctx);
 
     if (vpu_qpu_init() != 0)
         goto fail;
@@ -6003,6 +5998,57 @@ static void hevc_decode_flush(AVCodecContext *avctx)
     s->eos = 1;
 }
 
+typedef struct  hwaccel_rpi3_qpu_env_s {
+    const AVClass *av_class;
+    AVZcEnvPtr zc;
+} hwaccel_rpi3_qpu_env_t;
+
+static int hwaccel_alloc_frame(AVCodecContext *s, AVFrame *frame)
+{
+    hwaccel_rpi3_qpu_env_t * const r3 = s->internal->hwaccel_priv_data;
+    int rv;
+
+    if (av_rpi_zc_in_use(s))
+    {
+        rv = s->get_buffer2(s, frame, 0);
+    }
+    else
+    {
+        rv = rpi_get_display_buffer(r3->zc, frame);
+    }
+
+    if (rv == 0 &&
+        (rv = ff_attach_decode_data(frame)) < 0)
+    {
+        av_frame_unref(frame);
+    }
+
+    return rv;
+}
+
+static int hwaccel_rpi3_qpu_free(AVCodecContext *avctx)
+{
+    hwaccel_rpi3_qpu_env_t * const r3 = avctx->internal->hwaccel_priv_data;
+    av_rpi_zc_int_env_free(r3->zc);
+    return 0;
+}
+
+static int hwaccel_rpi3_qpu_init(AVCodecContext *avctx)
+{
+    hwaccel_rpi3_qpu_env_t * const r3 = avctx->internal->hwaccel_priv_data;
+
+    if ((r3->zc = av_rpi_zc_int_env_alloc()) == NULL)
+        goto fail;
+
+    return 0;
+
+fail:
+    av_log(avctx, AV_LOG_ERROR, "Rpi3 QPU init failed\n");
+    hwaccel_rpi3_qpu_free(avctx);
+    return AVERROR(ENOMEM);
+}
+
+
 #define OFFSET(x) offsetof(HEVCRpiContext, x)
 #define PAR (AV_OPT_FLAG_DECODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
 
@@ -6028,10 +6074,41 @@ static const enum AVPixelFormat hevc_rpi_pix_fmts[] = {
     AV_PIX_FMT_NONE
 };
 
-//static const AVCodecHWConfigInternal *hevc_rpi_hw_configs[] = {
-//    HW_CONFIG_INTERNAL(HEVC_RPI),
-//    NULL
-//};
+
+static const AVHWAccel hwaccel_rpi3_qpu = {
+    .name           = "Pi3 QPU Hwaccel",
+    .alloc_frame    = hwaccel_alloc_frame,
+    .init           = hwaccel_rpi3_qpu_init,
+    .uninit         = hwaccel_rpi3_qpu_free,
+    .priv_data_size = sizeof(hwaccel_rpi3_qpu_env_t),
+    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_MT_SAFE,
+};
+
+static const AVCodecHWConfigInternal hevc_rpi_hw_config_sand128 =
+{
+    .public = {
+        .pix_fmt = AV_PIX_FMT_SAND128,
+        .methods = AV_CODEC_HW_CONFIG_METHOD_AD_HOC,
+        .device_type = AV_HWDEVICE_TYPE_NONE,
+    },
+    .hwaccel = &hwaccel_rpi3_qpu
+};
+static const AVCodecHWConfigInternal hevc_rpi_hw_config_sand64_10 =
+{
+    .public = {
+        .pix_fmt = AV_PIX_FMT_SAND64_10,
+        .methods = AV_CODEC_HW_CONFIG_METHOD_AD_HOC,
+        .device_type = AV_HWDEVICE_TYPE_NONE,
+    },
+    .hwaccel = &hwaccel_rpi3_qpu
+};
+
+
+static const AVCodecHWConfigInternal *hevc_rpi_hw_configs[] = {
+    &hevc_rpi_hw_config_sand128,
+    &hevc_rpi_hw_config_sand64_10,
+    NULL
+};
 
 
 AVCodec ff_hevc_rpi_decoder = {
@@ -6061,7 +6138,7 @@ AVCodec ff_hevc_rpi_decoder = {
     .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_EXPORTS_CROPPING,
     .pix_fmts              = hevc_rpi_pix_fmts,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
-//    .hw_configs            = hevc_rpi_hw_configs,
+    .hw_configs            = hevc_rpi_hw_configs,
 //    .wrapper_name          = "hevc_rpi",
 };
 
