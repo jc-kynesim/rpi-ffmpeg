@@ -6048,7 +6048,8 @@ AVCodec ff_hevc_rpi_decoder = {
     .update_thread_context = ONLY_IF_THREADS_ENABLED(hevc_update_thread_context),
     .init_thread_copy      = ONLY_IF_THREADS_ENABLED(hevc_init_thread_copy),
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
-//                             AV_CODEC_CAP_HARDWARE |
+                             AV_CODEC_CAP_HARDWARE |
+                             AV_CODEC_CAP_AVOID_PROBING |
 #if 0
     // Debugging is often easier without threads getting in the way
                             0,

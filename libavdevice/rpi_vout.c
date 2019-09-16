@@ -68,6 +68,8 @@ typedef struct rpi_display_env_s
     MMAL_POOL_T *rpi_pool;
     volatile int rpi_display_count;
     enum AVPixelFormat avfmt;
+
+    AVZcEnvPtr zc;
 } rpi_display_env_t;
 
 
@@ -117,7 +119,7 @@ static void display_frame(AVFormatContext * const s, rpi_display_env_t * const d
     buf->offset = 0; // Offset to valid data
     buf->flags = 0;
     {
-        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, fr, de->avfmt, 1);
+        const AVRpiZcRefPtr fr_buf = av_rpi_zc_ref(s, de->zc, fr, de->avfmt, 1);
         if (fr_buf == NULL) {
             mmal_buffer_header_release(buf);
             return;
@@ -343,6 +345,27 @@ static int xv_control_message(AVFormatContext *s, int type, void *data, size_t d
     return AVERROR(ENOSYS);
 }
 
+// deinit is called if init fails so no need to clean up explicity here
+static int rpi_vout_init(struct AVFormatContext * s)
+{
+    rpi_display_env_t * const de = s->priv_data;
+
+    // Get a ZC context in case we need one - has little overhead if unused
+    if ((de->zc = av_rpi_zc_int_env_alloc()) == NULL)
+        return 1;
+
+    return 0;
+}
+
+static void rpi_vout_deinit(struct AVFormatContext * s)
+{
+    rpi_display_env_t * const de = s->priv_data;
+
+    av_rpi_zc_int_env_free(de->zc);
+    de->zc = NULL;
+}
+
+
 #define OFFSET(x) offsetof(rpi_display_env_t, x)
 static const AVOption options[] = {
 #if 0
@@ -378,4 +401,6 @@ AVOutputFormat ff_vout_rpi_muxer = {
     .control_message = xv_control_message,
     .flags          = AVFMT_NOFILE | AVFMT_VARIABLE_FPS | AVFMT_NOTIMESTAMPS,
     .priv_class     = &xv_class,
+    .init           = rpi_vout_init,
+    .deinit         = rpi_vout_deinit,
 };

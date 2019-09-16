@@ -2893,7 +2893,6 @@ static int get_buffer(AVCodecContext *s, AVFrame *frame, int flags)
 
     return avcodec_default_get_buffer2(s, frame, flags);
 }
-#endif
 
 static int init_input_stream(int ist_index, char *error, int error_len)
 {

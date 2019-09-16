@@ -609,7 +609,7 @@ int av_rpi_zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
 }
 
 
-static AVBufferRef * zc_copy(struct AVCodecContext * const s,
+static AVBufferRef * zc_copy(const AVZcEnvPtr zc,
     const AVFrame * const src)
 {
     AVFrame dest_frame;
@@ -621,7 +621,7 @@ static AVBufferRef * zc_copy(struct AVCodecContext * const s,
     dest->width = src->width;
     dest->height = src->height;
 
-    if (rpi_get_display_buffer(s->get_buffer_context, dest) != 0)
+    if (rpi_get_display_buffer(zc, dest) != 0)
     {
         return NULL;
     }
@@ -649,7 +649,7 @@ static AVBufferRef * zc_copy(struct AVCodecContext * const s,
 }
 
 
-static AVBufferRef * zc_420p10_to_sand128(struct AVCodecContext * const s,
+static AVBufferRef * zc_420p10_to_sand128(const AVZcEnvPtr zc,
     const AVFrame * const src)
 {
     assert(0);
@@ -657,7 +657,7 @@ static AVBufferRef * zc_420p10_to_sand128(struct AVCodecContext * const s,
 }
 
 
-static AVBufferRef * zc_sand64_16_to_sand128(struct AVCodecContext * const s,
+static AVBufferRef * zc_sand64_16_to_sand128(const AVZcEnvPtr zc,
     const AVFrame * const src, const unsigned int src_bits)
 {
     assert(0);
@@ -758,16 +758,16 @@ fail:
     return NULL;
 }
 
-AVRpiZcRefPtr av_rpi_zc_ref(void * const s,
+AVRpiZcRefPtr av_rpi_zc_ref(void * const logctx, const AVZcEnvPtr zc,
     const AVFrame * const frame, const enum AVPixelFormat expected_format, const int maycopy)
 {
-    assert(s != NULL);
+    av_assert0(!maycopy || zc != NULL);
 
     if (frame->format != AV_PIX_FMT_YUV420P &&
         frame->format != AV_PIX_FMT_YUV420P10 &&
         !av_rpi_is_sand_frame(frame))
     {
-        av_log(s, AV_LOG_WARNING, "%s: *** Format not SAND/YUV420P: %d\n", __func__, frame->format);
+        av_log(logctx, AV_LOG_WARNING, "%s: *** Format not SAND/YUV420P: %d\n", __func__, frame->format);
         return NULL;
     }
 
@@ -784,28 +784,28 @@ AVRpiZcRefPtr av_rpi_zc_ref(void * const s,
         if (maycopy)
         {
             if (frame->buf[1] != NULL)
-                av_log(s, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);
+                av_log(logctx, AV_LOG_INFO, "%s: *** Not a single buf frame: copying\n", __func__);
             else
-                av_log(s, AV_LOG_INFO, "%s: *** Unexpected frame format %d: copying to %d\n", __func__, frame->format, expected_format);
+                av_log(logctx, AV_LOG_INFO, "%s: *** Unexpected frame format %d: copying to %d\n", __func__, frame->format, expected_format);
 
             switch (frame->format)
             {
                 case AV_PIX_FMT_YUV420P10:
-                    return zc_420p10_to_sand128(s, frame);
+                    return zc_420p10_to_sand128(zc, frame);
 
                 case AV_PIX_FMT_SAND64_10:
-                    return zc_sand64_16_to_sand128(s, frame, 10);
+                    return zc_sand64_16_to_sand128(zc, frame, 10);
 
                 default:
-                    return zc_copy(s, frame);
+                    return zc_copy(zc, frame);
             }
         }
         else
         {
             if (frame->buf[1] != NULL)
-                av_log(s, AV_LOG_WARNING, "%s: *** Not a single buf frame: buf[1] != NULL\n", __func__);
+                av_log(logctx, AV_LOG_WARNING, "%s: *** Not a single buf frame: buf[1] != NULL\n", __func__);
             else
-                av_log(s, AV_LOG_INFO, "%s: *** Unexpected frame format: %d != %d\n", __func__, frame->format, expected_format);
+                av_log(logctx, AV_LOG_INFO, "%s: *** Unexpected frame format: %d != %d\n", __func__, frame->format, expected_format);
             return NULL;
         }
     }
@@ -814,12 +814,12 @@ AVRpiZcRefPtr av_rpi_zc_ref(void * const s,
     {
         if (maycopy)
         {
-            av_log(s, AV_LOG_INFO, "%s: *** Not one of our buffers: copying\n", __func__);
-            return zc_copy(s, frame);
+            av_log(logctx, AV_LOG_INFO, "%s: *** Not one of our buffers: copying\n", __func__);
+            return zc_copy(zc, frame);
         }
         else
         {
-            av_log(s, AV_LOG_WARNING, "%s: *** Not one of our buffers: NULL\n", __func__);
+            av_log(logctx, AV_LOG_WARNING, "%s: *** Not one of our buffers: NULL\n", __func__);
             return NULL;
         }
     }
