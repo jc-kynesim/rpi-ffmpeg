@@ -44,6 +44,37 @@ typedef struct ZcPoolEnt
     struct ZcPool * pool;
 } ZcPoolEnt;
 
+typedef struct ZcOldCtxVals
+{
+    int thread_safe_callbacks;
+    int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
+    void * get_buffer_context;
+} ZcOldCtxVals;
+
+typedef struct AVZcEnv
+{
+    unsigned int refcount;
+    ZcOldCtxVals old;
+
+    void * pool_env;
+    av_rpi_zc_alloc_buf_fn_t * alloc_buf;
+    av_rpi_zc_free_pool_fn_t * free_pool;
+
+} ZcEnv;
+
+typedef struct ZcBufEnv {
+    GPU_MEM_PTR_T gmem;
+    void * v;
+    const av_rpi_zc_buf_fn_tab_t * fn;
+    AVZcEnvPtr zc;
+} ZcBufEnv;
+
+
+static void rpi_free_zc_buf(void * opaque, uint8_t * data);
+
+
+
+
 #define ALLOC_PAD       0
 #define ALLOC_ROUND     0x1000
 #define STRIDE_ROUND    64
@@ -60,6 +91,20 @@ static inline int av_rpi_is_sand_format(const int format)
 static inline int av_rpi_is_sand_frame(const AVFrame * const frame)
 {
     return av_rpi_is_sand_format(frame->format);
+}
+
+static inline ZcBufEnv * pic_zbe_ptr(AVBufferRef *const buf)
+{
+    // Kludge where we check the free fn to check this is really
+    // one of our buffers - can't think of a better way
+    return buf == NULL || buf->buffer->free != rpi_free_zc_buf ? NULL :
+        av_buffer_get_opaque(buf);
+}
+
+static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
+{
+    // As gmem is the first el NULL should be preserved
+    return &pic_zbe_ptr(buf)->gmem;
 }
 
 
@@ -242,7 +287,7 @@ static unsigned int zc_pool_ent_map_vc_v(void * v)
 static ZcPool *
 zc_pool_new(const int keep_locked)
 {
-    ZcPool * const pool = calloc(1, sizeof(*pool));
+    ZcPool * const pool = av_mallocz(sizeof(*pool));
     if (pool == NULL)
         return NULL;
 
@@ -261,7 +306,7 @@ zc_pool_delete(ZcPool * const pool)
         pool->numbytes = -1;
         zc_pool_flush(pool);
         pthread_mutex_destroy(&pool->lock);
-        free(pool);
+        av_free(pool);
     }
 }
 
@@ -270,25 +315,6 @@ zc_pool_delete_v(void * v)
 {
     zc_pool_delete((ZcPool *)v);
 }
-
-typedef struct ZcOldCtxVals
-{
-    int thread_safe_callbacks;
-    int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
-    void * get_buffer_context;
-} ZcOldCtxVals;
-
-typedef struct AVZcEnv
-{
-    unsigned int refcount;
-//    ZcPool pool;
-    ZcOldCtxVals old;
-
-    void * pool_env;
-    av_rpi_zc_alloc_buf_fn_t * alloc_buf;
-    av_rpi_zc_free_pool_fn_t * free_pool;
-
-} ZcEnv;
 
 static const av_rpi_zc_buf_fn_tab_t zc_pool_buf_fns = {
     .free        = zc_pool_free_v,
@@ -538,6 +564,10 @@ int rpi_get_display_buffer(ZcEnv *const zc, AVFrame * const frame)
         return AVERROR(ENOMEM);
     }
 
+    // Track
+    atomic_fetch_add(&zc->refcount, 1);
+    pic_zbe_ptr(buf)->zc = zc;
+
     for (i = 0; i < AV_NUM_DATA_POINTERS; i++) {
         frame->buf[i] = NULL;
         frame->data[i] = NULL;
@@ -664,39 +694,30 @@ static AVBufferRef * zc_sand64_16_to_sand128(const AVZcEnvPtr zc,
     return NULL;
 }
 
-typedef struct ZcBufEnv {
-    GPU_MEM_PTR_T gmem;
-    const av_rpi_zc_buf_fn_tab_t * fn;
-    void * v;
-} ZcBufEnv;
+static void zc_deref(const AVZcEnvPtr zc)
+{
+    const int n = atomic_fetch_add(&zc->refcount, -1);
+    if (n == 1)  // was 1, now 0
+    {
+        zc->free_pool(zc->pool_env);
+        av_free(zc);
+    }
+}
 
 static void rpi_free_zc_buf(void * opaque, uint8_t * data)
 {
     if (opaque != NULL)
     {
         ZcBufEnv * const zbe = opaque;
-        void (*free_fn)(void *v) = zbe->fn->free;
-        void * v = zbe->v;
 
-        free(zbe);
+        if (zbe->fn->free)
+            zbe->fn->free(zbe->v);
 
-        if (free_fn)
-            free_fn(v);
+        if (zbe->zc != NULL)
+            zc_deref(zbe->zc);
+
+        av_free(zbe);
     }
-}
-
-static inline ZcBufEnv * pic_zbe_ptr(AVBufferRef *const buf)
-{
-    // Kludge where we check the free fn to check this is really
-    // one of our buffers - can't think of a better way
-    return buf == NULL || buf->buffer->free != rpi_free_zc_buf ? NULL :
-        av_buffer_get_opaque(buf);
-}
-
-static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
-{
-    // As gmem is the first el NULL should be preserved
-    return &pic_zbe_ptr(buf)->gmem;
 }
 
 void * av_rpi_zc_buf_v(AVBufferRef * const buf)
@@ -878,7 +899,7 @@ AVZcEnvPtr av_rpi_zc_int_env_alloc(void)
         goto fail2;
 
     *zc = (ZcEnv){
-        .refcount = 1,
+        .refcount = ATOMIC_VAR_INIT(1),
         .pool_env = pool_env,
         .alloc_buf = rpi_buf_pool_alloc,
         .free_pool = zc_pool_delete_v
@@ -887,7 +908,7 @@ AVZcEnvPtr av_rpi_zc_int_env_alloc(void)
     return zc;
 
 fail2:
-    free(zc);
+    av_free(zc);
 fail1:
     rpi_mem_gpu_uninit();
     return NULL;
@@ -895,11 +916,7 @@ fail1:
 
 void av_rpi_zc_int_env_free(AVZcEnvPtr zc)
 {
-    if (zc != NULL)
-    {
-        zc->free_pool(zc->pool_env);
-        av_free(zc);
-    }
+    zc_deref(zc);
 }
 
 
@@ -913,87 +930,41 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
                     av_rpi_zc_alloc_buf_fn_t * alloc_buf_fn,
                     av_rpi_zc_free_pool_fn_t * free_pool_fn)
 {
+    ZcEnv * zc;
 
-    if (av_rpi_zc_in_use(s))
-    {
-        ZcEnv * const zc = s->get_buffer_context;
-        ++zc->refcount;
-    }
-    else
-    {
-        ZcEnv *const zc = av_mallocz(sizeof(*zc));
-        if (zc == NULL)
-        {
-            return AVERROR(ENOMEM);
-        }
+    av_assert0(!av_rpi_zc_in_use(s));
 
-        *zc = (ZcEnv){
-            .refcount = 1,
-            .old = {
-                .get_buffer_context = s->get_buffer_context,
-                .get_buffer2 = s->get_buffer2,
-                .thread_safe_callbacks = s->thread_safe_callbacks
-            },
-            .pool_env = pool_env,
-            .alloc_buf = alloc_buf_fn,
-            .free_pool = free_pool_fn
-        };
+    if ((zc = av_malloc(sizeof(*zc))) == NULL)
+        return AVERROR(ENOMEM);
 
-        s->get_buffer_context = zc;
-        s->get_buffer2 = av_rpi_zc_get_buffer2;
-        s->thread_safe_callbacks = 1;
-    }
+    *zc = (ZcEnv){
+        .refcount = ATOMIC_VAR_INIT(1),
+        .old = {
+            .get_buffer_context = s->get_buffer_context,
+            .get_buffer2 = s->get_buffer2,
+            .thread_safe_callbacks = s->thread_safe_callbacks
+        },
+        .pool_env = pool_env,
+        .alloc_buf = alloc_buf_fn,
+        .free_pool = free_pool_fn
+    };
+
+    s->get_buffer_context = zc;
+    s->get_buffer2 = av_rpi_zc_get_buffer2;
+    s->thread_safe_callbacks = 1;
     return 0;
 }
 
 void av_rpi_zc_uninit2(struct AVCodecContext * const s)
 {
-    if (av_rpi_zc_in_use(s))
-    {
-        ZcEnv * const zc = s->get_buffer_context;
-        if (--zc->refcount == 0)
-        {
-            s->get_buffer2 = zc->old.get_buffer2;
-            s->get_buffer_context = zc->old.get_buffer_context;
-            s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
+    ZcEnv * const zc = s->get_buffer_context;
 
-            zc->free_pool(zc->pool_env);
-            av_free(zc);
+    av_assert0(av_rpi_zc_in_use(s));
 
-        }
-    }
-}
+    s->get_buffer2 = zc->old.get_buffer2;
+    s->get_buffer_context = zc->old.get_buffer_context;
+    s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
 
-
-int av_rpi_zc_init_local(struct AVCodecContext * const s)
-{
-    int rv;
-    ZcPool * pool_env;
-
-    if ((rv = rpi_mem_gpu_init(0)) < 0)
-        return rv;
-
-    if ((pool_env = zc_pool_new(rv != GPU_INIT_CMA || DEBUG_ALWAYS_KEEP_LOCKED)) == NULL)
-    {
-        rv = AVERROR(ENOMEM);
-        goto fail1;
-    }
-
-    if ((rv = av_rpi_zc_init2(s, pool_env, rpi_buf_pool_alloc, zc_pool_delete_v)) < 0)
-        goto fail2;
-
-    return 0;
-
-fail2:
-    zc_pool_delete_v(pool_env);
-fail1:
-    rpi_mem_gpu_uninit();
-    return rv;
-}
-
-void av_rpi_zc_uninit_local(struct AVCodecContext * const s)
-{
-    av_rpi_zc_uninit2(s);
-    rpi_mem_gpu_uninit();
+    zc_deref(zc);
 }
 

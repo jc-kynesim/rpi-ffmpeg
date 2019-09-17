@@ -137,9 +137,6 @@ void av_rpi_zc_int_env_free(AVZcEnvPtr zc);
 AVZcEnvPtr av_rpi_zc_int_env_alloc(void);
 int rpi_get_display_buffer(const AVZcEnvPtr zc, AVFrame * const frame);
 
-int av_rpi_zc_init_local(struct AVCodecContext * const s);
-void av_rpi_zc_uninit_local(struct AVCodecContext * const s);
-
 
 typedef struct av_rpi_zc_buf_fn_tab_s {
     void (* free)(void * v);
