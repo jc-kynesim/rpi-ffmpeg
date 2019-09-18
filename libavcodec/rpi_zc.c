@@ -24,7 +24,6 @@ struct ZcPoolEnt;
 typedef struct ZcPool
 {
     size_t numbytes;
-    int keep_locked;
     struct ZcPoolEnt * head;
     pthread_mutex_t lock;
 } ZcPool;
@@ -96,7 +95,7 @@ static inline int av_rpi_is_sand_frame(const AVFrame * const frame)
 
 // Pool entry functions
 
-static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)
+static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const size_t req_size)
 {
     ZcPoolEnt * const zp = av_mallocz(sizeof(ZcPoolEnt));
 
@@ -116,25 +115,11 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req
         av_log(NULL, AV_LOG_ERROR, "av_gpu_malloc_cached(%d) failed\n", alloc_size);
         goto fail1;
     }
-#if 0
-    // If GPU alloced then lock here and now to prevent slow mapping
-    // ops when we assign to a buf
-    if (pool->keep_locked)
-    {
-        if (vcsm_lock(zp->vcsm_handle) == NULL)
-        {
-            av_log(NULL, AV_LOG_ERROR, "vcsm_lock failed\n");
-            vcsm_free(zp->vcsm_handle);
-            goto fail1;
-        }
-    }
-#endif
 
 #if TRACE_ALLOC
     printf("%s: Alloc %#x bytes @ h=%d\n", __func__, alloc_size, zp->vcsm_handle);
 #endif
 
-    pool->numbytes = alloc_size;
     zp->numbytes = alloc_size;
     zp->pool = pool;
     return zp;
@@ -165,12 +150,8 @@ static void zc_pool_ent_free(ZcPoolEnt * const zp)
 //
 // Pool functions
 
-static void zc_pool_flush(ZcPool * const pool)
+static void zc_pool_free_ent_list(ZcPoolEnt * p)
 {
-    ZcPoolEnt * p = pool->head;
-    pool->head = NULL;
-    pool->numbytes = ~0U;
-
     while (p != NULL)
     {
         ZcPoolEnt * const zp = p;
@@ -179,10 +160,19 @@ static void zc_pool_flush(ZcPool * const pool)
     }
 }
 
-static ZcPoolEnt * zc_pool_get_ent(ZcPool * const pool, const int req_bytes)
+static void zc_pool_flush(ZcPool * const pool)
 {
-    ZcPoolEnt * zp;
-    int numbytes;
+    ZcPoolEnt * p = pool->head;
+    pool->head = NULL;
+    pool->numbytes = ~0U;
+    zc_pool_free_ent_list(p);
+}
+
+static ZcPoolEnt * zc_pool_get_ent(ZcPool * const pool, const size_t req_bytes)
+{
+    ZcPoolEnt * zp = NULL;
+    ZcPoolEnt * flush_list = NULL;
+    size_t numbytes;
 
     pthread_mutex_lock(&pool->lock);
 
@@ -192,24 +182,22 @@ static ZcPoolEnt * zc_pool_get_ent(ZcPool * const pool, const int req_bytes)
     // Close in this context means within 128k
     if (req_bytes > numbytes || req_bytes + 0x20000 < numbytes)
     {
-        zc_pool_flush(pool);
-        numbytes = req_bytes;
+        flush_list = pool->head;
+        pool->head = NULL;
+        pool->numbytes = numbytes = req_bytes;
     }
-
-    if (pool->head != NULL)
+    else if (pool->head != NULL)
     {
         zp = pool->head;
         pool->head = zp->next;
     }
-    else
-    {
-        zp = zc_pool_ent_alloc(pool, numbytes);
-    }
 
     pthread_mutex_unlock(&pool->lock);
 
-    // Start with our buffer empty of preconceptions
-//    rpi_cache_flush_one_gm_ptr(&zp->gmem, RPI_CACHE_FLUSH_MODE_INVALIDATE);
+    zc_pool_free_ent_list(flush_list);
+
+    if (zp == NULL)
+        zp = zc_pool_ent_alloc(pool, numbytes);
 
     return zp;
 }
@@ -239,14 +227,13 @@ static void zc_pool_put_ent(ZcPoolEnt * const zp)
 }
 
 static ZcPool *
-zc_pool_new(const int keep_locked)
+zc_pool_new(void)
 {
     ZcPool * const pool = av_mallocz(sizeof(*pool));
     if (pool == NULL)
         return NULL;
 
     pool->numbytes = -1;
-    pool->keep_locked = keep_locked;
     pool->head = NULL;
     pthread_mutex_init(&pool->lock, NULL);
     return pool;
@@ -360,12 +347,11 @@ av_rpi_zc_int_env_alloc(void * logctx)
 {
     ZcEnv * zc;
     ZcPool * pool_env;
-    int gpu_type;
 
-    if ((gpu_type = rpi_mem_gpu_init(0)) < 0)
+    if (rpi_mem_gpu_init(0))
         return NULL;
 
-    if ((pool_env = zc_pool_new(gpu_type != GPU_INIT_CMA || DEBUG_ALWAYS_KEEP_LOCKED)) == NULL)
+    if ((pool_env = zc_pool_new()) == NULL)
         goto fail1;
 
     if ((zc = av_rpi_zc_env_alloc(logctx, pool_env, zc_pool_buf_alloc, zc_pool_delete_v)) == NULL)
@@ -381,9 +367,12 @@ fail1:
 }
 
 void
-av_rpi_zc_int_env_free(AVZcEnvPtr zc)
+av_rpi_zc_int_env_freep(AVZcEnvPtr * zcp)
 {
-    av_rpi_zc_env_release(zc);
+    const AVZcEnvPtr zc = *zcp;
+    *zcp = NULL;
+    if (zc != NULL)
+        av_rpi_zc_env_release(zc);
 }
 
 //============================================================================

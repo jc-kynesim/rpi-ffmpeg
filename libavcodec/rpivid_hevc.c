@@ -1702,7 +1702,7 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     }
     av_freep(&rpi->dec_envs);
 
-    av_rpi_zc_int_env_free(rpi->zc);
+    av_rpi_zc_int_env_freep(&rpi->zc);
 
     gpu_free(&rpi->gcolbuf);
 

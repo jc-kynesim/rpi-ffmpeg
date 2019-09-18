@@ -6029,7 +6029,7 @@ static int hwaccel_alloc_frame(AVCodecContext *s, AVFrame *frame)
 static int hwaccel_rpi3_qpu_free(AVCodecContext *avctx)
 {
     hwaccel_rpi3_qpu_env_t * const r3 = avctx->internal->hwaccel_priv_data;
-    av_rpi_zc_int_env_free(r3->zc);
+    av_rpi_zc_int_env_freep(&r3->zc);
     return 0;
 }
 

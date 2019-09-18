@@ -361,8 +361,7 @@ static void rpi_vout_deinit(struct AVFormatContext * s)
 {
     rpi_display_env_t * const de = s->priv_data;
 
-    av_rpi_zc_int_env_free(de->zc);
-    de->zc = NULL;
+    av_rpi_zc_int_env_freep(&de->zc);
 }
 
 

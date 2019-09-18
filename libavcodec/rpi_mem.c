@@ -75,15 +75,32 @@ static int gpu_malloc_internal(GPU_MEM_PTR_T * const p,
     memset(p, 0, sizeof(*p));
     p->numbytes = (numbytes + 255) & ~255;  // Round up
 
-    if ((p->vcsm_handle = vcsm_malloc_cache(p->numbytes, cache_type | 0x80, (char *)name)) == 0 ||
-        (p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle)) == 0 ||
-        (p->arm = vcsm_lock(p->vcsm_handle)) == NULL ||
-        (p->vc = vcsm_vc_addr_from_hdl(p->vcsm_handle)) == 0)
+    if ((p->vcsm_handle = vcsm_malloc_cache(p->numbytes, cache_type | 0x80, (char *)name)) == 0)
     {
-        gpu_free_internal(p);
-        return AVERROR(ENOMEM);
+        av_log(NULL, AV_LOG_ERROR, "Unable to alloc %d bytes from VCSM for %s\n", p->numbytes, name);
+        goto fail;
     }
+    if ((p->vc_handle = vcsm_vc_hdl_from_hdl(p->vcsm_handle)) == 0)
+    {
+        av_log(NULL, AV_LOG_ERROR, "Unable to VC handle from VCSM for %s\n", name);
+        goto fail;
+    }
+    if ((p->arm = vcsm_lock(p->vcsm_handle)) == NULL)
+    {
+        av_log(NULL, AV_LOG_ERROR, "Unable to lock handle from VCSM for %s\n", name);
+        goto fail;
+    }
+    if ((p->vc = vcsm_vc_addr_from_hdl(p->vcsm_handle)) == 0)
+    {
+        av_log(NULL, AV_LOG_ERROR, "Unable to get VC addr from VCSM for %s\n", name);
+        goto fail;
+    }
+
     return 0;
+
+fail:
+    gpu_free_internal(p);
+    return AVERROR(ENOMEM);
 }
 
 // Public gpu fns
