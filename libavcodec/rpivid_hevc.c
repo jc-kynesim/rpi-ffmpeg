@@ -1626,12 +1626,12 @@ static int rpivid_hevc_alloc_frame(AVCodecContext *s, AVFrame *frame)
             pthread_mutex_lock(&rpi->phase_lock); // Abuse - not worth creating a lock just for this
             // Alloc inside lock to make sure we only ever alloc one
             if (rpi->zc == NULL) {
-                rpi->zc = av_rpi_zc_int_env_alloc();
+                rpi->zc = av_rpi_zc_int_env_alloc(s);
             }
             pthread_mutex_unlock(&rpi->phase_lock);
         }
         rv = (rpi->zc == NULL) ? AVERROR(ENOMEM) :
-            rpi_get_display_buffer(rpi->zc, frame);
+            av_rpi_zc_get_buffer(rpi->zc, frame);
     }
 
     if (rv == 0 &&

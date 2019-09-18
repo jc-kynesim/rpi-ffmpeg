@@ -351,7 +351,7 @@ static int rpi_vout_init(struct AVFormatContext * s)
     rpi_display_env_t * const de = s->priv_data;
 
     // Get a ZC context in case we need one - has little overhead if unused
-    if ((de->zc = av_rpi_zc_int_env_alloc()) == NULL)
+    if ((de->zc = av_rpi_zc_int_env_alloc(s)) == NULL)
         return 1;
 
     return 0;

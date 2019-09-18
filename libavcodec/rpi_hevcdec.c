@@ -6014,7 +6014,7 @@ static int hwaccel_alloc_frame(AVCodecContext *s, AVFrame *frame)
     }
     else
     {
-        rv = rpi_get_display_buffer(r3->zc, frame);
+        rv = av_rpi_zc_get_buffer(r3->zc, frame);
     }
 
     if (rv == 0 &&
@@ -6037,7 +6037,7 @@ static int hwaccel_rpi3_qpu_init(AVCodecContext *avctx)
 {
     hwaccel_rpi3_qpu_env_t * const r3 = avctx->internal->hwaccel_priv_data;
 
-    if ((r3->zc = av_rpi_zc_int_env_alloc()) == NULL)
+    if ((r3->zc = av_rpi_zc_int_env_alloc(avctx)) == NULL)
         goto fail;
 
     return 0;

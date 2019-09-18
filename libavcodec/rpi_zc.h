@@ -134,8 +134,9 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
 void av_rpi_zc_uninit2(struct AVCodecContext * const s);
 
 void av_rpi_zc_int_env_free(AVZcEnvPtr zc);
-AVZcEnvPtr av_rpi_zc_int_env_alloc(void);
-int rpi_get_display_buffer(const AVZcEnvPtr zc, AVFrame * const frame);
+AVZcEnvPtr av_rpi_zc_int_env_alloc(void * const logctx);
+
+int av_rpi_zc_get_buffer(const AVZcEnvPtr zc, AVFrame * const frame);
 
 
 typedef struct av_rpi_zc_buf_fn_tab_s {
@@ -149,6 +150,14 @@ typedef struct av_rpi_zc_buf_fn_tab_s {
 
 AVBufferRef * av_rpi_zc_buf(size_t numbytes, int addr_offset, void * v, const av_rpi_zc_buf_fn_tab_t * fn_tab);
 void * av_rpi_zc_buf_v(AVBufferRef * const buf);
+
+
+AVZcEnvPtr av_rpi_zc_env_alloc(void * logctx,
+                    void * pool_env,
+                    av_rpi_zc_alloc_buf_fn_t * alloc_buf_fn,
+                    av_rpi_zc_free_pool_fn_t * free_pool_fn);
+void av_rpi_zc_env_release(const AVZcEnvPtr zc);
+
 
 #endif
 
