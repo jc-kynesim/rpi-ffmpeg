@@ -25,7 +25,6 @@ typedef struct ZcPool
 {
     size_t numbytes;
     int keep_locked;
-    unsigned int n;
     struct ZcPoolEnt * head;
     pthread_mutex_t lock;
 } ZcPool;
@@ -39,7 +38,6 @@ typedef struct ZcPoolEnt
     void * map_arm;
     unsigned int map_vc;
 
-    unsigned int n;
     struct ZcPoolEnt * next;
     struct ZcPool * pool;
 } ZcPoolEnt;
@@ -70,7 +68,6 @@ typedef struct ZcBufEnv {
 } ZcBufEnv;
 
 
-static void rpi_free_zc_buf(void * opaque, uint8_t * data);
 
 
 
@@ -93,23 +90,11 @@ static inline int av_rpi_is_sand_frame(const AVFrame * const frame)
     return av_rpi_is_sand_format(frame->format);
 }
 
-static inline ZcBufEnv * pic_zbe_ptr(AVBufferRef *const buf)
-{
-    // Kludge where we check the free fn to check this is really
-    // one of our buffers - can't think of a better way
-    return buf == NULL || buf->buffer->free != rpi_free_zc_buf ? NULL :
-        av_buffer_get_opaque(buf);
-}
-
-static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
-{
-    // As gmem is the first el NULL should be preserved
-    return &pic_zbe_ptr(buf)->gmem;
-}
-
 //----------------------------------------------------------------------------
 //
 // Internal pool stuff
+
+// Pool entry functions
 
 static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req_size)
 {
@@ -152,7 +137,6 @@ static ZcPoolEnt * zc_pool_ent_alloc(ZcPool * const pool, const unsigned int req
     pool->numbytes = alloc_size;
     zp->numbytes = alloc_size;
     zp->pool = pool;
-    zp->n = pool->n++;
     return zp;
 
 fail1:
@@ -177,6 +161,10 @@ static void zc_pool_ent_free(ZcPoolEnt * const zp)
     av_free(zp);
 }
 
+//----------------------------------------------------------------------------
+//
+// Pool functions
+
 static void zc_pool_flush(ZcPool * const pool)
 {
     ZcPoolEnt * p = pool->head;
@@ -191,7 +179,7 @@ static void zc_pool_flush(ZcPool * const pool)
     }
 }
 
-static ZcPoolEnt * zc_pool_alloc(ZcPool * const pool, const int req_bytes)
+static ZcPoolEnt * zc_pool_get_ent(ZcPool * const pool, const int req_bytes)
 {
     ZcPoolEnt * zp;
     int numbytes;
@@ -226,7 +214,7 @@ static ZcPoolEnt * zc_pool_alloc(ZcPool * const pool, const int req_bytes)
     return zp;
 }
 
-static void zc_pool_free(ZcPoolEnt * const zp)
+static void zc_pool_put_ent(ZcPoolEnt * const zp)
 {
     ZcPool * const pool = zp == NULL ? NULL : zp->pool;
     if (zp != NULL)
@@ -284,7 +272,7 @@ zc_pool_delete(ZcPool * const pool)
 
 static void zc_pool_free_v(void * v)
 {
-    zc_pool_free(v);
+    zc_pool_put_ent(v);
 }
 
 static unsigned int zc_pool_ent_vcsm_handle_v(void * v)
@@ -341,7 +329,7 @@ static AVBufferRef *
 zc_pool_buf_alloc(void * v, size_t size, const AVRpiZcFrameGeometry * geo)
 {
     ZcPool * const pool = v;
-    ZcPoolEnt *const zp = zc_pool_alloc(pool, size);
+    ZcPoolEnt *const zp = zc_pool_get_ent(pool, size);
     AVBufferRef * buf;
 
     (void)geo;  // geo ignored here
@@ -360,7 +348,7 @@ zc_pool_buf_alloc(void * v, size_t size, const AVRpiZcFrameGeometry * geo)
     return buf;
 
 fail2:
-    zc_pool_free(zp);
+    zc_pool_put_ent(zp);
 fail0:
     return NULL;
 }
@@ -651,6 +639,22 @@ static AVBufferRef * zc_sand64_16_to_sand128(const AVZcEnvPtr zc,
 //
 // Public info extraction calls
 
+static void zc_buf_free_cb(void * opaque, uint8_t * data);
+
+static inline ZcBufEnv * pic_zbe_ptr(AVBufferRef *const buf)
+{
+    // Kludge where we check the free fn to check this is really
+    // one of our buffers - can't think of a better way
+    return buf == NULL || buf->buffer->free != zc_buf_free_cb ? NULL :
+        av_buffer_get_opaque(buf);
+}
+
+static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
+{
+    // As gmem is the first el NULL should be preserved
+    return &pic_zbe_ptr(buf)->gmem;
+}
+
 int av_rpi_zc_vc_handle(const AVRpiZcRefPtr fr_ref)
 {
     const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
@@ -761,7 +765,7 @@ void * av_rpi_zc_buf_v(AVBufferRef * const buf)
 }
 
 // AV buffer pre-free callback
-static void rpi_free_zc_buf(void * opaque, uint8_t * data)
+static void zc_buf_free_cb(void * opaque, uint8_t * data)
 {
     if (opaque != NULL)
     {
@@ -820,7 +824,7 @@ AVBufferRef * av_rpi_zc_buf(size_t numbytes, int addr_offset, void * v, const av
         goto fail;
     }
 
-    if ((buf = av_buffer_create(zbe->gmem.arm, zbe->gmem.numbytes, rpi_free_zc_buf, zbe, 0)) == NULL)
+    if ((buf = av_buffer_create(zbe->gmem.arm, zbe->gmem.numbytes, zc_buf_free_cb, zbe, 0)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "ZC: Failed av_buffer_create\n");
         goto fail;
@@ -829,7 +833,7 @@ AVBufferRef * av_rpi_zc_buf(size_t numbytes, int addr_offset, void * v, const av
     return buf;
 
 fail:
-    rpi_free_zc_buf(zbe, NULL);
+    zc_buf_free_cb(zbe, NULL);
     return NULL;
 }
 
