@@ -240,8 +240,10 @@ typedef struct phase_wait_env_s {
     dec_env_t *     q;
 #if OPT_PHASE_TIMING
     uint64_t phase_time;
+    uint64_t max_phase_time;
     uint64_t time_in_phase;
     uint64_t time_out_phase;
+    unsigned int max_time_decode_order;
     unsigned int time_bins[9];
     unsigned int time_bins3[9];
     uint64_t time3[3];
@@ -984,6 +986,10 @@ static inline void tend_phase(RPI_T * const rpi, const int phase_no)
     p->time_in_phase += in_time;
     p->phase_time = now;
     p->time3[p->i3] = in_time;
+    if (in_time > p->max_phase_time) {
+        p->max_phase_time = in_time;
+        p->max_time_decode_order = p->last_order;
+    }
     p->i3 = p->i3 < 3 ? p->i3 + 1 : 0;
     in_time3 = p->time3[0] + p->time3[1] + p->time3[2];
     for (i = 0; i != 9; ++i) {
@@ -1357,7 +1363,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         sem_post(&rpi->coeffbuf_sem);
         if (status == -1)
         {
-            av_log(avctx, AV_LOG_ERROR, "Out of pu + coeff intermediate memory\n");
+            av_log(avctx, AV_LOG_ERROR, "Out of pu + coeff intermediate memory: pus=%d\n", rpi->max_pu_msgs);
             rv = AVERROR_BUFFER_TOO_SMALL;
         }
         else
@@ -1689,7 +1695,9 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
             av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d %7d\n",
                    p->time_bins3[0],  p->time_bins3[1], p->time_bins3[2], p->time_bins3[3],
                    p->time_bins3[4],  p->time_bins3[5], p->time_bins3[6], p->time_bins3[7], p->time_bins3[8]);
-
+            av_log(avctx, AV_LOG_INFO, "Longest duraction: %ums @ frame %u\n",
+                   (unsigned int)(p->max_phase_time / 1000),
+                   p->max_time_decode_order);
         }
         av_log(avctx, AV_LOG_INFO, "PU max=%d\n", rpi->max_pu_msgs);
     }
