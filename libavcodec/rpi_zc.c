@@ -272,7 +272,11 @@ static unsigned int zc_pool_ent_vc_handle_v(void * v)
 {
     ZcPoolEnt * zp = v;
     if (zp->vc_handle == 0)
-        zp->vc_handle = vcsm_vc_hdl_from_hdl(zp->vcsm_handle);
+    {
+        if ((zp->vc_handle = vcsm_vc_hdl_from_hdl(zp->vcsm_handle)) == 0)
+            av_log(NULL, AV_LOG_ERROR, "%s: Failed to map VCSM handle %d to VC handle\n",
+                   __func__, zp->vcsm_handle);
+    }
     return zp->vc_handle;
 }
 
@@ -280,7 +284,11 @@ static void * zc_pool_ent_map_arm_v(void * v)
 {
     ZcPoolEnt * zp = v;
     if (zp->map_arm == NULL)
-        zp->map_arm = vcsm_lock(zp->vcsm_handle);
+    {
+        if ((zp->map_arm = vcsm_lock(zp->vcsm_handle)) == NULL)
+            av_log(NULL, AV_LOG_ERROR, "%s: Failed to map VCSM handle %d to ARM address\n",
+                   __func__, zp->vcsm_handle);
+    }
     return zp->map_arm;
 }
 
@@ -288,7 +296,11 @@ static unsigned int zc_pool_ent_map_vc_v(void * v)
 {
     ZcPoolEnt * zp = v;
     if (zp->map_vc == 0)
-        zp->map_vc = vcsm_vc_addr_from_hdl(zp->vcsm_handle);
+    {
+        if ((zp->map_vc = vcsm_vc_addr_from_hdl(zp->vcsm_handle)) == 0)
+            av_log(NULL, AV_LOG_ERROR, "%s: Failed to map VCSM handle %d to VC address\n",
+                   __func__, zp->vcsm_handle);
+    }
     return zp->map_vc;
 }
 
@@ -348,7 +360,7 @@ av_rpi_zc_int_env_alloc(void * logctx)
     ZcEnv * zc;
     ZcPool * pool_env;
 
-    if (rpi_mem_gpu_init(0))
+    if (rpi_mem_gpu_init(0) < 0)
         return NULL;
 
     if ((pool_env = zc_pool_new()) == NULL)
