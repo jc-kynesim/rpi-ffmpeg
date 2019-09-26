@@ -1703,12 +1703,13 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
     }
 #endif
 
-
-
-    for (int i; i < avctx->thread_count && rpi->dec_envs[i] != NULL; ++i) {
-        dec_env_delete(rpi->dec_envs[i]);
+    if (rpi->dec_envs != NULL)
+    {
+        for (int i; i < avctx->thread_count && rpi->dec_envs[i] != NULL; ++i) {
+            dec_env_delete(rpi->dec_envs[i]);
+        }
+        av_freep(&rpi->dec_envs);
     }
-    av_freep(&rpi->dec_envs);
 
     av_rpi_zc_int_env_freep(&rpi->zc);
 
