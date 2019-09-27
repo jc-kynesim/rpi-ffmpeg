@@ -234,6 +234,11 @@ enum AVPixelFormat {
      */
     AV_PIX_FMT_CUDA,
 
+    /**
+     * HW acceleration through RPI.
+     */
+    AV_PIX_FMT_RPI,
+
     AV_PIX_FMT_0RGB,        ///< packed RGB 8:8:8, 32bpp, XRGBXRGB...   X=unused/undefined
     AV_PIX_FMT_RGB0,        ///< packed RGB 8:8:8, 32bpp, RGBXRGBX...   X=unused/undefined
     AV_PIX_FMT_0BGR,        ///< packed BGR 8:8:8, 32bpp, XBGRXBGR...   X=unused/undefined
@@ -339,6 +344,13 @@ enum AVPixelFormat {
 
     AV_PIX_FMT_GRAYF32BE,  ///< IEEE-754 single precision Y, 32bpp, big-endian
     AV_PIX_FMT_GRAYF32LE,  ///< IEEE-754 single precision Y, 32bpp, little-endian
+
+// RPI - not on ifdef so can be got at by calling progs
+    AV_PIX_FMT_SAND128,    ///< 4:2:0  8-bit 128x*Y stripe, 64x*UV stripe, then next x stripe, mysterious padding
+    AV_PIX_FMT_SAND64_10,  ///< 4:2:0 10-bit  64x*Y stripe, 32x*UV stripe, then next x stripe, mysterious padding
+    AV_PIX_FMT_SAND64_16,  ///< 4:2:0 16-bit  64x*Y stripe, 32x*UV stripe, then next x stripe, mysterious padding
+    AV_PIX_FMT_RPI4_8,
+    AV_PIX_FMT_RPI4_10,
 
     AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };

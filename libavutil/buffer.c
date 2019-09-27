@@ -355,3 +355,9 @@ AVBufferRef *av_buffer_pool_get(AVBufferPool *pool)
 
     return ret;
 }
+
+// Return the opaque for the underlying frame (gives us a GPU_MEM_PTR_T)
+void *av_buffer_pool_opaque(AVBufferRef *ref) {
+  BufferPoolEntry *buf = av_buffer_get_opaque(ref);
+  return buf->opaque;
+}
