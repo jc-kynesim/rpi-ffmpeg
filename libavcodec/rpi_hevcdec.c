@@ -5762,7 +5762,7 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
 
     if (vpu_qpu_init() != 0)
         goto fail;
-    s->qpu_init_ok = 0;
+    s->qpu_init_ok = 1;
 
 #if RPI_QPU_EMU_Y || RPI_QPU_EMU_C
     {
