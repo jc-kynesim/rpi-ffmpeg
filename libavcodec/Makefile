@@ -50,9 +50,6 @@ OBJS = ac3_parser.o                                                     \
        qsv_api.o                                                        \
        raw.o                                                            \
        utils.o                                                          \
-       rpi_qpu.o                                                        \
-       rpi_mailbox.o                                                    \
-       rpi_zc.o                                                         \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 
@@ -370,7 +367,8 @@ OBJS-$(CONFIG_HAP_ENCODER)             += hapenc.o hap.o
 OBJS-$(CONFIG_HEVC_DECODER)            += hevcdec.o hevc_mvs.o \
                                           hevc_cabac.o hevc_refs.o hevcpred.o    \
                                           hevcdsp.o hevc_filter.o hevc_data.o
-OBJS-$(CONFIG_RPI)                     += rpivid_hevc.o rpi_mem.o
+OBJS-$(CONFIG_RPI)                     += rpi_mem.o \
+                                          rpi_mailbox.o rpi_zc.o
 OBJS-$(CONFIG_HEVC_RPI_DECODER)        += rpi_hevcdec.o rpi_hevc_mvs.o \
                                           rpi_hevc_cabac.o rpi_hevc_refs.o rpi_hevcpred.o    \
                                           rpi_hevcdsp.o rpi_hevc_filter.o rpi_hevc_data.o    \
@@ -885,6 +883,8 @@ OBJS-$(CONFIG_HEVC_NVDEC_HWACCEL)         += nvdec_hevc.o
 OBJS-$(CONFIG_HEVC_QSV_HWACCEL)           += qsvdec_h2645.o
 OBJS-$(CONFIG_HEVC_VAAPI_HWACCEL)         += vaapi_hevc.o
 OBJS-$(CONFIG_HEVC_VDPAU_HWACCEL)         += vdpau_hevc.o
+OBJS-$(CONFIG_HEVC_RPI4_8_HWACCEL)        += rpivid_hevc.o
+OBJS-$(CONFIG_HEVC_RPI4_10_HWACCEL)       += rpivid_hevc.o
 OBJS-$(CONFIG_MJPEG_NVDEC_HWACCEL)        += nvdec_mjpeg.o
 OBJS-$(CONFIG_MJPEG_VAAPI_HWACCEL)        += vaapi_mjpeg.o
 OBJS-$(CONFIG_MPEG1_NVDEC_HWACCEL)        += nvdec_mpeg12.o
