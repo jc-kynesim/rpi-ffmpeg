@@ -309,9 +309,9 @@ static inline int rpi_sem_wait(sem_t * const sem)
 #define TRACE_DEV 0
 #define TRACE_ENTRY 0
 
-#define REGS_NAME "/dev/argon-hevcmem"
+#define REGS_NAME "/dev/rpivid-hevcmem"
 #define REGS_SIZE 0x10000
-#define INTS_NAME "/dev/argon-intcmem"
+#define INTS_NAME "/dev/rpivid-intcmem"
 #define INTS_SIZE 0x10000  // 4 is probably enough but we are going to alloc a page anyway
 
 static volatile uint32_t * map_dev(AVCodecContext * const avctx, const char * const dev_name, size_t size)
