@@ -246,7 +246,8 @@ typedef struct phase_wait_env_s {
     unsigned int max_time_decode_order;
     unsigned int time_bins[9];
     unsigned int time_bins3[9];
-    uint64_t time3[3];
+    unsigned int time_bins5[9];
+    uint64_t time_stash[16];
     unsigned int i3;
 #endif
 } phase_wait_env_t;                      // Single linked list of threads waiting for this phase
@@ -972,6 +973,21 @@ static inline void tstart_phase(RPI_T * const rpi, const int phase_no)
 #endif
 }
 
+#if OPT_PHASE_TIMING
+static unsigned int tavg_bin_phase(phase_wait_env_t *const p, const unsigned int avg_n)
+{
+    uint64_t tsum = 0;
+    unsigned int i;
+    for (i = 0; i != avg_n; ++i)
+        tsum += p->time_stash[(p->i3 - i) & 15];
+    for (i = 0; i != 9; ++i) {
+        if (time_thresholds[i] * 1000 * avg_n > tsum)
+            break;
+    }
+    return i;
+}
+#endif
+
 // End timing for phase
 // Stats only - no actual effect
 static inline void tend_phase(RPI_T * const rpi, const int phase_no)
@@ -980,28 +996,19 @@ static inline void tend_phase(RPI_T * const rpi, const int phase_no)
     phase_wait_env_t *const p = rpi->phase_reqs + phase_no;
     const uint64_t now = tus64();
     const uint64_t in_time = now - p->phase_time;
-    uint64_t in_time3;
-    unsigned int i;
 
     p->time_in_phase += in_time;
     p->phase_time = now;
-    p->time3[p->i3] = in_time;
+    p->time_stash[p->i3] = in_time;
     if (in_time > p->max_phase_time) {
         p->max_phase_time = in_time;
         p->max_time_decode_order = p->last_order;
     }
-    p->i3 = p->i3 < 3 ? p->i3 + 1 : 0;
-    in_time3 = p->time3[0] + p->time3[1] + p->time3[2];
-    for (i = 0; i != 9; ++i) {
-        if (time_thresholds[i] * 1000 > in_time)
-            break;
-    }
-    ++p->time_bins[i];
-    for (i = 0; i != 9; ++i) {
-        if (time_thresholds[i] * 3000 > in_time3)
-            break;
-    }
-    ++p->time_bins3[i];
+    ++p->time_bins[tavg_bin_phase(p, 1)];
+    ++p->time_bins3[tavg_bin_phase(p, 3)];
+    ++p->time_bins5[tavg_bin_phase(p, 5)];
+
+    p->i3 = (p->i3 + 1) & 15;
 #endif
 }
 
@@ -1208,6 +1215,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     const SliceHeader * const sh = &s->sh;
     dec_env_t * const de = dec_env_get(avctx,  rpi);
     AVFrame * const f = s->ref->frame;
+    AVFrame * fallback_frame = f;
     const unsigned int dpbno_cur = s->ref - s->DPB;
     vid_vc_addr_t cmds_vc;
     vid_vc_addr_t pu_base_vc;
@@ -1383,6 +1391,14 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     // Phase 2 ---------------------------------------------------------------
 
     wait_phase(rpi, de, 2);
+
+    if ((rv = av_rpi_zc_resolve_frame(f, ZC_RESOLVE_ALLOC)) != 0)
+    {
+        post_phase(rpi, de, 2);
+        av_log(avctx, AV_LOG_ERROR, "Failed to allocate output frame\n");
+        goto fail;
+    }
+
     tstart_phase(rpi, 2);
 
     apb_write_vc_addr(rpi, RPI_PURBASE, pu_base_vc);
@@ -1402,19 +1418,33 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         apb_write(rpi, 0x900C+16*i, 0);
     }
 
+    // Keep the last thing we resolved as fallback for any ref we fail to
+    // resolve.  As a final fallback use our current frame.  The pels might
+    // not be there yet but at least the memory is valid.
+    fallback_frame = f;
     for(i=L0; i<=L1; i++)
     {
         for (unsigned int rIdx=0; rIdx <sh->nb_refs[i]; rIdx++)
         {
-            const HEVCFrame *f1 = s->ref->refPicList[i].ref[rIdx];
-            const HEVCFrame *c = s->ref; // CurrentPicture
-            int pic = f1 - s->DPB;
+            const HEVCFrame * const f1 = s->ref->refPicList[i].ref[rIdx];
+            const int pic = f1 - s->DPB;
             // Make sure pictures are in range 0 to 15
-            int adjusted_pic = f1<c? pic : pic-1;
-            const struct HEVCFrame *hevc = &s->DPB[pic];
-            const AVFrame *fr = hevc ? hevc->frame : NULL;
+            const int adjusted_pic = f1 < s->ref ? pic : pic-1;
+            const struct HEVCFrame * const hevc = &s->DPB[pic];
+            AVFrame * fr = (hevc != NULL) ? hevc->frame : NULL;
 
-            av_assert0(adjusted_pic >= 0 && adjusted_pic < 16);
+            if (fr != NULL &&
+                av_rpi_zc_resolve_frame(fr, ZC_RESOLVE_FAIL) == 0)
+            {
+                fallback_frame = fr;
+            }
+            else
+            {
+                av_log(avctx, AV_LOG_WARNING, "Failed to resolve reference frame\n");
+                fr = fallback_frame;
+            }
+
+            av_assert1(adjusted_pic >= 0 && adjusted_pic < 16);
             apb_write_vc_addr(rpi, 0x9000+16*adjusted_pic, get_vc_address_y(fr));
             apb_write_vc_addr(rpi, 0x9008+16*adjusted_pic, get_vc_address_u(fr));
             // Strides ignored
@@ -1462,6 +1492,9 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     tend_phase(rpi, 2);
     sem_post(&rpi->coeffbuf_sem);
+    // Set valid here to avoid race in resolving in any pending phase 2
+    av_rpi_zc_set_valid_frame(f);
+
     post_phase(rpi, de, 2);
 
     // Flush frame for CPU access
@@ -1617,14 +1650,30 @@ static int rpi_hevc_decode_slice(
 
 //////////////////////////////////////////////////////////////////////////////
 
-static int rpivid_hevc_alloc_frame(AVCodecContext *s, AVFrame *frame)
+static int rpivid_retrieve_data(void *logctx, AVFrame *frame)
 {
-    RPI_T * const rpi = s->internal->hwaccel_priv_data;
+    int rv;
+    if ((rv = av_rpi_zc_resolve_frame(frame, ZC_RESOLVE_WAIT_VALID)) != 0)
+        av_log(logctx, AV_LOG_ERROR, "Unable to resolve output frame\n");
+    return rv;
+}
+
+static int rpivid_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
+{
+    RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
+    HEVCContext * const s = avctx->priv_data;
+    const unsigned int thread_req = avctx->thread_count < 1 ? 1 : avctx->thread_count;
+    // Frame buffering + 1 output.  Would need thread_count extra but we now
+    // alloc at the start of phase 2 so that is the only thread we need the
+    // extra buffer for.
+    const unsigned int pool_req = s->ps.sps->temporal_layer[s->ps.sps->max_sub_layers - 1].max_dec_pic_buffering + 1;
     int rv;
 
-    if (av_rpi_zc_in_use(s))
+    if (av_rpi_zc_in_use(avctx))
     {
-        rv = s->get_buffer2(s, frame, 0);
+        const AVZcEnvPtr zc = avctx->get_buffer_context;
+        av_rpi_zc_set_decoder_pool_size(zc, pool_req);
+        av_rpi_zc_get_buffer(zc, frame);   // get_buffer2 would alloc
     }
     else
     {
@@ -1636,6 +1685,7 @@ static int rpivid_hevc_alloc_frame(AVCodecContext *s, AVFrame *frame)
             }
             pthread_mutex_unlock(&rpi->phase_lock);
         }
+        av_rpi_zc_set_decoder_pool_size(rpi->zc, pool_req); // Ignored by local allocator, but set anyway :-)
         rv = (rpi->zc == NULL) ? AVERROR(ENOMEM) :
             av_rpi_zc_get_buffer(rpi->zc, frame);
     }
@@ -1646,8 +1696,23 @@ static int rpivid_hevc_alloc_frame(AVCodecContext *s, AVFrame *frame)
         av_frame_unref(frame);
     }
 
+    if (rv == 0)
+    {
+        FrameDecodeData *fdd = (FrameDecodeData*)frame->private_ref->data;
+        fdd->post_process = rpivid_retrieve_data;
+    }
+
     return rv;
 }
+
+#if OPT_PHASE_TIMING
+static void log_bin_phase(AVCodecContext * const avctx, const unsigned int * const bins)
+{
+    av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d %7d\n",
+           bins[0],  bins[1], bins[2], bins[3],
+           bins[4],  bins[5], bins[6], bins[7], bins[8]);
+}
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -1689,12 +1754,9 @@ static int rpi_hevc_free(AVCodecContext *avctx) {
             av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d        >\n",
                    time_thresholds[0], time_thresholds[1], time_thresholds[2], time_thresholds[3],
                    time_thresholds[4], time_thresholds[5], time_thresholds[6], time_thresholds[7]);
-            av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d %7d\n",
-                   p->time_bins[0],  p->time_bins[1], p->time_bins[2], p->time_bins[3],
-                   p->time_bins[4],  p->time_bins[5], p->time_bins[6], p->time_bins[7], p->time_bins[8]);
-            av_log(avctx, AV_LOG_INFO, "%7d %7d %7d %7d %7d %7d %7d %7d %7d\n",
-                   p->time_bins3[0],  p->time_bins3[1], p->time_bins3[2], p->time_bins3[3],
-                   p->time_bins3[4],  p->time_bins3[5], p->time_bins3[6], p->time_bins3[7], p->time_bins3[8]);
+            log_bin_phase(avctx, p->time_bins);
+            log_bin_phase(avctx, p->time_bins3);
+            log_bin_phase(avctx, p->time_bins5);
             av_log(avctx, AV_LOG_INFO, "Longest duraction: %ums @ frame %u\n",
                    (unsigned int)(p->max_phase_time / 1000),
                    p->max_time_decode_order);
