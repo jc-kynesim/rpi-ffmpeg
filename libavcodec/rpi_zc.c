@@ -57,13 +57,28 @@ typedef struct AVZcEnv
     av_rpi_zc_alloc_buf_fn_t * alloc_buf;
     av_rpi_zc_free_pool_fn_t * free_pool;
 
+    unsigned int pool_size;
 } ZcEnv;
+
+typedef struct ZcUserBufEnv {
+    void * v;
+    const av_rpi_zc_buf_fn_tab_t * fn;
+    size_t numbytes;
+    int offset;
+} ZcUserBufEnv;
 
 typedef struct ZcBufEnv {
     GPU_MEM_PTR_T gmem;
-    void * v;
-    const av_rpi_zc_buf_fn_tab_t * fn;
     AVZcEnvPtr zc;
+    int is_valid;
+    AVBufferRef * user;
+    AVRpiZcFrameGeometry geo;
+    size_t size_y;
+    size_t size_c;
+    size_t size_pic;
+    ssize_t offset;
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
 } ZcBufEnv;
 
 
@@ -593,7 +608,8 @@ static AVBufferRef * zc_copy(const AVZcEnvPtr zc,
     dest->width = src->width;
     dest->height = src->height;
 
-    if (av_rpi_zc_get_buffer(zc, dest) != 0)
+    if (av_rpi_zc_get_buffer(zc, dest) != 0 ||
+        av_rpi_zc_resolve_frame(dest, ZC_RESOLVE_ALLOC_VALID) != 0)
     {
         return NULL;
     }
@@ -640,13 +656,13 @@ static AVBufferRef * zc_sand64_16_to_sand128(const AVZcEnvPtr zc,
 //
 // Public info extraction calls
 
-static void zc_buf_free_cb(void * opaque, uint8_t * data);
+static void zc_buf_env_free_cb(void * opaque, uint8_t * data);
 
 static inline ZcBufEnv * pic_zbe_ptr(AVBufferRef *const buf)
 {
     // Kludge where we check the free fn to check this is really
     // one of our buffers - can't think of a better way
-    return buf == NULL || buf->buffer->free != zc_buf_free_cb ? NULL :
+    return buf == NULL || buf->buffer->free != zc_buf_env_free_cb ? NULL :
         av_buffer_get_opaque(buf);
 }
 
@@ -664,13 +680,14 @@ int av_rpi_zc_vc_handle(const AVRpiZcRefPtr fr_ref)
 
 int av_rpi_zc_offset(const AVRpiZcRefPtr fr_ref)
 {
-    const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
-    return p == NULL ? 0 : fr_ref->data - p->arm;
+    const ZcBufEnv * const zbe = pic_zbe_ptr(fr_ref);
+    return zbe == NULL ? 0 : zbe->offset;
 }
 
 int av_rpi_zc_length(const AVRpiZcRefPtr fr_ref)
 {
-    return fr_ref == NULL ? 0 : fr_ref->size;
+    const ZcBufEnv * const zbe = pic_zbe_ptr(fr_ref);
+    return zbe == NULL ? 0 : zbe->size_pic;
 }
 
 int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref)
@@ -762,25 +779,45 @@ void av_rpi_zc_unref(AVRpiZcRefPtr fr_ref)
 void * av_rpi_zc_buf_v(AVBufferRef * const buf)
 {
     ZcBufEnv * const zbe = pic_zbe_ptr(buf);
-    return zbe == NULL ? NULL : zbe->v;
+    if (zbe != NULL && zbe->user != NULL)
+    {
+        const ZcUserBufEnv * const zub = (const ZcUserBufEnv *)zbe->user->data;
+        return zub == NULL ? NULL : zub->v;
+    }
+    return NULL;
 }
 
 // AV buffer pre-free callback
-static void zc_buf_free_cb(void * opaque, uint8_t * data)
+static void zc_user_buf_free_cb(void * opaque, uint8_t * data)
+{
+    if (opaque != NULL)
+    {
+        ZcUserBufEnv * const zub = opaque;
+
+        if (zub->fn->free)
+            zub->fn->free(zub->v);
+
+        av_free(zub);
+    }
+}
+
+static void zc_buf_env_free_cb(void * opaque, uint8_t * data)
 {
     if (opaque != NULL)
     {
         ZcBufEnv * const zbe = opaque;
 
-        if (zbe->fn->free)
-            zbe->fn->free(zbe->v);
+        av_buffer_unref(&zbe->user);
 
         if (zbe->zc != NULL)
             av_rpi_zc_env_release(zbe->zc);
 
+        pthread_cond_destroy(&zbe->cond);
+        pthread_mutex_destroy(&zbe->lock);
         av_free(zbe);
     }
 }
+
 
 // Wrap the various ZC bits in an AV Buffer and resolve those things we want
 // resolved now.
@@ -788,58 +825,195 @@ static void zc_buf_free_cb(void * opaque, uint8_t * data)
 AVBufferRef * av_rpi_zc_buf(size_t numbytes, int addr_offset, void * v, const av_rpi_zc_buf_fn_tab_t * fn_tab)
 {
     AVBufferRef *buf;
-    ZcBufEnv * zbe;
-    uint8_t * arm_ptr;
+    ZcUserBufEnv * zub;
 
-    if ((zbe = calloc(1, sizeof(ZcBufEnv))) == NULL)
+    if ((zub = av_malloc(sizeof(ZcUserBufEnv))) == NULL)
         return NULL;
 
-    zbe->fn = fn_tab;
-    zbe->v = v;
-    zbe->gmem.numbytes = numbytes;
+    zub->fn = fn_tab;
+    zub->v = v;
+    zub->numbytes = numbytes;
+    zub->offset = addr_offset;
 
-    if ((zbe->gmem.vcsm_handle = zbe->fn->vcsm_handle(zbe->v)) == 0)
-    {
-        av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vcsm_handle\n");
-        goto fail;
-    }
-
-    // For now init all this here
-    // Later we may avoid some parts (in particular arm addr lock) unless
-    // actually wanted
-    if ((arm_ptr = zbe->fn->map_arm(zbe->v)) == NULL)
-    {
-        av_log(NULL, AV_LOG_ERROR, "ZC: Failed to lock vcsm_handle %u\n", zbe->gmem.vcsm_handle);
-        goto fail;
-    }
-
-    zbe->gmem.arm = arm_ptr + addr_offset;
-    if ((zbe->gmem.vc_handle = zbe->fn->vc_handle(zbe->v)) == 0)
-    {
-        av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vc handle from vcsm_handle %u\n", zbe->gmem.vcsm_handle);
-        goto fail;
-    }
-    if ((zbe->gmem.vc = zbe->fn->map_vc(zbe->v)) == 0)
-    {
-        av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vc addr from vcsm_handle %u\n", zbe->gmem.vcsm_handle);
-        goto fail;
-    }
-
-    if ((buf = av_buffer_create(zbe->gmem.arm, zbe->gmem.numbytes, zc_buf_free_cb, zbe, 0)) == NULL)
+    if ((buf = av_buffer_create((uint8_t*)zub, sizeof(*zub), zc_user_buf_free_cb, zub, 0)) == NULL)
     {
         av_log(NULL, AV_LOG_ERROR, "ZC: Failed av_buffer_create\n");
-        goto fail;
+        av_free(zub);
+        return NULL;
     }
 
     return buf;
+}
+
+int av_rpi_zc_resolve_buffer(AVBufferRef * const buf, const int alloc_mode)
+{
+    ZcBufEnv * const zbe = pic_zbe_ptr(buf);
+
+    if (zbe == NULL)
+        return AVERROR(EINVAL);
+
+    if (alloc_mode == ZC_RESOLVE_FAIL && !zbe->is_valid)
+        return AVERROR(EAGAIN);
+
+    if (alloc_mode == ZC_RESOLVE_WAIT_VALID && !zbe->is_valid)
+    {
+        pthread_mutex_lock(&zbe->lock);
+        while (!zbe->is_valid)
+            pthread_cond_wait(&zbe->cond, &zbe->lock);
+        pthread_mutex_unlock(&zbe->lock);
+    }
+
+    // Do alloc if we need it
+    if (zbe->user == NULL)
+    {
+        ZcEnv * const zc = zbe->zc;
+        const ZcUserBufEnv * zub;
+
+        av_assert0(alloc_mode == ZC_RESOLVE_ALLOC || alloc_mode == ZC_RESOLVE_ALLOC_VALID);
+
+        if ((zbe->user = zc->alloc_buf(zc->pool_env, zbe->size_pic, &zbe->geo)) == NULL)
+        {
+            av_log(NULL, AV_LOG_ERROR, "rpi_get_display_buffer: Failed to get buffer from pool\n");
+            goto fail;
+        }
+        zub = (const ZcUserBufEnv *)zbe->user->data;
+
+        // Track
+
+        zbe->offset = zub->offset;
+        zbe->gmem.numbytes = zub->numbytes;
+        if ((zbe->gmem.arm =  zub->fn->map_arm(zub->v)) == NULL)
+        {
+            av_log(NULL, AV_LOG_ERROR, "ZC: Failed to lock vcsm_handle %u\n", zbe->gmem.vcsm_handle);
+            goto fail;
+        }
+
+        if ((zbe->gmem.vcsm_handle = zub->fn->vcsm_handle(zub->v)) == 0)
+        {
+            av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vcsm_handle\n");
+            goto fail;
+        }
+
+        if ((zbe->gmem.vc_handle = zub->fn->vc_handle(zub->v)) == 0)
+        {
+            av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vc handle from vcsm_handle %u\n", zbe->gmem.vcsm_handle);
+            goto fail;
+        }
+        if ((zbe->gmem.vc = zub->fn->map_vc(zub->v)) == 0)
+        {
+            av_log(NULL, AV_LOG_ERROR, "ZC: Failed to get vc addr from vcsm_handle %u\n", zbe->gmem.vcsm_handle);
+            goto fail;
+        }
+
+        buf->buffer->data = zbe->gmem.arm + zbe->offset;
+        buf->buffer->size = zbe->size_pic;
+
+        // In this mode we shouldn't have anyone waiting for us
+        // so no need to signal
+        if (alloc_mode == ZC_RESOLVE_ALLOC_VALID)
+            zbe->is_valid = 1;
+    }
+
+    // Just overwrite - no point in testing
+    buf->data = zbe->gmem.arm + zbe->offset;
+    buf->size = zbe->size_pic;
+    return 0;
 
 fail:
-    zc_buf_free_cb(zbe, NULL);
-    return NULL;
+    av_buffer_unref(&zbe->user);
+    return AVERROR(ENOMEM);
+}
+
+int av_rpi_zc_resolve_frame(AVFrame * const frame, const int may_alloc)
+{
+    int rv;
+
+    // Do alloc if we need it
+    if ((rv = av_rpi_zc_resolve_buffer(frame->buf[0], may_alloc)) != 0)
+        return rv;
+
+    // If we are a framebuf copy then the alloc can be done but we haven't
+    // imported its results yet
+    if (frame->data[0] == NULL)
+    {
+        const ZcBufEnv * const zbe = pic_zbe_ptr(frame->buf[0]);
+
+        frame->linesize[0] = zbe->geo.stride_y;
+        frame->linesize[1] = zbe->geo.stride_c;
+        frame->linesize[2] = zbe->geo.stride_c;
+        // abuse: linesize[3] = "stripe stride"
+        // stripe_stride is NOT the stride between slices it is (that / geo.stride_y).
+        // In a general case this makes the calculation an xor and multiply rather
+        // than a divide and multiply
+        if (zbe->geo.stripes > 1)
+            frame->linesize[3] = zbe->geo.stripe_is_yc ? zbe->geo.height_y + zbe->geo.height_c : zbe->geo.height_y;
+
+        frame->data[0] = frame->buf[0]->data;
+        frame->data[1] = frame->data[0] + (zbe->geo.stripe_is_yc ? zbe->size_y : zbe->size_y * zbe->geo.stripes);
+        if (zbe->geo.planes_c > 1)
+            frame->data[2] = frame->data[1] + zbe->size_c;
+
+        frame->extended_data = frame->data;
+        // Leave extended buf alone
+    }
+
+    return 0;
+}
+
+int av_rpi_zc_set_valid_frame(AVFrame * const frame)
+{
+    ZcBufEnv * const zbe = pic_zbe_ptr(frame->buf[0]);
+
+    if (zbe == NULL)
+        return AVERROR(EINVAL);
+
+    zbe->is_valid = 1;
+    pthread_cond_broadcast(&zbe->cond);
+
+    return 0;
+}
+
+void av_rpi_zc_set_decoder_pool_size(ZcEnv *const zc, const unsigned int pool_size)
+{
+    zc->pool_size = pool_size;
+}
+
+unsigned int av_rpi_zc_get_decoder_pool_size(ZcEnv *const zc)
+{
+    return zc->pool_size;
 }
 
 int av_rpi_zc_get_buffer(ZcEnv *const zc, AVFrame * const frame)
 {
+#if 1
+    ZcBufEnv * zbe = av_mallocz(sizeof(*zbe));
+
+    for (unsigned int i = 0; i < AV_NUM_DATA_POINTERS; i++) {
+        frame->buf[i] = NULL;
+        frame->data[i] = NULL;
+        frame->linesize[i] = 0;
+    }
+
+    if (zbe == NULL)
+        return AVERROR(ENOMEM);
+
+    if ((frame->buf[0] = av_buffer_create((uint8_t *)zbe, sizeof(*zbe), zc_buf_env_free_cb, zbe, 0)) == NULL)
+    {
+        av_free(zbe);
+        return AVERROR(ENOMEM);
+    }
+
+    pthread_mutex_init(&zbe->lock, NULL);
+    pthread_cond_init(&zbe->cond, NULL);
+    zbe->zc = zc;
+    atomic_fetch_add(&zc->refcount, 1);
+
+    zbe->geo = av_rpi_zc_frame_geometry(frame->format, frame->width, frame->height);  // Note geometry for later use
+    zbe->size_y = zbe->geo.stride_y * zbe->geo.height_y;
+    zbe->size_c = zbe->geo.stride_c * zbe->geo.height_c;
+    zbe->size_pic = (zbe->size_y + zbe->size_c * zbe->geo.planes_c) * zbe->geo.stripes;
+
+#else
     const AVRpiZcFrameGeometry geo = av_rpi_zc_frame_geometry(frame->format, frame->width, frame->height);
     const unsigned int size_y = geo.stride_y * geo.height_y;
     const unsigned int size_c = geo.stride_c * geo.height_c;
@@ -889,6 +1063,7 @@ int av_rpi_zc_get_buffer(ZcEnv *const zc, AVFrame * const frame)
     // *** If we intend to use this for real we will want a 2nd buffer pool
     frame->buf[RPI_ZC_SAND_8_IN_10_BUF] = zc_pool_buf_alloc(&zc->pool, size_pic);  // *** 2 * wanted size - kludge
 #endif
+#endif
 
     return 0;
 }
@@ -910,7 +1085,7 @@ AVZcEnvPtr av_rpi_zc_env_alloc(void * logctx,
 {
     ZcEnv * zc;
 
-	if ((zc = av_mallocz(sizeof(ZcEnv))) == NULL)
+    if ((zc = av_mallocz(sizeof(ZcEnv))) == NULL)
     {
         av_log(logctx, AV_LOG_ERROR, "av_rpi_zc_env_alloc: Context allocation failed\n");
         return NULL;
@@ -920,7 +1095,8 @@ AVZcEnvPtr av_rpi_zc_env_alloc(void * logctx,
         .refcount = ATOMIC_VAR_INIT(1),
         .pool_env = pool_env,
         .alloc_buf = alloc_buf_fn,
-        .free_pool = free_pool_fn
+        .free_pool = free_pool_fn,
+        .pool_size = 0
     };
 
     return zc;
@@ -948,7 +1124,8 @@ static int zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
     else if (frame->format == AV_PIX_FMT_YUV420P ||
              av_rpi_is_sand_frame(frame))
     {
-        rv = av_rpi_zc_get_buffer(s->get_buffer_context, frame);
+        if ((rv = av_rpi_zc_get_buffer(s->get_buffer_context, frame)) == 0)
+            rv = av_rpi_zc_resolve_frame(frame, ZC_RESOLVE_ALLOC_VALID);
     }
     else
     {
