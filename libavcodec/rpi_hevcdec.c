@@ -6015,6 +6015,8 @@ static int hwaccel_alloc_frame(AVCodecContext *s, AVFrame *frame)
     else
     {
         rv = av_rpi_zc_get_buffer(r3->zc, frame);
+        if (rv == 0)
+            rv = av_rpi_zc_resolve_frame(frame, ZC_RESOLVE_ALLOC_VALID);  // actually do the alloc
     }
 
     if (rv == 0 &&
