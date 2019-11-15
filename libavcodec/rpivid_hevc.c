@@ -1662,7 +1662,6 @@ static int rpivid_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
 {
     RPI_T * const rpi = avctx->internal->hwaccel_priv_data;
     HEVCContext * const s = avctx->priv_data;
-    const unsigned int thread_req = avctx->thread_count < 1 ? 1 : avctx->thread_count;
     // Frame buffering + 1 output.  Would need thread_count extra but we now
     // alloc at the start of phase 2 so that is the only thread we need the
     // extra buffer for.
@@ -1673,7 +1672,7 @@ static int rpivid_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
     {
         const AVZcEnvPtr zc = avctx->get_buffer_context;
         av_rpi_zc_set_decoder_pool_size(zc, pool_req);
-        av_rpi_zc_get_buffer(zc, frame);   // get_buffer2 would alloc
+        rv = av_rpi_zc_get_buffer(zc, frame);   // get_buffer2 would alloc
     }
     else
     {
