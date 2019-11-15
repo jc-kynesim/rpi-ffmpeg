@@ -135,18 +135,19 @@ void rpi_mem_gpu_uninit(void)
 
 int rpi_mem_gpu_init(const unsigned int flags)
 {
+    const int wants_cma = bcm_host_is_fkms_active();
     int use_cma;
 
     (void)flags;
 
-    bcm_host_init();
-
-    if (vcsm_init_ex(OPT_PREFER_CMA ? 1 : 0, -1) == 0)
+    if (vcsm_init_ex(wants_cma ? 1 : 0, -1) == 0)
         use_cma = 0;
-    else if (vcsm_init_ex(OPT_PREFER_CMA ? 0 : 1, -1) == 0)
+    else if (vcsm_init_ex(wants_cma ? 0 : 1, -1) == 0)
         use_cma = 1;
     else
         return AVERROR(EINVAL);
+
+    bcm_host_init();
 
     return use_cma + 1;
 }
