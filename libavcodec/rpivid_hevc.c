@@ -1502,6 +1502,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     // will overlap with the wait
     //
     // * Even better would be to have better lock/unlock control in ZC for external access
+    if (rpi->gpu_init_type == GPU_INIT_GPU)  // * CMA is currently always uncached
     {
         rpi_cache_buf_t cbuf;
         rpi_cache_flush_env_t * const fe = rpi_cache_flush_init(&cbuf);
