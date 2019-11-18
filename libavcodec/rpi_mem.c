@@ -161,7 +161,7 @@ int rpi_mem_gpu_init(const unsigned int flags)
 rpi_cache_flush_env_t * rpi_cache_flush_init(rpi_cache_buf_t * const buf)
 {
   rpi_cache_flush_env_t * const rfe = (rpi_cache_flush_env_t *)buf;
-  rfe->v.op_count = 0;
+  *rfe = (rpi_cache_flush_env_t){.v={.op_count = 0}};
   return rfe;
 }
 
@@ -176,8 +176,9 @@ int rpi_cache_flush_execute(rpi_cache_flush_env_t * const rfe)
     if (rfe->v.op_count != 0) {
         if (vcsm_clean_invalid2(&rfe->v) != 0)
         {
-//          av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid2 failed: errno=%d\n", errno);
-          rc = -1;
+          const int err = errno;
+          av_log(NULL, AV_LOG_ERROR, "vcsm_clean_invalid2 failed: errno=%d\n", err);
+          rc = AVERROR(err);
         }
         rfe->v.op_count = 0;
     }
