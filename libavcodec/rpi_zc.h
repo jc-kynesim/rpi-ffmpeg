@@ -143,14 +143,15 @@ int av_rpi_zc_get_buffer(const AVZcEnvPtr zc, AVFrame * const frame);
 // Resolve actually does the alloc (noop if already alloced)
 // Set data pointers on a buffer/frame that was copied before the alloc
 // accured
-#define ZC_RESOLVE_FAIL  0        // return error on invalid
-#define ZC_RESOLVE_ALLOC 1        // alloc as invalid
-#define ZC_RESOLVE_WAIT_VALID 2   // wait for valid
-#define ZC_RESOLVE_ALLOC_VALID 3  // alloc as valid
+#define ZC_RESOLVE_FAIL         0  // return error on invalid
+#define ZC_RESOLVE_ALLOC        1  // alloc as invalid
+#define ZC_RESOLVE_WAIT_VALID   2  // wait for valid
+#define ZC_RESOLVE_ALLOC_VALID  3  // alloc as valid
 int av_rpi_zc_resolve_buffer(AVBufferRef * const buf, const int may_alloc);
 int av_rpi_zc_resolve_frame(AVFrame * const frame, const int may_alloc);
 
 int av_rpi_zc_set_valid_frame(AVFrame * const frame);
+int av_rpi_zc_set_broken_frame(AVFrame * const frame);
 
 
 typedef struct av_rpi_zc_buf_fn_tab_s {
