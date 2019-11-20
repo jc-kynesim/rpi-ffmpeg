@@ -308,7 +308,7 @@ static inline int rpi_sem_wait(sem_t * const sem)
 //============================================================================
 
 #define TRACE_DEV 0
-#define TRACE_ENTRY 1
+#define TRACE_ENTRY 0
 
 #define REGS_NAME "/dev/rpivid-hevcmem"
 #define REGS_SIZE 0x10000
@@ -1173,7 +1173,7 @@ static void rpi_hevc_abort_frame(AVCodecContext * const avctx) {
     dec_env_t * const de = dec_env_get(avctx,  rpi);
 
 #if TRACE_ENTRY
-    fprintf(stderr, "<<< %s[%p]\n", __func__, de);
+    printf("<<< %s[%p]\n", __func__, de);
 #endif
 
     if (de == NULL) {
@@ -1228,7 +1228,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     int coeffbuf_sem_claimed = 0;
 
 #if TRACE_ENTRY
-    fprintf(stderr, "<<< %s[%p]\n", __func__, de);
+    fprintf("<<< %s[%p]\n", __func__, de);
 #endif
 
     if (de == NULL) {
@@ -1515,7 +1515,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
 
 #if TRACE_ENTRY
-    fprintf(stderr, ">>> %s[%p] OK\n", __func__, de);
+    printf(">>> %s[%p] OK\n", __func__, de);
 #endif
 
     dec_env_release(rpi, de);
@@ -1528,12 +1528,11 @@ fail:
     abort_phases(rpi, de);  // Dummy any unresolved phases
 
 #if TRACE_ENTRY
-    fprintf(stderr, ">>> %s[%p] FAIL\n", __func__, de);
+    printf(">>> %s[%p] FAIL\n", __func__, de);
 #endif
 
     dec_env_release(rpi, de);
-//    return rv;
-    return 0;
+    return rv;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -1680,7 +1679,7 @@ static int rpivid_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
 
     if (av_rpi_zc_in_use(avctx))
     {
-        const AVZcEnvPtr zc = avctx->get_buffer_context;
+        const AVZcEnvPtr zc = avctx->opaque;
         av_rpi_zc_set_decoder_pool_size(zc, pool_req);
         av_rpi_zc_get_buffer(zc, frame);   // get_buffer2 would alloc
     }

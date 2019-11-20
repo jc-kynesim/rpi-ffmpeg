@@ -45,7 +45,7 @@ typedef struct ZcOldCtxVals
 {
     int thread_safe_callbacks;
     int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
-    void * get_buffer_context;
+    void * opaque;
 } ZcOldCtxVals;
 
 typedef struct AVZcEnv
@@ -1144,7 +1144,7 @@ static int zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
     else if (frame->format == AV_PIX_FMT_YUV420P ||
              av_rpi_is_sand_frame(frame))
     {
-        if ((rv = av_rpi_zc_get_buffer(s->get_buffer_context, frame)) == 0)
+        if ((rv = av_rpi_zc_get_buffer(s->opaque, frame)) == 0)
             rv = av_rpi_zc_resolve_frame(frame, ZC_RESOLVE_ALLOC_VALID);
     }
     else
@@ -1182,12 +1182,12 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
         return AVERROR(ENOMEM);
 
     zc->old = (ZcOldCtxVals){
-        .get_buffer_context = s->get_buffer_context,
+        .opaque = s->opaque,
         .get_buffer2 = s->get_buffer2,
         .thread_safe_callbacks = s->thread_safe_callbacks
     };
 
-    s->get_buffer_context = zc;
+    s->opaque = zc;
     s->get_buffer2 = zc_get_buffer2;
     s->thread_safe_callbacks = 1;
     return 0;
@@ -1195,12 +1195,12 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
 
 void av_rpi_zc_uninit2(struct AVCodecContext * const s)
 {
-    ZcEnv * const zc = s->get_buffer_context;
+    ZcEnv * const zc = s->opaque;
 
     av_assert0(av_rpi_zc_in_use(s));
 
     s->get_buffer2 = zc->old.get_buffer2;
-    s->get_buffer_context = zc->old.get_buffer_context;
+    s->opaque = zc->old.opaque;
     s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
 
     av_rpi_zc_env_release(zc);
