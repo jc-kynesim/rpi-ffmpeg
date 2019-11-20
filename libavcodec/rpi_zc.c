@@ -67,6 +67,10 @@ typedef struct ZcUserBufEnv {
     int offset;
 } ZcUserBufEnv;
 
+#define ZC_BUF_INVALID  0
+#define ZC_BUF_VALID    1
+#define ZC_BUF_NEVER    2
+
 typedef struct ZcBufEnv {
     GPU_MEM_PTR_T gmem;
     AVZcEnvPtr zc;
@@ -863,6 +867,9 @@ int av_rpi_zc_resolve_buffer(AVBufferRef * const buf, const int alloc_mode)
         pthread_mutex_unlock(&zbe->lock);
     }
 
+    if (zbe->is_valid == ZC_BUF_NEVER)
+        return AVERROR(EINVAL);
+
     // Do alloc if we need it
     if (zbe->user == NULL)
     {
@@ -967,7 +974,20 @@ int av_rpi_zc_set_valid_frame(AVFrame * const frame)
     if (zbe == NULL)
         return AVERROR(EINVAL);
 
-    zbe->is_valid = 1;
+    zbe->is_valid = ZC_BUF_VALID;
+    pthread_cond_broadcast(&zbe->cond);
+
+    return 0;
+}
+
+int av_rpi_zc_set_broken_frame(AVFrame * const frame)
+{
+    ZcBufEnv * const zbe = pic_zbe_ptr(frame->buf[0]);
+
+    if (zbe == NULL)
+        return AVERROR(EINVAL);
+
+    zbe->is_valid = ZC_BUF_NEVER;
     pthread_cond_broadcast(&zbe->cond);
 
     return 0;

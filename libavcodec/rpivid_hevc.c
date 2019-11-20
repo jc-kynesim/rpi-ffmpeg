@@ -308,7 +308,7 @@ static inline int rpi_sem_wait(sem_t * const sem)
 //============================================================================
 
 #define TRACE_DEV 0
-#define TRACE_ENTRY 0
+#define TRACE_ENTRY 1
 
 #define REGS_NAME "/dev/rpivid-hevcmem"
 #define REGS_SIZE 0x10000
@@ -1173,7 +1173,7 @@ static void rpi_hevc_abort_frame(AVCodecContext * const avctx) {
     dec_env_t * const de = dec_env_get(avctx,  rpi);
 
 #if TRACE_ENTRY
-    printf("<<< %s[%p]\n", __func__, de);
+    fprintf(stderr, "<<< %s[%p]\n", __func__, de);
 #endif
 
     if (de == NULL) {
@@ -1225,9 +1225,10 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     unsigned int i;
     int rv = 0;
     int status = 0;
+    int coeffbuf_sem_claimed = 0;
 
 #if TRACE_ENTRY
-    printf("<<< %s[%p]\n", __func__, de);
+    fprintf(stderr, "<<< %s[%p]\n", __func__, de);
 #endif
 
     if (de == NULL) {
@@ -1312,6 +1313,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     wait_phase(rpi, de, 1);
     rpi_sem_wait(&rpi->coeffbuf_sem);
+    coeffbuf_sem_claimed = 1;
     tstart_phase(rpi, 1);
 
     for (;;)
@@ -1368,7 +1370,6 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
     else
     {
-        sem_post(&rpi->coeffbuf_sem);
         if (status == -1)
         {
             av_log(avctx, AV_LOG_ERROR, "Out of pu + coeff intermediate memory: pus=%d\n", rpi->max_pu_msgs);
@@ -1394,6 +1395,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
     if ((rv = av_rpi_zc_resolve_frame(f, ZC_RESOLVE_ALLOC)) != 0)
     {
+        // As we are in phase 2 already here we don't need to worry about
+        // ceoffbuf_no despite the early exit
         post_phase(rpi, de, 2);
         av_log(avctx, AV_LOG_ERROR, "Failed to allocate output frame\n");
         goto fail;
@@ -1491,6 +1494,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     int_wait(rpi, 2);
 
     tend_phase(rpi, 2);
+    coeffbuf_sem_claimed = 0;
     sem_post(&rpi->coeffbuf_sem);
     // Set valid here to avoid race in resolving in any pending phase 2
     av_rpi_zc_set_valid_frame(f);
@@ -1511,21 +1515,25 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     }
 
 #if TRACE_ENTRY
-    printf(">>> %s[%p] OK\n", __func__, de);
+    fprintf(stderr, ">>> %s[%p] OK\n", __func__, de);
 #endif
 
     dec_env_release(rpi, de);
     return 0;
 
 fail:
+    av_rpi_zc_set_broken_frame(f);
+    if (coeffbuf_sem_claimed)
+        sem_post(&rpi->coeffbuf_sem);
     abort_phases(rpi, de);  // Dummy any unresolved phases
 
 #if TRACE_ENTRY
-    printf(">>> %s[%p] FAIL\n", __func__, de);
+    fprintf(stderr, ">>> %s[%p] FAIL\n", __func__, de);
 #endif
 
     dec_env_release(rpi, de);
-    return rv;
+//    return rv;
+    return 0;
 }
 
 //////////////////////////////////////////////////////////////////////////////
