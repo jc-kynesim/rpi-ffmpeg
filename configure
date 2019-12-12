@@ -3015,6 +3015,8 @@ vp9_dxva2_hwaccel_deps="dxva2 DXVA_PicParams_VP9"
 vp9_dxva2_hwaccel_select="vp9_decoder"
 vp9_nvdec_hwaccel_deps="nvdec"
 vp9_nvdec_hwaccel_select="vp9_decoder"
+vp9_v4l2request_hwaccel_deps="v4l2_request vp9_v4l2_request"
+vp9_v4l2request_hwaccel_select="vp9_decoder"
 vp9_vaapi_hwaccel_deps="vaapi VADecPictureParameterBufferVP9_bit_depth"
 vp9_vaapi_hwaccel_select="vp9_decoder"
 vp9_vdpau_hwaccel_deps="vdpau VdpPictureInfoVP9"
@@ -6579,6 +6581,7 @@ check_cc h264_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_H264_SLICE;"
 check_cc hevc_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_HEVC_SLICE;"
 check_cc mpeg2_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_MPEG2_SLICE;"
 check_cc vp8_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_VP8_FRAME;"
+check_cc vp9_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_VP9_FRAME;"
 
 check_headers sys/videoio.h
 test_code cc sys/videoio.h "struct v4l2_frmsizeenum vfse; vfse.discrete.width = 0;" && enable_sanitized struct_v4l2_frmivalenum_discrete
