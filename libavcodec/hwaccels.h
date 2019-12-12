@@ -71,6 +71,7 @@ extern const AVHWAccel ff_vp9_d3d11va_hwaccel;
 extern const AVHWAccel ff_vp9_d3d11va2_hwaccel;
 extern const AVHWAccel ff_vp9_dxva2_hwaccel;
 extern const AVHWAccel ff_vp9_nvdec_hwaccel;
+extern const AVHWAccel ff_vp9_v4l2request_hwaccel;
 extern const AVHWAccel ff_vp9_vaapi_hwaccel;
 extern const AVHWAccel ff_vp9_vdpau_hwaccel;
 extern const AVHWAccel ff_wmv3_d3d11va_hwaccel;

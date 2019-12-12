@@ -131,6 +131,7 @@ typedef struct VP9BitstreamHeader {
         uint8_t temporal;
         uint8_t absolute_vals;
         uint8_t update_map;
+        uint8_t update_data;
         uint8_t prob[7];
         uint8_t pred_prob[3];
         struct {
