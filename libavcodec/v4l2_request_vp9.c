@@ -19,6 +19,7 @@
 #include "hwconfig.h"
 #include "v4l2_request.h"
 #include "vp9dec.h"
+#include "vp9-ctrls.h"
 
 typedef struct V4L2RequestControlsVP9 {
     struct v4l2_ctrl_vp9_frame_decode_params decode_params;
