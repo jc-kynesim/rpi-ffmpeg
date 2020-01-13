@@ -6,6 +6,7 @@ HEADERS = ac3_parser.h                                                  \
           avcodec.h                                                     \
           avdct.h                                                       \
           avfft.h                                                       \
+          rpi_zc.h                                                      \
           d3d11va.h                                                     \
           dirac.h                                                       \
           dv_profile.h                                                  \
@@ -132,6 +133,7 @@ OBJS-$(CONFIG_QSVDEC)                  += qsvdec.o
 OBJS-$(CONFIG_QSVENC)                  += qsvenc.o
 OBJS-$(CONFIG_RANGECODER)              += rangecoder.o
 OBJS-$(CONFIG_RDFT)                    += rdft.o
+OBJS-$(CONFIG_RPI)                     += rpi_qpu.o rpi_mailbox.o rpi_zc.o
 OBJS-$(CONFIG_RV34DSP)                 += rv34dsp.o
 OBJS-$(CONFIG_SHARED)                  += log2_tab.o reverse.o
 OBJS-$(CONFIG_SINEWIN)                 += sinewin.o sinewin_fixed.o
@@ -368,6 +370,15 @@ OBJS-$(CONFIG_HCOM_DECODER)            += hcom.o
 OBJS-$(CONFIG_HEVC_DECODER)            += hevcdec.o hevc_mvs.o \
                                           hevc_cabac.o hevc_refs.o hevcpred.o    \
                                           hevcdsp.o hevc_filter.o hevc_data.o
+OBJS-$(CONFIG_RPI)                     += rpi_mem.o \
+                                          rpi_mailbox.o rpi_zc.o
+OBJS-$(CONFIG_HEVC_RPI_DECODER)        += rpi_hevcdec.o rpi_hevc_mvs.o \
+                                          rpi_hevc_cabac.o rpi_hevc_refs.o rpi_hevcpred.o    \
+                                          rpi_hevcdsp.o rpi_hevc_filter.o rpi_hevc_data.o    \
+                                          rpi_hevc_shader.o rpi_hevc_shader_template.o       \
+                                          rpi_hevc_parse.o h2645_parse.o rpi_hevc_ps.o \
+                                          rpi_hevc_sei.o rpi_hevc_data.o rpi_qpu.o rpi_mem.o
+OBJS-$(CONFIG_HEVC_CUVID_DECODER)      += cuvid.o
 OBJS-$(CONFIG_HEVC_AMF_ENCODER)        += amfenc_hevc.o
 OBJS-$(CONFIG_HEVC_CUVID_DECODER)      += cuviddec.o
 OBJS-$(CONFIG_HEVC_MEDIACODEC_DECODER) += mediacodecdec.o
@@ -880,6 +891,8 @@ OBJS-$(CONFIG_HEVC_NVDEC_HWACCEL)         += nvdec_hevc.o
 OBJS-$(CONFIG_HEVC_QSV_HWACCEL)           += qsvdec_h2645.o
 OBJS-$(CONFIG_HEVC_VAAPI_HWACCEL)         += vaapi_hevc.o
 OBJS-$(CONFIG_HEVC_VDPAU_HWACCEL)         += vdpau_hevc.o
+OBJS-$(CONFIG_HEVC_RPI4_8_HWACCEL)        += rpivid_hevc.o
+OBJS-$(CONFIG_HEVC_RPI4_10_HWACCEL)       += rpivid_hevc.o
 OBJS-$(CONFIG_MJPEG_NVDEC_HWACCEL)        += nvdec_mjpeg.o
 OBJS-$(CONFIG_MJPEG_VAAPI_HWACCEL)        += vaapi_mjpeg.o
 OBJS-$(CONFIG_MPEG1_NVDEC_HWACCEL)        += nvdec_mpeg12.o
@@ -1222,4 +1235,32 @@ $(SUBDIR)pcm.o: $(SUBDIR)pcm_tables.h
 $(SUBDIR)qdm2.o: $(SUBDIR)qdm2_tables.h
 $(SUBDIR)sinewin.o: $(SUBDIR)sinewin_tables.h
 $(SUBDIR)sinewin_fixed.o: $(SUBDIR)sinewin_fixed_tables.h
+endif
+
+ifdef CONFIG_HEVC_RPI_DECODER
+QASM_PY := ../local/bin/qasm.py
+VASMVIDCORE := ../local/bin/vasmvidcore_std
+
+ifneq ("$(wildcard $(QASM_PY))","")
+$(SUBDIR)rpi_hevc_shader.c: $(SUBDIR)rpi_hevc_shader.qasm
+	$(QASM_PY) -mc_c:rpi_hevc_shader,rpi_hevc_shader,ff_hevc_rpi_shader $< > $@
+
+$(SUBDIR)rpi_hevc_shader.h: $(SUBDIR)rpi_hevc_shader.qasm
+	$(QASM_PY) -mc_h:rpi_hevc_shader,rpi_hevc_shader,ff_hevc_rpi_shader $< > $@
+endif
+
+ifneq ("$(wildcard $(VASMVIDCORE))","")
+$(SUBDIR)rpi_hevc_transform8.bin: $(SUBDIR)rpi_hevc_transform.s
+	$(VASMVIDCORE) -Fbin -DBIT_DEPTH=8 $< -o $@
+$(SUBDIR)rpi_hevc_transform10.bin: $(SUBDIR)rpi_hevc_transform.s
+	$(VASMVIDCORE) -Fbin -DBIT_DEPTH=10 $< -o $@
+
+$(SUBDIR)rpi_hevc_transform8.h: $(SUBDIR)rpi_hevc_transform8.bin
+	python pi-util/make_array.py $<
+$(SUBDIR)rpi_hevc_transform10.h: $(SUBDIR)rpi_hevc_transform10.bin
+	python pi-util/make_array.py $<
+endif
+
+$(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_hevc_transform8.h $(SUBDIR)rpi_hevc_transform10.h
+$(SUBDIR)rpi_hevcdec.o $(SUBDIR)rpi_shader_template.o $(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_hevc_shader.h
 endif
