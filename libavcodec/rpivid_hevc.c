@@ -95,6 +95,9 @@
 
 //////////////////////////////////////////////////////////////////////////////
 
+// Unused but left here to illustrate the diffrences between FFmpegs prob
+// structure and the rpivid one
+
 struct FFM_PROB {
     uint8_t  sao_merge_flag                   [ 1];
     uint8_t  sao_type_idx                     [ 1];
@@ -195,6 +198,9 @@ typedef enum rpivid_decode_state_e {
     RPIVID_DECODE_END,
 } rpivid_decode_state_t;
 
+#define RPI_PROB_VALS 154U
+#define RPI_PROB_ARRAY_SIZE ((154 + 3) & ~3)
+
 typedef struct dec_env_s {
     const AVCodecContext * avctx;
 
@@ -209,20 +215,16 @@ typedef struct dec_env_s {
     struct RPI_CMD *cmd_fifo;
     unsigned int    bit_len, bit_max;
     unsigned int    cmd_len, cmd_max;
-    struct RPI_PROB probabilities;
     unsigned int    num_slice_msgs;
     unsigned int    PicWidthInCtbsY;
     unsigned int    PicHeightInCtbsY;
     unsigned int    dpbno_col;
     uint32_t        reg_slicestart;
-    int             collocated_from_l0_flag;
-    unsigned int    max_num_merge_cand;
-    unsigned int    collocated_ref_idx;
     unsigned int    wpp_entry_x;
     unsigned int    wpp_entry_y;
     uint16_t        slice_msgs[2*HEVC_MAX_REFS*8+3];
     uint8_t         scaling_factors[NUM_SCALING_FACTORS];
-    unsigned int    RefPicList[2][HEVC_MAX_REFS];
+//    unsigned int    RefPicList[2][HEVC_MAX_REFS];
 } dec_env_t;
 
 #define RPIVID_PHASES 3
@@ -442,101 +444,160 @@ static void axi_dump(const dec_env_t * const de, uint64_t addr, uint32_t size) {
 }
 #endif
 
-//////////////////////////////////////////////////////////////////////////////
-
-// Array of constants for scaling factors
-static const uint32_t scaling_factor_offsets[4][6] = {
-    // MID0    MID1    MID2    MID3    MID4    MID5
-    {0x0000, 0x0010, 0x0020, 0x0030, 0x0040, 0x0050},   // SID0 (4x4)
-    {0x0060, 0x00A0, 0x00E0, 0x0120, 0x0160, 0x01A0},   // SID1 (8x8)
-    {0x01E0, 0x02E0, 0x03E0, 0x04E0, 0x05E0, 0x06E0},   // SID2 (16x16)
-    {0x07E0,      0,      0, 0x0BE0,      0,      0}};  // SID3 (32x32)
-
-// ffmpeg places SID3,MID1 where matrixID 3 normally is
 
 //////////////////////////////////////////////////////////////////////////////
 // Scaling factors
 
 static void expand_scaling_list(
-    dec_env_t * const de,
-    const ScalingList * const scaling_list, // scaling list structure from ffmpeg
     const unsigned int sizeID,
-    const unsigned int matrixID)
+    const unsigned int matrixID,
+    uint8_t * const dst0,
+    const uint8_t * const src0,
+    uint8_t dc)
 {
-    unsigned int x, y, i, blkSize = 4<<sizeID;
-    const uint32_t index_offset = scaling_factor_offsets[sizeID][matrixID];
-
-    for (x=0; x<blkSize; x++) {
-        for (y=0; y<blkSize; y++) {
-            uint32_t index = index_offset + x + y*blkSize;
-            // Derivation of i to match indexing in ff_hevc_hls_residual_coding
-            switch (sizeID) {
-                case 0: i = (y<<2) + x;             break;
-                case 1: i = (y<<3) + x;             break;
-                case 2: i = ((y>>1)<<3) + (x>>1);   break;
-                case 3: i = ((y>>2)<<3) + (x>>2);
+    switch (sizeID) {
+        case 0:
+            memcpy(dst0, src0, 16);
+            break;
+        case 1:
+            memcpy(dst0, src0, 64);
+            break;
+        case 2:
+        {
+            uint8_t * d = dst0;
+            for (unsigned int y=0; y != 16; y++) {
+                const uint8_t * s = src0 + (y >> 1) * 8;
+                for (unsigned int x = 0; x != 8; ++x) {
+                    *d++ = *s;
+                    *d++ = *s++;
+                }
             }
-            de->scaling_factors[index] = scaling_list->sl[sizeID][matrixID][i];
+            dst0[0] = dc;
+            break;
+        }
+        default:
+        {
+            uint8_t * d = dst0;
+            for (unsigned int y=0; y != 32; y++) {
+                const uint8_t * s = src0 + (y >> 2) * 8;
+                for (unsigned int x = 0; x != 8; ++x) {
+                    *d++ = *s;
+                    *d++ = *s;
+                    *d++ = *s;
+                    *d++ = *s++;
+                }
+            }
+            dst0[0] = dc;
+            break;
         }
     }
-    if (sizeID>1)
-        de->scaling_factors[index_offset] =
-            scaling_list->sl_dc[sizeID-2][matrixID];
 }
 
 static void populate_scaling_factors(dec_env_t * const de, const HEVCContext * const s) {
+    // Array of constants for scaling factors
+    static const uint32_t scaling_factor_offsets[4][6] = {
+        // MID0    MID1    MID2    MID3    MID4    MID5
+        {0x0000, 0x0010, 0x0020, 0x0030, 0x0040, 0x0050},   // SID0 (4x4)
+        {0x0060, 0x00A0, 0x00E0, 0x0120, 0x0160, 0x01A0},   // SID1 (8x8)
+        {0x01E0, 0x02E0, 0x03E0, 0x04E0, 0x05E0, 0x06E0},   // SID2 (16x16)
+        {0x07E0,      0,      0, 0x0BE0,      0,      0}};  // SID3 (32x32)
+
+    // ffmpeg places SID3,MID1 where matrixID 3 normally is
     const ScalingList * const sl =
         s->ps.pps->scaling_list_data_present_flag ? &s->ps.pps->scaling_list
                                                   : &s->ps.sps->scaling_list;
-    int sid, mid;
-    for (sid=0; sid<3; sid++)
-        for (mid=0; mid<6; mid++)
-            expand_scaling_list(de, sl, sid, mid);
+    unsigned int mid;
 
+    for (mid=0; mid<6; mid++)
+        expand_scaling_list(0, mid,
+            de->scaling_factors + scaling_factor_offsets[0][mid],
+            sl->sl[0][mid], 0);
+    for (mid=0; mid<6; mid++)
+        expand_scaling_list(1, mid,
+            de->scaling_factors + scaling_factor_offsets[1][mid],
+            sl->sl[1][mid], 0);
+    for (mid=0; mid<6; mid++)
+        expand_scaling_list(2, mid,
+            de->scaling_factors + scaling_factor_offsets[2][mid],
+            sl->sl[2][mid],
+            sl->sl_dc[0][mid]);
     // second scaling matrix for 32x32 is at matrixID 3 not 1 in ffmpeg
-    expand_scaling_list(de, sl, 3, 0);
-    expand_scaling_list(de, sl, 3, 3);
+    for (mid=0; mid<6; mid += 3)
+        expand_scaling_list(3, mid,
+            de->scaling_factors + scaling_factor_offsets[3][mid],
+            sl->sl[3][mid],
+            sl->sl_dc[1][mid]);
 }
 
 //////////////////////////////////////////////////////////////////////////////
 // Probabilities
 
-// **** Horrid type punning here &I don't understand why it is wanted
-static void populate_prob_tables(dec_env_t * const de, const HEVCContext * const s) {
-    struct RPI_PROB * const dst = &de->probabilities;
-    const struct FFM_PROB * const src = (struct FFM_PROB *) s->HEVClc->cabac_state;
-    #define PROB_CPSZ(to, from, sz) memcpy(dst->to, src->from, sz)
-    #define PROB_COPY(to, from)     memcpy(dst->to, src->from, sizeof(dst->to))
-    memset(dst, 0, sizeof(*dst));
-    PROB_COPY(SAO_MERGE_FLAG           , sao_merge_flag                 );
-    PROB_COPY(SAO_TYPE_IDX             , sao_type_idx                   );
-    PROB_COPY(SPLIT_FLAG               , split_coding_unit_flag         );
-    PROB_COPY(CU_SKIP_FLAG             , skip_flag                      );
-    PROB_COPY(CU_TRANSQUANT_BYPASS_FLAG, cu_transquant_bypass_flag      );
-    PROB_COPY(PRED_MODE                , pred_mode_flag                 );
-    PROB_COPY(PART_SIZE                , part_mode                      );
-    PROB_COPY(INTRA_PRED_MODE          , prev_intra_luma_pred_flag      );
-    PROB_COPY(CHROMA_PRED_MODE         , intra_chroma_pred_mode         );
-    PROB_COPY(MERGE_FLAG_EXT           , merge_flag                     );
-    PROB_COPY(MERGE_IDX_EXT            , merge_idx                      );
-    PROB_COPY(INTER_DIR                , inter_pred_idc                 );
-    PROB_COPY(REF_PIC                  , ref_idx_l0                     );
-    PROB_COPY(MVP_IDX                  , mvp_lx_flag                    );
-    PROB_CPSZ(MVD+0                    , abs_mvd_greater0_flag+0    ,  1); // ABS_MVD_GREATER0_FLAG[1] not used
-    PROB_CPSZ(MVD+1                    , abs_mvd_greater1_flag+1    ,  1); // ABS_MVD_GREATER1_FLAG[0] not used
-    PROB_COPY(QT_ROOT_CBF              , no_residual_data_flag          );
-    PROB_COPY(TRANS_SUBDIV_FLAG        , split_transform_flag           );
-    PROB_CPSZ(QT_CBF                   , cbf_luma                   ,  2);
-    PROB_CPSZ(QT_CBF+2                 , cbf_cb_cr                  ,  4);
-    PROB_COPY(DQP                      , cu_qp_delta                    );
-    PROB_COPY(ONE_FLAG                 , coeff_abs_level_greater1_flag  );
-    PROB_COPY(LASTX                    , last_significant_coeff_x_prefix);
-    PROB_COPY(LASTY                    , last_significant_coeff_y_prefix);
-    PROB_COPY(SIG_CG_FLAG              , significant_coeff_group_flag   );
-    PROB_COPY(ABS_FLAG                 , coeff_abs_level_greater2_flag  );
-    PROB_COPY(TRANSFORMSKIP_FLAG       , transform_skip_flag            );
-    PROB_CPSZ(SIG_FLAG                 , significant_coeff_flag     , 42);
-}
+static const uint8_t prob_init[3][156] = {
+	{
+		 153, 200, 139, 141, 157, 154, 154, 154,
+		 154, 154, 184, 154, 154, 154, 184,  63,
+		 154, 154, 154, 154, 154, 154, 154, 154,
+		 154, 154, 154, 154, 154, 153, 138, 138,
+		 111, 141,  94, 138, 182, 154, 154, 154,
+		 140,  92, 137, 138, 140, 152, 138, 139,
+		 153,  74, 149,  92, 139, 107, 122, 152,
+		 140, 179, 166, 182, 140, 227, 122, 197,
+		 110, 110, 124, 125, 140, 153, 125, 127,
+		 140, 109, 111, 143, 127, 111,  79, 108,
+		 123,  63, 110, 110, 124, 125, 140, 153,
+		 125, 127, 140, 109, 111, 143, 127, 111,
+		  79, 108, 123,  63,  91, 171, 134, 141,
+		 138, 153, 136, 167, 152, 152, 139, 139,
+		 111, 111, 125, 110, 110,  94, 124, 108,
+		 124, 107, 125, 141, 179, 153, 125, 107,
+		 125, 141, 179, 153, 125, 107, 125, 141,
+		 179, 153, 125, 140, 139, 182, 182, 152,
+		 136, 152, 136, 153, 136, 139, 111, 136,
+		 139, 111,   0,   0,	},
+	{
+		 153, 185, 107, 139, 126, 197, 185, 201,
+		 154, 149, 154, 139, 154, 154, 154, 152,
+		 110, 122,  95,  79,  63,  31,  31, 153,
+		 153, 168, 140, 198,  79, 124, 138,  94,
+		 153, 111, 149, 107, 167, 154, 154, 154,
+		 154, 196, 196, 167, 154, 152, 167, 182,
+		 182, 134, 149, 136, 153, 121, 136, 137,
+		 169, 194, 166, 167, 154, 167, 137, 182,
+		 125, 110,  94, 110,  95,  79, 125, 111,
+		 110,  78, 110, 111, 111,  95,  94, 108,
+		 123, 108, 125, 110,  94, 110,  95,  79,
+		 125, 111, 110,  78, 110, 111, 111,  95,
+		  94, 108, 123, 108, 121, 140,  61, 154,
+		 107, 167,  91, 122, 107, 167, 139, 139,
+		 155, 154, 139, 153, 139, 123, 123,  63,
+		 153, 166, 183, 140, 136, 153, 154, 166,
+		 183, 140, 136, 153, 154, 166, 183, 140,
+		 136, 153, 154, 170, 153, 123, 123, 107,
+		 121, 107, 121, 167, 151, 183, 140, 151,
+		 183, 140,   0,   0,	},
+	{
+		 153, 160, 107, 139, 126, 197, 185, 201,
+		 154, 134, 154, 139, 154, 154, 183, 152,
+		 154, 137,  95,  79,  63,  31,  31, 153,
+		 153, 168, 169, 198,  79, 224, 167, 122,
+		 153, 111, 149,  92, 167, 154, 154, 154,
+		 154, 196, 167, 167, 154, 152, 167, 182,
+		 182, 134, 149, 136, 153, 121, 136, 122,
+		 169, 208, 166, 167, 154, 152, 167, 182,
+		 125, 110, 124, 110,  95,  94, 125, 111,
+		 111,  79, 125, 126, 111, 111,  79, 108,
+		 123,  93, 125, 110, 124, 110,  95,  94,
+		 125, 111, 111,  79, 125, 126, 111, 111,
+		  79, 108, 123,  93, 121, 140,  61, 154,
+		 107, 167,  91, 107, 107, 167, 139, 139,
+		 170, 154, 139, 153, 139, 123, 123,  63,
+		 124, 166, 183, 140, 136, 153, 154, 166,
+		 183, 140, 136, 153, 154, 166, 183, 140,
+		 136, 153, 154, 170, 153, 138, 138, 122,
+		 121, 122, 121, 167, 151, 183, 140, 151,
+		 183, 140,   0,   0,	},
+};
+
 
 //////////////////////////////////////////////////////////////////////////////
 // Phase 1 command and bit FIFOs
@@ -562,12 +623,44 @@ static void p1_axi_write(dec_env_t * const de, const uint32_t len, const void * 
 //////////////////////////////////////////////////////////////////////////////
 // Write probability and scaling factor memories
 
+#if 0
 static void WriteProb(dec_env_t * const de) {
     int i;
     const uint8_t *p = (uint8_t *) &de->probabilities;
     for (i=0; i<sizeof(struct RPI_PROB); i+=4, p+=4)
         p1_apb_write(de, 0x1000+i, p[0] + (p[1]<<8) + (p[2]<<16) + (p[3]<<24));
 }
+#endif
+
+static void WriteProb(dec_env_t * const de, const HEVCContext * const s) {
+    uint8_t dst[RPI_PROB_ARRAY_SIZE];
+
+    const unsigned int init_type = (s->sh.cabac_init_flag && s->sh.slice_type != HEVC_SLICE_I) ?
+        s->sh.slice_type + 1 : 2 - s->sh.slice_type;
+    const uint8_t * p = prob_init[init_type];
+    const int q = av_clip(s->sh.slice_qp, 0, 51);
+    unsigned int i;
+
+    for (i = 0; i < RPI_PROB_VALS; i++) {
+        int init_value = p[i];
+        int m = (init_value >> 4) * 5 - 45;
+        int n = ((init_value & 15) << 3) - 16;
+        int pre = 2 * (((m * q) >> 4) + n) - 127;
+
+        pre ^= pre >> 31;
+        if (pre > 124)
+            pre = 124 + (pre & 1);
+        dst[i] = pre;
+    }
+    for (i = RPI_PROB_VALS; i != RPI_PROB_ARRAY_SIZE; ++i) {
+        dst[i] = 0;
+    }
+
+    for (i=0; i < RPI_PROB_ARRAY_SIZE; i+=4)
+        p1_apb_write(de, 0x1000+i, dst[i] + (dst[i+1]<<8) + (dst[i+2]<<16) + (dst[i+3]<<24));
+
+}
+
 
 static void WriteScalingFactors(dec_env_t * const de) {
     int i;
@@ -1081,8 +1174,10 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
 
     int weightedPredFlag, i, rIdx;
     uint16_t cmd_slice;
+    unsigned int collocated_from_l0_flag;
 
     de->num_slice_msgs=0;
+    de->dpbno_col = 0;
     cmd_slice = 0;
     if (sh->slice_type==HEVC_SLICE_I) cmd_slice = 1;
     if (sh->slice_type==HEVC_SLICE_P) cmd_slice = 2;
@@ -1092,16 +1187,17 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
         cmd_slice += sh->nb_refs[L0]<<2;
         cmd_slice += sh->nb_refs[L1]<<6;
     }
-    if (sh->slice_type==HEVC_SLICE_P
-    ||  sh->slice_type==HEVC_SLICE_B) de->max_num_merge_cand = sh->max_num_merge_cand;
 
-    cmd_slice += de->max_num_merge_cand<<11;
+    if (sh->slice_type==HEVC_SLICE_P ||  sh->slice_type==HEVC_SLICE_B)
+        cmd_slice |= sh->max_num_merge_cand<<11;
 
-    if (sh->slice_temporal_mvp_enabled_flag) {
-        if      (sh->slice_type==HEVC_SLICE_B) de->collocated_from_l0_flag = sh->collocated_list==L0;
-        else if (sh->slice_type==HEVC_SLICE_P) de->collocated_from_l0_flag = 1;
-    }
-    cmd_slice += de->collocated_from_l0_flag<<14;
+    collocated_from_l0_flag =
+        !sh->slice_temporal_mvp_enabled_flag ?
+            0 :
+        sh->slice_type == HEVC_SLICE_B ?
+            (sh->collocated_list == L0) :
+            (sh->slice_type==HEVC_SLICE_P);
+    cmd_slice |= collocated_from_l0_flag<<14;
 
     if (sh->slice_type==HEVC_SLICE_P || sh->slice_type==HEVC_SLICE_B) {
 
@@ -1114,12 +1210,13 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
             }
         }
 
-        de->collocated_ref_idx = sh->collocated_ref_idx;
-        if (s->ref->refPicList && s->ref->collocated_ref)
-            for (i=0; i<HEVC_MAX_REFS; i++) {
-                if (i<sh->nb_refs[L1]) de->RefPicList[1][i] = s->ref->refPicList[1].ref[i] - s->DPB;
-                if (i<sh->nb_refs[L0]) de->RefPicList[0][i] = s->ref->refPicList[0].ref[i] - s->DPB;
-            }
+        if (sps->sps_temporal_mvp_enabled_flag)
+        {
+            const RefPicList *rpl = (sh->slice_type != HEVC_SLICE_B || collocated_from_l0_flag) ?
+                s->ref->refPicList + 0 :
+                s->ref->refPicList + 1;
+            de->dpbno_col = rpl->ref[sh->collocated_ref_idx] - s->DPB;
+        }
 
         cmd_slice += NoBackwardPredFlag<<10;
         msg_slice(de, cmd_slice);
@@ -1157,12 +1254,6 @@ static void pre_slice_decode(dec_env_t * const de, const HEVCContext * const s) 
         + (pps->loop_filter_across_tiles_enabled_flag       << 10)); // CMD_DEBLOCK
 
     msg_slice(de, ((sh->slice_cr_qp_offset&31)<<5) + (sh->slice_cb_qp_offset&31)); // CMD_QPOFF
-
-    // collocated reads/writes
-    if (sps->sps_temporal_mvp_enabled_flag) {
-        de->dpbno_col = sh->slice_type == HEVC_SLICE_I ? 0 :
-            de->RefPicList[sh->slice_type==HEVC_SLICE_B && de->collocated_from_l0_flag==0][de->collocated_ref_idx];
-    }
 }
 
 
@@ -1212,10 +1303,8 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     const HEVCContext * const s = avctx->priv_data;
     const HEVCPPS * const pps = s->ps.pps;
     const HEVCSPS * const sps = s->ps.sps;
-    const SliceHeader * const sh = &s->sh;
     dec_env_t * const de = dec_env_get(avctx,  rpi);
     AVFrame * const f = s->ref->frame;
-    AVFrame * fallback_frame = f;
     const unsigned int dpbno_cur = s->ref - s->DPB;
     vid_vc_addr_t cmds_vc;
     vid_vc_addr_t pu_base_vc;
@@ -1414,27 +1503,18 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     apb_write_vc_len(rpi, RPI_OUTYSTRIDE, f->linesize[3] * 128);
     apb_write_vc_len(rpi, RPI_OUTCSTRIDE, f->linesize[3] * 128);
 
-    for(i=0; i<16; i++) {
-        apb_write(rpi, 0x9000+16*i, 0);
-        apb_write(rpi, 0x9004+16*i, 0);
-        apb_write(rpi, 0x9008+16*i, 0);
-        apb_write(rpi, 0x900C+16*i, 0);
-    }
-
     // Keep the last thing we resolved as fallback for any ref we fail to
     // resolve.  As a final fallback use our current frame.  The pels might
     // not be there yet but at least the memory is valid.
-    fallback_frame = f;
-    for(i=L0; i<=L1; i++)
+    //
+    // Attempt to resolve the entire DPB - we could note what we have used
+    // in ref lists but probably simpler and more reliable to set the whole thing
     {
-        for (unsigned int rIdx=0; rIdx <sh->nb_refs[i]; rIdx++)
-        {
-            const HEVCFrame * const f1 = s->ref->refPicList[i].ref[rIdx];
-            const int pic = f1 - s->DPB;
-            // Make sure pictures are in range 0 to 15
-            const int adjusted_pic = f1 < s->ref ? pic : pic-1;
-            const struct HEVCFrame * const hevc = &s->DPB[pic];
-            AVFrame * fr = (hevc != NULL) ? hevc->frame : NULL;
+        AVFrame * fallback_frame = f;
+        for (i = 0; i != 16; ++i) {
+            // Avoid current frame
+            const HEVCFrame * hevc_fr = (s->DPB + i >= s->ref) ? s->DPB + i + 1 : s->DPB + i;
+            AVFrame * fr = hevc_fr->frame;
 
             if (fr != NULL &&
                 av_rpi_zc_resolve_frame(fr, ZC_RESOLVE_FAIL) == 0)
@@ -1443,14 +1523,13 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
             }
             else
             {
-                av_log(avctx, AV_LOG_WARNING, "Failed to resolve reference frame\n");
                 fr = fallback_frame;
             }
 
-            av_assert1(adjusted_pic >= 0 && adjusted_pic < 16);
-            apb_write_vc_addr(rpi, 0x9000+16*adjusted_pic, get_vc_address_y(fr));
-            apb_write_vc_addr(rpi, 0x9008+16*adjusted_pic, get_vc_address_u(fr));
-            // Strides ignored
+            apb_write_vc_addr(rpi, 0x9000+16*i, get_vc_address_y(fr));
+            apb_write(rpi, 0x9004+16*i, 0);
+            apb_write_vc_addr(rpi, 0x9008+16*i, get_vc_address_u(fr));
+            apb_write(rpi, 0x900C+16*i, 0);
         }
     }
 
@@ -1561,12 +1640,16 @@ static void wpp_decode_slice(dec_env_t * const de, const HEVCContext * const s, 
     int indep = !s->sh.dependent_slice_segment_flag;
     int ctb_col = s->sh.slice_ctb_addr_rs % de->PicWidthInCtbsY;
 
-    if (ctb_addr_ts) wpp_end_previous_slice(de, s, ctb_addr_ts);
+    if (ctb_addr_ts)
+        wpp_end_previous_slice(de, s, ctb_addr_ts);
     pre_slice_decode(de, s);
     WriteBitstream(de, s);
-    if (ctb_addr_ts==0 || indep || de->PicWidthInCtbsY==1) WriteProb(de);
-    else if (ctb_col==0) p1_apb_write(de, RPI_TRANSFER, PROB_RELOAD);
-    else resetQPY=0;
+    if (ctb_addr_ts==0 || indep || de->PicWidthInCtbsY==1)
+        WriteProb(de, s);
+    else if (ctb_col==0)
+        p1_apb_write(de, RPI_TRANSFER, PROB_RELOAD);
+    else
+        resetQPY=0;
     program_slicecmds(de, s->slice_idx);
     new_slice_segment(de, s);
     wpp_entry_point(de, s, indep, resetQPY, ctb_addr_ts);
@@ -1574,11 +1657,15 @@ static void wpp_decode_slice(dec_env_t * const de, const HEVCContext * const s, 
         int ctb_addr_rs = pps->ctb_addr_ts_to_rs[ctb_addr_ts];
         int ctb_row = ctb_addr_rs / de->PicWidthInCtbsY;
         int last_x = de->PicWidthInCtbsY-1;
-        if (de->PicWidthInCtbsY>2) wpp_pause(de, ctb_row);
+        if (de->PicWidthInCtbsY>2)
+            wpp_pause(de, ctb_row);
         p1_apb_write(de, RPI_STATUS, (ctb_row<<18) + (last_x<<5) + 2);
-        if (de->PicWidthInCtbsY==2) p1_apb_write(de, RPI_TRANSFER, PROB_BACKUP);
-        if (de->PicWidthInCtbsY==1) WriteProb(de);
-        else p1_apb_write(de, RPI_TRANSFER, PROB_RELOAD);
+        if (de->PicWidthInCtbsY==2)
+            p1_apb_write(de, RPI_TRANSFER, PROB_BACKUP);
+        if (de->PicWidthInCtbsY==1)
+            WriteProb(de, s);
+        else
+            p1_apb_write(de, RPI_TRANSFER, PROB_RELOAD);
         ctb_addr_ts += pps->column_width[0];
         wpp_entry_point(de, s, 0, 1, ctb_addr_ts);
     }
@@ -1597,7 +1684,7 @@ static void decode_slice(dec_env_t * const de, const HEVCContext * const s, int 
     resetQPY = ctb_addr_ts==0
             || pps->tile_id[ctb_addr_ts]!=pps->tile_id[ctb_addr_ts-1]
             || !s->sh.dependent_slice_segment_flag;
-    if (resetQPY) WriteProb(de);
+    if (resetQPY) WriteProb(de, s);
     program_slicecmds(de, s->slice_idx);
     new_slice_segment(de, s);
     new_entry_point(de, s, !s->sh.dependent_slice_segment_flag, resetQPY, ctb_addr_ts);
@@ -1610,13 +1697,24 @@ static void decode_slice(dec_env_t * const de, const HEVCContext * const s, int 
         int last_x = pps->col_bd[tile_x+1]-1;
         int last_y = pps->row_bd[tile_y+1]-1;
         p1_apb_write(de, RPI_STATUS, 2 + (last_x<<5) + (last_y<<18));
-        WriteProb(de);
+        WriteProb(de, s);
         ctb_addr_ts += pps->column_width[tile_x] * pps->row_height[tile_y];
         new_entry_point(de, s, 0, 1, ctb_addr_ts);
     }
 }
 
 //////////////////////////////////////////////////////////////////////////////
+
+static int cabac_start_align(HEVCContext *s)
+{
+    GetBitContext *gb = &s->HEVClc->gb;
+    skip_bits(gb, 1);
+    align_get_bits(gb);
+    // Should look at getting rid of this
+    return ff_init_cabac_decoder(&s->HEVClc->cc,
+                          gb->buffer + get_bits_count(gb) / 8,
+                          (get_bits_left(gb) + 7) / 8);
+}
 
 static int rpi_hevc_decode_slice(
     AVCodecContext *avctx,
@@ -1643,10 +1741,10 @@ static int rpi_hevc_decode_slice(
     }
     de->state = RPIVID_DECODE_SLICE;
 
-    ff_hevc_cabac_init(s, ctb_addr_ts);
+//    ff_hevc_cabac_init(s, ctb_addr_ts);
+    cabac_start_align(s);
     if (s->ps.sps->scaling_list_enable_flag)
         populate_scaling_factors(de, s);
-    populate_prob_tables(de, s);
     pps->entropy_coding_sync_enabled_flag? wpp_decode_slice(de, s, ctb_addr_ts)
                                              : decode_slice(de, s, ctb_addr_ts);
 #if TRACE_ENTRY
