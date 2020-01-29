@@ -108,6 +108,8 @@ int av_rpi_zc_length(const AVRpiZcRefPtr fr_ref);
 // Get the number of bytes allocated from the frame ref
 // Returns 0 if ref doesn't look valid
 int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref);
+// Geometry this frame was allocated with
+const AVRpiZcFrameGeometry * av_rpi_zc_geometry(const AVRpiZcRefPtr fr_ref);
 
 // Unreference the buffer refed/allocated by _zc_ref
 // If fr_ref is NULL then this will NOP
