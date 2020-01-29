@@ -700,6 +700,12 @@ int av_rpi_zc_numbytes(const AVRpiZcRefPtr fr_ref)
     return p == NULL ? 0 : p->numbytes;
 }
 
+const AVRpiZcFrameGeometry * av_rpi_zc_geometry(const AVRpiZcRefPtr fr_ref)
+{
+    const ZcBufEnv * const zbe = pic_zbe_ptr(fr_ref);
+    return zbe == NULL ? NULL : &zbe->geo;
+}
+
 AVRpiZcRefPtr av_rpi_zc_ref(void * const logctx, const AVZcEnvPtr zc,
     const AVFrame * const frame, const enum AVPixelFormat expected_format, const int maycopy)
 {
