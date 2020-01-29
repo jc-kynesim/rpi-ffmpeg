@@ -141,9 +141,9 @@ int rpi_mem_gpu_init(const unsigned int flags)
     (void)flags;
 
     if (vcsm_init_ex(wants_cma ? 1 : 0, -1) == 0)
-        use_cma = 0;
-    else if (vcsm_init_ex(wants_cma ? 0 : 1, -1) == 0)
         use_cma = 1;
+    else if (vcsm_init_ex(wants_cma ? 0 : 1, -1) == 0)
+        use_cma = 0;
     else
         return AVERROR(EINVAL);
 
