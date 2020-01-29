@@ -24,6 +24,7 @@ INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
  --disable-thumb\
  --enable-mmal\
  --enable-rpi\
+ --enable-shared\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFINES $RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS -Wl,-rpath=/opt/vc/lib,-rpath-link=$RPI_OPT_VC/lib,-rpath=/lib,-rpath=/usr/lib,-rpath-link=$RPI_TOOLROOT/lib,-rpath-link=$RPI_TOOLROOT/lib"\
