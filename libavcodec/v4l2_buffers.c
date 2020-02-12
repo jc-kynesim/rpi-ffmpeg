@@ -468,8 +468,20 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
             frame->data[i] = frame->buf[i]->data;
         }
 
-        /* 1.1 fixup special cases */
+        /* 1.1 fixup special cases where we expand monoplanar */
         switch (avbuf->context->av_pix_fmt) {
+        case AV_PIX_FMT_YUV420P:
+            if (avbuf->num_planes > 1)
+                break;
+            frame->linesize[1] = avbuf->plane_info[0].bytesperline / 2;
+            frame->data[1] = frame->buf[0]->data +
+                avbuf->plane_info[0].bytesperline *
+                avbuf->context->format.fmt.pix.height;
+            frame->linesize[2] = frame->linesize[1];
+            frame->data[2] = frame->data[1] +
+                frame->linesize[1] *
+                avbuf->context->format.fmt.pix.height / 2;
+            break;
         case AV_PIX_FMT_NV12:
             if (avbuf->num_planes > 1)
                 break;

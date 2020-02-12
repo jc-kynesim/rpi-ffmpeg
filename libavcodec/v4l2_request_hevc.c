@@ -190,6 +190,9 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
     if (sh->slice_loop_filter_across_slices_enabled_flag)
         slice_params->flags |= V4L2_HEVC_SLICE_PARAMS_FLAG_SLICE_LOOP_FILTER_ACROSS_SLICES_ENABLED;
 
+    if (sh->dependent_slice_segment_flag)
+        slice_params->flags |= V4L2_HEVC_SLICE_PARAMS_FLAG_DEPENDENT_SLICE_SEGMENT;
+
     for (i = 0; i < FF_ARRAY_ELEMS(h->DPB); i++) {
         const HEVCFrame *frame = &h->DPB[i];
         if (frame != pic && (frame->flags & (HEVC_FRAME_FLAG_LONG_REF | HEVC_FRAME_FLAG_SHORT_REF))) {
@@ -231,21 +234,11 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
         slice_params->entry_point_offset_minus1[i] = sh->entry_point_offset[i] - 1;
 }
 
-static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
-                                         av_unused const uint8_t *buffer,
-                                         av_unused uint32_t size)
+static struct v4l2_ctrl_hevc_sps make_v4l2_sps(
+    const HEVCSPS * const sps)
 {
-    const HEVCContext *h = avctx->priv_data;
-    const HEVCSPS *sps = h->ps.sps;
-    const HEVCPPS *pps = h->ps.pps;
-    const ScalingList *sl = pps->scaling_list_data_present_flag ?
-                            &pps->scaling_list :
-                            sps->scaling_list_enable_flag ?
-                            &sps->scaling_list : NULL;
-    V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
-
     /* ISO/IEC 23008-2, ITU-T Rec. H.265: Sequence parameter set */
-    controls->sps = (struct v4l2_ctrl_hevc_sps) {
+    struct v4l2_ctrl_hevc_sps dst = {
         .chroma_format_idc = sps->chroma_format_idc,
         .pic_width_in_luma_samples = sps->width,
         .pic_height_in_luma_samples = sps->height,
@@ -267,34 +260,54 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
         .log2_diff_max_min_pcm_luma_coding_block_size = sps->pcm.log2_max_pcm_cb_size - sps->pcm.log2_min_pcm_cb_size,
         .num_short_term_ref_pic_sets = sps->nb_st_rps,
         .num_long_term_ref_pics_sps = sps->num_long_term_ref_pics_sps,
+        .flags = 0  // Set below
     };
 
     if (sps->separate_colour_plane_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_SEPARATE_COLOUR_PLANE;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_SEPARATE_COLOUR_PLANE;
 
     if (sps->scaling_list_enable_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_SCALING_LIST_ENABLED;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_SCALING_LIST_ENABLED;
 
     if (sps->amp_enabled_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_AMP_ENABLED;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_AMP_ENABLED;
 
     if (sps->sao_enabled)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_SAMPLE_ADAPTIVE_OFFSET;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_SAMPLE_ADAPTIVE_OFFSET;
 
     if (sps->pcm_enabled_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_PCM_ENABLED;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_PCM_ENABLED;
 
     if (sps->pcm.loop_filter_disable_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_PCM_LOOP_FILTER_DISABLED;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_PCM_LOOP_FILTER_DISABLED;
 
     if (sps->long_term_ref_pics_present_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_LONG_TERM_REF_PICS_PRESENT;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_LONG_TERM_REF_PICS_PRESENT;
 
     if (sps->sps_temporal_mvp_enabled_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_SPS_TEMPORAL_MVP_ENABLED;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_SPS_TEMPORAL_MVP_ENABLED;
 
     if (sps->sps_strong_intra_smoothing_enable_flag)
-        controls->sps.flags |= V4L2_HEVC_SPS_FLAG_STRONG_INTRA_SMOOTHING_ENABLED;
+        dst.flags |= V4L2_HEVC_SPS_FLAG_STRONG_INTRA_SMOOTHING_ENABLED;
+
+    return dst;
+}
+
+static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
+                                         av_unused const uint8_t *buffer,
+                                         av_unused uint32_t size)
+{
+    const HEVCContext *h = avctx->priv_data;
+    const HEVCSPS *sps = h->ps.sps;
+    const HEVCPPS *pps = h->ps.pps;
+    const ScalingList *sl = pps->scaling_list_data_present_flag ?
+                            &pps->scaling_list :
+                            sps->scaling_list_enable_flag ?
+                            &sps->scaling_list : NULL;
+    V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
+
+    /* ISO/IEC 23008-2, ITU-T Rec. H.265: Sequence parameter set */
+    controls->sps = make_v4l2_sps(sps);
 
     if (sl) {
         for (int i = 0; i < 6; i++) {
@@ -503,8 +516,19 @@ static int v4l2_request_hevc_set_controls(AVCodecContext *avctx)
 static int v4l2_request_hevc_init(AVCodecContext *avctx)
 {
     int ret;
+    const HEVCContext *h = avctx->priv_data;
 
-    ret = ff_v4l2_request_init(avctx, V4L2_PIX_FMT_HEVC_SLICE, 3 * 1024 * 1024, NULL, 0);
+    struct v4l2_ctrl_hevc_sps sps = make_v4l2_sps(h->ps.sps);
+
+    struct v4l2_ext_control control[] = {
+        {
+            .id = V4L2_CID_MPEG_VIDEO_HEVC_SPS,
+            .ptr = &sps,
+            .size = sizeof(sps),
+        },
+    };
+
+    ret = ff_v4l2_request_init(avctx, V4L2_PIX_FMT_HEVC_SLICE, 3 * 1024 * 1024, control, FF_ARRAY_ELEMS(control));
     if (ret)
         return ret;
 

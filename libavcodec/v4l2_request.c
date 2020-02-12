@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <drm_fourcc.h>
+#include <drm/drm_fourcc.h>
 #include <linux/media.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -147,6 +147,8 @@ static int v4l2_request_dequeue_buffer(V4L2RequestContext *ctx, V4L2RequestBuffe
 }
 
 const uint32_t v4l2_request_capture_pixelformats[] = {
+    V4L2_PIX_FMT_SAND8,
+    V4L2_PIX_FMT_SAND30,
     V4L2_PIX_FMT_NV12,
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     V4L2_PIX_FMT_SUNXI_TILED_NV12,
@@ -163,6 +165,14 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
     case V4L2_PIX_FMT_NV12:
         layer->format = DRM_FORMAT_NV12;
         desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        break;
+    case V4L2_PIX_FMT_SAND8:
+        layer->format = DRM_FORMAT_NV12;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
+        break;
+    case V4L2_PIX_FMT_SAND30:
+        layer->format = DRM_FORMAT_P030;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
         break;
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     case V4L2_PIX_FMT_SUNXI_TILED_NV12:
@@ -185,9 +195,23 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
     layer->planes[0].offset = 0;
     layer->planes[0].pitch = V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.plane_fmt[0].bytesperline : format->fmt.pix.bytesperline;
 
-    layer->planes[1].object_index = 0;
-    layer->planes[1].offset = layer->planes[0].pitch * (V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.height : format->fmt.pix.height);
-    layer->planes[1].pitch = layer->planes[0].pitch;
+    if (pixelformat == V4L2_PIX_FMT_SAND8) {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = format->fmt.pix.height * 128;
+        layer->planes[0].pitch = format->fmt.pix.width;
+        layer->planes[1].pitch = format->fmt.pix.width;
+    }
+    else if (pixelformat == V4L2_PIX_FMT_SAND30) {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = format->fmt.pix.height * 128;
+        layer->planes[0].pitch = format->fmt.pix.width * 2; // Lies but it keeps DRM import happy
+        layer->planes[1].pitch = format->fmt.pix.width * 2;
+    }
+    else {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = layer->planes[0].pitch * (V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.height : format->fmt.pix.height);
+        layer->planes[1].pitch = layer->planes[0].pitch;
+    }
 
     return 0;
 }
@@ -308,9 +332,30 @@ int ff_v4l2_request_decode_frame(AVCodecContext *avctx, AVFrame *frame, struct v
     return v4l2_request_queue_decode(avctx, frame, control, count, 1, 1);
 }
 
+
+static inline char safechar(unsigned int x)
+{
+    x &= 0xff;
+    return x > 0x20 && x <= 0x7e ? x : '.';
+}
+
+static const char * str_fourcc(char * buf, const unsigned int fcc)
+{
+    if (fcc == 0) {
+        return "----";
+    }
+    buf[0] = safechar(fcc >> 0);
+    buf[1] = safechar(fcc >> 8);
+    buf[2] = safechar(fcc >> 16);
+    buf[3] = safechar(fcc >> 24);
+    buf[4] = 0;
+    return buf;
+}
+
 static int v4l2_request_try_format(AVCodecContext *avctx, enum v4l2_buf_type type, uint32_t pixelformat)
 {
     V4L2RequestContext *ctx = avctx->internal->hwaccel_priv_data;
+    char b0[5], b1[5];
     struct v4l2_fmtdesc fmtdesc = {
         .index = 0,
         .type = type,
@@ -335,13 +380,14 @@ static int v4l2_request_try_format(AVCodecContext *avctx, enum v4l2_buf_type typ
     }
 
     while (ioctl(ctx->video_fd, VIDIOC_ENUM_FMT, &fmtdesc) >= 0) {
+        av_log(avctx, AV_LOG_INFO, "%s: pixelformat found: %s wants %s\n", __func__, str_fourcc(b0, fmtdesc.pixelformat), str_fourcc(b1, pixelformat));
         if (fmtdesc.pixelformat == pixelformat)
             return 0;
 
         fmtdesc.index++;
     }
 
-    av_log(avctx, AV_LOG_INFO, "%s: pixelformat %u not supported for type %u\n", __func__, pixelformat, type);
+    av_log(avctx, AV_LOG_INFO, "%s: pixelformat %s not supported for type %u\n", __func__, str_fourcc(b0, pixelformat), type);
     return -1;
 }
 
@@ -351,6 +397,7 @@ static int v4l2_request_set_format(AVCodecContext *avctx, enum v4l2_buf_type typ
     struct v4l2_format format = {
         .type = type,
     };
+    int rv;
 
     if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
         format.fmt.pix_mp.width = avctx->coded_width;
@@ -365,7 +412,9 @@ static int v4l2_request_set_format(AVCodecContext *avctx, enum v4l2_buf_type typ
         format.fmt.pix.sizeimage = buffersize;
     }
 
-    return ioctl(ctx->video_fd, VIDIOC_S_FMT, &format);
+    rv = ioctl(ctx->video_fd, VIDIOC_S_FMT, &format);
+    av_log(avctx, AV_LOG_INFO, "%s: rv=%d\n", __func__, rv);
+    return rv;
 }
 
 static int v4l2_request_select_capture_format(AVCodecContext *avctx)
@@ -920,6 +969,12 @@ int ff_v4l2_request_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_c
     } else {
         hwfc->width = ctx->format.fmt.pix.width;
         hwfc->height = ctx->format.fmt.pix.height;
+        if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_SAND8) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_8;
+        }
+        else if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_SAND30) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_10;
+        }
     }
 
     hwfc->pool = av_buffer_pool_init2(sizeof(V4L2RequestDescriptor), avctx, v4l2_request_frame_alloc, v4l2_request_pool_free);
