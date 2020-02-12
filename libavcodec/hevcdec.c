@@ -376,12 +376,17 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
                      CONFIG_HEVC_V4L2REQUEST_HWACCEL + \
                      CONFIG_HEVC_VAAPI_HWACCEL + \
                      CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL + \
+                     CONFIG_HEVC_RPI4_8_HWACCEL + \
+                     CONFIG_HEVC_RPI4_10_HWACCEL + \
                      CONFIG_HEVC_VDPAU_HWACCEL)
     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmt = pix_fmts;
 
     switch (sps->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
+#if CONFIG_HEVC_RPI4_8_HWACCEL
+        *fmt++ = AV_PIX_FMT_RPI4_8;
+#endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
 #endif
@@ -406,6 +411,9 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #endif
         break;
     case AV_PIX_FMT_YUV420P10:
+#if CONFIG_HEVC_RPI4_10_HWACCEL
+        *fmt++ = AV_PIX_FMT_RPI4_10;
+#endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
 #endif
@@ -3098,6 +3106,10 @@ static int decode_nal_units(HEVCContext *s, const uint8_t *buf, int length)
     }
 
 fail:
+    if (ret < 0 && s->avctx->hwaccel && s->avctx->hwaccel->abort_frame) {
+        s->avctx->hwaccel->abort_frame(s->avctx);
+    }
+
     if (s->ref && s->threads_type == FF_THREAD_FRAME)
         ff_thread_report_progress(&s->ref->tf, INT_MAX, 0);
 
@@ -3602,6 +3614,12 @@ AVCodec ff_hevc_decoder = {
 #endif
 #if CONFIG_HEVC_V4L2REQUEST_HWACCEL
                                HWACCEL_V4L2REQUEST(hevc),
+#endif
+#if CONFIG_HEVC_RPI4_8_HWACCEL
+                               HWACCEL_RPI4_8(hevc),
+#endif
+#if CONFIG_HEVC_RPI4_10_HWACCEL
+                               HWACCEL_RPI4_10(hevc),
 #endif
                                NULL
                            },

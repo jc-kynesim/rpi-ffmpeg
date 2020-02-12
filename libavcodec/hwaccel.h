@@ -24,6 +24,7 @@
 
 
 #define HWACCEL_CAP_ASYNC_SAFE      (1 << 0)
+#define HWACCEL_CAP_MT_SAFE         (1 << 1)
 
 
 typedef struct AVCodecHWConfigInternal {
@@ -82,5 +83,9 @@ typedef struct AVCodecHWConfigInternal {
     HW_CONFIG_HWACCEL(0, 0, 1, XVMC,         NONE,         ff_ ## codec ## _xvmc_hwaccel)
 #define HWACCEL_V4L2REQUEST(codec) \
     HW_CONFIG_HWACCEL(1, 0, 0, DRM_PRIME,    DRM,          ff_ ## codec ## _v4l2request_hwaccel)
+#define HWACCEL_RPI4_8(codec) \
+    HW_CONFIG_HWACCEL(0, 0, 1, RPI4_8,       NONE,         ff_ ## codec ## _rpi4_8_hwaccel)
+#define HWACCEL_RPI4_10(codec) \
+    HW_CONFIG_HWACCEL(0, 0, 1, RPI4_10,      NONE,         ff_ ## codec ## _rpi4_10_hwaccel)
 
 #endif /* AVCODEC_HWACCEL_H */

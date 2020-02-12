@@ -3273,8 +3273,7 @@ typedef struct AVCodecContext {
 #define FF_SUB_TEXT_FMT_ASS_WITH_TIMINGS 1
 #endif
 
-    /**
-     * Audio only. The amount of padding (in samples) appended by the encoder to
+    /* Audio only. The amount of padding (in samples) appended by the encoder to
      * the end of the audio. I.e. this number of decoded samples must be
      * discarded by the caller from the end of the stream to get the original
      * audio without any trailing padding.
@@ -3807,6 +3806,17 @@ typedef struct AVHWAccel {
      * that avctx->hwaccel_priv_data is invalid.
      */
     int (*frame_params)(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx);
+
+    /**
+     * Called if parsing fails
+     *
+     * An error has occured, end_frame will not be called
+     * start_frame & decode_slice may or may not have been called
+     * Optional
+     *
+     * @param avctx the codec context
+     */
+    void (*abort_frame)(AVCodecContext *avctx);
 } AVHWAccel;
 
 /**
@@ -4666,6 +4676,17 @@ void av_packet_rescale_ts(AVPacket *pkt, AVRational tb_src, AVRational tb_dst);
  * @return A decoder if one was found, NULL otherwise.
  */
 AVCodec *avcodec_find_decoder(enum AVCodecID id);
+
+/**
+ * Find a registered decoder with a matching codec ID and pix_fmt.
+ * A decoder will pix_fmt set to NULL will match any fmt.
+ * A fmt of AV_PIX_FMT_NONE will only match a decoder will px_fmt NULL.
+ *
+ * @param id AVCodecID of the requested decoder
+ * @param fmt AVPixelForma that msut be supported by decoder
+ * @return A decoder if one was found, NULL otherwise.
+ */
+AVCodec *avcodec_find_decoder_by_id_and_fmt(enum AVCodecID id, enum AVPixelFormat fmt);
 
 /**
  * Find a registered decoder with the specified name.
