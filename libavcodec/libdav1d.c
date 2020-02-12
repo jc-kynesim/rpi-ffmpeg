@@ -53,6 +53,16 @@ static const enum AVPixelFormat pix_fmt_rgb[3] = {
     AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP10, AV_PIX_FMT_GBRP12,
 };
 
+static enum AVPixelFormat libdav1d_get_format(AVCodecContext *avctx, const Dav1dPicture *p)
+{
+   enum AVPixelFormat pix_fmts[2], *fmt = pix_fmts;
+
+   *fmt++ = pix_fmt[p->p.layout][p->seq_hdr->hbd];
+   *fmt = AV_PIX_FMT_NONE;
+
+   return ff_get_format(avctx, pix_fmts);
+}
+
 static void libdav1d_log_callback(void *opaque, const char *fmt, va_list vl)
 {
     AVCodecContext *c = opaque;
@@ -229,6 +239,7 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
     c->profile = p->seq_hdr->profile;
     c->level = ((p->seq_hdr->operating_points[0].major_level - 2) << 2)
                | p->seq_hdr->operating_points[0].minor_level;
+    frame->format = c->pix_fmt = libdav1d_get_format(c, p);
     frame->width = p->p.w;
     frame->height = p->p.h;
     if (c->width != p->p.w || c->height != p->p.h) {

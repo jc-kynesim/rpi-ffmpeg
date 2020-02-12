@@ -263,6 +263,12 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
     /* if we are draining and there are no more capture buffers queued in the driver we are done */
     if (!V4L2_TYPE_IS_OUTPUT(ctx->type) && ctx_to_m2mctx(ctx)->draining) {
         for (i = 0; i < ctx->num_buffers; i++) {
+            /* capture buffer initialization happens during decode hence
+             * detection happens at runtime
+             */
+            if (!ctx->buffers)
+                break;
+
             if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
                 goto start;
         }
@@ -393,22 +399,54 @@ static int v4l2_release_buffers(V4L2Context* ctx)
     struct v4l2_requestbuffers req = {
         .memory = V4L2_MEMORY_MMAP,
         .type = ctx->type,
-        .count = 0, /* 0 -> unmaps buffers from the driver */
+        .count = 0, /* 0 -> unmap all buffers from the driver */
     };
-    int i, j;
+    int ret, i, j;
 
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer *buffer = &ctx->buffers[i];
 
         for (j = 0; j < buffer->num_planes; j++) {
             struct V4L2Plane_info *p = &buffer->plane_info[j];
+
+            if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+                /* output buffers are not EXPORTED */
+                goto unmap;
+            }
+
+            if (ctx_to_m2mctx(ctx)->output_drm) {
+                /* use the DRM frame to close */
+                if (buffer->drm_frame.objects[j].fd >= 0) {
+                    if (close(buffer->drm_frame.objects[j].fd) < 0) {
+                        av_log(logger(ctx), AV_LOG_ERROR, "%s close drm fd "
+                            "[buffer=%2d, plane=%d, fd=%2d] - %s \n",
+                            ctx->name, i, j, buffer->drm_frame.objects[j].fd,
+                            av_err2str(AVERROR(errno)));
+                    }
+                }
+            }
+unmap:
             if (p->mm_addr && p->length)
                 if (munmap(p->mm_addr, p->length) < 0)
-                    av_log(logger(ctx), AV_LOG_ERROR, "%s unmap plane (%s))\n", ctx->name, av_err2str(AVERROR(errno)));
+                    av_log(logger(ctx), AV_LOG_ERROR, "%s unmap plane (%s))\n",
+                        ctx->name, av_err2str(AVERROR(errno)));
         }
     }
 
-    return ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_REQBUFS, &req);
+    ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_REQBUFS, &req);
+    if (ret < 0) {
+            av_log(logger(ctx), AV_LOG_ERROR, "release all %s buffers (%s)\n",
+                ctx->name, av_err2str(AVERROR(errno)));
+
+            if (ctx_to_m2mctx(ctx)->output_drm)
+                av_log(logger(ctx), AV_LOG_ERROR,
+                    "Make sure the DRM client releases all FB/GEM objects before closing the codec (ie):\n"
+                    "for all buffers: \n"
+                    "  1. drmModeRmFB(..)\n"
+                    "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
+    }
+
+    return ret;
 }
 
 static inline int v4l2_try_raw_format(V4L2Context* ctx, enum AVPixelFormat pixfmt)
@@ -501,6 +539,24 @@ static int v4l2_get_coded_format(V4L2Context* ctx, uint32_t *p)
     return 0;
 }
 
+static AVRational v4l2_get_sar(V4L2Context* ctx)
+{
+    struct AVRational sar = { 1, 1 };
+    struct v4l2_cropcap cropcap;
+    int ret;
+
+    memset(&cropcap, 0, sizeof(cropcap));
+    cropcap.type = ctx->type;
+
+    ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_CROPCAP, &cropcap);
+    if (ret)
+        return sar;
+
+    sar.num = cropcap.pixelaspect.numerator;
+    sar.den = cropcap.pixelaspect.denominator;
+    return sar;
+}
+
  /*****************************************************************************
   *
   *             V4L2 Context Interface
@@ -574,6 +630,7 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt)
 int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame)
 {
     V4L2Buffer* avbuf = NULL;
+    int ret;
 
     /*
      * blocks until:
@@ -588,7 +645,12 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame)
         return AVERROR(EAGAIN);
     }
 
-    return ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
+    ret = ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
+    if (ret)
+	    return ret;
+
+    frame->sample_aspect_ratio = v4l2_get_sar(ctx);
+    return 0;
 }
 
 int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
@@ -692,9 +754,8 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         ctx->buffers[i].context = ctx;
         ret = ff_v4l2_buffer_initialize(&ctx->buffers[i], i);
         if (ret < 0) {
-            av_log(logger(ctx), AV_LOG_ERROR, "%s buffer initialization (%s)\n", ctx->name, av_err2str(ret));
-            av_free(ctx->buffers);
-            return ret;
+            av_log(logger(ctx), AV_LOG_ERROR, "%s buffer[%d] initialization (%s)\n", ctx->name, i, av_err2str(ret));
+            goto error;
         }
     }
 
@@ -707,4 +768,12 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ? ctx->format.fmt.pix_mp.plane_fmt[0].bytesperline : ctx->format.fmt.pix.bytesperline);
 
     return 0;
+
+error:
+    v4l2_release_buffers(ctx);
+
+    av_free(ctx->buffers);
+    ctx->buffers = NULL;
+
+    return ret;
 }

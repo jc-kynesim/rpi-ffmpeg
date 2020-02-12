@@ -38,7 +38,7 @@
 
 #define V4L_M2M_DEFAULT_OPTS \
     { "num_output_buffers", "Number of buffers in the output context",\
-        OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 16 }, 6, INT_MAX, FLAGS }
+        OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 2 }, 1, INT_MAX, FLAGS }
 
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
@@ -59,6 +59,11 @@ typedef struct V4L2m2mContext {
 
     /* Reference to self; only valid while codec is active. */
     AVBufferRef *self_ref;
+
+    AVBufferRef *device_ref;
+
+    /* generate DRM frames */
+    int output_drm;
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv
