@@ -21,6 +21,8 @@
 
 // *** This module is a work in progress and its utility is strictly
 //     limited to testing.
+//     Amongst other issues it doesn't wait for the pic to be displayed before
+//     returning the buffer so flikering does occur.
 
 #include "libavutil/opt.h"
 #include "libavutil/avassert.h"
@@ -40,7 +42,7 @@
 
 #include "libavutil/rpi_sand_fns.h"
 
-#define TRACE_ALL 1
+#define TRACE_ALL 0
 
 #define NUM_BUFFERS 4
 #define RPI_DISPLAY_ALL 0
@@ -80,25 +82,19 @@ typedef struct drm_display_env_s
 } drm_display_env_t;
 
 
-static int xv_write_trailer(AVFormatContext *s)
+static int drm_vout_write_trailer(AVFormatContext *s)
 {
-    drm_display_env_t * const de = s->priv_data;
 #if TRACE_ALL
+    drm_display_env_t * const de = s->priv_data;
     av_log(s, AV_LOG_INFO, "%s\n", __func__);
 #endif
 
     return 0;
 }
 
-static int xv_write_header(AVFormatContext *s)
+static int drm_vout_write_header(AVFormatContext *s)
 {
-    drm_display_env_t * const de = s->priv_data;
     const AVCodecParameters * const par = s->streams[0]->codecpar;
-    const unsigned int w = par->width;
-    const unsigned int h = par->height;
-    const unsigned int x = 0;
-    const unsigned int y = 0;
-    const enum AVPixelFormat req_fmt = par->format;
 
 #if TRACE_ALL
     av_log(s, AV_LOG_INFO, "%s\n", __func__);
@@ -110,19 +106,14 @@ static int xv_write_header(AVFormatContext *s)
         return AVERROR(EINVAL);
     }
 
-    // **********************
-
     return 0;
-
-fail:
-    xv_write_trailer(s);
-    return AVERROR_UNKNOWN;
 }
 
-static int xv_write_packet(AVFormatContext *s, AVPacket *pkt)
+static int drm_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
 {
     AVFrame * const frame = (AVFrame *)pkt->data;
     drm_display_env_t * const de = s->priv_data;
+    int ret = 0;
 
 #if TRACE_ALL
     av_log(s, AV_LOG_INFO, "%s\n", __func__);
@@ -215,7 +206,7 @@ static int xv_write_packet(AVFormatContext *s, AVPacket *pkt)
             da->fd = desc->objects[0].fd;
         }
 
-        int ret = drmModeSetPlane(de->drm_fd, de->setup.planeId, de->setup.crtcId,
+        ret = drmModeSetPlane(de->drm_fd, de->setup.planeId, de->setup.crtcId,
                                   da->fb_handle, 0,
                     de->setup.compose.x, de->setup.compose.y,
                     de->setup.compose.width,
@@ -232,21 +223,21 @@ static int xv_write_packet(AVFormatContext *s, AVPacket *pkt)
     return 0;
 }
 
-static int xv_write_frame(AVFormatContext *s, int stream_index, AVFrame **ppframe,
+static int drm_vout_write_frame(AVFormatContext *s, int stream_index, AVFrame **ppframe,
                           unsigned flags)
 {
 #if TRACE_ALL
     av_log(s, AV_LOG_INFO, "%s: idx=%d, flags=%#x\n", __func__, stream_index, flags);
 #endif
 
-    /* xv_write_header() should have accepted only supported formats */
+    /* drm_vout_write_header() should have accepted only supported formats */
     if ((flags & AV_WRITE_UNCODED_FRAME_QUERY))
         return 0;
 
     return 0;
 }
 
-static int xv_control_message(AVFormatContext *s, int type, void *data, size_t data_size)
+static int drm_vout_control_message(AVFormatContext *s, int type, void *data, size_t data_size)
 {
 #if TRACE_ALL
     av_log(s, AV_LOG_INFO, "%s: %d\n", __func__, type);
@@ -491,7 +482,7 @@ static const AVOption options[] = {
 
 };
 
-static const AVClass xv_class = {
+static const AVClass drm_vout_class = {
     .class_name = "drm vid outdev",
     .item_name  = av_default_item_name,
     .option     = options,
@@ -505,13 +496,13 @@ AVOutputFormat ff_vout_drm_muxer = {
     .priv_data_size = sizeof(drm_display_env_t),
     .audio_codec    = AV_CODEC_ID_NONE,
     .video_codec    = AV_CODEC_ID_WRAPPED_AVFRAME,
-    .write_header   = xv_write_header,
-    .write_packet   = xv_write_packet,
-    .write_uncoded_frame = xv_write_frame,
-    .write_trailer  = xv_write_trailer,
-    .control_message = xv_control_message,
+    .write_header   = drm_vout_write_header,
+    .write_packet   = drm_vout_write_packet,
+    .write_uncoded_frame = drm_vout_write_frame,
+    .write_trailer  = drm_vout_write_trailer,
+    .control_message = drm_vout_control_message,
     .flags          = AVFMT_NOFILE | AVFMT_VARIABLE_FPS | AVFMT_NOTIMESTAMPS,
-    .priv_class     = &xv_class,
+    .priv_class     = &drm_vout_class,
     .init           = drm_vout_init,
     .deinit         = drm_vout_deinit,
 };

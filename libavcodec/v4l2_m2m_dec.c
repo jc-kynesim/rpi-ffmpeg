@@ -24,6 +24,8 @@
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 
+#include "config.h"
+
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_drm.h"
 #include "libavutil/pixfmt.h"
@@ -207,6 +209,7 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     capture->av_codec_id = AV_CODEC_ID_RAWVIDEO;
     capture->av_pix_fmt = avctx->pix_fmt;
 
+#if !CONFIG_VOUT_DRM_KLUDGE
     /* the client requests the codec to generate DRM frames:
      *   - data[0] will therefore point to the returned AVDRMFrameDescriptor
      *       check the ff_v4l2_buffer_to_avframe conversion function.
@@ -223,6 +226,9 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     default:
         break;
     }
+#else
+    s->output_drm = 1;
+#endif
 
     s->device_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
     if (!s->device_ref) {
