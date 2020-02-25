@@ -29,11 +29,26 @@
 #include "decode.h"
 #include "internal.h"
 #include "v4l2_request.h"
+#include "v4l2_phase.h"
 
 uint64_t ff_v4l2_request_get_capture_timestamp(AVFrame *frame)
 {
     V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)frame->data[0];
     return req ? v4l2_timeval_to_ns(&req->capture.buffer.timestamp) : 0;
+}
+
+int ff_v4l2_request_start_phase_control(AVFrame *frame, struct V4L2PhaseControl * ctrl)
+{
+    V4L2RequestDescriptor * const req = (V4L2RequestDescriptor*)frame->data[0];
+    return ff_v4l2_phase_start(&req->phase, ctrl);
+}
+
+void ff_v4l2_request_abort_phase_control(AVFrame *frame)
+{
+    if (frame != NULL && frame->data[0] != NULL) {
+        V4L2RequestDescriptor *const req = (V4L2RequestDescriptor *)frame->data[0];
+        ff_v4l2_phase_abort(&req->phase);
+    }
 }
 
 int ff_v4l2_request_reset_frame(AVCodecContext *avctx, AVFrame *frame)
@@ -278,8 +293,24 @@ static int v4l2_request_queue_decode(AVCodecContext *avctx, AVFrame *frame, stru
         return -1;
     }
 
+    ret = ioctl(req->request_fd, MEDIA_REQUEST_IOC_REINIT, NULL);
+    if (ret < 0) {
+        av_log(avctx, AV_LOG_ERROR, "%s: reinit request %d failed, %s (%d)\n", __func__, req->request_fd, strerror(errno), errno);
+        return -1;
+    }
+
     if (last_slice) {
+        if (ff_v4l2_phase_started(&req->phase)) {
+            ff_v4l2_phase_release(&req->phase, 0);
+            ff_v4l2_phase_claim(&req->phase, 1);
+        }
+
         ret = v4l2_request_dequeue_buffer(ctx, &req->capture);
+
+        if (ff_v4l2_phase_started(&req->phase)) {
+            ff_v4l2_phase_release(&req->phase, 1);
+        }
+
         if (ret < 0) {
             av_log(avctx, AV_LOG_ERROR, "%s: dequeue capture buffer %d failed for request %d, %s (%d)\n", __func__, req->capture.index, req->request_fd, strerror(errno), errno);
             return -1;
@@ -288,12 +319,6 @@ static int v4l2_request_queue_decode(AVCodecContext *avctx, AVFrame *frame, stru
 
     // TODO: check errors
     // buffer.flags & V4L2_BUF_FLAG_ERROR
-
-    ret = ioctl(req->request_fd, MEDIA_REQUEST_IOC_REINIT, NULL);
-    if (ret < 0) {
-        av_log(avctx, AV_LOG_ERROR, "%s: reinit request %d failed, %s (%d)\n", __func__, req->request_fd, strerror(errno), errno);
-        return -1;
-    }
 
     if (last_slice)
         return v4l2_request_set_drm_descriptor(req, &ctx->format);
@@ -478,7 +503,8 @@ static int v4l2_request_probe_video_device(struct udev_device *device, AVCodecCo
         goto fail;
     }
 
-    ctx->video_fd = open(path, O_RDWR | O_NONBLOCK, 0);
+//    ctx->video_fd = open(path, O_RDWR | O_NONBLOCK, 0);
+    ctx->video_fd = open(path, O_RDWR, 0);
     if (ctx->video_fd < 0) {
         av_log(avctx, AV_LOG_ERROR, "%s: opening %s failed, %s (%d)\n", __func__, path, strerror(errno), errno);
         ret = AVERROR(EINVAL);

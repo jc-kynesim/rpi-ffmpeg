@@ -21,6 +21,8 @@
 #include "v4l2_request.h"
 #include "hevc-ctrls.h"
 
+#include "v4l2_phase.h"
+
 typedef struct V4L2RequestControlsHEVC {
     struct v4l2_ctrl_hevc_sps sps;
     struct v4l2_ctrl_hevc_pps pps;
@@ -34,6 +36,9 @@ typedef struct V4L2RequestContextHEVC {
     V4L2RequestContext base;
     int decode_mode;
     int start_code;
+
+    unsigned int order;
+    V4L2PhaseControl * pctrl;
 } V4L2RequestContextHEVC;
 
 static void v4l2_request_hevc_fill_pred_table(const HEVCContext *h, struct v4l2_hevc_pred_weight_table *table)
@@ -305,6 +310,8 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
                             sps->scaling_list_enable_flag ?
                             &sps->scaling_list : NULL;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    int rv;
 
     /* ISO/IEC 23008-2, ITU-T Rec. H.265: Sequence parameter set */
     controls->sps = make_v4l2_sps(sps);
@@ -411,7 +418,14 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     controls->first_slice = 1;
     controls->num_slices = 0;
 
-    return ff_v4l2_request_reset_frame(avctx, h->ref->frame);
+    if ((rv = ff_v4l2_request_reset_frame(avctx, h->ref->frame)) != 0)
+        return rv;
+
+    ff_v4l2_request_start_phase_control(h->ref->frame, ctx->pctrl);
+
+    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+
+    return 0;
 }
 
 static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
@@ -449,9 +463,19 @@ static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
     return ff_v4l2_request_decode_frame(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control));
 }
 
+static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx) {
+    const HEVCContext *h = avctx->priv_data;
+
+    if (h->ref != NULL)
+        ff_v4l2_request_abort_phase_control(h->ref->frame);
+}
+
 static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 {
-    return v4l2_request_hevc_queue_decode(avctx, 1);
+    int rv = v4l2_request_hevc_queue_decode(avctx, 1);
+    if (rv < 0)
+        v4l2_request_hevc_abort_frame(avctx);
+    return rv;
 }
 
 static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
@@ -513,10 +537,18 @@ static int v4l2_request_hevc_set_controls(AVCodecContext *avctx)
     return ff_v4l2_request_set_controls(avctx, control, FF_ARRAY_ELEMS(control));
 }
 
+static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
+{
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    ff_v4l2_phase_control_deletez(&ctx->pctrl);
+    return ff_v4l2_request_uninit(avctx);
+}
+
 static int v4l2_request_hevc_init(AVCodecContext *avctx)
 {
     int ret;
     const HEVCContext *h = avctx->priv_data;
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
 
     struct v4l2_ctrl_hevc_sps sps = make_v4l2_sps(h->ps.sps);
 
@@ -527,6 +559,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
             .size = sizeof(sps),
         },
     };
+
+    ctx->pctrl = ff_v4l2_phase_control_new(2);
 
     ret = ff_v4l2_request_init(avctx, V4L2_PIX_FMT_HEVC_SLICE, 3 * 1024 * 1024, control, FF_ARRAY_ELEMS(control));
     if (ret)
@@ -543,10 +577,11 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .start_frame    = v4l2_request_hevc_start_frame,
     .decode_slice   = v4l2_request_hevc_decode_slice,
     .end_frame      = v4l2_request_hevc_end_frame,
+    .abort_frame    = v4l2_request_hevc_abort_frame,
     .frame_priv_data_size = sizeof(V4L2RequestControlsHEVC),
     .init           = v4l2_request_hevc_init,
-    .uninit         = ff_v4l2_request_uninit,
+    .uninit         = v4l2_request_hevc_uninit,
     .priv_data_size = sizeof(V4L2RequestContextHEVC),
     .frame_params   = ff_v4l2_request_frame_params,
-    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE,
+    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_MT_SAFE,
 };
