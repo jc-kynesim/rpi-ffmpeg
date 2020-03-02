@@ -279,9 +279,10 @@ static int drm_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
     av_frame_ref(frame, src_frame);
 
     pthread_mutex_lock(&de->q_lock);
-    if (de->q_next == NULL) {
+    {
+        AVFrame * const t = de->q_next;
         de->q_next = frame;
-        frame = NULL;
+        frame = t;
     }
     pthread_mutex_unlock(&de->q_lock);
 
