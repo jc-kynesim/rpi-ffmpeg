@@ -67,8 +67,14 @@ static void fill_dpb_entry(struct v4l2_h264_dpb_entry *entry, const H264Picture 
     entry->frame_num = pic->frame_num;
     entry->pic_num = pic->pic_id;
     entry->flags = V4L2_H264_DPB_ENTRY_FLAG_VALID;
-    if (pic->reference)
+    if (pic->reference) {
         entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_ACTIVE;
+        if (pic->reference != PICT_FRAME) {
+            entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_FIELD;
+            if (pic->reference == PICT_BOTTOM_FIELD)
+                entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_BOTTOM_FIELD;
+        }
+    }
     if (pic->long_ref)
         entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM;
     if (pic->field_poc[0] != INT_MAX)
