@@ -545,6 +545,13 @@ AVRpiZcFrameGeometry av_rpi_zc_frame_geometry(
 
             pthread_mutex_unlock(&sand_lock);
 
+#if 0
+            printf("Req: %dx%d: stride=%d/%d, height=%d/%d, stripes=%d, img.pitch=%d\n",
+                   video_width, video_height,
+                   geo.stride_y, geo.stride_c,
+                   geo.height_y, geo.height_c,
+                   geo.stripes, img.pitch);
+#endif
             av_assert0((int)geo.height_y > 0 && (int)geo.height_c > 0);
             av_assert0(geo.height_y >= video_height && geo.height_c >= video_height / 2);
             break;
@@ -674,6 +681,12 @@ static inline GPU_MEM_PTR_T * pic_gm_ptr(AVBufferRef * const buf)
 {
     // As gmem is the first el NULL should be preserved
     return &pic_zbe_ptr(buf)->gmem;
+}
+
+unsigned int av_rpi_zc_vcsm_handle(const AVRpiZcRefPtr fr_ref)
+{
+    const GPU_MEM_PTR_T * const p = pic_gm_ptr(fr_ref);
+    return p == NULL ? 0 : p->vcsm_handle;
 }
 
 int av_rpi_zc_vc_handle(const AVRpiZcRefPtr fr_ref)
