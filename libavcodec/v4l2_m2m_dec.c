@@ -142,8 +142,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     int ret;
 
     if (s->buf_pkt.size) {
-        avpkt = s->buf_pkt;
-        memset(&s->buf_pkt, 0, sizeof(AVPacket));
+        av_packet_move_ref(&avpkt, &s->buf_pkt);
     } else {
         ret = ff_decode_get_packet(avctx, &avpkt);
         if (ret < 0 && ret != AVERROR_EOF)
