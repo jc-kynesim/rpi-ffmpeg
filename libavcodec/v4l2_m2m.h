@@ -30,6 +30,7 @@
 #include <linux/videodev2.h>
 
 #include "libavcodec/avcodec.h"
+#include "libavutil/pixfmt.h"
 #include "v4l2_context.h"
 
 #define container_of(ptr, type, member) ({ \
@@ -78,6 +79,7 @@ typedef struct V4L2m2mPriv {
 
     int num_output_buffers;
     int num_capture_buffers;
+    enum AVPixelFormat pix_fmt;
 } V4L2m2mPriv;
 
 /**
