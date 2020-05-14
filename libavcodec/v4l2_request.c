@@ -162,8 +162,8 @@ static int v4l2_request_dequeue_buffer(V4L2RequestContext *ctx, V4L2RequestBuffe
 }
 
 const uint32_t v4l2_request_capture_pixelformats[] = {
-    V4L2_PIX_FMT_SAND8,
-    V4L2_PIX_FMT_SAND30,
+    V4L2_PIX_FMT_NV12_COL128,
+    V4L2_PIX_FMT_NV12_10_COL128,
     V4L2_PIX_FMT_NV12,
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     V4L2_PIX_FMT_SUNXI_TILED_NV12,
@@ -181,11 +181,11 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
         layer->format = DRM_FORMAT_NV12;
         desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
-    case V4L2_PIX_FMT_SAND8:
+    case V4L2_PIX_FMT_NV12_COL128:
         layer->format = DRM_FORMAT_NV12;
         desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
         break;
-    case V4L2_PIX_FMT_SAND30:
+    case V4L2_PIX_FMT_NV12_10_COL128:
         layer->format = DRM_FORMAT_P030;
         desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
         break;
@@ -210,13 +210,13 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
     layer->planes[0].offset = 0;
     layer->planes[0].pitch = V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.plane_fmt[0].bytesperline : format->fmt.pix.bytesperline;
 
-    if (pixelformat == V4L2_PIX_FMT_SAND8) {
+    if (pixelformat == V4L2_PIX_FMT_NV12_COL128) {
         layer->planes[1].object_index = 0;
         layer->planes[1].offset = format->fmt.pix.height * 128;
         layer->planes[0].pitch = format->fmt.pix.width;
         layer->planes[1].pitch = format->fmt.pix.width;
     }
-    else if (pixelformat == V4L2_PIX_FMT_SAND30) {
+    else if (pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
         layer->planes[1].object_index = 0;
         layer->planes[1].offset = format->fmt.pix.height * 128;
         layer->planes[0].pitch = format->fmt.pix.width * 2; // Lies but it keeps DRM import happy
@@ -995,10 +995,10 @@ int ff_v4l2_request_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_c
     } else {
         hwfc->width = ctx->format.fmt.pix.width;
         hwfc->height = ctx->format.fmt.pix.height;
-        if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_SAND8) {
+        if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_COL128) {
             hwfc->sw_format = AV_PIX_FMT_RPI4_8;
         }
-        else if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_SAND30) {
+        else if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
             hwfc->sw_format = AV_PIX_FMT_RPI4_10;
         }
     }
