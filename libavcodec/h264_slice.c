@@ -785,10 +785,17 @@ static enum AVPixelFormat get_pixel_format(H264Context *h, int force_callback)
                 *fmt++ = AV_PIX_FMT_GBRP10;
             } else
                 *fmt++ = AV_PIX_FMT_YUV444P10;
-        } else if (CHROMA422(h))
+        } else if (CHROMA422(h)) {
+#if CONFIG_H264_V4L2REQUEST_HWACCEL
+            *fmt++ = AV_PIX_FMT_DRM_PRIME;
+#endif
             *fmt++ = AV_PIX_FMT_YUV422P10;
-        else
+        } else {
+#if CONFIG_H264_V4L2REQUEST_HWACCEL
+            *fmt++ = AV_PIX_FMT_DRM_PRIME;
+#endif
             *fmt++ = AV_PIX_FMT_YUV420P10;
+        }
         break;
     case 12:
         if (CHROMA444(h)) {
@@ -827,6 +834,9 @@ static enum AVPixelFormat get_pixel_format(H264Context *h, int force_callback)
             else
                 *fmt++ = AV_PIX_FMT_YUV444P;
         } else if (CHROMA422(h)) {
+#if CONFIG_H264_V4L2REQUEST_HWACCEL
+                *fmt++ = AV_PIX_FMT_DRM_PRIME;
+#endif
             if (h->avctx->color_range == AVCOL_RANGE_JPEG)
                 *fmt++ = AV_PIX_FMT_YUVJ422P;
             else

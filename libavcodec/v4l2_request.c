@@ -188,6 +188,13 @@ const uint32_t v4l2_request_capture_pixelformats[] = {
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     V4L2_PIX_FMT_SUNXI_TILED_NV12,
 #endif
+#if defined(V4L2_PIX_FMT_NV15) && defined(DRM_FORMAT_NV15)
+    V4L2_PIX_FMT_NV15,
+#endif
+    V4L2_PIX_FMT_NV16,
+#if defined(V4L2_PIX_FMT_NV20) && defined(DRM_FORMAT_NV20)
+    V4L2_PIX_FMT_NV20,
+#endif
 };
 
 static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4l2_format *format)
@@ -205,6 +212,22 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
     case V4L2_PIX_FMT_SUNXI_TILED_NV12:
         layer->format = DRM_FORMAT_NV12;
         desc->objects[0].format_modifier = DRM_FORMAT_MOD_ALLWINNER_TILED;
+        break;
+#endif
+#if defined(V4L2_PIX_FMT_NV15) && defined(DRM_FORMAT_NV15)
+    case V4L2_PIX_FMT_NV15:
+        layer->format = DRM_FORMAT_NV15;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        break;
+#endif
+    case V4L2_PIX_FMT_NV16:
+        layer->format = DRM_FORMAT_NV16;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        break;
+#if defined(V4L2_PIX_FMT_NV20) && defined(DRM_FORMAT_NV20)
+    case V4L2_PIX_FMT_NV20:
+        layer->format = DRM_FORMAT_NV20;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #endif
     default:
