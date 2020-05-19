@@ -270,13 +270,25 @@ static int drm_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
     av_log(s, AV_LOG_INFO, "%s\n", __func__);
 #endif
 
-    if (src_frame->format != AV_PIX_FMT_DRM_PRIME) {
-        av_log(s, AV_LOG_WARNING, "Frame (format=%d) not DRM_PRiME\n", frame->format);
+    if (src_frame->format == AV_PIX_FMT_DRM_PRIME) {
+        frame = av_frame_alloc();
+        av_frame_ref(frame, src_frame);
+    }
+    else if (src_frame->format == AV_PIX_FMT_VAAPI) {
+        frame = av_frame_alloc();
+        frame->format = AV_PIX_FMT_DRM_PRIME;
+        if (av_hwframe_map(frame, src_frame, 0) != 0)
+        {
+            av_log(s, AV_LOG_WARNING, "Failed to map frame (format=%d) to DRM_PRiME\n", src_frame->format);
+            av_frame_free(&frame);
+            return AVERROR(EINVAL);
+        }
+    }
+    else {
+        av_log(s, AV_LOG_WARNING, "Frame (format=%d) not DRM_PRiME\n", src_frame->format);
         return AVERROR(EINVAL);
     }
 
-    frame = av_frame_alloc();
-    av_frame_ref(frame, src_frame);
 
     pthread_mutex_lock(&de->q_lock);
     {
