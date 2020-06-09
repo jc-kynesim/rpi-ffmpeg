@@ -3915,6 +3915,9 @@ static void job_gen_bounds(const HEVCRpiContext * const s, HEVCRpiJob * const jb
     bounds->y = (rs0 / ctb_width) << s->ps.sps->log2_ctb_size;
     bounds->w = ((rs1 - rs0) % ctb_width + 1) << s->ps.sps->log2_ctb_size;
     bounds->h = ((rs1 - rs0) / ctb_width + 1) << s->ps.sps->log2_ctb_size;
+
+    bounds->w = FFMIN(bounds->w, s->ps.sps->width - bounds->x);
+    bounds->h = FFMIN(bounds->h, s->ps.sps->height - bounds->y);
 }
 
 #if RPI_PASSES == 2

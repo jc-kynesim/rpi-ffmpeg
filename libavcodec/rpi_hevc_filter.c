@@ -624,10 +624,10 @@ static void deblock_y_blk(const HEVCRpiContext * const s, const RpiBlk bounds, c
     const unsigned int log2_ctb_size = s->ps.sps->log2_ctb_size;
     const unsigned int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
     const unsigned int ctb_size = (1 << log2_ctb_size);
-    const unsigned int cb_r = FFMIN(bounds.x + bounds.w, s->ps.sps->width) - (end_x ? 0 :  1);
+    const unsigned int cb_r = bounds.x + bounds.w - (end_x ? 0 :  1);
     const unsigned int ctb_n = (bounds.x + bounds.y * s->ps.sps->ctb_width) >> log2_ctb_size;
     const DBParams * cb_dbp = s->deblock + ctb_n;
-    const unsigned int b_b = FFMIN(bounds.y + bounds.h, s->ps.sps->height) - (end_y ? 0 : 8);
+    const unsigned int b_b = bounds.y + bounds.h - (end_y ? 0 : 8);
 
     unsigned int cb_x;
 
@@ -734,10 +734,10 @@ static void deblock_uv_blk(const HEVCRpiContext * const s, const RpiBlk bounds, 
     const unsigned int log2_ctb_size = s->ps.sps->log2_ctb_size;
     const unsigned int log2_min_cb_size  = s->ps.sps->log2_min_cb_size;
     const unsigned int ctb_size = (1 << log2_ctb_size);
-    const unsigned int cb_r = FFMIN(bounds.x + bounds.w, s->ps.sps->width) - (end_x ? 0 :  8);
+    const unsigned int cb_r = bounds.x + bounds.w - (end_x ? 0 :  8);
     const unsigned int ctb_n = (bounds.x + bounds.y * s->ps.sps->ctb_width) >> log2_ctb_size;
     const DBParams * dbp = s->deblock + ctb_n;
-    const unsigned int b_b = FFMIN(bounds.y + bounds.h, s->ps.sps->height) - (end_y ? 0 : 8);
+    const unsigned int b_b = bounds.y + bounds.h - (end_y ? 0 : 8);
     const uint8_t * const tcq_u = s->ps.pps->qp_dblk_x[1];
     const uint8_t * const tcq_v = s->ps.pps->qp_dblk_x[2];
 
@@ -1129,8 +1129,8 @@ int ff_hevc_rpi_hls_filter_blk(const HEVCRpiContext * const s, const RpiBlk boun
     const int ctb_size = (1 << s->ps.sps->log2_ctb_size);
     int x, y;
 
-    const unsigned int br = FFMIN(bounds.x + bounds.w, s->ps.sps->width);
-    const unsigned int bb = FFMIN(bounds.y + bounds.h, s->ps.sps->height);
+    const unsigned int br = bounds.x + bounds.w;
+    const unsigned int bb = bounds.y + bounds.h;
 
     const int x_end = (br >= s->ps.sps->width);
     const int y_end = (bb >= s->ps.sps->height);
