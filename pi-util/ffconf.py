@@ -11,7 +11,28 @@ from stat import *
 
 ffmpeg_exec = "./ffmpeg"
 
-def testone(fileroot, srcname, es_file, md5_file, pi4, vcodec):
+CODEC_HEVC_RPI  = 1
+HWACCEL_RPI     = 2
+HWACCEL_DRM     = 3
+HWACCEL_VAAPI   = 4
+
+def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec):
+    hwaccel = ""
+    if dectype == HWACCEL_RPI:
+        hwaccel = "rpi"
+    elif dectype == HWACCEL_DRM:
+        hwaccel = "drm"
+    elif dectype == HWACCEL_VAAPI:
+        hwaccel = "vaapi"
+
+    pix_fmt = []
+    if pix == "8":
+        pix_fmt = ["-pix_fmt", "yuv420p"]
+    elif pix == "10":
+        pix_fmt = ["-pix_fmt", "yuv420p10le"]
+    elif pix == "12":
+        pix_fmt = ["-pix_fmt", "yuv420p12le"]
+
     tmp_root = "/tmp"
 
     names = srcname.split('/')
@@ -31,11 +52,11 @@ def testone(fileroot, srcname, es_file, md5_file, pi4, vcodec):
 
     flog = open(os.path.join(tmp_root, name + ".log"), "wt")
 
+    ffargs = [ffmpeg_exec, "-flags", "unaligned", "-hwaccel", hwaccel, "-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] + pix_fmt + ["-f", "md5", dec_file]
+
     # Unaligned needed for cropping conformance
-    if pi4:
-        rstr = subprocess.call(
-            [ffmpeg_exec, "-flags", "unaligned", "-hwaccel", "rpi", "-vcodec", "hevc", "-i", os.path.join(fileroot, es_file), "-f", "md5", dec_file],
-            stdout=flog, stderr=subprocess.STDOUT)
+    if hwaccel:
+        rstr = subprocess.call(ffargs, stdout=flog, stderr=subprocess.STDOUT)
     else:
         rstr = subprocess.call(
             [ffmpeg_exec, "-flags", "unaligned", "-vcodec", vcodec, "-i", os.path.join(fileroot, es_file), "-f", "md5", dec_file],
@@ -102,7 +123,7 @@ def runtest(name, tests):
             return True
     return False
 
-def doconf(csva, tests, test_root, vcodec, pi4):
+def doconf(csva, tests, test_root, vcodec, dectype):
     unx_failures = []
     unx_success = []
     failures = 0
@@ -114,7 +135,7 @@ def doconf(csva, tests, test_root, vcodec, pi4):
             print "==== ", name,
             sys.stdout.flush()
 
-            rv = testone(os.path.join(test_root, name), name, a[2], a[3], pi4=pi4, vcodec=vcodec)
+            rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec)
             if (rv == 0):
                 successes += 1
             else:
@@ -163,6 +184,8 @@ if __name__ == '__main__':
     argp = argparse.ArgumentParser(description="FFmpeg h265 conformance tester")
     argp.add_argument("tests", nargs='*')
     argp.add_argument("--pi4", action='store_true', help="Force pi4 cmd line")
+    argp.add_argument("--drm", action='store_true', help="Force v4l2 drm cmd line")
+    argp.add_argument("--vaapi", action='store_true', help="Force vaapi cmd line")
     argp.add_argument("--test_root", default="/opt/conform/h265.2016", help="Root dir for test")
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
     argp.add_argument("--csv", default="pi-util/conf_h265.2016.csv", help="CSV filename")
@@ -176,7 +199,18 @@ if __name__ == '__main__':
     with open(args.csv, 'rt') as csvfile:
         csva = [a for a in csv.reader(csvfile, ConfCSVDialect())]
 
-    is_pi4 = args.pi4 or os.path.exists("/dev/rpivid-hevcmem")
+    dectype = CODEC_HEVC_RPI
+    if os.path.exists("/dev/rpivid-hevcmem"):
+        dectype = HWACCEL_RPI
+    if args.drm or os.path.exists("/sys/module/rpivid_hevc"):
+        dectype = HWACCEL_DRM
 
-    doconf(csva, args.tests, args.test_root, args.vcodec, is_pi4)
+    if args.pi4:
+        dectype = HWACCEL_RPI
+    elif args.drm:
+        dectype = HWACCEL_DRM
+    elif args.vaapi:
+        dectype = HWACCEL_VAAPI
+
+    doconf(csva, args.tests, args.test_root, args.vcodec, dectype)
 
