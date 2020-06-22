@@ -130,12 +130,22 @@ static const char *opt_name_enc_time_bases[]            = {"enc_time_base", NULL
     }\
 }
 
+#if CONFIG_RPI
+int rpi_init(AVCodecContext *avctx) {
+    return 0;
+}
+#endif
+
 const HWAccel hwaccels[] = {
 #if CONFIG_VIDEOTOOLBOX
     { "videotoolbox", videotoolbox_init, HWACCEL_VIDEOTOOLBOX, AV_PIX_FMT_VIDEOTOOLBOX },
 #endif
 #if CONFIG_LIBMFX
     { "qsv",   qsv_init,   HWACCEL_QSV,   AV_PIX_FMT_QSV },
+#endif
+#if CONFIG_RPI
+    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_8 },
+    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_10 },
 #endif
     { 0 },
 };
@@ -755,7 +765,9 @@ static AVCodec *choose_decoder(OptionsContext *o, AVFormatContext *s, AVStream *
         st->codecpar->codec_id = codec->id;
         return codec;
     } else
+    {
         return avcodec_find_decoder(st->codecpar->codec_id);
+    }
 }
 
 /* Add all the streams from the given input file to the global

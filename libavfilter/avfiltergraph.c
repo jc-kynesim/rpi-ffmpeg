@@ -32,6 +32,9 @@
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
+#if CONFIG_UNSAND_FILTER
+#include "libavutil/rpi_sand_fns.h"
+#endif
 
 #define FF_INTERNAL_FIELDS 1
 #include "framequeue.h"
@@ -429,6 +432,19 @@ static int can_merge_formats(AVFilterFormats *a_arg,
     }
 }
 
+#if CONFIG_UNSAND_FILTER
+static int has_sand_format(const AVFilterFormats * const ff)
+{
+    int i;
+    for (i = 0; i != ff->nb_formats; ++i) {
+        if (av_rpi_is_sand_format(ff->formats[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+#endif
+
 /**
  * Perform one round of query_formats() and merging formats lists on the
  * filter graph.
@@ -469,6 +485,7 @@ static int query_formats(AVFilterGraph *graph, AVClass *log_ctx)
         for (j = 0; j < filter->nb_inputs; j++) {
             AVFilterLink *link = filter->inputs[j];
             int convert_needed = 0;
+            unsigned int extra_convert_tried = 0;
 
             if (!link)
                 continue;
@@ -516,11 +533,14 @@ static int query_formats(AVFilterGraph *graph, AVClass *log_ctx)
             )
 #undef MERGE_DISPATCH
 
-            if (convert_needed) {
+            while (convert_needed) {
                 AVFilterContext *convert;
                 const AVFilter *filter;
                 AVFilterLink *inlink, *outlink;
                 char inst_name[30];
+                int can_retry = 0;
+
+                convert_needed = 0;
 
                 if (graph->disable_auto_convert) {
                     av_log(log_ctx, AV_LOG_ERROR,
@@ -533,19 +553,45 @@ static int query_formats(AVFilterGraph *graph, AVClass *log_ctx)
                 /* couldn't merge format lists. auto-insert conversion filter */
                 switch (link->type) {
                 case AVMEDIA_TYPE_VIDEO:
-                    if (!(filter = avfilter_get_by_name("scale"))) {
-                        av_log(log_ctx, AV_LOG_ERROR, "'scale' filter "
-                               "not present, cannot convert pixel formats.\n");
-                        return AVERROR(EINVAL);
+#if CONFIG_UNSAND_FILTER
+                    // Only try each extra conversion once
+                    // The unsand output pad should never trigger has_sand_format
+                    // but it is better to be safe
+                    if ((extra_convert_tried & 1) == 0 && has_sand_format(link->in_formats)) {
+                        if (!(filter = avfilter_get_by_name("unsand"))) {
+                            av_log(log_ctx, AV_LOG_ERROR, "'unsand' filter "
+                                   "not present, cannot convert pixel formats.\n");
+                            return AVERROR(EINVAL);
+                        }
+
+                        snprintf(inst_name, sizeof(inst_name), "auto_unsand_%d",
+                                 scaler_count++);
+
+                        if ((ret = avfilter_graph_create_filter(&convert, filter,
+                                                                inst_name, "", NULL,
+                                                                graph)) < 0)
+                            return ret;
+
+                        extra_convert_tried |= 1;
+                        can_retry = 1;
                     }
+                    else
+#endif
+                    {
+                        if (!(filter = avfilter_get_by_name("scale"))) {
+                            av_log(log_ctx, AV_LOG_ERROR, "'scale' filter "
+                                   "not present, cannot convert pixel formats.\n");
+                            return AVERROR(EINVAL);
+                        }
 
-                    snprintf(inst_name, sizeof(inst_name), "auto_scaler_%d",
-                             scaler_count++);
+                        snprintf(inst_name, sizeof(inst_name), "auto_scaler_%d",
+                                 scaler_count++);
 
-                    if ((ret = avfilter_graph_create_filter(&convert, filter,
-                                                            inst_name, graph->scale_sws_opts, NULL,
-                                                            graph)) < 0)
-                        return ret;
+                        if ((ret = avfilter_graph_create_filter(&convert, filter,
+                                                                inst_name, graph->scale_sws_opts, NULL,
+                                                                graph)) < 0)
+                            return ret;
+                    }
                     break;
                 case AVMEDIA_TYPE_AUDIO:
                     if (!(filter = avfilter_get_by_name("aresample"))) {
@@ -587,9 +633,19 @@ static int query_formats(AVFilterGraph *graph, AVClass *log_ctx)
                     av_assert0(outlink-> in_channel_layouts->refcount > 0);
                     av_assert0(outlink->out_channel_layouts->refcount > 0);
                 }
-                if (!ff_merge_formats( inlink->in_formats,  inlink->out_formats,  inlink->type) ||
-                    !ff_merge_formats(outlink->in_formats, outlink->out_formats, outlink->type))
+                // If we have added an extra filter we must merge the input
+                // side but we can have another go at the output
+                if (!ff_merge_formats( inlink->in_formats,  inlink->out_formats,  inlink->type))
                     ret = AVERROR(ENOSYS);
+                else if (!ff_merge_formats(outlink->in_formats, outlink->out_formats, outlink->type))
+                {
+                    if (can_retry) {
+                        link = outlink;
+                        convert_needed = 1;
+                        continue;
+                    }
+                    ret = AVERROR(ENOSYS);
+                }
                 if (inlink->type == AVMEDIA_TYPE_AUDIO &&
                     (!ff_merge_samplerates(inlink->in_samplerates,
                                            inlink->out_samplerates) ||

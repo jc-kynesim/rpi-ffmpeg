@@ -3044,6 +3044,40 @@ static int has_codec_parameters(AVStream *st, const char **errmsg_ptr)
     return 1;
 }
 
+#if CONFIG_HEVC_RPI_DECODER && CONFIG_HEVC_DECODER
+// This should be quite general purpose but avoid possible conflicts
+// by limiting usage to cases wehere we know it works.
+static int try_fallback_decoder(AVCodecContext * const avctx, const AVCodec *const old_codec, AVDictionary ** const opts)
+{
+    // Only try fallback if we know it is supported (HEVC only)
+    const AVCodec *const new_codec = old_codec->id != AV_CODEC_ID_HEVC ? NULL :
+        avcodec_find_decoder_by_id_and_fmt(old_codec->id, AV_PIX_FMT_NONE);
+    int err;
+
+    // Failed to find fallback or we are already at the fallback
+    if (new_codec == NULL || new_codec == old_codec)
+    {
+        return AVERROR_DECODER_NOT_FOUND;
+    }
+
+    // * This may be dodgy - header says to not use this fn,
+    //   especially if we are going to reopen the context...
+    //   (but it does seem to work for our cases)
+    if (avcodec_is_open(avctx)) {
+        avcodec_close(avctx);
+    }
+
+    if ((err = avcodec_open2(avctx, new_codec, opts)) < 0)
+    {
+        return err;
+    }
+
+    return 0;
+}
+#else
+#define try_fallback_decoder(avctx, old_codec, opts) (AVERROR_DECODER_NOT_FOUND)
+#endif
+
 /* returns 1 or 0 if or if not decoded data was returned, or a negative error */
 static int try_decode_frame(AVFormatContext *s, AVStream *st,
                             const AVPacket *avpkt, AVDictionary **options)
@@ -3078,7 +3112,11 @@ static int try_decode_frame(AVFormatContext *s, AVStream *st,
         av_dict_set(options ? options : &thread_opt, "threads", "1", 0);
         if (s->codec_whitelist)
             av_dict_set(options ? options : &thread_opt, "codec_whitelist", s->codec_whitelist, 0);
-        ret = avcodec_open2(avctx, codec, options ? options : &thread_opt);
+        if ((ret = avcodec_open2(avctx, codec, options ? options : &thread_opt)) == AVERROR_DECODER_NOT_FOUND)
+        {
+            // Try fallback if if looks worth a try
+            ret = try_fallback_decoder(avctx, codec, options ? options : &thread_opt);
+        }
         if (!options)
             av_dict_free(&thread_opt);
         if (ret < 0) {
@@ -3109,6 +3147,14 @@ static int try_decode_frame(AVFormatContext *s, AVStream *st,
         if (avctx->codec_type == AVMEDIA_TYPE_VIDEO ||
             avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
             ret = avcodec_send_packet(avctx, &pkt);
+
+            // If we are going to want to fall back we should know here
+            if (ret == AVERROR_DECODER_NOT_FOUND) {
+                if ((ret = try_fallback_decoder(avctx, avctx->codec, options)) < 0)
+                    break;
+                continue;
+            }
+
             if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
                 break;
             if (ret >= 0)
@@ -3719,9 +3765,20 @@ FF_ENABLE_DEPRECATION_WARNINGS
         // Try to just open decoders, in case this is enough to get parameters.
         if (!has_codec_parameters(st, NULL) && st->request_probe <= 0) {
             if (codec && !avctx->codec)
-                if (avcodec_open2(avctx, codec, options ? &options[i] : &thread_opt) < 0)
-                    av_log(ic, AV_LOG_WARNING,
-                           "Failed to open codec in %s\n",__FUNCTION__);
+            {
+                int err;
+
+                if ((err = avcodec_open2(avctx, codec, options ? &options[i] : &thread_opt)) < 0)
+                {
+                    if (err == AVERROR_DECODER_NOT_FOUND) {
+                        err = try_fallback_decoder(avctx, codec, options ? &options[i] : &thread_opt);
+                    }
+                    if (err < 0) {
+                        av_log(ic, AV_LOG_WARNING,
+                               "Failed to open codec in %s\n",__FUNCTION__);
+                    }
+                }
+            }
         }
         if (!options)
             av_dict_free(&thread_opt);

@@ -149,6 +149,7 @@ extern AVCodec ff_hap_decoder;
 extern AVCodec ff_hevc_decoder;
 extern AVCodec ff_hevc_qsv_decoder;
 extern AVCodec ff_hevc_rkmpp_decoder;
+extern AVCodec ff_hevc_rpi_decoder;
 extern AVCodec ff_hevc_v4l2m2m_decoder;
 extern AVCodec ff_hnm4_video_decoder;
 extern AVCodec ff_hq_hqa_decoder;
@@ -888,6 +889,41 @@ static enum AVCodecID remap_deprecated_codec_id(enum AVCodecID id)
         //last major bump but will fill up again over time, please don't remove it
         default                                         : return id;
     }
+}
+
+static int codec_supports_format(const AVCodec * const p, const enum AVPixelFormat fmt)
+{
+    const enum AVPixelFormat *pf = p->pix_fmts;
+
+    // Assume good if we lack info
+    if (pf == NULL)
+        return 1;
+    if (fmt == AV_PIX_FMT_NONE)
+        return 0;
+
+    for (; *pf != AV_PIX_FMT_NONE; ++pf) {
+        if (*pf == fmt)
+            return 1;
+    }
+    return 0;
+}
+
+AVCodec *avcodec_find_decoder_by_id_and_fmt(enum AVCodecID id, enum AVPixelFormat fmt)
+{
+    const AVCodec *p, *experimental = NULL;
+    void *i = 0;
+
+    id= remap_deprecated_codec_id(id);
+    while ((p = av_codec_iterate(&i))) {
+        if (av_codec_is_decoder(p) && p->id == id && codec_supports_format(p, fmt)) {
+            if (p->capabilities & AV_CODEC_CAP_EXPERIMENTAL && !experimental) {
+                experimental = p;
+            } else
+                return (AVCodec *)p;
+        }
+        p = p->next;
+    }
+    return (AVCodec *)experimental;
 }
 
 static AVCodec *find_codec(enum AVCodecID id, int (*x)(const AVCodec *))

@@ -2073,6 +2073,18 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .name = "cuda",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
+    [AV_PIX_FMT_RPI] = {
+        .name = "rpi",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
+    [AV_PIX_FMT_RPI4_10] = {
+        .name = "rpi",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
+    [AV_PIX_FMT_RPI4_8] = {
+        .name = "rpi",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
     [AV_PIX_FMT_AYUV64LE] = {
         .name = "ayuv64le",
         .nb_components = 4,
@@ -2370,6 +2382,30 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
     [AV_PIX_FMT_VULKAN] = {
         .name = "vulkan",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
+    [AV_PIX_FMT_SAND128] = {
+        .name = "sand128",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 0, 0, 8, 0, 7, 1 },        /* Y */
+            { 1, 2, 0, 0, 8, 1, 7, 1 },        /* U */
+            { 1, 2, 1, 0, 8, 1, 7, 2 },        /* V */
+        },
+        .flags = 0,
+    },
+    [AV_PIX_FMT_SAND64_10] = {
+        .name = "sand64_10",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 2, 0, 0, 10, 0, 9, 1 },        /* Y */
+            { 1, 4, 0, 0, 10, 1, 9, 1 },        /* U */
+            { 1, 4, 1, 0, 10, 1, 9, 2 },        /* V */
+        },
+        .flags = 0,
     },
 };
 #if FF_API_PLUS1_MINUS1

@@ -336,6 +336,7 @@ External library support:
   --enable-libmfx          enable Intel MediaSDK (AKA Quick Sync Video) code via libmfx [no]
   --enable-libnpp          enable Nvidia Performance Primitives-based code [no]
   --enable-mmal            enable Broadcom Multi-Media Abstraction Layer (Raspberry Pi) via MMAL [no]
+  --enable-rpi             enable other rpi specific stuff [no]
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
   --enable-omx             enable OpenMAX IL code [no]
@@ -1862,6 +1863,8 @@ HWACCEL_LIBRARY_LIST="
     omx
     opencl
     vulkan
+    rpi4_8
+    rpi4_10
 "
 
 DOCUMENT_LIST="
@@ -1877,6 +1880,7 @@ FEATURE_LIST="
     gray
     hardcoded_tables
     omx_rpi
+    rpi
     runtime_cpudetect
     safe_bitstream_reader
     shared
@@ -1923,6 +1927,7 @@ SUBSYSTEM_LIST="
     pixelutils
     network
     rdft
+    rpi
 "
 
 # COMPONENT_LIST needs to come last to ensure correct dependency checking
@@ -2405,9 +2410,11 @@ CONFIG_EXTRA="
     rangecoder
     riffdec
     riffenc
+    rpi
     rtpdec
     rtpenc_chain
     rv34dsp
+    sand
     scene_sad
     sinewin
     snappy
@@ -2737,6 +2744,8 @@ hap_decoder_select="snappy texturedsp"
 hap_encoder_deps="libsnappy"
 hap_encoder_select="texturedspenc"
 hevc_decoder_select="bswapdsp cabac golomb hevcparse videodsp"
+hevc_rpi_decoder_deps="rpi"
+hevc_rpi_decoder_select="hevc_decoder sand"
 huffyuv_decoder_select="bswapdsp huffyuvdsp llviddsp"
 huffyuv_encoder_select="bswapdsp huffman huffyuvencdsp llvidencdsp"
 hymt_decoder_select="huffyuv_decoder"
@@ -2934,6 +2943,10 @@ hevc_dxva2_hwaccel_deps="dxva2 DXVA_PicParams_HEVC"
 hevc_dxva2_hwaccel_select="hevc_decoder"
 hevc_nvdec_hwaccel_deps="nvdec"
 hevc_nvdec_hwaccel_select="hevc_decoder"
+hevc_rpi4_10_hwaccel_deps="rpi"
+hevc_rpi4_10_hwaccel_select="hevc_decoder"
+hevc_rpi4_8_hwaccel_deps="rpi"
+hevc_rpi4_8_hwaccel_select="hevc_decoder"
 hevc_vaapi_hwaccel_deps="vaapi VAPictureParameterBufferHEVC"
 hevc_vaapi_hwaccel_select="hevc_decoder"
 hevc_vdpau_hwaccel_deps="vdpau VdpPictureInfoHEVC"
@@ -3403,6 +3416,8 @@ v4l2_indev_deps_any="linux_videodev2_h sys_videoio_h"
 v4l2_indev_suggest="libv4l2"
 v4l2_outdev_deps_any="linux_videodev2_h sys_videoio_h"
 v4l2_outdev_suggest="libv4l2"
+vout_rpi_outdev_deps="rpi"
+vout_rpi_outdev_select="sand"
 vfwcap_indev_deps="vfw32 vfwcap_defines"
 xcbgrab_indev_deps="libxcb"
 xcbgrab_indev_suggest="libxcb_shm libxcb_shape libxcb_xfixes"
@@ -3618,6 +3633,8 @@ tonemap_vaapi_filter_deps="vaapi VAProcFilterParameterBufferHDRToneMapping"
 tonemap_opencl_filter_deps="opencl const_nan"
 transpose_opencl_filter_deps="opencl"
 transpose_vaapi_filter_deps="vaapi VAProcPipelineCaps_rotation_flags"
+unsand_filter_deps="rpi"
+unsand_filter_select="sand"
 unsharp_opencl_filter_deps="opencl"
 uspp_filter_deps="gpl avcodec"
 vaguedenoiser_filter_deps="gpl"
@@ -6430,11 +6447,12 @@ enabled mbedtls           && { check_pkg_config mbedtls mbedtls mbedtls/x509_crt
                                check_lib mbedtls mbedtls/ssl.h mbedtls_ssl_init -lmbedtls -lmbedx509 -lmbedcrypto ||
                                die "ERROR: mbedTLS not found"; }
 enabled mediacodec        && { enabled jni || die "ERROR: mediacodec requires --enable-jni"; }
-enabled mmal              && { check_lib mmal interface/mmal/mmal.h mmal_port_connect -lmmal_core -lmmal_util -lmmal_vc_client -lbcm_host ||
+( enabled rpi ||
+  enabled mmal )          && { check_lib mmal interface/mmal/mmal.h mmal_port_connect -lmmal_core -lmmal_util -lmmal_vc_client -lbcm_host ||
                                { ! enabled cross_compile &&
                                  add_cflags -isystem/opt/vc/include/ -isystem/opt/vc/include/interface/vmcs_host/linux -isystem/opt/vc/include/interface/vcos/pthreads -fgnu89-inline &&
                                  add_ldflags -L/opt/vc/lib/ &&
-                                 check_lib mmal interface/mmal/mmal.h mmal_port_connect -lmmal_core -lmmal_util -lmmal_vc_client -lbcm_host; } ||
+                                 check_lib mmal interface/mmal/mmal.h mmal_port_connect -lmmal_core -lmmal_util -lmmal_vc_client -lbcm_host -lvcos -lvcsm -lvchostif -lvchiq_arm; } ||
                                die "ERROR: mmal not found" &&
                                check_func_headers interface/mmal/mmal.h "MMAL_PARAMETER_VIDEO_MAX_NUM_CALLBACKS"; }
 enabled openal            && { { for al_extralibs in "${OPENAL_LIBS}" "-lopenal" "-lOpenAL32"; do

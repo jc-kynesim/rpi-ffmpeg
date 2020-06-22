@@ -285,6 +285,9 @@ void av_buffer_pool_uninit(AVBufferPool **pool);
  */
 AVBufferRef *av_buffer_pool_get(AVBufferPool *pool);
 
+// Return the opaque for the underlying frame
+void *av_buffer_pool_buffer_get_opaque(AVBufferRef *ref);
+
 /**
  * Query the original opaque parameter of an allocated buffer in the pool.
  *
