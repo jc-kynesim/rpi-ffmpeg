@@ -2930,33 +2930,6 @@ void avsubtitle_free(AVSubtitle *sub);
  */
 
 /**
- * Find a registered decoder with a matching codec ID.
- *
- * @param id AVCodecID of the requested decoder
- * @return A decoder if one was found, NULL otherwise.
- */
-AVCodec *avcodec_find_decoder(enum AVCodecID id);
-
-/**
- * Find a registered decoder with a matching codec ID and pix_fmt.
- * A decoder will pix_fmt set to NULL will match any fmt.
- * A fmt of AV_PIX_FMT_NONE will only match a decoder will px_fmt NULL.
- *
- * @param id AVCodecID of the requested decoder
- * @param fmt AVPixelForma that msut be supported by decoder
- * @return A decoder if one was found, NULL otherwise.
- */
-AVCodec *avcodec_find_decoder_by_id_and_fmt(enum AVCodecID id, enum AVPixelFormat fmt);
-
-/**
- * Find a registered decoder with the specified name.
- *
- * @param name name of the requested decoder
- * @return A decoder if one was found, NULL otherwise.
- */
-AVCodec *avcodec_find_decoder_by_name(const char *name);
-
-/**
  * The default callback for AVCodecContext.get_buffer2(). It is made public so
  * it can be called by custom get_buffer2() implementations for decoders without
  * AV_CODEC_CAP_DR1 set.

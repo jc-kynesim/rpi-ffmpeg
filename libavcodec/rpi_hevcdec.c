@@ -44,7 +44,7 @@
 #include "rpi_hevcdec.h"
 #include "rpi_hevc_cabac_fns.h"
 #include "profiles.h"
-#include "hwaccel.h"
+#include "hwconfig.h"
 
 #include "rpi_zc_frames.h"
 #include "rpi_qpu.h"
@@ -5924,8 +5924,6 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
     if (!qpu_ok())
         return -1;
 
-    avctx->internal->allocate_progress = 1;
-
     if ((ret = hevc_init_context(avctx)) < 0)
         return ret;
 
@@ -5973,22 +5971,6 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     return 0;
 }
-
-#if HAVE_THREADS
-static av_cold int hevc_init_thread_copy(AVCodecContext *avctx)
-{
-    HEVCRpiContext *s = avctx->priv_data;
-    int ret;
-
-    memset(s, 0, sizeof(*s));
-
-    ret = hevc_init_context(avctx);
-    if (ret < 0)
-        return ret;
-
-    return 0;
-}
-#endif
 
 static void hevc_decode_flush(AVCodecContext *avctx)
 {
@@ -6125,7 +6107,6 @@ AVCodec ff_hevc_rpi_decoder = {
     .decode                = hevc_rpi_decode_frame,
     .flush                 = hevc_decode_flush,
     .update_thread_context = ONLY_IF_THREADS_ENABLED(hevc_update_thread_context),
-    .init_thread_copy      = ONLY_IF_THREADS_ENABLED(hevc_init_thread_copy),
     .capabilities          = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
                              AV_CODEC_CAP_HARDWARE |
                              AV_CODEC_CAP_AVOID_PROBING |
@@ -6137,7 +6118,9 @@ AVCodec ff_hevc_rpi_decoder = {
     // We only have decent optimisation for frame - so only admit to that
                              AV_CODEC_CAP_FRAME_THREADS,
 #endif
-    .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_EXPORTS_CROPPING,
+    .caps_internal         = FF_CODEC_CAP_INIT_THREADSAFE |
+                             FF_CODEC_CAP_EXPORTS_CROPPING |
+                             FF_CODEC_CAP_ALLOCATE_PROGRESS,
     .pix_fmts              = hevc_rpi_pix_fmts,
     .profiles              = NULL_IF_CONFIG_SMALL(ff_hevc_profiles),
     .hw_configs            = hevc_rpi_hw_configs,

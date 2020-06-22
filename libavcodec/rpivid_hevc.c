@@ -12,7 +12,7 @@
 #include "libavutil/avassert.h"
 #include "libavutil/imgutils.h"
 #include "avcodec.h"
-#include "hwaccel.h"
+#include "hwconfig.h"
 #include "decode.h"
 
 #include "hevc.h"
