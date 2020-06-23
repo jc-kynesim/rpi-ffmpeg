@@ -13,6 +13,14 @@ USR_PREFIX=`pwd`/install
 LIB_PREFIX=$USR_PREFIX/lib/arm-linux-gnueabihf
 INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
 
+SHARED_LIBS="--enable-shared"
+if [ "$1" == "--noshared" ]; then
+  SHARED_LIBS="--disable-shared"
+  echo Static libs
+else
+  echo Shared libs
+fi
+
 ./configure --enable-cross-compile\
  --prefix=$USR_PREFIX\
  --libdir=$LIB_PREFIX\
@@ -24,7 +32,7 @@ INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
  --disable-thumb\
  --enable-mmal\
  --enable-rpi\
- --enable-shared\
+ $SHARED_LIBS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFINES $RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS -Wl,-rpath=/opt/vc/lib,-rpath-link=$RPI_OPT_VC/lib,-rpath=/lib,-rpath=/usr/lib,-rpath-link=$RPI_TOOLROOT/lib,-rpath-link=$RPI_TOOLROOT/lib"\
