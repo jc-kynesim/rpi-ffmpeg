@@ -8,6 +8,14 @@ RPI_LIBDIRS="-L$RPI_TOOLROOT/lib -L$RPI_OPT_VC/lib"
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
 
+SHARED_LIBS="--enable-shared"
+if [ "$1" == "--noshared" ]; then
+  SHARED_LIBS="--disable-shared"
+  echo Static libs
+else
+  echo Shared libs
+fi
+
 ./configure --enable-cross-compile\
  --cpu=arm1176jzf-s\
  --arch=arm\
@@ -15,7 +23,7 @@ RPI_KEEPS=""
  --target-os=linux\
  --disable-stripping\
  --enable-mmal\
- --enable-shared\
+ $SHARED_LIBS\
  --extra-cflags="-g $RPI_KEEPS $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS -Wl,-rpath=/opt/vc/lib,-rpath-link=$RPI_OPT_VC/lib,-rpath=/lib,-rpath=/usr/lib,-rpath-link=$RPI_TOOLROOT/lib,-rpath-link=$RPI_TOOLROOT/lib"\
