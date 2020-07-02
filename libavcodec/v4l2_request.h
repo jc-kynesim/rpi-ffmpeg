@@ -22,6 +22,7 @@
 #include <linux/videodev2.h>
 
 #include "libavutil/hwcontext_drm.h"
+#include "v4l2_phase.h"
 
 typedef struct V4L2RequestContext {
     int video_fd;
@@ -43,14 +44,32 @@ typedef struct V4L2RequestBuffer {
     struct v4l2_buffer buffer;
 } V4L2RequestBuffer;
 
+struct V4l2PhaseControl;
+
+typedef struct V4L2PhaseEnv {
+    struct V4L2PhaseEnv * next;
+    struct V4L2PhaseControl * ctrl;
+    unsigned int order;
+} V4L2PhaseEnv;
+
 typedef struct V4L2RequestDescriptor {
     AVDRMFrameDescriptor drm;
     int request_fd;
     V4L2RequestBuffer output;
     V4L2RequestBuffer capture;
+
+    // Phase control
+    V4L2PhaseInfo phase;
 } V4L2RequestDescriptor;
 
 uint64_t ff_v4l2_request_get_capture_timestamp(AVFrame *frame);
+
+// Sets phase control on this frame & gives it an order
+int ff_v4l2_request_start_phase_control(AVFrame *frame, struct V4L2PhaseControl * phase);
+
+// Had error - release all phases
+void ff_v4l2_request_abort_phase_control(AVFrame *frame);
+
 
 int ff_v4l2_request_reset_frame(AVCodecContext *avctx, AVFrame *frame);
 
