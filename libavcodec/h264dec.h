@@ -190,6 +190,8 @@ typedef struct H264SliceContext {
     int slice_type_nos;         ///< S free slice type (SI/SP are remapped to I/P)
     int slice_type_fixed;
 
+    int idr_pic_id;
+
     int qscale;
     int chroma_qp[2];   // QPc
     int qp_thresh;      ///< QP threshold to skip loopfilter
@@ -328,11 +330,13 @@ typedef struct H264SliceContext {
     MMCO mmco[MAX_MMCO_COUNT];
     int  nb_mmco;
     int explicit_ref_marking;
+    int ref_pic_marking_size_in_bits;
 
     int frame_num;
     int poc_lsb;
     int delta_poc_bottom;
     int delta_poc[2];
+    int pic_order_cnt_bit_size;
     int curr_pic_num;
     int max_pic_num;
 } H264SliceContext;
@@ -538,6 +542,8 @@ typedef struct H264Context {
      * some context properties (which are supposed to stay constant between
      * slices) anymore */
     int setup_finished;
+
+    int got_first_iframe;
 
     int cur_chroma_format_idc;
     int cur_bit_depth_luma;

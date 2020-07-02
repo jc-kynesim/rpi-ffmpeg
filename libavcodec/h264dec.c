@@ -467,6 +467,7 @@ void ff_h264_flush_change(H264Context *h)
 
     h->next_outputed_poc = INT_MIN;
     h->prev_interlaced_frame = 1;
+    h->got_first_iframe = 0;
     idr(h);
 
     h->poc.prev_frame_num = -1;
@@ -1101,6 +1102,9 @@ AVCodec ff_h264_decoder = {
 #endif
 #if CONFIG_H264_VIDEOTOOLBOX_HWACCEL
                                HWACCEL_VIDEOTOOLBOX(h264),
+#endif
+#if CONFIG_H264_V4L2REQUEST_HWACCEL
+                               HWACCEL_V4L2REQUEST(h264),
 #endif
                                NULL
                            },

@@ -274,6 +274,7 @@ External library support:
   --enable-libtls          enable LibreSSL (via libtls), needed for https support
                            if openssl, gnutls or mbedtls is not used [no]
   --enable-libtwolame      enable MP2 encoding via libtwolame [no]
+  --enable-libudev         enable libudev [no]
   --enable-libv4l2         enable libv4l2/v4l-utils [no]
   --enable-libvidstab      enable video stabilization using vid.stab [no]
   --enable-libvmaf         enable vmaf filter via libvmaf [no]
@@ -344,6 +345,7 @@ External library support:
   --enable-omx-rpi         enable OpenMAX IL code for Raspberry Pi [no]
   --enable-rkmpp           enable Rockchip Media Process Platform code [no]
   --disable-v4l2-m2m       disable V4L2 mem2mem code [autodetect]
+  --enable-v4l2-request    enable V4L2 request API code [no]
   --disable-vaapi          disable Video Acceleration API (mainly Unix/Intel) code [autodetect]
   --disable-vdpau          disable Nvidia Video Decode and Presentation API for Unix code [autodetect]
   --disable-videotoolbox   disable VideoToolbox code [autodetect]
@@ -1809,6 +1811,7 @@ EXTERNAL_LIBRARY_LIST="
     libtesseract
     libtheora
     libtwolame
+    libudev
     libv4l2
     libvorbis
     libvpx
@@ -1863,6 +1866,7 @@ HWACCEL_LIBRARY_LIST="
     mmal
     omx
     opencl
+    v4l2_request
     vulkan
     rpi4_8
     rpi4_10
@@ -2914,6 +2918,7 @@ d3d11va_deps="dxva_h ID3D11VideoDecoder ID3D11VideoContext"
 dxva2_deps="dxva2api_h DXVA2_ConfigPictureDecode ole32 user32"
 ffnvcodec_deps_any="libdl LoadLibrary"
 nvdec_deps="ffnvcodec"
+v4l2_request_deps="linux_videodev2_h linux_media_h v4l2_timeval_to_ns libdrm libudev"
 vaapi_x11_deps="xlib"
 videotoolbox_hwaccel_deps="videotoolbox pthreads"
 videotoolbox_hwaccel_extralibs="-framework QuartzCore"
@@ -2931,6 +2936,8 @@ h264_dxva2_hwaccel_deps="dxva2"
 h264_dxva2_hwaccel_select="h264_decoder"
 h264_nvdec_hwaccel_deps="nvdec"
 h264_nvdec_hwaccel_select="h264_decoder"
+h264_v4l2request_hwaccel_deps="v4l2_request"
+h264_v4l2request_hwaccel_select="h264_decoder"
 h264_vaapi_hwaccel_deps="vaapi"
 h264_vaapi_hwaccel_select="h264_decoder"
 h264_vdpau_hwaccel_deps="vdpau"
@@ -2949,6 +2956,8 @@ hevc_rpi4_10_hwaccel_deps="rpi"
 hevc_rpi4_10_hwaccel_select="hevc_decoder"
 hevc_rpi4_8_hwaccel_deps="rpi"
 hevc_rpi4_8_hwaccel_select="hevc_decoder"
+hevc_v4l2request_hwaccel_deps="v4l2_request"
+hevc_v4l2request_hwaccel_select="hevc_decoder"
 hevc_vaapi_hwaccel_deps="vaapi VAPictureParameterBufferHEVC"
 hevc_vaapi_hwaccel_select="hevc_decoder"
 hevc_vdpau_hwaccel_deps="vdpau VdpPictureInfoHEVC"
@@ -2977,6 +2986,8 @@ mpeg2_dxva2_hwaccel_deps="dxva2"
 mpeg2_dxva2_hwaccel_select="mpeg2video_decoder"
 mpeg2_nvdec_hwaccel_deps="nvdec"
 mpeg2_nvdec_hwaccel_select="mpeg2video_decoder"
+mpeg2_v4l2request_hwaccel_deps="v4l2_request mpeg2_v4l2_request"
+mpeg2_v4l2request_hwaccel_select="mpeg2video_decoder"
 mpeg2_vaapi_hwaccel_deps="vaapi"
 mpeg2_vaapi_hwaccel_select="mpeg2video_decoder"
 mpeg2_vdpau_hwaccel_deps="vdpau"
@@ -3007,6 +3018,8 @@ vc1_vdpau_hwaccel_deps="vdpau"
 vc1_vdpau_hwaccel_select="vc1_decoder"
 vp8_nvdec_hwaccel_deps="nvdec"
 vp8_nvdec_hwaccel_select="vp8_decoder"
+vp8_v4l2request_hwaccel_deps="v4l2_request"
+vp8_v4l2request_hwaccel_select="vp8_decoder"
 vp8_vaapi_hwaccel_deps="vaapi"
 vp8_vaapi_hwaccel_select="vp8_decoder"
 vp9_d3d11va_hwaccel_deps="d3d11va DXVA_PicParams_VP9"
@@ -3017,6 +3030,8 @@ vp9_dxva2_hwaccel_deps="dxva2 DXVA_PicParams_VP9"
 vp9_dxva2_hwaccel_select="vp9_decoder"
 vp9_nvdec_hwaccel_deps="nvdec"
 vp9_nvdec_hwaccel_select="vp9_decoder"
+vp9_v4l2request_hwaccel_deps="v4l2_request"
+vp9_v4l2request_hwaccel_select="vp9_decoder"
 vp9_vaapi_hwaccel_deps="vaapi VADecPictureParameterBufferVP9_bit_depth"
 vp9_vaapi_hwaccel_select="vp9_decoder"
 vp9_vdpau_hwaccel_deps="vdpau VdpPictureInfoVP9"
@@ -6396,6 +6411,7 @@ enabled libtls            && require_pkg_config libtls libtls tls.h tls_configur
 enabled libtwolame        && require libtwolame twolame.h twolame_init -ltwolame &&
                              { check_lib libtwolame twolame.h twolame_encode_buffer_float32_interleaved -ltwolame ||
                                die "ERROR: libtwolame must be installed and version must be >= 0.3.10"; }
+enabled libudev           && require_pkg_config libudev libudev libudev.h udev_new
 enabled libv4l2           && require_pkg_config libv4l2 libv4l2 libv4l2.h v4l2_ioctl
 enabled libvidstab        && require_pkg_config libvidstab "vidstab >= 0.98" vid.stab/libvidstab.h vsMotionDetectInit
 enabled libvmaf           && require_pkg_config libvmaf "libvmaf >= 1.3.9" libvmaf.h compute_vmaf
@@ -6496,6 +6512,10 @@ enabled rkmpp             && { require_pkg_config rkmpp rockchip_mpp  rockchip/r
                                { enabled libdrm ||
                                  die "ERROR: rkmpp requires --enable-libdrm"; }
                              }
+enabled v4l2_request      && { enabled libdrm ||
+                               die "ERROR: v4l2-request requires --enable-libdrm"; } &&
+                             { enabled libudev ||
+                               die "ERROR: v4l2-request requires --enable-libudev"; }
 enabled vapoursynth       && require_pkg_config vapoursynth "vapoursynth-script >= 42" VSScript.h vsscript_init
 
 
@@ -6576,6 +6596,13 @@ if enabled v4l2_m2m; then
     check_cc vp8_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP8;"
     check_cc vp9_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP9;"
 fi
+
+check_func_headers "linux/media.h linux/videodev2.h" v4l2_timeval_to_ns
+check_cc h264_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_H264_SLICE;"
+check_cc hevc_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_HEVC_SLICE;"
+check_cc mpeg2_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_MPEG2_SLICE;"
+check_cc vp8_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_VP8_FRAME;"
+check_cc vp9_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_VP9_FRAME;"
 
 check_headers sys/videoio.h
 test_code cc sys/videoio.h "struct v4l2_frmsizeenum vfse; vfse.discrete.width = 0;" && enable_sanitized struct_v4l2_frmivalenum_discrete

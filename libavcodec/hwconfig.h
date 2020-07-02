@@ -85,6 +85,8 @@ typedef struct AVCodecHWConfigInternal {
     HW_CONFIG_HWACCEL(0, 0, 1, RPI4_8,       NONE,         ff_ ## codec ## _rpi4_8_hwaccel)
 #define HWACCEL_RPI4_10(codec) \
     HW_CONFIG_HWACCEL(0, 0, 1, RPI4_10,      NONE,         ff_ ## codec ## _rpi4_10_hwaccel)
+#define HWACCEL_V4L2REQUEST(codec) \
+    HW_CONFIG_HWACCEL(1, 0, 0, DRM_PRIME,    DRM,          ff_ ## codec ## _v4l2request_hwaccel)
 
 #define HW_CONFIG_ENCODER(device, frames, ad_hoc, format, device_type_) \
     &(const AVCodecHWConfigInternal) { \
