@@ -20,6 +20,7 @@
 #include "hwconfig.h"
 #include "v4l2_request.h"
 #include "hevc-ctrls.h"
+#include "v4l2_phase.h"
 
 #define MAX_SLICES 16
 
@@ -37,6 +38,9 @@ typedef struct V4L2RequestContextHEVC {
     int decode_mode;
     int start_code;
     int max_slices;
+
+    unsigned int order;
+    V4L2PhaseControl * pctrl;
 } V4L2RequestContextHEVC;
 
 static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
@@ -195,6 +199,9 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
     if (sh->slice_loop_filter_across_slices_enabled_flag)
         slice_params->flags |= V4L2_HEVC_SLICE_PARAMS_FLAG_SLICE_LOOP_FILTER_ACROSS_SLICES_ENABLED;
 
+    if (sh->dependent_slice_segment_flag)
+        slice_params->flags |= V4L2_HEVC_SLICE_PARAMS_FLAG_DEPENDENT_SLICE_SEGMENT;
+
     for (i = 0; i < FF_ARRAY_ELEMS(h->DPB); i++) {
         const HEVCFrame *frame = &h->DPB[i];
         if (frame != pic && (frame->flags & (HEVC_FRAME_FLAG_LONG_REF | HEVC_FRAME_FLAG_SHORT_REF))) {
@@ -305,6 +312,8 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
                             sps->scaling_list_enable_flag ?
                             &sps->scaling_list : NULL;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    int rv;
 
     fill_sps(&controls->sps, h);
 
@@ -407,7 +416,14 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     controls->first_slice = 1;
     controls->num_slices = 0;
 
-    return ff_v4l2_request_reset_frame(avctx, h->ref->frame);
+    if ((rv = ff_v4l2_request_reset_frame(avctx, h->ref->frame)) != 0)
+        return rv;
+
+    ff_v4l2_request_start_phase_control(h->ref->frame, ctx->pctrl);
+
+    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+
+    return 0;
 }
 
 static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
@@ -480,9 +496,19 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     return 0;
 }
 
+static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx) {
+    const HEVCContext *h = avctx->priv_data;
+
+    if (h->ref != NULL)
+        ff_v4l2_request_abort_phase_control(h->ref->frame);
+}
+
 static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 {
-    return v4l2_request_hevc_queue_decode(avctx, 1);
+    int rv = v4l2_request_hevc_queue_decode(avctx, 1);
+    if (rv < 0)
+        v4l2_request_hevc_abort_frame(avctx);
+    return rv;
 }
 
 static int v4l2_request_hevc_set_controls(AVCodecContext *avctx)
@@ -528,9 +554,17 @@ static int v4l2_request_hevc_set_controls(AVCodecContext *avctx)
     return ff_v4l2_request_set_controls(avctx, control, FF_ARRAY_ELEMS(control));
 }
 
+static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
+{
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    ff_v4l2_phase_control_deletez(&ctx->pctrl);
+    return ff_v4l2_request_uninit(avctx);
+}
+
 static int v4l2_request_hevc_init(AVCodecContext *avctx)
 {
     const HEVCContext *h = avctx->priv_data;
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
     struct v4l2_ctrl_hevc_sps sps;
     int ret;
 
@@ -541,6 +575,9 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
             .size = sizeof(sps),
         },
     };
+
+    if ((ctx->pctrl = ff_v4l2_phase_control_new(2)) == NULL)
+        return AVERROR(ENOMEM);
 
     fill_sps(&sps, h);
 
@@ -559,10 +596,11 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .start_frame    = v4l2_request_hevc_start_frame,
     .decode_slice   = v4l2_request_hevc_decode_slice,
     .end_frame      = v4l2_request_hevc_end_frame,
+    .abort_frame    = v4l2_request_hevc_abort_frame,
     .frame_priv_data_size = sizeof(V4L2RequestControlsHEVC),
     .init           = v4l2_request_hevc_init,
-    .uninit         = ff_v4l2_request_uninit,
+    .uninit         = v4l2_request_hevc_uninit,
     .priv_data_size = sizeof(V4L2RequestContextHEVC),
     .frame_params   = ff_v4l2_request_frame_params,
-    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE,
+    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_MT_SAFE,
 };

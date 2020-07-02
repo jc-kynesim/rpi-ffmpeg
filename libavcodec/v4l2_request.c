@@ -29,11 +29,26 @@
 #include "decode.h"
 #include "internal.h"
 #include "v4l2_request.h"
+#include "v4l2_phase.h"
 
 uint64_t ff_v4l2_request_get_capture_timestamp(AVFrame *frame)
 {
     V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)frame->data[0];
     return req ? v4l2_timeval_to_ns(&req->capture.buffer.timestamp) : 0;
+}
+
+int ff_v4l2_request_start_phase_control(AVFrame *frame, struct V4L2PhaseControl * ctrl)
+{
+    V4L2RequestDescriptor * const req = (V4L2RequestDescriptor*)frame->data[0];
+    return ff_v4l2_phase_start(&req->phase, ctrl);
+}
+
+void ff_v4l2_request_abort_phase_control(AVFrame *frame)
+{
+    if (frame != NULL && frame->data[0] != NULL) {
+        V4L2RequestDescriptor *const req = (V4L2RequestDescriptor *)frame->data[0];
+        ff_v4l2_phase_abort(&req->phase);
+    }
 }
 
 int ff_v4l2_request_reset_frame(AVCodecContext *avctx, AVFrame *frame)
@@ -184,6 +199,10 @@ static int v4l2_request_dequeue_buffer(V4L2RequestContext *ctx, V4L2RequestBuffe
 }
 
 const uint32_t v4l2_request_capture_pixelformats[] = {
+#if CONFIG_SAND
+    V4L2_PIX_FMT_NV12_COL128,
+    V4L2_PIX_FMT_NV12_10_COL128,
+#endif
     V4L2_PIX_FMT_NV12,
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     V4L2_PIX_FMT_SUNXI_TILED_NV12,
@@ -201,6 +220,16 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
         layer->format = DRM_FORMAT_NV12;
         desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
+#if CONFIG_SAND
+    case V4L2_PIX_FMT_NV12_COL128:
+        layer->format = DRM_FORMAT_NV12;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
+        break;
+    case V4L2_PIX_FMT_NV12_10_COL128:
+        layer->format = DRM_FORMAT_P030;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
+        break;
+#endif
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     case V4L2_PIX_FMT_SUNXI_TILED_NV12:
         layer->format = DRM_FORMAT_NV12;
@@ -221,10 +250,26 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
     layer->planes[0].object_index = 0;
     layer->planes[0].offset = 0;
     layer->planes[0].pitch = V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.plane_fmt[0].bytesperline : format->fmt.pix.bytesperline;
-
-    layer->planes[1].object_index = 0;
-    layer->planes[1].offset = layer->planes[0].pitch * (V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.height : format->fmt.pix.height);
-    layer->planes[1].pitch = layer->planes[0].pitch;
+#if CONFIG_SAND
+    if (pixelformat == V4L2_PIX_FMT_NV12_COL128) {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = format->fmt.pix.height * 128;
+        layer->planes[0].pitch = format->fmt.pix.width;
+        layer->planes[1].pitch = format->fmt.pix.width;
+    }
+    else if (pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = format->fmt.pix.height * 128;
+        layer->planes[0].pitch = format->fmt.pix.width * 2; // Lies but it keeps DRM import happy
+        layer->planes[1].pitch = format->fmt.pix.width * 2;
+    }
+    else
+#endif
+    {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = layer->planes[0].pitch * (V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.height : format->fmt.pix.height);
+        layer->planes[1].pitch = layer->planes[0].pitch;
+    }
 
     return 0;
 }
@@ -291,8 +336,24 @@ static int v4l2_request_queue_decode(AVCodecContext *avctx, AVFrame *frame, stru
         return -1;
     }
 
+    ret = ioctl(req->request_fd, MEDIA_REQUEST_IOC_REINIT, NULL);
+    if (ret < 0) {
+        av_log(avctx, AV_LOG_ERROR, "%s: reinit request %d failed, %s (%d)\n", __func__, req->request_fd, strerror(errno), errno);
+        return -1;
+    }
+
     if (last_slice) {
+        if (ff_v4l2_phase_started(&req->phase)) {
+            ff_v4l2_phase_release(&req->phase, 0);
+            ff_v4l2_phase_claim(&req->phase, 1);
+        }
+
         ret = v4l2_request_dequeue_buffer(ctx, &req->capture);
+
+        if (ff_v4l2_phase_started(&req->phase)) {
+            ff_v4l2_phase_release(&req->phase, 1);
+        }
+
         if (ret < 0) {
             av_log(avctx, AV_LOG_ERROR, "%s: dequeue capture buffer %d failed for request %d, %s (%d)\n", __func__, req->capture.index, req->request_fd, strerror(errno), errno);
             return -1;
@@ -301,12 +362,6 @@ static int v4l2_request_queue_decode(AVCodecContext *avctx, AVFrame *frame, stru
 
     // TODO: check errors
     // buffer.flags & V4L2_BUF_FLAG_ERROR
-
-    ret = ioctl(req->request_fd, MEDIA_REQUEST_IOC_REINIT, NULL);
-    if (ret < 0) {
-        av_log(avctx, AV_LOG_ERROR, "%s: reinit request %d failed, %s (%d)\n", __func__, req->request_fd, strerror(errno), errno);
-        return -1;
-    }
 
     if (last_slice)
         return v4l2_request_set_drm_descriptor(req, &ctx->format);
@@ -466,7 +521,8 @@ static int v4l2_request_probe_video_device(struct udev_device *device, AVCodecCo
         goto fail;
     }
 
-    ctx->video_fd = open(path, O_RDWR | O_NONBLOCK, 0);
+//    ctx->video_fd = open(path, O_RDWR | O_NONBLOCK, 0);
+    ctx->video_fd = open(path, O_RDWR, 0);
     if (ctx->video_fd < 0) {
         av_log(avctx, AV_LOG_ERROR, "%s: opening %s failed, %s (%d)\n", __func__, path, strerror(errno), errno);
         ret = AVERROR(EINVAL);
@@ -957,6 +1013,14 @@ int ff_v4l2_request_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_c
     } else {
         hwfc->width = ctx->format.fmt.pix.width;
         hwfc->height = ctx->format.fmt.pix.height;
+#if CONFIG_SAND
+        if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_COL128) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_8;
+        }
+        else if (ctx->format.fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_10;
+        }
+#endif
     }
 
     hwfc->pool = av_buffer_pool_init2(sizeof(V4L2RequestDescriptor), avctx, v4l2_request_frame_alloc, v4l2_request_pool_free);

@@ -42,7 +42,7 @@ Authors: John Cox
 #include "rpi_sand_fn_pw.h"
 #undef PW
 
-#if HAVE_NEON
+#if ARCH_ARM && HAVE_NEON
 void rpi_sand128b_stripe_to_8_10(uint8_t * dest, const uint8_t * src1, const uint8_t * src2, unsigned int lines);
 #endif
 
@@ -225,7 +225,7 @@ void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const
     // We make no effort to copy an exact width - round up to nearest src stripe
     // as we will always have storage in dest for that
 
-#if HAVE_NEON
+#if ARCH_ARM && HAVE_NEON
     if (shr == 3 && src_stride1 == 128) {
         for (j = 0; j + n < w; j += dst_stride1) {
             uint8_t * d = dst + j * dst_stride2;

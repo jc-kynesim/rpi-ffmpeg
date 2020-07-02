@@ -338,6 +338,7 @@ External library support:
   --enable-libnpp          enable Nvidia Performance Primitives-based code [no]
   --enable-mmal            enable Broadcom Multi-Media Abstraction Layer (Raspberry Pi) via MMAL [no]
   --enable-rpi             enable other rpi specific stuff [no]
+  --enable-sand            enable sand video formats [rpi]
   --enable-vout-drm        enable the vout_drm module - for internal testing only [no]
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
@@ -1888,6 +1889,7 @@ FEATURE_LIST="
     rpi
     runtime_cpudetect
     safe_bitstream_reader
+    sand
     shared
     small
     static

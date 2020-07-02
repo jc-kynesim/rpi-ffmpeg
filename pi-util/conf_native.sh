@@ -21,7 +21,9 @@ INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
  --disable-thumb\
  --enable-mmal\
  --enable-rpi\
+ --enable-v4l2-request\
  --enable-libdrm\
+ --enable-libudev\
  --enable-vout-drm\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFINES $RPI_INCLUDES"\
