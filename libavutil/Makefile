@@ -180,6 +180,7 @@ OBJS-$(CONFIG_LZO)                      += lzo.o
 OBJS-$(CONFIG_MEDIACODEC)               += hwcontext_mediacodec.o
 OBJS-$(CONFIG_OPENCL)                   += hwcontext_opencl.o
 OBJS-$(CONFIG_QSV)                      += hwcontext_qsv.o
+OBJS-$(CONFIG_SAND)                     += rpi_sand_fns.o
 OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o
 OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o
 OBJS-$(CONFIG_VDPAU)                    += hwcontext_vdpau.o

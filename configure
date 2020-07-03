@@ -336,6 +336,7 @@ External library support:
   --enable-libmfx          enable Intel MediaSDK (AKA Quick Sync Video) code via libmfx [no]
   --enable-libnpp          enable Nvidia Performance Primitives-based code [no]
   --enable-mmal            enable Broadcom Multi-Media Abstraction Layer (Raspberry Pi) via MMAL [no]
+  --enable-rpi             enable other rpi specific stuff [no]
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
   --enable-omx             enable OpenMAX IL code [no]
@@ -1877,6 +1878,7 @@ FEATURE_LIST="
     gray
     hardcoded_tables
     omx_rpi
+    rpi
     runtime_cpudetect
     safe_bitstream_reader
     shared
@@ -2408,6 +2410,7 @@ CONFIG_EXTRA="
     rtpdec
     rtpenc_chain
     rv34dsp
+    sand
     scene_sad
     sinewin
     snappy
@@ -2737,6 +2740,8 @@ hap_decoder_select="snappy texturedsp"
 hap_encoder_deps="libsnappy"
 hap_encoder_select="texturedspenc"
 hevc_decoder_select="bswapdsp cabac golomb hevcparse videodsp"
+hevc_rpi_decoder_deps="rpi"
+hevc_rpi_decoder_select="hevc_decoder sand"
 huffyuv_decoder_select="bswapdsp huffyuvdsp llviddsp"
 huffyuv_encoder_select="bswapdsp huffman huffyuvencdsp llvidencdsp"
 hymt_decoder_select="huffyuv_decoder"
@@ -3618,6 +3623,8 @@ tonemap_vaapi_filter_deps="vaapi VAProcFilterParameterBufferHDRToneMapping"
 tonemap_opencl_filter_deps="opencl const_nan"
 transpose_opencl_filter_deps="opencl"
 transpose_vaapi_filter_deps="vaapi VAProcPipelineCaps_rotation_flags"
+unsand_filter_deps="rpi"
+unsand_filter_select="sand"
 unsharp_opencl_filter_deps="opencl"
 uspp_filter_deps="gpl avcodec"
 vaguedenoiser_filter_deps="gpl"

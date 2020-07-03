@@ -2237,7 +2237,13 @@ typedef struct AVCodecContext {
 #endif
 
     /**
-     * Audio only. The amount of padding (in samples) appended by the encoder to
+     * Opaque pointer for use by replacement get_buffer2 code
+     *
+     * @author jc (08/02/2016)
+     */
+    void * get_buffer_context;
+
+    /* Audio only. The amount of padding (in samples) appended by the encoder to
      * the end of the audio. I.e. this number of decoded samples must be
      * discarded by the caller from the end of the stream to get the original
      * audio without any trailing padding.
@@ -2918,6 +2924,17 @@ void avsubtitle_free(AVSubtitle *sub);
  * @addtogroup lavc_decoding
  * @{
  */
+
+/**
+ * Find a registered decoder with a matching codec ID and pix_fmt.
+ * A decoder will pix_fmt set to NULL will match any fmt.
+ * A fmt of AV_PIX_FMT_NONE will only match a decoder will px_fmt NULL.
+ *
+ * @param id AVCodecID of the requested decoder
+ * @param fmt AVPixelForma that msut be supported by decoder
+ * @return A decoder if one was found, NULL otherwise.
+ */
+AVCodec *avcodec_find_decoder_by_id_and_fmt(enum AVCodecID id, enum AVPixelFormat fmt);
 
 /**
  * The default callback for AVCodecContext.get_buffer2(). It is made public so

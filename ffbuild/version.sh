@@ -2,7 +2,6 @@
 
 # Usage: version.sh <ffmpeg-root-dir> <output-version.h> <extra-version>
 
-if [ -d $1/.git ]; then  # only check for a git rev, if the src tree is in a git repo
 # check for git short hash
 if ! test "$revision"; then
     if (cd "$1" && grep git RELEASE 2> /dev/null >/dev/null) ; then
@@ -27,7 +26,6 @@ if [ -z "$revision" ]; then
     */ffmpeg-HEAD-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])
       git_hash="${srcdir##*-}";;
   esac
-fi
 fi
 
 # no revision number found

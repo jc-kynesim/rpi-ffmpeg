@@ -751,11 +751,19 @@ static AVCodec *choose_decoder(OptionsContext *o, AVFormatContext *s, AVStream *
 
     MATCH_PER_STREAM_OPT(codec_names, str, codec_name, s, st);
     if (codec_name) {
+        if (strcmp("hevc_rpi", codec_name) == 0) {
+            return avcodec_find_decoder_by_id_and_fmt(AV_CODEC_ID_HEVC, st->codecpar->format);
+        }
         AVCodec *codec = find_codec_or_die(codec_name, st->codecpar->codec_type, 0);
         st->codecpar->codec_id = codec->id;
         return codec;
     } else
+    {
+        if (st->codecpar->codec_id == AV_CODEC_ID_HEVC) {
+            return avcodec_find_decoder_by_id_and_fmt(st->codecpar->codec_id, st->codecpar->format);
+        }
         return avcodec_find_decoder(st->codecpar->codec_id);
+    }
 }
 
 /* Add all the streams from the given input file to the global
