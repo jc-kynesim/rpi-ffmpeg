@@ -39,6 +39,12 @@
 #define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
 #endif
 
+// P030 should be defined in drm_fourcc.h and hopefully will be sometime
+// in the future but until then...
+#ifndef DRM_FORMAT_P030
+#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
+#endif
+
 uint64_t ff_v4l2_request_get_capture_timestamp(AVFrame *frame)
 {
     V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)frame->data[0];
