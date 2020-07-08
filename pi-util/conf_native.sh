@@ -11,6 +11,14 @@ USR_PREFIX=`pwd`/install
 LIB_PREFIX=$USR_PREFIX/lib/arm-linux-gnueabihf
 INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
 
+SHARED_LIBS="--enable-shared"
+if [ "$1" == "--noshared" ]; then
+  SHARED_LIBS="--disable-shared"
+  echo Static libs
+else
+  echo Shared libs
+fi
+
 ./configure \
  --prefix=$USR_PREFIX\
  --libdir=$LIB_PREFIX\
@@ -25,17 +33,15 @@ INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
  --enable-libdrm\
  --enable-libudev\
  --enable-vout-drm\
+ $SHARED_LIBS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFINES $RPI_INCLUDES"\
  --extra-ldflags="$RPI_LIBDIRS"\
  --extra-libs="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm"\
 
-# --enable-shared\
-
 # --enable-decoder=hevc_rpi\
 # --enable-extra-warnings\
 # --arch=armv71\
-# --enable-shared\
 
 # gcc option for getting asm listing
 # -Wa,-ahls
