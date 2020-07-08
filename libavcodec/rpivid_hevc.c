@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <unistd.h>
 #include <sys/mman.h>
 
 #include "fftools/ffmpeg.h"
