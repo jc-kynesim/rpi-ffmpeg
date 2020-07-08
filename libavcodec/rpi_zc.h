@@ -155,7 +155,8 @@ void av_rpi_zc_uninit2(struct AVCodecContext * const s);
 // Get minimum pool size in frames - valid by the time the first alloc request
 // occurs.  Takes into account thread requests and DPB sizes derived from SPS
 // rather than just adding a worst case DPB size.
-unsigned int av_rpi_zc_get_decoder_pool_size(const AVZcEnvPtr zc);
+// Returns 0 if unknown
+unsigned int av_rpi_zc_decoder_pool_size(const struct AVCodecContext * const s);
 
 typedef struct av_rpi_zc_buf_fn_tab_s {
     // This AVBuffer is being freed by ffmpeg - return memory
@@ -195,6 +196,7 @@ void * av_rpi_zc_buf_v(AVBufferRef * const buf);
 void av_rpi_zc_int_env_freep(AVZcEnvPtr * zc);
 AVZcEnvPtr av_rpi_zc_int_env_alloc(void * const logctx);
 void av_rpi_zc_set_decoder_pool_size(const AVZcEnvPtr zc, const unsigned int pool_size);
+AVZcEnvPtr av_rpi_zc_env_ptr(const struct AVCodecContext * const s);
 
 // Test to see if the context is using zc (checks get_buffer2)
 int av_rpi_zc_in_use(const struct AVCodecContext * const s);

@@ -1,6 +1,6 @@
 #include "config.h"
 
-#include "libavcodec/avcodec.h"
+#include "avcodec.h"
 #include "rpi_mem.h"
 #include "rpi_mailbox.h"
 #include "rpi_zc.h"
@@ -45,7 +45,6 @@ typedef struct ZcOldCtxVals
 {
     int thread_safe_callbacks;
     int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
-    void * opaque;
 } ZcOldCtxVals;
 
 typedef struct AVZcEnv
@@ -1017,9 +1016,11 @@ void av_rpi_zc_set_decoder_pool_size(ZcEnv *const zc, const unsigned int pool_si
     zc->pool_size = pool_size;
 }
 
-unsigned int av_rpi_zc_get_decoder_pool_size(ZcEnv *const zc)
+// Used by user code - do not require ZcEnv
+unsigned int av_rpi_zc_decoder_pool_size(const struct AVCodecContext * const s)
 {
-    return zc->pool_size;
+    const ZcEnv * const zc = av_rpi_zc_env_ptr(s);
+    return zc == NULL ? 0 : zc->pool_size;
 }
 
 int av_rpi_zc_get_buffer(ZcEnv *const zc, AVFrame * const frame)
@@ -1147,6 +1148,10 @@ AVZcEnvPtr av_rpi_zc_env_alloc(void * logctx,
 
 #define RPI_GET_BUFFER2 1
 
+AVZcEnvPtr av_rpi_zc_env_ptr(const struct AVCodecContext * const s)
+{
+    return s->zc_env;
+}
 
 static int zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
 {
@@ -1163,7 +1168,7 @@ static int zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
     else if (frame->format == AV_PIX_FMT_YUV420P ||
              av_rpi_is_sand_frame(frame))
     {
-        if ((rv = av_rpi_zc_get_buffer(s->opaque, frame)) == 0)
+        if ((rv = av_rpi_zc_get_buffer(av_rpi_zc_env_ptr(s), frame)) == 0)
             rv = av_rpi_zc_resolve_frame(frame, ZC_RESOLVE_ALLOC_VALID);
     }
     else
@@ -1183,6 +1188,9 @@ static int zc_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
 #endif
 }
 
+// Abstract this so that if we use zc_env externally we get it from a
+// consistent place.
+// Beware direct copy in pthread_frame.c:update-content_from_user
 int av_rpi_zc_in_use(const struct AVCodecContext * const s)
 {
     return s->get_buffer2 == zc_get_buffer2;
@@ -1201,12 +1209,11 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
         return AVERROR(ENOMEM);
 
     zc->old = (ZcOldCtxVals){
-        .opaque = s->opaque,
         .get_buffer2 = s->get_buffer2,
         .thread_safe_callbacks = s->thread_safe_callbacks
     };
 
-    s->opaque = zc;
+    s->zc_env = zc;
     s->get_buffer2 = zc_get_buffer2;
     s->thread_safe_callbacks = 1;
     return 0;
@@ -1214,12 +1221,12 @@ int av_rpi_zc_init2(struct AVCodecContext * const s,
 
 void av_rpi_zc_uninit2(struct AVCodecContext * const s)
 {
-    ZcEnv * const zc = s->opaque;
+    ZcEnv * const zc = av_rpi_zc_env_ptr(s);
 
     av_assert0(av_rpi_zc_in_use(s));
 
     s->get_buffer2 = zc->old.get_buffer2;
-    s->opaque = zc->old.opaque;
+    s->zc_env = NULL;
     s->thread_safe_callbacks = zc->old.thread_safe_callbacks;
 
     av_rpi_zc_env_release(zc);

@@ -2351,6 +2351,12 @@ typedef struct AVCodecContext {
      * - encoding: set by user
      */
     int export_side_data;
+
+    /**
+     * Env used by ZC setup
+     */
+    void * zc_env;
+
 } AVCodecContext;
 
 #if FF_API_CODEC_GET_SET
