@@ -2078,11 +2078,11 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
     [AV_PIX_FMT_RPI4_10] = {
-        .name = "rpi",
+        .name = "rpi4_10",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
     [AV_PIX_FMT_RPI4_8] = {
-        .name = "rpi",
+        .name = "rpi4_8",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
     [AV_PIX_FMT_AYUV64LE] = {
