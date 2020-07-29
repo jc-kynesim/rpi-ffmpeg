@@ -5921,7 +5921,7 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
     int ret;
 
     if (!qpu_ok())
-        return -1;
+        return AVERROR_DECODER_NOT_FOUND;
 
     if ((ret = hevc_init_context(avctx)) < 0)
         return ret;
@@ -5938,16 +5938,16 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
     // initialised by this point
     {
         HEVCRpiJobGlobal * const jbg = jbg_new(FFMAX(avctx->thread_count * 3, 5));
-        if (jbg == NULL)
-        {
+        if (jbg == NULL) {
             av_log(s->avctx, AV_LOG_ERROR, "%s: Job global init failed\n", __func__);
-            return -1;
+            ret = AVERROR(ENOMEM);
+            goto fail;
         }
 
-        if ((s->jbc = rpi_job_ctl_new(jbg)) == NULL)
-        {
+        if ((s->jbc = rpi_job_ctl_new(jbg)) == NULL) {
             av_log(s->avctx, AV_LOG_ERROR, "%s: Job ctl init failed\n", __func__);
-            return -1;
+            ret = AVERROR(ENOMEM);
+            goto fail;
         }
     }
 
@@ -5956,15 +5956,12 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
     s->eos = 1;
 
     if (avctx->extradata_size > 0 && avctx->extradata) {
-        ret = hevc_rpi_decode_extradata(s, avctx->extradata, avctx->extradata_size, 1);
+        if ((ret = hevc_rpi_decode_extradata(s, avctx->extradata, avctx->extradata_size, 1)) < 0)
+            goto fail;
 
-        if (ret == 0 && !all_sps_supported(s))
+        if (!all_sps_supported(s)) {
             ret = AVERROR_DECODER_NOT_FOUND;
-
-        if (ret < 0)
-        {
-            hevc_decode_free(avctx);
-            return ret;
+            goto fail;
         }
     }
 
@@ -5974,6 +5971,10 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
         s->threads_type = 0;
 
     return 0;
+
+fail:
+    hevc_decode_free(avctx);
+    return ret;
 }
 
 static void hevc_decode_flush(AVCodecContext *avctx)
