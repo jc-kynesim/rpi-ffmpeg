@@ -765,8 +765,6 @@ typedef struct HEVCRpiContext {
     uint8_t *checksum_buf;
     int      checksum_buf_size;
 
-    atomic_int wpp_err;
-
     const uint8_t *data;
 
     H2645Packet pkt;

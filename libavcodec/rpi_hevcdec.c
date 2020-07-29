@@ -5798,11 +5798,12 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     HEVCRpiContext *s0 = src->priv_data;
     int i, ret;
 
-    if (!s->context_initialized) {
-        ret = hevc_init_context(dst);
-        if (ret < 0)
-            return ret;
-    }
+    av_assert0(s->context_initialized);
+
+    // dst == src can happen according to the comments and in that case
+    // there is nothing to do here
+    if (dst == src)
+        return 0;
 
     for (i = 0; i < FF_ARRAY_ELEMS(s->DPB); i++) {
         ff_hevc_rpi_unref_frame(s, &s->DPB[i], ~0);
@@ -5885,6 +5886,19 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
     HEVCRpiContext *s = avctx->priv_data;
     int ret;
 
+    if ((ret = hevc_init_context(avctx)) < 0)
+        return ret;
+
+    // If we are a child context then stop now
+    // Everything after this point is either 1st decode setup or global alloc
+    // that must not be repeated
+    // Global info will be copied into children in update_thread_context (we
+    // can't do it here as we have no way of finding the parent context)
+    if (avctx->internal->is_copy)
+        return 0;
+
+    // Job allocation requires VCSM alloc to work so ensure that we have it
+    // initialised by this point
     {
         HEVCRpiJobGlobal * const jbg = jbg_new(FFMAX(avctx->thread_count * 3, 5));
         if (jbg == NULL)
@@ -5900,16 +5914,9 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
         }
     }
 
-    ret = hevc_init_context(avctx);
-    if (ret < 0)
-        return ret;
-
     hevc_init_worker(s);
 
-    s->sei.picture_timing.picture_struct = 0;
     s->eos = 1;
-
-    atomic_init(&s->wpp_err, 0);
 
     if (avctx->extradata_size > 0 && avctx->extradata) {
         ret = hevc_rpi_decode_extradata(s, avctx->extradata, avctx->extradata_size, 1);
