@@ -30,6 +30,7 @@
 #include <linux/videodev2.h>
 
 #include "libavcodec/avcodec.h"
+#include "libavutil/pixfmt.h"
 #include "v4l2_context.h"
 
 #define container_of(ptr, type, member) ({ \
@@ -38,7 +39,7 @@
 
 #define V4L_M2M_DEFAULT_OPTS \
     { "num_output_buffers", "Number of buffers in the output context",\
-        OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 16 }, 6, INT_MAX, FLAGS }
+        OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 16 }, 2, INT_MAX, FLAGS }
 
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
@@ -63,6 +64,11 @@ typedef struct V4L2m2mContext {
 
     /* reference back to V4L2m2mPriv */
     void *priv;
+
+    AVBufferRef *device_ref;
+
+    /* generate DRM frames */
+    int output_drm;
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv {
@@ -73,6 +79,7 @@ typedef struct V4L2m2mPriv {
 
     int num_output_buffers;
     int num_capture_buffers;
+    enum AVPixelFormat pix_fmt;
 } V4L2m2mPriv;
 
 /**

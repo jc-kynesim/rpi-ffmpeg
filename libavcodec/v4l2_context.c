@@ -455,22 +455,54 @@ static int v4l2_release_buffers(V4L2Context* ctx)
     struct v4l2_requestbuffers req = {
         .memory = V4L2_MEMORY_MMAP,
         .type = ctx->type,
-        .count = 0, /* 0 -> unmaps buffers from the driver */
+        .count = 0, /* 0 -> unmap all buffers from the driver */
     };
-    int i, j;
+    int ret, i, j;
 
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer *buffer = &ctx->buffers[i];
 
         for (j = 0; j < buffer->num_planes; j++) {
             struct V4L2Plane_info *p = &buffer->plane_info[j];
+
+            if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+                /* output buffers are not EXPORTED */
+                goto unmap;
+            }
+
+            if (ctx_to_m2mctx(ctx)->output_drm) {
+                /* use the DRM frame to close */
+                if (buffer->drm_frame.objects[j].fd >= 0) {
+                    if (close(buffer->drm_frame.objects[j].fd) < 0) {
+                        av_log(logger(ctx), AV_LOG_ERROR, "%s close drm fd "
+                            "[buffer=%2d, plane=%d, fd=%2d] - %s \n",
+                            ctx->name, i, j, buffer->drm_frame.objects[j].fd,
+                            av_err2str(AVERROR(errno)));
+                    }
+                }
+            }
+unmap:
             if (p->mm_addr && p->length)
                 if (munmap(p->mm_addr, p->length) < 0)
-                    av_log(logger(ctx), AV_LOG_ERROR, "%s unmap plane (%s))\n", ctx->name, av_err2str(AVERROR(errno)));
+                    av_log(logger(ctx), AV_LOG_ERROR, "%s unmap plane (%s))\n",
+                        ctx->name, av_err2str(AVERROR(errno)));
         }
     }
 
-    return ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_REQBUFS, &req);
+    ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_REQBUFS, &req);
+    if (ret < 0) {
+            av_log(logger(ctx), AV_LOG_ERROR, "release all %s buffers (%s)\n",
+                ctx->name, av_err2str(AVERROR(errno)));
+
+            if (ctx_to_m2mctx(ctx)->output_drm)
+                av_log(logger(ctx), AV_LOG_ERROR,
+                    "Make sure the DRM client releases all FB/GEM objects before closing the codec (ie):\n"
+                    "for all buffers: \n"
+                    "  1. drmModeRmFB(..)\n"
+                    "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
+    }
+
+    return ret;
 }
 
 static inline int v4l2_try_raw_format(V4L2Context* ctx, enum AVPixelFormat pixfmt)
@@ -499,6 +531,8 @@ static inline int v4l2_try_raw_format(V4L2Context* ctx, enum AVPixelFormat pixfm
 
 static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
 {
+    V4L2m2mContext* s = ctx_to_m2mctx(ctx);
+    V4L2m2mPriv *priv = s->avctx->priv_data;
     enum AVPixelFormat pixfmt = ctx->av_pix_fmt;
     struct v4l2_fmtdesc fdesc;
     int ret;
@@ -516,6 +550,13 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
         ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc);
         if (ret)
             return AVERROR(EINVAL);
+
+        if (priv->pix_fmt != AV_PIX_FMT_NONE) {
+            if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt)) {
+                fdesc.index++;
+                continue;
+            }
+        }
 
         pixfmt = ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO);
         ret = v4l2_try_raw_format(ctx, pixfmt);

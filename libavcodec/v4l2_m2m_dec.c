@@ -23,12 +23,19 @@
 
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
+
+#include "libavutil/hwcontext.h"
+#include "libavutil/hwcontext_drm.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
 #include "libavcodec/avcodec.h"
 #include "libavcodec/decode.h"
 #include "libavcodec/internal.h"
+
+#include "libavcodec/hwaccels.h"
+#include "libavcodec/internal.h"
+#include "libavcodec/hwconfig.h"
 
 #include "v4l2_context.h"
 #include "v4l2_m2m.h"
@@ -142,8 +149,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     int ret;
 
     if (s->buf_pkt.size) {
-        avpkt = s->buf_pkt;
-        memset(&s->buf_pkt, 0, sizeof(AVPacket));
+        av_packet_move_ref(&avpkt, &s->buf_pkt);
     } else {
         ret = ff_decode_get_packet(avctx, &avpkt);
         if (ret < 0 && ret != AVERROR_EOF)
@@ -208,13 +214,37 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     capture->av_codec_id = AV_CODEC_ID_RAWVIDEO;
     capture->av_pix_fmt = avctx->pix_fmt;
 
+    /* the client requests the codec to generate DRM frames:
+     *   - data[0] will therefore point to the returned AVDRMFrameDescriptor
+     *       check the ff_v4l2_buffer_to_avframe conversion function.
+     *   - the DRM frame format is passed in the DRM frame descriptor layer.
+     *       check the v4l2_get_drm_frame function.
+     */
+    switch (ff_get_format(avctx, avctx->codec->pix_fmts)) {
+    case AV_PIX_FMT_DRM_PRIME:
+        s->output_drm = 1;
+        break;
+    case AV_PIX_FMT_NONE:
+        return 0;
+        break;
+    default:
+        break;
+    }
+
+    s->device_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
+    if (!s->device_ref) {
+        ret = AVERROR(ENOMEM);
+        return ret;
+    }
+
+    ret = av_hwdevice_ctx_init(s->device_ref);
+    if (ret < 0)
+        return ret;
+
     s->avctx = avctx;
     ret = ff_v4l2_m2m_codec_init(priv);
     if (ret) {
         av_log(avctx, AV_LOG_ERROR, "can't configure decoder\n");
-        s->self_ref = NULL;
-        av_buffer_unref(&priv->context_ref);
-
         return ret;
     }
 
@@ -223,10 +253,42 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
 static av_cold int v4l2_decode_close(AVCodecContext *avctx)
 {
+    return ff_v4l2_m2m_codec_end(avctx->priv_data);
+}
+
+static void v4l2_decode_flush(AVCodecContext *avctx)
+{
     V4L2m2mPriv *priv = avctx->priv_data;
-    V4L2m2mContext *s = priv->context;
-    av_packet_unref(&s->buf_pkt);
-    return ff_v4l2_m2m_codec_end(priv);
+    V4L2m2mContext* s = priv->context;
+    V4L2Context* output = &s->output;
+    V4L2Context* capture = &s->capture;
+    int ret, i;
+
+    ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", output->name, ret);
+
+    ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMON);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON %s error: %d\n", output->name, ret);
+
+    for (i = 0; i < output->num_buffers; i++) {
+        if (output->buffers[i].status == V4L2BUF_IN_DRIVER)
+            output->buffers[i].status = V4L2BUF_AVAILABLE;
+    }
+
+    struct v4l2_decoder_cmd cmd = {
+        .cmd = V4L2_DEC_CMD_START,
+        .flags = 0,
+    };
+
+    ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
+
+    s->draining = 0;
+    output->done = 0;
+    capture->done = 0;
 }
 
 #define OFFSET(x) offsetof(V4L2m2mPriv, x)
@@ -235,8 +297,14 @@ static av_cold int v4l2_decode_close(AVCodecContext *avctx)
 static const AVOption options[] = {
     V4L_M2M_DEFAULT_OPTS,
     { "num_capture_buffers", "Number of buffers in the capture context",
-        OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 20}, 20, INT_MAX, FLAGS },
+        OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 20}, 2, INT_MAX, FLAGS },
+    { "pixel_format", "Pixel format to be used by the decoder", OFFSET(pix_fmt), AV_OPT_TYPE_PIXEL_FMT, {.i64 = AV_PIX_FMT_NONE}, AV_PIX_FMT_NONE, AV_PIX_FMT_NB, FLAGS },
     { NULL},
+};
+
+static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
+    HW_CONFIG_INTERNAL(DRM_PRIME),
+    NULL
 };
 
 #define M2MDEC_CLASS(NAME) \
@@ -259,9 +327,14 @@ static const AVOption options[] = {
         .init           = v4l2_decode_init, \
         .receive_frame  = v4l2_receive_frame, \
         .close          = v4l2_decode_close, \
+        .flush          = v4l2_decode_flush, \
         .bsfs           = bsf_name, \
         .capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
-        .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS, \
+        .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_CLEANUP, \
+        .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
+                                                         AV_PIX_FMT_NV12, \
+                                                         AV_PIX_FMT_NONE}, \
+        .hw_configs     = v4l2_m2m_hw_configs, \
         .wrapper_name   = "v4l2m2m", \
     }
 
