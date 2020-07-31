@@ -27,7 +27,7 @@
 #include "libavutil/avassert.h"
 #include "dnn_backend_native_layer_depth2space.h"
 
-int dnn_load_layer_depth2space(Layer *layer, AVIOContext *model_file_context, int file_size)
+int dnn_load_layer_depth2space(Layer *layer, AVIOContext *model_file_context, int file_size, int operands_num)
 {
     DepthToSpaceParams *params;
     int dnn_size = 0;
@@ -41,6 +41,10 @@ int dnn_load_layer_depth2space(Layer *layer, AVIOContext *model_file_context, in
     layer->output_operand_index = (int32_t)avio_rl32(model_file_context);
     dnn_size += 8;
     layer->params = params;
+
+    if (layer->input_operand_indexes[0] >= operands_num || layer->output_operand_index >= operands_num) {
+        return 0;
+    }
 
     return dnn_size;
 }
@@ -71,6 +75,8 @@ int dnn_execute_layer_depth2space(DnnOperand *operands, const int32_t *input_ope
     output_operand->dims[3] = new_channels;
     output_operand->data_type = operands[input_operand_index].data_type;
     output_operand->length = calculate_operand_data_length(output_operand);
+    if (output_operand->length <= 0)
+        return -1;
     output_operand->data = av_realloc(output_operand->data, output_operand->length);
     if (!output_operand->data)
         return -1;
