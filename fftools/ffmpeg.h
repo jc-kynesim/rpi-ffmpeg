@@ -61,6 +61,7 @@ enum HWAccelID {
     HWACCEL_GENERIC,
     HWACCEL_VIDEOTOOLBOX,
     HWACCEL_QSV,
+    HWACCEL_RPI,
 };
 
 typedef struct HWAccel {
@@ -590,6 +591,7 @@ extern int video_sync_method;
 extern float frame_drop_threshold;
 extern int do_benchmark;
 extern int do_benchmark_all;
+extern int no_cvt_hw;
 extern int do_deinterlace;
 extern int do_hex_dump;
 extern int do_pkt_dump;
@@ -653,6 +655,7 @@ int ffmpeg_parse_options(int argc, char **argv);
 
 int videotoolbox_init(AVCodecContext *s);
 int qsv_init(AVCodecContext *s);
+int rpi_init(AVCodecContext *s);
 
 HWDevice *hw_device_get_by_name(const char *name);
 int hw_device_init_from_string(const char *arg, HWDevice **dev);

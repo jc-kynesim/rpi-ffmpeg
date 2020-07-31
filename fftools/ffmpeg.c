@@ -2118,8 +2118,8 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame)
                        ifilter->channel_layout != frame->channel_layout;
         break;
     case AVMEDIA_TYPE_VIDEO:
-        need_reinit |= ifilter->width  != frame->width ||
-                       ifilter->height != frame->height;
+        need_reinit |= ifilter->width  != av_frame_cropped_width(frame) ||
+                       ifilter->height != av_frame_cropped_height(frame);
         break;
     }
 
@@ -2367,6 +2367,8 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
         if (ist->dec_ctx->codec_id == AV_CODEC_ID_H264) {
             ist->st->codecpar->video_delay = ist->dec_ctx->has_b_frames;
         } else
+        {
+#if 0
             av_log(ist->dec_ctx, AV_LOG_WARNING,
                    "video_delay is larger in decoder than demuxer %d > %d.\n"
                    "If you want to help, upload a sample "
@@ -2374,6 +2376,8 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
                    "and contact the ffmpeg-devel mailing list. (ffmpeg-devel@ffmpeg.org)\n",
                    ist->dec_ctx->has_b_frames,
                    ist->st->codecpar->video_delay);
+#endif
+        }
     }
 
     if (ret != AVERROR_EOF)
@@ -2400,8 +2404,7 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
         decoded_frame->top_field_first = ist->top_field_first;
 
     ist->frames_decoded++;
-
-    if (ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
+    if (!no_cvt_hw && ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
         err = ist->hwaccel_retrieve_data(ist->dec_ctx, decoded_frame);
         if (err < 0)
             goto fail;
@@ -2913,6 +2916,15 @@ static int init_input_stream(int ist_index, char *error, int error_len)
             return ret;
         }
 
+#if CONFIG_HEVC_RPI_DECODER
+        ret = -1;
+        if (strcmp(codec->name, "hevc_rpi") == 0 &&
+            (ret = avcodec_open2(ist->dec_ctx, codec, &ist->decoder_opts)) < 0) {
+            ist->dec = codec = avcodec_find_decoder_by_name("hevc");
+            av_log(NULL, AV_LOG_INFO, "Failed to open hevc_rpi - trying hevc\n");
+        }
+        if (ret < 0)
+#endif
         if ((ret = avcodec_open2(ist->dec_ctx, codec, &ist->decoder_opts)) < 0) {
             if (ret == AVERROR_EXPERIMENTAL)
                 abort_codec_experimental(codec, 0);

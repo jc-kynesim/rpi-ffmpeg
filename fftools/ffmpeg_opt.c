@@ -130,12 +130,22 @@ static const char *opt_name_enc_time_bases[]            = {"enc_time_base", NULL
     }\
 }
 
+#if CONFIG_RPI
+int rpi_init(AVCodecContext *avctx) {
+    return 0;
+}
+#endif
+
 const HWAccel hwaccels[] = {
 #if CONFIG_VIDEOTOOLBOX
     { "videotoolbox", videotoolbox_init, HWACCEL_VIDEOTOOLBOX, AV_PIX_FMT_VIDEOTOOLBOX },
 #endif
 #if CONFIG_LIBMFX
     { "qsv",   qsv_init,   HWACCEL_QSV,   AV_PIX_FMT_QSV },
+#endif
+#if CONFIG_RPI
+    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_8 },
+    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_10 },
 #endif
     { 0 },
 };
@@ -155,6 +165,7 @@ float frame_drop_threshold = 0;
 int do_deinterlace    = 0;
 int do_benchmark      = 0;
 int do_benchmark_all  = 0;
+int no_cvt_hw         = 0;
 int do_hex_dump       = 0;
 int do_pkt_dump       = 0;
 int copy_ts           = 0;
@@ -755,7 +766,9 @@ static AVCodec *choose_decoder(OptionsContext *o, AVFormatContext *s, AVStream *
         st->codecpar->codec_id = codec->id;
         return codec;
     } else
+    {
         return avcodec_find_decoder(st->codecpar->codec_id);
+    }
 }
 
 /* Add all the streams from the given input file to the global
@@ -3460,6 +3473,8 @@ const OptionDef options[] = {
         "add timings for benchmarking" },
     { "benchmark_all",  OPT_BOOL | OPT_EXPERT,                       { &do_benchmark_all },
       "add timings for each task" },
+    { "no_cvt_hw",      OPT_BOOL | OPT_EXPERT,                       { &no_cvt_hw },
+      "do not auto-convert hw frames to sw" },
     { "progress",       HAS_ARG | OPT_EXPERT,                        { .func_arg = opt_progress },
       "write program-readable progress information", "url" },
     { "stdin",          OPT_BOOL | OPT_EXPERT,                       { &stdin_interaction },

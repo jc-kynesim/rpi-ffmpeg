@@ -2236,8 +2236,7 @@ typedef struct AVCodecContext {
 #define FF_SUB_TEXT_FMT_ASS_WITH_TIMINGS 1
 #endif
 
-    /**
-     * Audio only. The amount of padding (in samples) appended by the encoder to
+    /* Audio only. The amount of padding (in samples) appended by the encoder to
      * the end of the audio. I.e. this number of decoded samples must be
      * discarded by the caller from the end of the stream to get the original
      * audio without any trailing padding.
@@ -2567,6 +2566,17 @@ typedef struct AVHWAccel {
      * that avctx->hwaccel_priv_data is invalid.
      */
     int (*frame_params)(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx);
+
+    /**
+     * Called if parsing fails
+     *
+     * An error has occured, end_frame will not be called
+     * start_frame & decode_slice may or may not have been called
+     * Optional
+     *
+     * @param avctx the codec context
+     */
+    void (*abort_frame)(AVCodecContext *avctx);
 } AVHWAccel;
 
 /**
