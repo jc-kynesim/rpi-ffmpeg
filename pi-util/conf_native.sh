@@ -31,8 +31,10 @@ fi
  --enable-rpi\
  --enable-v4l2-request\
  --enable-libdrm\
+ --enable-epoxy\
  --enable-libudev\
  --enable-vout-drm\
+ --enable-vout-egl\
  $SHARED_LIBS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFINES $RPI_INCLUDES"\

@@ -194,6 +194,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     V4L2m2mPriv *priv = avctx->priv_data;
     int ret;
 
+    avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
@@ -221,13 +223,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      *       check the v4l2_get_drm_frame function.
      */
     switch (ff_get_format(avctx, avctx->codec->pix_fmts)) {
-    case AV_PIX_FMT_DRM_PRIME:
-        s->output_drm = 1;
-        break;
-    case AV_PIX_FMT_NONE:
-        return 0;
-        break;
     default:
+        s->output_drm = 1;
         break;
     }
 
