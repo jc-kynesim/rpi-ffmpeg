@@ -1,0 +1,55 @@
+# Setup & Build instructions for testing Argon30 mesa support (on Pi4)
+
+# These assume that the drm_mmal test for Sand8 has been built on this Pi
+# as build relies on many of the same files
+
+# 1st get everything required to build ffmpeg
+# If sources aren't already enabled on your Pi then enable them
+sudo su
+sed "s/#deb-src/deb-src/" /etc/apt/sources.list > /tmp/sources.list
+sed "s/#deb-src/deb-src/" /etc/apt/sources.list.d/raspi.list > /tmp/raspi.list
+mv /tmp/sources.list /etc/apt/
+mv /tmp/raspi.list /etc/apt/sources.list.d/
+apt update
+
+# Get dependancies
+sudo apt build-dep ffmpeg
+
+# Enable H265 V4L2 request decoder
+sudo su
+echo dtoverlay=rpivid-v4l2 >> /boot/config.txt
+reboot
+# Check it has turned up
+ls -la /dev/video*
+# This should include video19
+# crw-rw----+ 1 root video 81, 7 Aug  4 17:25 /dev/video19
+
+# Config
+pi-util/conf_native.sh
+
+# Build (this is a bit dull)
+# If you want to poke the source the libavdevice/egl_vout.c contains the
+# output code -
+make -j6
+
+# Grab test streams
+wget http://www.jell.yfish.us/media/jellyfish-3-mbps-hd-h264.mkv
+wget http://www.jell.yfish.us/media/jellyfish-3-mbps-hd-hevc.mkv
+wget http://www.jell.yfish.us/media/jellyfish-3-mbps-hd-hevc-10bit.mkv
+
+# Test i420 output (works currently)
+./ffmpeg -no_cvt_hw -vcodec h264_v4l2m2m -i jellyfish-3-mbps-hd-h264.mkv -f vout_egl -
+
+# Test Sand8 output - doesn't currently work but should once you have
+# Sand8 working in drm_mmal. I can't guarantee that this will work as
+# I can't test this path with a known working format, but the debug looks
+# good.  If this doesn't work & drm_mmal does with sand8 then come back to me
+./ffmpeg -no_cvt_hw -hwaccel drm -vcodec hevc -i jellyfish-3-mbps-hd-hevc.mkv -f vout_egl -
+
+# Test Sand30 - doesn't currently work
+# (Beware that when FFmpeg errors out it often leaves your teminal window
+# in a state where you need to reset it)
+./ffmpeg -no_cvt_hw -hwaccel drm -vcodec hevc -i jellyfish-3-mbps-hd-hevc-10bit.mkv -f vout_egl -
+
+
+
