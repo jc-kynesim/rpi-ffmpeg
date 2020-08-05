@@ -66,7 +66,6 @@ struct egl_setup {
    uint32_t crtcId;
    int crtcIdx;
    uint32_t planeId;
-   unsigned int out_fourcc;
    struct {
        int x, y, width, height;
    } compose;
@@ -702,8 +701,6 @@ static int egl_vout_init(struct AVFormatContext * s)
     av_log(s, AV_LOG_INFO, "<<< %s\n", __func__);
 
     de->setup = (struct egl_setup){0};
-
-    de->setup.out_fourcc = DRM_FORMAT_NV12; // **** Need some sort of select
 
     for (i = 0; i != 32; ++i) {
         de->aux[i].fd = -1;
