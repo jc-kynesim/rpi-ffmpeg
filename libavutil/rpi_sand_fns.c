@@ -34,6 +34,13 @@ Authors: John Cox
 #include "avassert.h"
 #include "frame.h"
 
+#if ARCH_ARM && HAVE_NEON
+#include "arm/rpi_sand_neon.h"
+#define HAVE_SAND_ASM 1
+#else
+#define HAVE_SAND_ASM 0
+#endif
+
 #define PW 1
 #include "rpi_sand_fn_pw.h"
 #undef PW
@@ -41,10 +48,6 @@ Authors: John Cox
 #define PW 2
 #include "rpi_sand_fn_pw.h"
 #undef PW
-
-#if ARCH_ARM && HAVE_NEON
-void rpi_sand128b_stripe_to_8_10(uint8_t * dest, const uint8_t * src1, const uint8_t * src2, unsigned int lines);
-#endif
 
 #if 1
 // Simple round
@@ -89,6 +92,13 @@ void av_rpi_sand30_to_planar_y16(uint8_t * dst, const unsigned int dst_stride,
     const unsigned int mask = stride1 - 1;
     const uint8_t * p0 = src + (x0 & mask) + y * stride1 + (x0 & ~mask) * stride2;
     const unsigned int slice_inc = ((stride2 - 1) * stride1) >> 2;  // RHS of a stripe to LHS of next in words
+
+#if HAVE_SAND_ASM
+    if (_x == 0) {
+        ff_rpi_sand30_lines_to_planar_y16(dst, dst_stride, src, stride1, stride2, _x, y, _w, h);
+        return;
+    }
+#endif
 
     if (x0 == x1) {
         // *******************
@@ -148,6 +158,14 @@ void av_rpi_sand30_to_planar_c16(uint8_t * dst_u, const unsigned int dst_stride_
     const unsigned int mask = stride1 - 1;
     const uint8_t * p0 = src + (x0 & mask) + y * stride1 + (x0 & ~mask) * stride2;
     const unsigned int slice_inc = ((stride2 - 1) * stride1) >> 2;  // RHS of a stripe to LHS of next in words
+
+#if HAVE_SAND_ASM
+    if (_x == 0) {
+        ff_rpi_sand30_lines_to_planar_c16(dst_u, dst_stride_u, dst_v, dst_stride_v,
+                                       src, stride1, stride2, _x, y, _w, h);
+        return;
+    }
+#endif
 
     if (x0 == x1) {
         // *******************
@@ -232,7 +250,7 @@ void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const
             const uint8_t * s1 = src + j * 2 * src_stride2;
             const uint8_t * s2 = s1 + src_stride1 * src_stride2;
 
-            rpi_sand128b_stripe_to_8_10(d, s1, s2, h);
+            ff_rpi_sand128b_stripe_to_8_10(d, s1, s2, h);
         }
     }
     else

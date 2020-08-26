@@ -54,6 +54,14 @@ void FUNC(av_rpi_sand_to_planar_y)(uint8_t * dst, const unsigned int dst_stride,
     const unsigned int w = _w;
     const unsigned int mask = stride1 - 1;
 
+#if PW == 1 && HAVE_SAND_ASM
+    if (_x == 0) {
+        ff_rpi_sand8_lines_to_planar_y8(dst, dst_stride,
+                                     src, stride1, stride2, _x, y, _w, h);
+        return;
+    }
+#endif
+
     if ((x & ~mask) == ((x + w) & ~mask)) {
         // All in one sand stripe
         const uint8_t * p = src + (x & mask) + y * stride1 + (x & ~mask) * stride2;
@@ -97,6 +105,14 @@ void FUNC(av_rpi_sand_to_planar_c)(uint8_t * dst_u, const unsigned int dst_strid
     const unsigned int x = _x * 2;
     const unsigned int w = _w * 2;
     const unsigned int mask = stride1 - 1;
+
+#if PW == 1 && HAVE_SAND_ASM
+    if (_x == 0) {
+        ff_rpi_sand8_lines_to_planar_c8(dst_u, dst_stride_u, dst_v, dst_stride_v,
+                                     src, stride1, stride2, _x, y, _w, h);
+        return;
+    }
+#endif
 
     if ((x & ~mask) == ((x + w) & ~mask)) {
         // All in one sand stripe
