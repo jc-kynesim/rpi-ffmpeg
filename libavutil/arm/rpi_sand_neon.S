@@ -227,6 +227,7 @@ function ff_rpi_sand8_lines_to_planar_c8, export=1
                 subs            r12, #64
                 vldm            r4,  {q0-q7}
                 add             r4,  r8
+                it              gt
                 vldmgt          r4,  {q8-q15}
                 add             r4,  r8
 
@@ -382,6 +383,7 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
                 vmovn.u32       d4,  q14
 
                 vshr.u32        q14, q11, #20
+                it              eq
                 addeq           r2,  r3
                 vshrn.u32       d3,  q11, #10
                 vmovn.u32       d1,  q11
@@ -535,6 +537,7 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 add             r10, r0,  #24
                 vmovn.u32       d27, q14
 
+                it              eq
                 addeq           r4,  r8
                 vuzp.16         q8,  q11
                 vuzp.16         q9,  q12
@@ -669,6 +672,7 @@ function ff_rpi_sand30_lines_to_planar_p010, export=1
                 vmovn.u32       d0,  q14
 
                 vshl.u32        q14, q11, #6
+                it              eq
                 addeq           r2,  r3
                 vshrn.u32       d5,  q11, #14
                 vshrn.u32       d3,  q11, #4
