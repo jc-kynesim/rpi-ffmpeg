@@ -274,6 +274,17 @@ static int v4l2_buf_to_bufref(V4L2Buffer *in, int plane, AVBufferRef **buf)
     return ret;
 }
 
+static void set_buf_length(V4L2Buffer *out, unsigned int plane, uint32_t bytesused, uint32_t length)
+{
+    if (V4L2_TYPE_IS_MULTIPLANAR(out->buf.type)) {
+        out->planes[plane].bytesused = bytesused;
+        out->planes[plane].length = length;
+    } else {
+        out->buf.bytesused = bytesused;
+        out->buf.length = length;
+    }
+}
+
 static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, int size, int offset, AVBufferRef* bref)
 {
     unsigned int bytesused, length;
@@ -286,13 +297,7 @@ static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, i
 
     memcpy((uint8_t*)out->plane_info[plane].mm_addr+offset, data, FFMIN(size, length-offset));
 
-    if (V4L2_TYPE_IS_MULTIPLANAR(out->buf.type)) {
-        out->planes[plane].bytesused = bytesused;
-        out->planes[plane].length = length;
-    } else {
-        out->buf.bytesused = bytesused;
-        out->buf.length = length;
-    }
+    set_buf_length(out, plane, bytesused, length);
 
     return 0;
 }
@@ -338,68 +343,90 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
     return 0;
 }
 
+static void cpy_2d(uint8_t * dst, int dst_stride, const uint8_t * src, int src_stride, int w, int h)
+{
+    if (dst_stride == src_stride && w + 32 >= dst_stride) {
+        memcpy(dst, src, dst_stride * h);
+    }
+    else {
+        while (--h >= 0) {
+            memcpy(dst, src, w);
+            dst += dst_stride;
+            src += src_stride;
+        }
+    }
+}
+
+static int is_chroma(const AVPixFmtDescriptor *desc, int i, int num_planes)
+{
+    return i != 0  && !(i == num_planes - 1 && (desc->flags & AV_PIX_FMT_FLAG_ALPHA));
+}
+
 static int v4l2_buffer_swframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 {
-    int i, ret;
-    struct v4l2_format fmt = out->context->format;
-    int pixel_format = V4L2_TYPE_IS_MULTIPLANAR(fmt.type) ?
-                       fmt.fmt.pix_mp.pixelformat : fmt.fmt.pix.pixelformat;
-    int height       = V4L2_TYPE_IS_MULTIPLANAR(fmt.type) ?
-                       fmt.fmt.pix_mp.height : fmt.fmt.pix.height;
-    int is_planar_format = 0;
+    int i;
+    int num_planes = 0;
+    int pel_strides[4] = {0};
 
-    switch (pixel_format) {
-    case V4L2_PIX_FMT_YUV420M:
-    case V4L2_PIX_FMT_YVU420M:
-#ifdef V4L2_PIX_FMT_YUV422M
-    case V4L2_PIX_FMT_YUV422M:
-#endif
-#ifdef V4L2_PIX_FMT_YVU422M
-    case V4L2_PIX_FMT_YVU422M:
-#endif
-#ifdef V4L2_PIX_FMT_YUV444M
-    case V4L2_PIX_FMT_YUV444M:
-#endif
-#ifdef V4L2_PIX_FMT_YVU444M
-    case V4L2_PIX_FMT_YVU444M:
-#endif
-    case V4L2_PIX_FMT_NV12M:
-    case V4L2_PIX_FMT_NV21M:
-    case V4L2_PIX_FMT_NV12MT_16X16:
-    case V4L2_PIX_FMT_NV12MT:
-    case V4L2_PIX_FMT_NV16M:
-    case V4L2_PIX_FMT_NV61M:
-        is_planar_format = 1;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
+
+    for (i = 0; i != desc->nb_components; ++i) {
+        if (desc->comp[i].plane >= num_planes)
+            num_planes = desc->comp[i].plane + 1;
+        pel_strides[desc->comp[i].plane] = desc->comp[i].step;
     }
 
-    if (!is_planar_format) {
-        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
-        int planes_nb = 0;
-        int offset = 0;
-
-        for (i = 0; i < desc->nb_components; i++)
-            planes_nb = FFMAX(planes_nb, desc->comp[i].plane + 1);
-
-        for (i = 0; i < planes_nb; i++) {
-            int size, h = height;
-            if (i == 1 || i == 2) {
+    if (out->num_planes > 1) {
+        if (num_planes != out->num_planes) {
+            av_log(NULL, AV_LOG_ERROR, "%s: Num planes mismatch: %d != %d\n", __func__, num_planes, out->num_planes);
+            return -1;
+        }
+        for (i = 0; i != num_planes; ++i) {
+            int w = frame->width;
+            int h = frame->height;
+            if (is_chroma(desc, i, num_planes)) {
+                w = AV_CEIL_RSHIFT(w, desc->log2_chroma_w);
                 h = AV_CEIL_RSHIFT(h, desc->log2_chroma_h);
             }
-            size = frame->linesize[i] * h;
-            ret = v4l2_bufref_to_buf(out, 0, frame->data[i], size, offset, frame->buf[i]);
-            if (ret)
-                return ret;
-            offset += size;
+
+            cpy_2d(out->plane_info[i].mm_addr, out->plane_info[i].bytesperline,
+                   frame->data[i], frame->linesize[i],
+                   w * pel_strides[i], h);
+            set_buf_length(out, i, out->plane_info[i].bytesperline * h, out->plane_info[i].length);
         }
-        return 0;
     }
+    else
+    {
+        unsigned int offset = 0;
 
-    for (i = 0; i < out->num_planes; i++) {
-        ret = v4l2_bufref_to_buf(out, i, frame->buf[i]->data, frame->buf[i]->size, 0, frame->buf[i]);
-        if (ret)
-            return ret;
+        for (i = 0; i != num_planes; ++i) {
+            int w = frame->width;
+            int h = frame->height;
+            int dst_stride = out->plane_info[0].bytesperline;
+            uint8_t * const dst = (uint8_t *)out->plane_info[0].mm_addr + offset;
+
+            if (is_chroma(desc, i, num_planes)) {
+                // Is chroma
+                dst_stride >>= desc->log2_chroma_w;
+                offset += dst_stride * (out->context->height >> desc->log2_chroma_h);
+                w = AV_CEIL_RSHIFT(w, desc->log2_chroma_w);
+                h = AV_CEIL_RSHIFT(h, desc->log2_chroma_h);
+            }
+            else {
+                // Is luma or alpha
+                offset += dst_stride * out->context->height;
+            }
+            if (offset > out->plane_info[0].length) {
+                av_log(NULL, AV_LOG_ERROR, "%s: Plane total %d > buffer size %d\n", __func__, offset, out->plane_info[0].length);
+                return -1;
+            }
+
+            cpy_2d(dst, dst_stride,
+                   frame->data[i], frame->linesize[i],
+                   w * pel_strides[i], h);
+        }
+        set_buf_length(out, 0, offset, out->plane_info[0].length);
     }
-
     return 0;
 }
 
