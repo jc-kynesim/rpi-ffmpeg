@@ -29,6 +29,29 @@ Authors: John Cox
 
 #include "libavutil/arm/asm.S"
 
+
+@ General notes:
+@ Having done some timing on this in sand8->y8 (Pi4)
+@  vst1 (680fps) is a bit faster than vstm (660fps)
+@  vldm (680fps) is noticably faster than vld1 (480fps)
+@  (or it might be that a mix is what is required)
+@
+@ At least on a Pi4 it is no more expensive to have a single auto-inc register
+@ for dest address than it is to have 2 used alternately (On Pi3 Ben asserted
+@ the latter was better)
+@
+@ vstm will bus error on unaligned access (so will vldm), vst1 is safe unless
+@ the memory is uncached.
+@ As these are Sand -> planar we can assume that src is going to be aligned but
+@ it is possible that dest isn't (converting to .yuv or other packed format).
+@ Luckily vst1 is faster than vstm :-) so all is well
+@ vst1 has alignment requirements of el size so maybe splitting vst1.32 into 4
+@ .8 stores would let us do non-word aligned stores into uncached but it
+@ probably isn't worth it.
+
+
+
+
 @ void ff_rpi_sand128b_stripe_to_8_10(
 @   uint8_t * dest,             // [r0]
 @   const uint8_t * src1,       // [r1]
@@ -82,7 +105,7 @@ endfunc
 @ within the stripe is OK. However it does respect the dest size for writing
 
 function ff_rpi_sand8_lines_to_planar_y8, export=1
-                push            {r4-r8, lr}     @ +24
+                push            {r4-r8, lr}     @ +24            L
                 ldr             r3,  [sp, #24]
                 ldr             r6,  [sp, #36]
                 ldr             r7,  [sp, #32]  @ y
@@ -101,7 +124,10 @@ function ff_rpi_sand8_lines_to_planar_y8, export=1
                 add             r2,  r3
                 subs            r5,  #128
                 blt             2f
-                vstm            r0!, {q8-q15}
+                vst1.8          {d16, d17, d18, d19}, [r0]!
+                vst1.8          {d20, d21, d22, d23}, [r0]!
+                vst1.8          {d24, d25, d26, d27}, [r0]!
+                vst1.8          {d28, d29, d30, d31}, [r0]!
                 bne             1b
 11:
                 subs            r7,  #1
@@ -115,7 +141,8 @@ function ff_rpi_sand8_lines_to_planar_y8, export=1
 2:
                 cmp             r5,  #64-128
                 blt             1f
-                vstm            r0!, {q8-q11}
+                vst1.8          {d16, d17, d18, d19}, [r0]!
+                vst1.8          {d20, d21, d22, d23}, [r0]!
                 beq             11b
                 vmov            q8,  q12
                 vmov            q9,  q13
@@ -125,7 +152,7 @@ function ff_rpi_sand8_lines_to_planar_y8, export=1
 1:
                 cmp             r5,  #32-128
                 blt             1f
-                vstm            r0!, {q8-q9}
+                vst1.8          {d16, d17, d18, d19}, [r0]!
                 beq             11b
                 vmov            q8,  q10
                 sub             r5,  #32
@@ -133,14 +160,14 @@ function ff_rpi_sand8_lines_to_planar_y8, export=1
 1:
                 cmp             r5,  #16-128
                 blt             1f
-                vstm            r0!, {q8}
+                vst1.8          {d16, d17}, [r0]!
                 beq             11b
                 sub             r5,  #16
                 vmov            q8,  q9
 1:
                 cmp             r5,  #8-128
                 blt             1f
-                vstm            r0!, {d16}
+                vst1.8          {d16}, [r0]!
                 beq             11b
                 sub             r5,  #8
                 vmov            d16, d17
@@ -161,9 +188,6 @@ function ff_rpi_sand8_lines_to_planar_y8, export=1
 1:
                 vst1.8          {d16[0]}, [r0]!
                 b               11b
-
-
-
 endfunc
 
 @ void ff_rpi_sand8_lines_to_planar_c8(
@@ -194,95 +218,124 @@ function ff_rpi_sand8_lines_to_planar_c8, export=1
                 sub             r1,  r1,  r6
                 sub             r3,  r3,  r6
                 ldr             r7,  [sp, #48]
+                vpush           {q4-q7}
 
 10:
                 mov             r4,  r5
                 mov             r12, r6
 1:
-                vldm            r4,  {q8-q15}
+                subs            r12, #64
+                vldm            r4,  {q0-q7}
                 add             r4,  r8
+                it              gt
+                vldmgt          r4,  {q8-q15}
+                add             r4,  r8
+
+                vuzp.8          q0,  q1
+                vuzp.8          q2,  q3
+                vuzp.8          q4,  q5
+                vuzp.8          q6,  q7
+
                 vuzp.8          q8,  q9
                 vuzp.8          q10, q11
                 vuzp.8          q12, q13
                 vuzp.8          q14, q15
                 subs            r12, #64
-                @ Rearrange regs so we can use vstm
-                @ Use single large vstm in the hope that it might avoid cache
-                @ pre-read
-                @ Can be done with 4 VSWPs but this is probably faster
-                @ based on Bens profiling
-                vmov            q0,  q8
-                vmov            q1,  q10
-                vmov            q2,  q12
-                vmov            q3,  q14
-                vmov            q14, q13
-                vmov            q13, q11
-                vmov            q12, q9
-                blt             2f
-                vstm            r0!, {q0-q3}
-                vstm            r2!, {q12-q15}
-                bne             1b
 
+                @ Rearrange regs so we can use vst1 with 4 regs
+                vswp            q1,  q2
+                vswp            q5,  q6
+                vswp            q9,  q10
+                vswp            q13, q14
+                blt             2f
+
+                vst1.8          {d0,  d1,  d2,  d3 }, [r0]!
+                vst1.8          {d8,  d9,  d10, d11}, [r0]!
+                vst1.8          {d16, d17, d18, d19}, [r0]!
+                vst1.8          {d24, d25, d26, d27}, [r0]!
+
+                vst1.8          {d4,  d5,  d6,  d7 }, [r2]!
+                vst1.8          {d12, d13, d14, d15}, [r2]!
+                vst1.8          {d20, d21, d22, d23}, [r2]!
+                vst1.8          {d28, d29, d30, d31}, [r2]!
+                bne             1b
 11:
                 subs            r7,  #1
                 add             r5,  #128
                 add             r0,  r1
                 add             r2,  r3
                 bne             10b
+                vpop            {q4-q7}
                 pop             {r4-r8,pc}
 
 2:
-                cmp             r12, #32-64
+                cmp             r12, #64-128
                 blt             1f
-                vstm            r0!, {q0-q1}
-                vstm            r2!, {q12-q13}
+                vst1.8          {d0,  d1,  d2,  d3 }, [r0]!
+                vst1.8          {d8,  d9,  d10, d11}, [r0]!
+                vst1.8          {d4,  d5,  d6,  d7 }, [r2]!
+                vst1.8          {d12, d13, d14, d15}, [r2]!
+                beq             11b
+                sub             r12, #64
+                vmov            q0,  q8
+                vmov            q1,  q9
+                vmov            q2,  q10
+                vmov            q3,  q11
+                vmov            q4,  q12
+                vmov            q5,  q13
+                vmov            q6,  q14
+                vmov            q7,  q15
+1:
+                cmp             r12, #32-128
+                blt             1f
+                vst1.8          {d0,  d1,  d2,  d3 }, [r0]!
+                vst1.8          {d4,  d5,  d6,  d7 }, [r2]!
                 beq             11b
                 sub             r12, #32
-                vmov            q0,  q2
-                vmov            q1,  q3
-                vmov            q12, q14
-                vmov            q13, q15
+                vmov            q0,  q4
+                vmov            q1,  q5
+                vmov            q2,  q6
+                vmov            q3,  q7
 1:
-                cmp             r12, #16-64
+                cmp             r12, #16-128
                 blt             1f
-                vstm            r0!, {q0}
-                vstm            r2!, {q12}
+                vst1.8          {d0,  d1 }, [r0]!
+                vst1.8          {d4,  d5 }, [r2]!
                 beq             11b
                 sub             r12, #16
                 vmov            q0,  q1
-                vmov            q12, q13
+                vmov            q2,  q3
 1:
-                cmp             r12, #8-64
+                cmp             r12, #8-128
                 blt             1f
-                vstm            r0!, {d0}
-                vstm            r2!, {d24}
+                vst1.8          {d0}, [r0]!
+                vst1.8          {d4}, [r2]!
                 beq             11b
                 sub             r12, #8
                 vmov            d0,  d1
-                vmov            d24, d25
+                vmov            d4,  d5
 1:
-                cmp             r12, #4-64
+                cmp             r12, #4-128
                 blt             1f
                 vst1.32         {d0[0]}, [r0]!
-                vst1.32         {d24[0]}, [r2]!
+                vst1.32         {d4[0]}, [r2]!
                 beq             11b
                 sub             r12, #4
-                vshr.u64        d0,  #32
-                vshr.u64        d24, #32
+                vmov            s0,  s1
+                vmov            s8,  s9
 1:
-                cmp             r12, #2-64
+                cmp             r12, #2-128
                 blt             1f
                 vst1.16         {d0[0]}, [r0]!
-                vst1.16         {d24[0]}, [r2]!
+                vst1.16         {d4[0]}, [r2]!
                 beq             11b
                 vst1.8          {d0[2]}, [r0]!
-                vst1.8          {d24[2]}, [r2]!
+                vst1.8          {d4[2]}, [r2]!
                 b               11b
 1:
                 vst1.8          {d0[0]}, [r0]!
-                vst1.8          {d24[0]}, [r2]!
+                vst1.8          {d4[0]}, [r2]!
                 b               11b
-
 endfunc
 
 
@@ -330,6 +383,7 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
                 vmovn.u32       d4,  q14
 
                 vshr.u32        q14, q11, #20
+                it              eq
                 addeq           r2,  r3
                 vshrn.u32       d3,  q11, #10
                 vmovn.u32       d1,  q11
@@ -483,6 +537,7 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 add             r10, r0,  #24
                 vmovn.u32       d27, q14
 
+                it              eq
                 addeq           r4,  r8
                 vuzp.16         q8,  q11
                 vuzp.16         q9,  q12
@@ -617,6 +672,7 @@ function ff_rpi_sand30_lines_to_planar_p010, export=1
                 vmovn.u32       d0,  q14
 
                 vshl.u32        q14, q11, #6
+                it              eq
                 addeq           r2,  r3
                 vshrn.u32       d5,  q11, #14
                 vshrn.u32       d3,  q11, #4
