@@ -370,6 +370,11 @@ static int v4l2_buffer_swframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
 
+    if ((desc->flags & AV_PIX_FMT_FLAG_HWACCEL) != 0) {
+        av_log(NULL, AV_LOG_ERROR, "%s: HWACCEL cannot be copied\n", __func__);
+        return -1;
+    }
+
     for (i = 0; i != desc->nb_components; ++i) {
         if (desc->comp[i].plane >= num_planes)
             num_planes = desc->comp[i].plane + 1;
