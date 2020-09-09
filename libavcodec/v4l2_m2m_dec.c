@@ -70,8 +70,14 @@ static int v4l2_try_start(AVCodecContext *avctx)
     }
 
     /* 2.1 update the AVCodecContext */
-    avctx->pix_fmt = ff_v4l2_format_v4l2_to_avfmt(capture->format.fmt.pix_mp.pixelformat, AV_CODEC_ID_RAWVIDEO);
-    capture->av_pix_fmt = avctx->pix_fmt;
+    capture->av_pix_fmt =
+        ff_v4l2_format_v4l2_to_avfmt(capture->format.fmt.pix_mp.pixelformat, AV_CODEC_ID_RAWVIDEO);
+    if (s->output_drm) {
+        avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+        avctx->sw_pix_fmt = capture->av_pix_fmt;
+    }
+    else
+        avctx->pix_fmt = capture->av_pix_fmt;
 
     /* 3. set the crop parameters */
     selection.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
