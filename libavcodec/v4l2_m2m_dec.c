@@ -270,7 +270,14 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", output->name, ret);
+    ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMOFF);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", capture->name, ret);
 
+
+    ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON %s error: %d\n", capture->name, ret);
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMON);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON %s error: %d\n", output->name, ret);
