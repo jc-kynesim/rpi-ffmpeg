@@ -26,14 +26,9 @@ typedef struct V4L2RequestControlsH264 {
     struct v4l2_ctrl_h264_pps pps;
     struct v4l2_ctrl_h264_scaling_matrix scaling_matrix;
     struct v4l2_ctrl_h264_decode_params decode_params;
-<<<<<<< HEAD
-    struct v4l2_ctrl_h264_slice_params slice_params[MAX_SLICES];
-    struct v4l2_ctrl_h264_pred_weight pred_weight[MAX_SLICES];
-=======
     struct v4l2_ctrl_h264_slice_params slice_params;
     struct v4l2_ctrl_h264_pred_weights pred_weights;
     int pred_weights_required;
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
     int first_slice;
     int num_slices;
 } V4L2RequestControlsH264;
@@ -75,12 +70,7 @@ static void fill_dpb_entry(struct v4l2_h264_dpb_entry *entry, const H264Picture 
     entry->frame_num = pic->frame_num;
     entry->fields = pic->reference & V4L2_H264_FRAME_REF;
     entry->flags = V4L2_H264_DPB_ENTRY_FLAG_VALID;
-<<<<<<< HEAD
-    entry->reference = pic->reference & 3;
-    if (entry->reference)
-=======
     if (entry->fields)
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
         entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_ACTIVE;
     if (pic->long_ref)
         entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM;
@@ -125,11 +115,7 @@ static void fill_ref_list(struct v4l2_h264_reference *reference, struct v4l2_ctr
         struct v4l2_h264_dpb_entry *entry = &decode->dpb[i];
         if ((entry->flags & V4L2_H264_DPB_ENTRY_FLAG_VALID) &&
             entry->reference_ts == timestamp) {
-<<<<<<< HEAD
-            reference->flags = ref->reference & 3;
-=======
             reference->fields = ref->reference & V4L2_H264_FRAME_REF;
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
             reference->index = i;
             return;
         }
@@ -212,14 +198,8 @@ static void fill_pps(struct v4l2_ctrl_h264_pps *ctrl, const H264Context *h)
         ctrl->flags |= V4L2_H264_PPS_FLAG_REDUNDANT_PIC_CNT_PRESENT;
     if (pps->transform_8x8_mode)
         ctrl->flags |= V4L2_H264_PPS_FLAG_TRANSFORM_8X8_MODE;
-<<<<<<< HEAD
-    //if (sps->scaling_matrix_present)
-    //    ctrl->flags |= V4L2_H264_PPS_FLAG_PIC_SCALING_MATRIX_PRESENT;
-=======
-
     /* FFmpeg always provide a scaling matrix */
     ctrl->flags |= V4L2_H264_PPS_FLAG_SCALING_MATRIX_PRESENT;
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
 }
 
 static int v4l2_request_h264_start_frame(AVCodecContext *avctx,
@@ -251,10 +231,6 @@ static int v4l2_request_h264_start_frame(AVCodecContext *avctx,
         .frame_num = h->poc.frame_num,
         .top_field_order_cnt = h->cur_pic_ptr->field_poc[0] != INT_MAX ? h->cur_pic_ptr->field_poc[0] : 0,
         .bottom_field_order_cnt = h->cur_pic_ptr->field_poc[1] != INT_MAX ? h->cur_pic_ptr->field_poc[1] : 0,
-<<<<<<< HEAD
-        .frame_num = h->poc.frame_num,
-=======
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
         .idr_pic_id = sl->idr_pic_id,
         .pic_order_cnt_lsb = sl->poc_lsb,
         .delta_pic_order_cnt_bottom = sl->delta_poc_bottom,
@@ -264,11 +240,7 @@ static int v4l2_request_h264_start_frame(AVCodecContext *avctx,
         .dec_ref_pic_marking_bit_size = sl->ref_pic_marking_size_in_bits,
         /* Size in bits of pic order count syntax. */
         .pic_order_cnt_bit_size = sl->pic_order_cnt_bit_size,
-<<<<<<< HEAD
-        .slice_group_change_cycle = 0, /* what is this? */
-=======
         .slice_group_change_cycle = 0, /* slice group not supported by FFmpeg */
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
     };
 
     if (h->picture_idr)
@@ -319,15 +291,9 @@ static int v4l2_request_h264_queue_decode(AVCodecContext *avctx, int last_slice)
             .size = sizeof(controls->slice_params),
         },
         {
-<<<<<<< HEAD
-            .id = V4L2_CID_MPEG_VIDEO_H264_PRED_WEIGHT,
-            .ptr = &controls->pred_weight,
-            .size = sizeof(controls->pred_weight[0]) * FFMAX(FFMIN(controls->decode_params.num_slices, MAX_SLICES), ctx->max_slices),
-=======
             .id = V4L2_CID_MPEG_VIDEO_H264_PRED_WEIGHTS,
             .ptr = &controls->pred_weights,
             .size = sizeof(controls->pred_weights),
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
         },
     };
 
@@ -357,13 +323,6 @@ static int v4l2_request_h264_decode_slice(AVCodecContext *avctx, const uint8_t *
         controls->first_slice = 0;
     }
 
-<<<<<<< HEAD
-    controls->slice_params[slice] = (struct v4l2_ctrl_h264_slice_params) {
-        /* Size in bytes, including header */
-        .size = 0,
-        /* Offset in bytes to the start of slice in the OUTPUT buffer. */
-        .start_byte_offset = req->output.used,
-=======
     if (ctx->start_code == V4L2_MPEG_VIDEO_H264_START_CODE_ANNEX_B) {
         ret = ff_v4l2_request_append_output_buffer(avctx, h->cur_pic_ptr->f, nalu_slice_start_code, 3);
         if (ret)
@@ -378,18 +337,13 @@ static int v4l2_request_h264_decode_slice(AVCodecContext *avctx, const uint8_t *
         return 0;
 
     controls->slice_params = (struct v4l2_ctrl_h264_slice_params) {
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
         /* Offset in bits to slice_data() from the beginning of this slice. */
         .header_bit_size = get_bits_count(&sl->gb),
 
         .first_mb_in_slice = sl->first_mb_addr,
 
         .slice_type = ff_h264_get_slice_type(sl),
-<<<<<<< HEAD
-        .colour_plane_id = 0, /* what is this? */
-=======
         .colour_plane_id = 0, /* separate colour plane not supported by FFmpeg */
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
         .redundant_pic_cnt = sl->redundant_pic_count,
         .cabac_init_idc = sl->cabac_init_idc,
         .slice_qp_delta = sl->qscale - pps->init_qp,
@@ -405,28 +359,6 @@ static int v4l2_request_h264_decode_slice(AVCodecContext *avctx, const uint8_t *
         controls->slice_params.flags |= V4L2_H264_SLICE_FLAG_DIRECT_SPATIAL_MV_PRED;
     /* V4L2_H264_SLICE_FLAG_SP_FOR_SWITCH: not implemented by FFmpeg */
 
-<<<<<<< HEAD
-    controls->pred_weight[slice].chroma_log2_weight_denom = sl->pwt.chroma_log2_weight_denom;
-    controls->pred_weight[slice].luma_log2_weight_denom = sl->pwt.luma_log2_weight_denom;
-
-    count = sl->list_count > 0 ? sl->ref_count[0] : 0;
-    for (i = 0; i < count; i++)
-        fill_ref_list(&controls->slice_params[slice].ref_pic_list0[i], &controls->decode_params, &sl->ref_list[0][i]);
-    if (count)
-        fill_weight_factors(&controls->pred_weight[slice].weight_factors[0], 0, sl);
-
-    count = sl->list_count > 1 ? sl->ref_count[1] : 0;
-    for (i = 0; i < count; i++)
-        fill_ref_list(&controls->slice_params[slice].ref_pic_list1[i], &controls->decode_params, &sl->ref_list[1][i]);
-    if (count)
-        fill_weight_factors(&controls->pred_weight[slice].weight_factors[1], 1, sl);
-
-    if (ctx->start_code == V4L2_MPEG_VIDEO_H264_START_CODE_ANNEX_B) {
-        ret = ff_v4l2_request_append_output_buffer(avctx, h->cur_pic_ptr->f, nalu_slice_start_code, 3);
-        if (ret)
-            return ret;
-    }
-=======
     controls->pred_weights_required = V4L2_H264_CTRL_PRED_WEIGHTS_REQUIRED(&controls->pps, &controls->slice_params);
     if (controls->pred_weights_required) {
         controls->pred_weights.chroma_log2_weight_denom = sl->pwt.chroma_log2_weight_denom;
@@ -444,7 +376,6 @@ static int v4l2_request_h264_decode_slice(AVCodecContext *avctx, const uint8_t *
         fill_ref_list(&controls->slice_params.ref_pic_list1[i], &controls->decode_params, &sl->ref_list[1][i]);
     if (count && controls->pred_weights_required)
         fill_weight_factors(&controls->pred_weights.weight_factors[1], 1, sl);
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
 
     controls->num_slices++;
     return 0;
@@ -479,19 +410,6 @@ static int v4l2_request_h264_set_controls(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
-<<<<<<< HEAD
-    ret = ff_v4l2_request_query_control(avctx, &slice_params);
-    if (ret && ctx->decode_mode == V4L2_MPEG_VIDEO_H264_DECODE_MODE_SLICE_BASED)
-        return ret;
-
-    ctx->max_slices = slice_params.elems;
-    if (ctx->max_slices > MAX_SLICES) {
-        av_log(avctx, AV_LOG_ERROR, "%s: unsupported max slices, %d\n", __func__, ctx->max_slices);
-        return AVERROR(EINVAL);
-    }
-
-=======
->>>>>>> kwiboo/v4l2-request-hwaccel-4.3.1
     control[0].value = ctx->decode_mode;
     control[1].value = ctx->start_code;
 
