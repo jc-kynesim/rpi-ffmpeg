@@ -159,7 +159,7 @@ static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts
     return (unsigned int)(!t.num || !t.den ? pts / 1000000 : (pts * t.num) / t.den);
 }
 
-#define XLAT_PTS 1
+#define XLAT_PTS 0
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
@@ -184,7 +184,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
             track_pts = track_to_pts(avctx, s->track_no);
 
-            av_log(avctx, AV_LOG_INFO, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt.pts, avpkt.dts, track_pts, s->track_no);
+//            av_log(avctx, AV_LOG_INFO, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt.pts, avpkt.dts, track_pts, s->track_no);
             s->last_pkt_dts = avpkt.dts;
             s->track_els[s->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
                 .pts = avpkt.pts,
@@ -199,7 +199,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     if (ret)
         goto dequeue;
 
-    av_log(avctx, AV_LOG_INFO, "Extdata len=%d, sent=%d\n", avctx->extradata_size, s->extdata_sent);
+//    av_log(avctx, AV_LOG_INFO, "Extdata len=%d, sent=%d\n", avctx->extradata_size, s->extdata_sent);
     ret = ff_v4l2_context_enqueue_packet(output, &avpkt,
                                          avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size);
     s->extdata_sent = 1;
