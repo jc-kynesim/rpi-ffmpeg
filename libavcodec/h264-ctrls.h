@@ -36,7 +36,7 @@
 #define V4L2_CID_MPEG_VIDEO_H264_DECODE_PARAMS	(V4L2_CID_MPEG_BASE+1004)
 #define V4L2_CID_MPEG_VIDEO_H264_DECODE_MODE	(V4L2_CID_MPEG_BASE+1005)
 #define V4L2_CID_MPEG_VIDEO_H264_START_CODE	(V4L2_CID_MPEG_BASE+1006)
-#define V4L2_CID_MPEG_VIDEO_H264_PRED_WEIGHT	(V4L2_CID_MPEG_BASE+1007)
+#define V4L2_CID_MPEG_VIDEO_H264_PRED_WEIGHTS	(V4L2_CID_MPEG_BASE+1007)
 
 /* enum v4l2_ctrl_type type values */
 #define V4L2_CTRL_TYPE_H264_SPS			0x0110
@@ -44,7 +44,7 @@
 #define V4L2_CTRL_TYPE_H264_SCALING_MATRIX	0x0112
 #define V4L2_CTRL_TYPE_H264_SLICE_PARAMS	0x0113
 #define V4L2_CTRL_TYPE_H264_DECODE_PARAMS	0x0114
-#define V4L2_CTRL_TYPE_H264_PRED_WEIGHT		0x0115
+#define V4L2_CTRL_TYPE_H264_PRED_WEIGHTS	0x0115
 
 enum v4l2_mpeg_video_h264_decode_mode {
 	V4L2_MPEG_VIDEO_H264_DECODE_MODE_SLICE_BASED,
@@ -99,7 +99,7 @@ struct v4l2_ctrl_h264_sps {
 #define V4L2_H264_PPS_FLAG_CONSTRAINED_INTRA_PRED			0x0010
 #define V4L2_H264_PPS_FLAG_REDUNDANT_PIC_CNT_PRESENT			0x0020
 #define V4L2_H264_PPS_FLAG_TRANSFORM_8X8_MODE				0x0040
-#define V4L2_H264_PPS_FLAG_PIC_SCALING_MATRIX_PRESENT			0x0080
+#define V4L2_H264_PPS_FLAG_SCALING_MATRIX_PRESENT			0x0080
 
 struct v4l2_ctrl_h264_pps {
 	__u8 pic_parameter_set_id;
@@ -127,7 +127,14 @@ struct v4l2_h264_weight_factors {
 	__s16 chroma_offset[32][2];
 };
 
-struct v4l2_ctrl_h264_pred_weight {
+#define V4L2_H264_CTRL_PRED_WEIGHTS_REQUIRED(pps, slice) \
+	((((pps)->flags & V4L2_H264_PPS_FLAG_WEIGHTED_PRED) && \
+	 ((slice)->slice_type == V4L2_H264_SLICE_TYPE_P || \
+	  (slice)->slice_type == V4L2_H264_SLICE_TYPE_SP)) || \
+	 ((pps)->weighted_bipred_idc == 1 && \
+	  (slice)->slice_type == V4L2_H264_SLICE_TYPE_B))
+
+struct v4l2_ctrl_h264_pred_weights {
 	__u16 luma_log2_weight_denom;
 	__u16 chroma_log2_weight_denom;
 	struct v4l2_h264_weight_factors weight_factors[2];
@@ -142,23 +149,18 @@ struct v4l2_ctrl_h264_pred_weight {
 #define V4L2_H264_SLICE_FLAG_DIRECT_SPATIAL_MV_PRED	0x01
 #define V4L2_H264_SLICE_FLAG_SP_FOR_SWITCH		0x02
 
-#define V4L2_H264_REFERENCE_FLAG_TOP_FIELD		0x01
-#define V4L2_H264_REFERENCE_FLAG_BOTTOM_FIELD		0x02
+#define V4L2_H264_TOP_FIELD_REF				0x1
+#define V4L2_H264_BOTTOM_FIELD_REF			0x2
+#define V4L2_H264_FRAME_REF				0x3
 
 struct v4l2_h264_reference {
-	__u8 flags;
+	__u8 fields;
 
 	/* Index into v4l2_ctrl_h264_decode_params.dpb[] */
 	__u8 index;
 };
 
 struct v4l2_ctrl_h264_slice_params {
-	/* Size in bytes, including header */
-	__u32 size;
-
-	/* Offset in bytes to the start of slice in the OUTPUT buffer. */
-	__u32 start_byte_offset;
-
 	/* Offset in bits to slice_data() from the beginning of this slice. */
 	__u32 header_bit_size;
 
@@ -189,21 +191,15 @@ struct v4l2_ctrl_h264_slice_params {
 #define V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM	0x04
 #define V4L2_H264_DPB_ENTRY_FLAG_FIELD		0x08
 
-enum v4l2_h264_dpb_reference {
-	V4L2_H264_DPB_TOP_REF = 0x1,
-	V4L2_H264_DPB_BOTTOM_REF = 0x2,
-	V4L2_H264_DPB_FRAME_REF = 0x3,
-};
-
 struct v4l2_h264_dpb_entry {
 	__u64 reference_ts;
-	__u16 frame_num;
-	__u8 reserved[2];
 	__u32 pic_num;
+	__u16 frame_num;
+	__u8 fields;
+	__u8 reserved[5];
 	/* Note that field is indicated by v4l2_buffer.field */
 	__s32 top_field_order_cnt;
 	__s32 bottom_field_order_cnt;
-	enum v4l2_h264_dpb_reference reference;
 	__u32 flags; /* V4L2_H264_DPB_ENTRY_FLAG_* */
 };
 
@@ -213,15 +209,11 @@ struct v4l2_h264_dpb_entry {
 
 struct v4l2_ctrl_h264_decode_params {
 	struct v4l2_h264_dpb_entry dpb[V4L2_H264_NUM_DPB_ENTRIES];
-	__u16 num_slices;
 	__u16 nal_ref_idc;
+	__u16 frame_num;
 	__s32 top_field_order_cnt;
 	__s32 bottom_field_order_cnt;
-
-	__u16 frame_num;
 	__u16 idr_pic_id;
-	__u16 reserved;
-
 	__u16 pic_order_cnt_lsb;
 	__s32 delta_pic_order_cnt_bottom;
 	__s32 delta_pic_order_cnt0;
@@ -232,6 +224,7 @@ struct v4l2_ctrl_h264_decode_params {
 	__u32 pic_order_cnt_bit_size;
 	__u32 slice_group_change_cycle;
 
+	__u32 reserved;
 	__u32 flags; /* V4L2_H264_DECODE_PARAM_FLAG_* */
 };
 
