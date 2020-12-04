@@ -102,6 +102,8 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *buf);
  */
 int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out);
 
+int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out, const void *extdata, size_t extlen);
+
 /**
  * Extracts the data from an AVFrame to a V4L2Buffer
  *

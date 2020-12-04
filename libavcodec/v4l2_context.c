@@ -296,11 +296,13 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
             if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
                 break;
         }
+#if 0
         if (i == ctx->num_buffers)
             av_log(logger(ctx), AV_LOG_WARNING, "All capture buffers returned to "
                                                 "userspace. Increase num_capture_buffers "
                                                 "to prevent device deadlock or dropped "
                                                 "packets/frames.\n");
+#endif
     }
 
     /* if we are draining and there are no more capture buffers queued in the driver we are done */
@@ -649,7 +651,7 @@ int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* frame)
     return ff_v4l2_buffer_enqueue(avbuf);
 }
 
-int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt)
+int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const void * extdata, size_t extlen)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
     V4L2Buffer* avbuf;
@@ -667,7 +669,7 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt)
     if (!avbuf)
         return AVERROR(EAGAIN);
 
-    ret = ff_v4l2_buffer_avpkt_to_buf(pkt, avbuf);
+    ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen);
     if (ret)
         return ret;
 

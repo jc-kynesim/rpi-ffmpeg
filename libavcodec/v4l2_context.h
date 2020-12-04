@@ -172,7 +172,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout);
  * @param[in] pkt A pointer to an AVPacket.
  * @return 0 in case of success, a negative error otherwise.
  */
-int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt);
+int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const void * ext_data, size_t ext_size);
 
 /**
  * Enqueues a buffer to a V4L2Context from an AVFrame

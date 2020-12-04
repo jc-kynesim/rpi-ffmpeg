@@ -2,20 +2,25 @@ echo "Configure for ARM64 native build"
 
 #RPI_KEEPS="-save-temps=obj"
 
+SHARED_LIBS="--enable-shared"
+if [ "$1" == "--noshared" ]; then
+  SHARED_LIBS="--disable-shared"
+  echo Static libs
+  OUT=out/arm64-static-rel
+else
+  echo Shared libs
+  OUT=out/arm64-shared-rel
+fi
+
+mkdir -p $OUT
+cd $OUT
+
 A=aarch64-linux-gnu
 USR_PREFIX=`pwd`/install
 LIB_PREFIX=$USR_PREFIX/lib/$A
 INC_PREFIX=$USR_PREFIX/include/$A
 
-SHARED_LIBS="--enable-shared"
-if [ "$1" == "--noshared" ]; then
-  SHARED_LIBS="--disable-shared"
-  echo Static libs
-else
-  echo Shared libs
-fi
-
-./configure \
+../../configure \
  --prefix=$USR_PREFIX\
  --libdir=$LIB_PREFIX\
  --incdir=$INC_PREFIX\

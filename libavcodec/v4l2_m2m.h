@@ -41,6 +41,13 @@
     { "num_output_buffers", "Number of buffers in the output context",\
         OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 16 }, 2, INT_MAX, FLAGS }
 
+#define FF_V4L2_M2M_TRACK_SIZE 128
+typedef struct V4L2m2mTrackEl {
+    int64_t pts;
+    int64_t opaque_reorder;
+    int64_t track_pts;
+} V4L2m2mTrackEl;
+
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
     int fd;
@@ -69,6 +76,15 @@ typedef struct V4L2m2mContext {
 
     /* generate DRM frames */
     int output_drm;
+
+    /* Frame tracking */
+    int64_t last_pkt_dts;
+    int64_t last_opaque;
+    unsigned int track_no;
+    V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
+
+    /* Ext data sent */
+    int extdata_sent;
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv {

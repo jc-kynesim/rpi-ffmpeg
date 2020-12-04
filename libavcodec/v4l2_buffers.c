@@ -37,7 +37,7 @@
 #include "v4l2_m2m.h"
 
 #define USEC_PER_SEC 1000000
-static AVRational v4l2_timebase = { 1, USEC_PER_SEC };
+static const AVRational v4l2_timebase = { 1, USEC_PER_SEC };
 
 static inline V4L2m2mContext *buf_to_m2mctx(V4L2Buffer *buf)
 {
@@ -54,10 +54,8 @@ static inline AVCodecContext *logger(V4L2Buffer *buf)
 static inline AVRational v4l2_get_timebase(V4L2Buffer *avbuf)
 {
     V4L2m2mContext *s = buf_to_m2mctx(avbuf);
-
-    if (s->avctx->pkt_timebase.num)
-        return s->avctx->pkt_timebase;
-    return s->avctx->time_base;
+    const AVRational tb = s->avctx->pkt_timebase.num ? s->avctx->pkt_timebase : s->avctx->time_base;
+    return tb.num && tb.den ? tb : v4l2_timebase;
 }
 
 static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts)
@@ -300,8 +298,11 @@ static void v4l2_free_buffer(void *opaque, uint8_t *data)
                 /* no need to queue more buffers to the driver */
                 avbuf->status = V4L2BUF_AVAILABLE;
             }
-            else if (avbuf->context->streamon)
+            else if (avbuf->context->streamon) {
+                avbuf->buf.timestamp.tv_sec = 0;
+                avbuf->buf.timestamp.tv_usec = 0;
                 ff_v4l2_buffer_enqueue(avbuf);
+            }
         }
 
         av_buffer_unref(&avbuf->context_ref);
@@ -409,7 +410,7 @@ static void set_buf_length(V4L2Buffer *out, unsigned int plane, uint32_t bytesus
     }
 }
 
-static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, int size, int offset, AVBufferRef* bref)
+static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, int size, int offset)
 {
     unsigned int bytesused, length;
 
@@ -643,11 +644,17 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
     return 0;
 }
 
-int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
+int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out, const void *extdata, size_t extlen)
 {
     int ret;
 
-    ret = v4l2_bufref_to_buf(out, 0, pkt->data, pkt->size, 0, pkt->buf);
+    if (extlen) {
+        ret = v4l2_bufref_to_buf(out, 0, extdata, extlen, 0);
+        if (ret)
+            return ret;
+    }
+
+    ret = v4l2_bufref_to_buf(out, 0, pkt->data, pkt->size, extlen);
     if (ret)
         return ret;
 
@@ -657,6 +664,11 @@ int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
         out->flags = V4L2_BUF_FLAG_KEYFRAME;
 
     return 0;
+}
+
+int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
+{
+    return ff_v4l2_buffer_avpkt_to_buf_ext(pkt, out, NULL, 0);
 }
 
 int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
