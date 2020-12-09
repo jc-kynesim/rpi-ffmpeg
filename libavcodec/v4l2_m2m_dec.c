@@ -146,6 +146,7 @@ static int v4l2_prepare_decoder(V4L2m2mContext *s)
     return 0;
 }
 
+#define XLAT_PTS 1
 
 static inline int64_t track_to_pts(AVCodecContext *avctx, unsigned int n)
 {
@@ -159,7 +160,72 @@ static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts
     return (unsigned int)(!t.num || !t.den ? pts / 1000000 : (pts * t.num) / t.den);
 }
 
-#define XLAT_PTS 0
+static void
+xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *const avpkt)
+{
+#if XLAT_PTS
+    int64_t track_pts;
+
+    // Avoid 0
+    if (++s->track_no == 0)
+        s->track_no = 1;
+
+    track_pts = track_to_pts(avctx, s->track_no);
+
+    av_log(avctx, AV_LOG_INFO, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt->pts, avpkt->dts, track_pts, s->track_no);
+    s->last_pkt_dts = avpkt->dts;
+    s->track_els[s->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
+        .pkt_size         = avpkt->size,
+        .pts              = avpkt->pts,
+        .reordered_opaque = avctx->reordered_opaque,
+        .pkt_pos          = avpkt->pos,
+        .pkt_duration     = avpkt->duration,
+        .track_pts        = track_pts
+    };
+    avpkt->pts = track_pts;
+#endif
+}
+
+static void
+xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *const frame)
+{
+#if XLAT_PTS
+    unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
+    const V4L2m2mTrackEl *const t = s->track_els + n;
+//        av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", n=%u\n", frame->pts, n);
+    if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
+    {
+        av_log(avctx, AV_LOG_INFO, "Tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
+        frame->pts              = AV_NOPTS_VALUE;
+        frame->pkt_dts          = s->last_pkt_dts;
+        frame->reordered_opaque = s->last_opaque;
+        frame->pkt_pos          = -1;
+        frame->pkt_duration     = 0;
+        frame->pkt_size         = -1;
+    }
+    else
+    {
+        frame->pts              = t->pts;
+        frame->pkt_dts          = s->last_pkt_dts;
+        frame->reordered_opaque = t->reordered_opaque;
+        frame->pkt_pos          = t->pkt_pos;
+        frame->pkt_duration     = t->pkt_duration;
+        frame->pkt_size         = t->pkt_size;
+
+        s->last_opaque = s->track_els[n].reordered_opaque;
+        s->track_els[n].pts = AV_NOPTS_VALUE;  // If we hit this again deny accurate knowledge of PTS
+    }
+#if FF_API_PKT_PTS
+FF_DISABLE_DEPRECATION_WARNINGS
+    frame->pkt_pts = frame->pts;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+    frame->best_effort_timestamp = frame->pts;
+    frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
+    av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
+#endif
+}
+
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
@@ -174,26 +240,8 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         ret = ff_decode_get_packet(avctx, &avpkt);
         if (ret < 0 && ret != AVERROR_EOF && ret != AVERROR(EAGAIN))
             return ret;
-#if XLAT_PTS
-        if (ret == 0) {
-            int64_t track_pts;
-
-            // Avoid 0
-            if (++s->track_no == 0)
-                s->track_no = 1;
-
-            track_pts = track_to_pts(avctx, s->track_no);
-
-//            av_log(avctx, AV_LOG_INFO, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt.pts, avpkt.dts, track_pts, s->track_no);
-            s->last_pkt_dts = avpkt.dts;
-            s->track_els[s->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
-                .pts = avpkt.pts,
-                .opaque_reorder = avctx->reordered_opaque,
-                .track_pts = track_pts
-            };
-            avpkt.pts = track_pts;
-        }
-#endif
+        if (ret == 0)
+            xlat_pts_in(avctx, s, &avpkt);
     }
 
     if (ret)
@@ -229,34 +277,8 @@ dequeue:
     if (!s->buf_pkt.size)
         av_packet_unref(&avpkt);
     ret = ff_v4l2_context_dequeue_frame(capture, frame, -1);
-#if  XLAT_PTS
-    if (!ret) {
-        unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
-//        av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", n=%u\n", frame->pts, n);
-        if (frame->pts == AV_NOPTS_VALUE || frame->pts != s->track_els[n].track_pts)
-        {
-            av_log(avctx, AV_LOG_INFO, "Tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, s->track_els[n].track_pts);
-            frame->pts = AV_NOPTS_VALUE;
-            frame->pkt_pts = AV_NOPTS_VALUE;
-            frame->pkt_dts = s->last_pkt_dts;
-            frame->reordered_opaque = s->last_opaque;
-        }
-        else
-        {
-            frame->pts = s->track_els[n].pts;
-            frame->pkt_pts = s->track_els[n].pts;
-            frame->pkt_dts = s->last_pkt_dts;
-            frame->reordered_opaque = s->track_els[n].opaque_reorder;
-            s->last_opaque = s->track_els[n].opaque_reorder;
-            s->track_els[n].pts = AV_NOPTS_VALUE;  // If we hit this again deny accurate knowledge of PTS
-        }
-//        av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
-    }
-    else
-    {
-//        av_log(avctx, AV_LOG_INFO, "Out ret=%d\n", ret);
-    }
-#endif
+    if (!ret)
+        xlat_pts_out(avctx, s, frame);
     return ret;
 }
 

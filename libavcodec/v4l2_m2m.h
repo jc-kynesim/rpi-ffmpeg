@@ -43,8 +43,11 @@
 
 #define FF_V4L2_M2M_TRACK_SIZE 128
 typedef struct V4L2m2mTrackEl {
+    int     pkt_size;
     int64_t pts;
-    int64_t opaque_reorder;
+    int64_t reordered_opaque;
+    int64_t pkt_pos;
+    int64_t pkt_duration;
     int64_t track_pts;
 } V4L2m2mTrackEl;
 
