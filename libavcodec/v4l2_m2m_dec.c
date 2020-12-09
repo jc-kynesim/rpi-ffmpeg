@@ -172,7 +172,7 @@ xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *cons
 
     track_pts = track_to_pts(avctx, s->track_no);
 
-    av_log(avctx, AV_LOG_INFO, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt->pts, avpkt->dts, track_pts, s->track_no);
+//    av_log(avctx, AV_LOG_INFO, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt->pts, avpkt->dts, track_pts, s->track_no);
     s->last_pkt_dts = avpkt->dts;
     s->track_els[s->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
         .pkt_size         = avpkt->size,
@@ -222,12 +222,92 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
     frame->best_effort_timestamp = frame->pts;
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
-    av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
+//    av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
 #endif
+}
+
+static inline int stream_started(const V4L2m2mContext * const s) {
+    return s->capture.streamon && s->output.streamon;
+}
+
+
+// -ve  Error
+// 0    OK
+// 1    Dst full (retry if we think V4L2 Q has space now)
+// 2    Src empty (do not retry)
+// 3    Start failure (do not retry)
+
+static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const s)
+{
+    AVPacket avpkt = {0};
+    int ret = 0;
+    int ret2 = 0;
+
+    if (s->buf_pkt.size) {
+        av_packet_move_ref(&avpkt, &s->buf_pkt);
+    } else {
+        ret = ff_decode_get_packet(avctx, &avpkt);
+        if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN))
+            return 2;
+        else if (ret < 0)
+            return ret;
+        xlat_pts_in(avctx, s, &avpkt);
+    }
+
+    ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt,
+                                         avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size);
+    s->extdata_sent = 1;
+
+    if (ret == AVERROR(EAGAIN)) {
+        // Out of input buffers - stash
+        av_packet_move_ref(&s->buf_pkt, &avpkt);
+        ret = 1;
+    }
+    else {
+        // In all other cases we are done with this packet
+        av_packet_unref(&avpkt);
+
+        if (ret) {
+            av_log(avctx, AV_LOG_ERROR, "Packet enqueue failure: err=%d\n", ret);
+            return ret;
+        }
+    }
+
+    // Start if we haven't
+    ret2 = v4l2_try_start(avctx);
+    if (ret2) {
+        av_log(avctx, AV_LOG_DEBUG, "Start failure: err=%d\n", ret2);
+        ret = (ret2 == AVERROR(ENOMEM)) ? ret2 : 3;
+    }
+
+    return ret;
 }
 
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
+#if 1
+    V4L2m2mContext *const s = ((V4L2m2mPriv*)avctx->priv_data)->context;
+    int src_rv;
+    int dst_rv = 1;
+
+    do {
+        src_rv = try_enqueue_src(avctx, s);
+
+        if (src_rv == 1 && dst_rv == AVERROR(EAGAIN)) {
+            av_log(avctx, AV_LOG_WARNING, "Poll says src Q has space but enqueue fail");
+            src_rv = 2;
+        }
+
+        if (src_rv >= 0 && src_rv <= 2 && dst_rv != 0) {
+            dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1);
+            if (dst_rv == 0)
+                xlat_pts_out(avctx, s, frame);
+        }
+    } while (src_rv == 0 || (src_rv == 1 && dst_rv == AVERROR(EAGAIN)) );
+
+    return dst_rv == 0 ? 0 : src_rv < 0 ? src_rv : dst_rv < 0 ? dst_rv : AVERROR(EAGAIN);
+
+#else
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const capture = &s->capture;
     V4L2Context *const output = &s->output;
@@ -276,10 +356,12 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 dequeue:
     if (!s->buf_pkt.size)
         av_packet_unref(&avpkt);
+
     ret = ff_v4l2_context_dequeue_frame(capture, frame, -1);
     if (!ret)
         xlat_pts_out(avctx, s, frame);
     return ret;
+#endif
 }
 
 #if 0
