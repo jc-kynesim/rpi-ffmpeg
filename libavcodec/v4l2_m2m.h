@@ -43,6 +43,7 @@
 
 #define FF_V4L2_M2M_TRACK_SIZE 128
 typedef struct V4L2m2mTrackEl {
+    int     discard;   // If we see this buffer its been flushed, so discard
     int     pkt_size;
     int64_t pts;
     int64_t reordered_opaque;

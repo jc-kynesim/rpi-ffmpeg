@@ -41,22 +41,30 @@
 #include "v4l2_m2m.h"
 #include "v4l2_fmt.h"
 
+static int check_capture_streamon(AVCodecContext *const avctx, V4L2m2mContext *const s)
+{
+    int ret;
+
+    if (s->output.streamon)
+        return 0;
+
+    ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMON);
+    if (ret < 0)
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON on output context\n");
+
+    return ret;
+}
+
 static int v4l2_try_start(AVCodecContext *avctx)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const capture = &s->capture;
-    V4L2Context *const output = &s->output;
     struct v4l2_selection selection = { 0 };
     int ret;
 
     /* 1. start the output process */
-    if (!output->streamon) {
-        ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMON);
-        if (ret < 0) {
-            av_log(avctx, AV_LOG_DEBUG, "VIDIOC_STREAMON on output context\n");
-            return ret;
-        }
-    }
+    if ((ret = check_capture_streamon(avctx, s)) != 0)
+        return ret;
 
     if (capture->streamon)
         return 0;
@@ -175,6 +183,7 @@ xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *cons
 //    av_log(avctx, AV_LOG_INFO, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt->pts, avpkt->dts, track_pts, s->track_no);
     s->last_pkt_dts = avpkt->dts;
     s->track_els[s->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
+        .discard          = 0,
         .pkt_size         = avpkt->size,
         .pts              = avpkt->pts,
         .reordered_opaque = avctx->reordered_opaque,
@@ -186,13 +195,13 @@ xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *cons
 #endif
 }
 
-static void
+// Returns -1 if we should discard the frame
+static int
 xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *const frame)
 {
 #if XLAT_PTS
     unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
     const V4L2m2mTrackEl *const t = s->track_els + n;
-//        av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", n=%u\n", frame->pts, n);
     if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
     {
         av_log(avctx, AV_LOG_INFO, "Tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
@@ -203,7 +212,7 @@ xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *cons
         frame->pkt_duration     = 0;
         frame->pkt_size         = -1;
     }
-    else
+    else if (!t->discard)
     {
         frame->pts              = t->pts;
         frame->pkt_dts          = s->last_pkt_dts;
@@ -215,6 +224,12 @@ xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *cons
         s->last_opaque = s->track_els[n].reordered_opaque;
         s->track_els[n].pts = AV_NOPTS_VALUE;  // If we hit this again deny accurate knowledge of PTS
     }
+    else
+    {
+        av_log(avctx, AV_LOG_DEBUG, "Discard frame (flushed): pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
+        return -1;
+    }
+
 #if FF_API_PKT_PTS
 FF_DISABLE_DEPRECATION_WARNINGS
     frame->pkt_pts = frame->pts;
@@ -224,6 +239,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
 //    av_log(avctx, AV_LOG_INFO, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
 #endif
+    return 0;
 }
 
 static inline int stream_started(const V4L2m2mContext * const s) {
@@ -242,6 +258,9 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     AVPacket avpkt = {0};
     int ret = 0;
     int ret2 = 0;
+
+    if ((ret = check_capture_streamon(avctx, s)) != 0)
+        return ret;
 
     if (s->buf_pkt.size) {
         av_packet_move_ref(&avpkt, &s->buf_pkt);
@@ -299,13 +318,19 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         }
 
         if (src_rv >= 0 && src_rv <= 2 && dst_rv != 0) {
-            dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1);
-            if (dst_rv == 0)
-                xlat_pts_out(avctx, s, frame);
+            do {
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1);
+            } while (dst_rv == 0 && xlat_pts_out(avctx, s, frame));
         }
     } while (src_rv == 0 || (src_rv == 1 && dst_rv == AVERROR(EAGAIN)) );
 
-    return dst_rv == 0 ? 0 : src_rv < 0 ? src_rv : dst_rv < 0 ? dst_rv : AVERROR(EAGAIN);
+    if (dst_rv)
+        av_frame_unref(frame);
+
+    return dst_rv == 0 ? 0 :
+        src_rv < 0 ? src_rv :
+        dst_rv < 0 ? dst_rv :
+            AVERROR(EAGAIN);
 
 #else
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
@@ -453,7 +478,7 @@ static av_cold int v4l2_decode_close(AVCodecContext *avctx)
 
 static void v4l2_decode_flush(AVCodecContext *avctx)
 {
-#if 1
+#if 0
     v4l2_decode_close(avctx);
     v4l2_decode_init(avctx);
 #else
@@ -466,6 +491,17 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", output->name, ret);
+
+    for (i = 0; i < output->num_buffers; i++) {
+        if (output->buffers[i].status == V4L2BUF_IN_DRIVER)
+            output->buffers[i].status = V4L2BUF_AVAILABLE;
+    }
+
+    for (i = 0; i != FF_V4L2_M2M_TRACK_SIZE; ++i)
+        s->track_els[i].discard = 1;
+
+#if 0
+
     ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMOFF);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", capture->name, ret);
@@ -478,11 +514,6 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON %s error: %d\n", output->name, ret);
 
-    for (i = 0; i < output->num_buffers; i++) {
-        if (output->buffers[i].status == V4L2BUF_IN_DRIVER)
-            output->buffers[i].status = V4L2BUF_AVAILABLE;
-    }
-
     struct v4l2_decoder_cmd cmd = {
         .cmd = V4L2_DEC_CMD_START,
         .flags = 0,
@@ -491,6 +522,7 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
+#endif
 
     s->draining = 0;
     s->extdata_sent = 0;
