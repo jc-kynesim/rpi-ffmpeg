@@ -303,6 +303,9 @@ static void v4l2_free_buffer(void *opaque, uint8_t *data)
                 avbuf->buf.timestamp.tv_usec = 0;
                 ff_v4l2_buffer_enqueue(avbuf);
             }
+            else {
+                av_log(logger(avbuf), AV_LOG_ERROR, "=== %s: Buffer freed but streamoff\n", avbuf->context->name);
+            }
         }
 
         av_buffer_unref(&avbuf->context_ref);
@@ -782,6 +785,9 @@ int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
     ret = ioctl(buf_to_m2mctx(avbuf)->fd, VIDIOC_QBUF, &avbuf->buf);
     if (ret < 0)
         return AVERROR(errno);
+
+    ++avbuf->context->q_count;
+    av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s VIDIOC_QBUF: index %d, count=%d\n", avbuf->context->name, avbuf->buf.index, avbuf->context->q_count);
 
     avbuf->status = V4L2BUF_IN_DRIVER;
 

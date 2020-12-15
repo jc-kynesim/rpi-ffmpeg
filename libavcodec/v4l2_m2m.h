@@ -87,6 +87,9 @@ typedef struct V4L2m2mContext {
     unsigned int track_no;
     V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
 
+    /* req pkt */
+    int req_pkt;
+
     /* Ext data sent */
     int extdata_sent;
 } V4L2m2mContext;

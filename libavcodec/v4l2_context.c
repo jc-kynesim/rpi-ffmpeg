@@ -174,6 +174,7 @@ static int v4l2_handle_event(V4L2Context *ctx)
 
     if (evt.type == V4L2_EVENT_EOS) {
         ctx->done = 1;
+        av_log(logger(ctx), AV_LOG_TRACE, "%s VIDIOC_EVENT_EOS\n", ctx->name);
         return 0;
     }
 
@@ -280,6 +281,21 @@ static int v4l2_stop_encode(V4L2Context *ctx)
     return 0;
 }
 
+static int count_in_driver(const V4L2Context * const ctx)
+{
+    int i;
+    int n = 0;
+
+    if (!ctx->buffers)
+        return -1;
+
+    for (i = 0; i < ctx->num_buffers; ++i) {
+        if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
+            ++n;
+    }
+    return n;
+}
+
 static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 {
     struct v4l2_plane planes[VIDEO_MAX_PLANES];
@@ -296,12 +312,12 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
             if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
                 break;
         }
-#if 0
+#if 1
         if (i == ctx->num_buffers)
-            av_log(logger(ctx), AV_LOG_WARNING, "All capture buffers returned to "
+            av_log(logger(ctx), AV_LOG_WARNING, "All capture buffers (%d) returned to "
                                                 "userspace. Increase num_capture_buffers "
                                                 "to prevent device deadlock or dropped "
-                                                "packets/frames.\n");
+                                                "packets/frames.\n", i);
 #endif
     }
 
@@ -331,11 +347,16 @@ start:
     }
 
     for (;;) {
-        ret = poll(&pfd, 1, timeout);
+        int t2 = timeout < 0 ? 3000 : timeout;
+        int e = pfd.events;
+        ret = poll(&pfd, 1, t2);
         if (ret > 0)
             break;
         if (errno == EINTR)
             continue;
+        if (timeout == -1) {
+            av_log(logger(ctx), AV_LOG_ERROR, "=== poll unexpected TIMEOUT: events=%#x, cap buffers=%d\n", e, count_in_driver(ctx));;
+        }
         return NULL;
     }
 
@@ -400,23 +421,43 @@ dequeue:
         if (ret) {
             if (errno != EAGAIN) {
                 ctx->done = 1;
-                if (errno != EPIPE)
+//                if (errno != EPIPE)
                     av_log(logger(ctx), AV_LOG_DEBUG, "%s VIDIOC_DQBUF, errno (%s)\n",
                         ctx->name, av_err2str(AVERROR(errno)));
             }
             return NULL;
         }
+        --ctx->q_count;
+        av_log(logger(ctx), AV_LOG_TRACE, "--- %s VIDIOC_DQBUF OK: index=%d, count=%d\n",
+               ctx->name, buf.index, ctx->q_count);
+
 
         if (ctx_to_m2mctx(ctx)->draining && !V4L2_TYPE_IS_OUTPUT(ctx->type)) {
             int bytesused = V4L2_TYPE_IS_MULTIPLANAR(buf.type) ?
                             buf.m.planes[0].bytesused : buf.bytesused;
             if (bytesused == 0) {
+                av_log(logger(ctx), AV_LOG_TRACE, "Buffer empty - reQ\n");
+
+                // Must reQ so we don't leak
+                ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_QBUF, &buf);
+                if (ret) {
+                    av_log(logger(ctx), AV_LOG_WARNING, "%s VIDIOC_QBUF, errno (%s): reQ empty buf failed\n",
+                        ctx->name, av_err2str(AVERROR(errno)));
+                }
+                else {
+                    ++ctx->q_count;
+                    av_log(logger(ctx), AV_LOG_TRACE, "--- %s VIDIOC_QBUF OK: index=%d, count=%d\n",
+                           ctx->name, buf.index, ctx->q_count);
+                }
+
                 ctx->done = 1;
                 return NULL;
             }
 #ifdef V4L2_BUF_FLAG_LAST
-            if (buf.flags & V4L2_BUF_FLAG_LAST)
+            if (buf.flags & V4L2_BUF_FLAG_LAST){
+                av_log(logger(ctx), AV_LOG_TRACE, "FLAG_LAST set\n");
                 ctx->done = 1;
+            }
 #endif
         }
 
