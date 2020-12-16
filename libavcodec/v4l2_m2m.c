@@ -357,7 +357,11 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
     ff_v4l2_context_release(&s->output);
 
     s->self_ref = NULL;
+    // This is only called on avctx close so after this point we don't have that
+    // Crash sooner if we find we are using it (can still log with avctx = NULL)
+    s->avctx = NULL;
     av_buffer_unref(&priv->context_ref);
+    priv->context = NULL;
 
     return 0;
 }

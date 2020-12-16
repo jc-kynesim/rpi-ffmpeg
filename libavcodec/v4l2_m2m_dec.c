@@ -359,7 +359,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1);
 
                 if (dst_rv < 0) {
-                    av_log(avctx, AV_LOG_ERROR, "Packet dequeue failure: draining=%d, out.done=%d, err=%d\n", s->draining, s->output.done, dst_rv);
+                    av_log(avctx, AV_LOG_ERROR, "Packet dequeue failure: draining=%d, cap.done=%d, err=%d\n", s->draining, s->capture.done, dst_rv);
                 }
 
             } while (dst_rv == 0 && xlat_pts_out(avctx, s, frame));

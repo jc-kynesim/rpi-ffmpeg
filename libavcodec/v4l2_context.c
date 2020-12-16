@@ -173,7 +173,7 @@ static int v4l2_handle_event(V4L2Context *ctx)
     }
 
     if (evt.type == V4L2_EVENT_EOS) {
-        ctx->done = 1;
+//        ctx->done = 1;
         av_log(logger(ctx), AV_LOG_TRACE, "%s VIDIOC_EVENT_EOS\n", ctx->name);
         return 0;
     }
