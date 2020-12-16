@@ -253,6 +253,25 @@ static void finalize_rtp_handler_init(AVFormatContext *s, RTSPStream *rtsp_st,
     }
 }
 
+static int init_satip_stream(AVFormatContext *s)
+{
+    RTSPState *rt = s->priv_data;
+    RTSPStream *rtsp_st = av_mallocz(sizeof(RTSPStream));
+    if (!rtsp_st)
+        return AVERROR(ENOMEM);
+    dynarray_add(&rt->rtsp_streams,
+                 &rt->nb_rtsp_streams, rtsp_st);
+
+    rtsp_st->sdp_payload_type = 33; // MP2T
+    av_strlcpy(rtsp_st->control_url,
+               rt->control_uri, sizeof(rtsp_st->control_url));
+
+    rtsp_st->stream_index = -1;
+    init_rtp_handler(&ff_mpegts_dynamic_handler, rtsp_st, NULL);
+    finalize_rtp_handler_init(s, rtsp_st, NULL);
+    return 0;
+}
+
 /* parse the rtpmap description: <codec_name>/<clock_rate>[/<other params>] */
 static int sdp_parse_rtpmap(AVFormatContext *s,
                             AVStream *st, RTSPStream *rtsp_st,
@@ -1125,6 +1144,9 @@ void ff_rtsp_parse_line(AVFormatContext *s,
     } else if (av_stristart(p, "Content-Type:", &p)) {
         p += strspn(p, SPACE_CHARS);
         av_strlcpy(reply->content_type, p, sizeof(reply->content_type));
+    } else if (av_stristart(p, "com.ses.streamID:", &p)) {
+        p += strspn(p, SPACE_CHARS);
+        av_strlcpy(reply->stream_id, p, sizeof(reply->stream_id));
     }
 }
 
@@ -1503,8 +1525,10 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
         rtp_opened:
             port = ff_rtp_get_local_rtp_port(rtsp_st->rtp_handle);
         have_port:
-            snprintf(transport, sizeof(transport) - 1,
-                     "%s/UDP;", trans_pref);
+            av_strlcat(transport, trans_pref, sizeof(transport));
+            av_strlcat(transport,
+                       rt->server_type == RTSP_SERVER_SATIP ? ";" : "/UDP;",
+                       sizeof(transport));
             if (rt->server_type != RTSP_SERVER_REAL)
                 av_strlcat(transport, "unicast;", sizeof(transport));
             av_strlcatf(transport, sizeof(transport),
@@ -1565,6 +1589,15 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
                    reply->nb_transports != 1) {
             err = ff_rtsp_averror(reply->status_code, AVERROR_INVALIDDATA);
             goto fail;
+        }
+
+        if (rt->server_type == RTSP_SERVER_SATIP && reply->stream_id[0]) {
+            char proto[128], host[128], path[512], auth[128];
+            int port;
+            av_url_split(proto, sizeof(proto), auth, sizeof(auth), host, sizeof(host),
+                        &port, path, sizeof(path), rt->control_uri);
+            ff_url_join(rt->control_uri, sizeof(rt->control_uri), proto, NULL, host,
+                        port, "/stream=%s", reply->stream_id);
         }
 
         /* XXX: same protocol for all streams is required */
@@ -1718,6 +1751,9 @@ redirect:
         lower_rtsp_proto         = "tls";
         default_port             = RTSPS_DEFAULT_PORT;
         rt->lower_transport_mask = 1 << RTSP_LOWER_TRANSPORT_TCP;
+    } else if (!strcmp(proto, "satip")) {
+        av_strlcpy(proto, "rtsp", sizeof(proto));
+        rt->server_type = RTSP_SERVER_SATIP;
     }
 
     if (*auth) {
@@ -1865,7 +1901,9 @@ redirect:
 
     /* request options supported by the server; this also detects server
      * type */
-    for (rt->server_type = RTSP_SERVER_RTP;;) {
+    if (rt->server_type != RTSP_SERVER_SATIP)
+        rt->server_type = RTSP_SERVER_RTP;
+    for (;;) {
         cmd[0] = 0;
         if (rt->server_type == RTSP_SERVER_REAL)
             av_strlcat(cmd,
@@ -1900,9 +1938,12 @@ redirect:
         break;
     }
 
-    if (CONFIG_RTSP_DEMUXER && s->iformat)
-        err = ff_rtsp_setup_input_streams(s, reply);
-    else if (CONFIG_RTSP_MUXER)
+    if (CONFIG_RTSP_DEMUXER && s->iformat) {
+        if (rt->server_type == RTSP_SERVER_SATIP)
+            err = init_satip_stream(s);
+        else
+            err = ff_rtsp_setup_input_streams(s, reply);
+    } else if (CONFIG_RTSP_MUXER)
         err = ff_rtsp_setup_output_streams(s, host);
     else
         av_assert0(0);
