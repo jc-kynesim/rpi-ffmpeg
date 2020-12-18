@@ -261,7 +261,7 @@ static inline int stream_started(const V4L2m2mContext * const s) {
 // 0    OK
 // 1    Dst full (retry if we think V4L2 Q has space now)
 // 2    Src empty (do not retry)
-// 3    Start failure (do not retry)
+// 3    Not started (do not retry, do not attempt capture dQ)
 
 static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
@@ -273,13 +273,25 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
         av_packet_move_ref(&avpkt, &s->buf_pkt);
     } else {
         ret = ff_decode_get_packet(avctx, &avpkt);
-        if (ret == AVERROR(EAGAIN))
+        if (ret == AVERROR(EAGAIN)) {
+            if (!stream_started(s)) {
+                av_log(avctx, AV_LOG_TRACE, "%s: receive_frame before 1st coded packet\n", __func__);
+                return 3;
+            }
             return 2;
+        }
 
         if (ret == AVERROR_EOF || avpkt.size == 0) {
             // EOF - enter drain mode
             av_log(avctx, AV_LOG_TRACE, "--- EOS req: ret=%d, size=%d, started=%d, drain=%d\n", ret, avpkt.size, stream_started(s), s->draining);
-            if (stream_started(s) && !s->draining) {
+            if (!stream_started(s)) {
+                av_log(avctx, AV_LOG_DEBUG, "EOS on flushed stream\n");
+                s->draining = 1;
+                s->capture.done = 1;
+                return AVERROR_EOF;
+            }
+
+            if (!s->draining) {
                 // On the offchance that get_packet left something that needs freeing in here
                 av_packet_unref(&avpkt);
                 // Calling enqueue with an empty pkt starts drain
