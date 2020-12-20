@@ -659,10 +659,16 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
     int ret;
 
     ret = ioctl(ctx_to_m2mctx(ctx)->fd, cmd, &type);
-    if (ret < 0)
-        return AVERROR(errno);
+    if (ret < 0) {
+        const int err = errno;
+        av_log(logger(ctx), AV_LOG_ERROR, "%s set status %d (%s) failed: err=%d\n", ctx->name,
+               cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF", err);
+        return AVERROR(err);
+    }
 
     ctx->streamon = (cmd == VIDIOC_STREAMON);
+    av_log(logger(ctx), AV_LOG_DEBUG, "%s set status %d (%s) OK\n", ctx->name,
+           cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF");
 
     return 0;
 }

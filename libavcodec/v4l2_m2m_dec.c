@@ -62,6 +62,9 @@ static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *co
     ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
+    else
+        av_log(avctx, AV_LOG_DEBUG, "VIDIOC_DECODER_CMD start OK\n", errno);
+
     return ret;
 }
 
