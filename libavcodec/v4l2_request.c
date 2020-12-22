@@ -217,6 +217,7 @@ static int v4l2_request_dequeue_buffer(V4L2RequestContext *ctx, V4L2RequestBuffe
         return ret;
 
     buf->buffer.timestamp = buffer.timestamp;
+    buf->buffer.flags     = buffer.flags;
     return 0;
 }
 
@@ -394,6 +395,9 @@ static int v4l2_request_queue_decode(AVCodecContext *avctx, AVFrame *frame, stru
         }
 
         ret = v4l2_request_dequeue_buffer(ctx, &req->capture);
+
+        av_log(avctx, AV_LOG_DEBUG, "%s: Capture buffer dequeued: flags=%#x\n", __func__, req->capture.buffer.flags);
+        frame->flags = (req->capture.buffer.flags & V4L2_BUF_FLAG_ERROR) == 0 ? 0 : AV_FRAME_FLAG_CORRUPT;
 
         if (ff_v4l2_phase_started(&req->phase)) {
             ff_v4l2_phase_release(&req->phase, 1);
