@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "decode.h"
 #include "hevcdec.h"
 #include "hwconfig.h"
 #include "v4l2_request.h"
@@ -511,6 +512,50 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     return rv;
 }
 
+// Called before finally returning the frame to the user
+// Set corrupt flag here as this is actually the frame structure that
+// is going to the user (in MT land each thread has its own pool)
+static int v4l2_request_post_process(void *logctx, AVFrame *frame)
+{
+    V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)frame->data[0];
+    if (req) {
+        av_log(logctx, AV_LOG_DEBUG, "%s: flags=%#x, ts=%ld.%06ld\n", __func__, req->capture.buffer.flags,
+               req->capture.buffer.timestamp.tv_sec, req->capture.buffer.timestamp.tv_usec);
+        frame->flags = (req->capture.buffer.flags & V4L2_BUF_FLAG_ERROR) == 0 ? 0 : AV_FRAME_FLAG_CORRUPT;
+    }
+
+    return 0;
+}
+
+static int v4l2_request_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
+{
+    int ret;
+
+    // This dups the remainder of ff_get_buffer but adds a post_process callback
+    ret = avctx->get_buffer2(avctx, frame, AV_GET_BUFFER_FLAG_REF);
+    if (ret < 0)
+        goto fail;
+
+    ret = ff_attach_decode_data(frame);
+    if (ret < 0)
+        goto fail;
+
+    {
+        FrameDecodeData *fdd = (FrameDecodeData*)frame->private_ref->data;
+        fdd->post_process = v4l2_request_post_process;
+    }
+
+    return 0;
+
+fail:
+    if (ret < 0) {
+        av_log(avctx, AV_LOG_ERROR, "%s failed\n", __func__);
+        av_frame_unref(frame);
+    }
+
+    return ret;
+}
+
 static int v4l2_request_hevc_set_controls(AVCodecContext *avctx)
 {
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
@@ -593,6 +638,7 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_HEVC,
     .pix_fmt        = AV_PIX_FMT_DRM_PRIME,
+    .alloc_frame    = v4l2_request_hevc_alloc_frame,
     .start_frame    = v4l2_request_hevc_start_frame,
     .decode_slice   = v4l2_request_hevc_decode_slice,
     .end_frame      = v4l2_request_hevc_end_frame,

@@ -270,6 +270,11 @@ static int drm_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
     av_log(s, AV_LOG_INFO, "%s\n", __func__);
 #endif
 
+    if ((src_frame->flags & AV_FRAME_FLAG_CORRUPT) != 0) {
+        av_log(s, AV_LOG_WARNING, "Discard corrupt frame: ts=%" PRId64 "\n", src_frame->format, src_frame->pts);
+        return 0;
+    }
+
     if (src_frame->format == AV_PIX_FMT_DRM_PRIME) {
         frame = av_frame_alloc();
         av_frame_ref(frame, src_frame);
