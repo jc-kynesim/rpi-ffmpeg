@@ -1,7 +1,9 @@
 echo "Configure for Pi2/3"
 
-RPI_TOOLROOT=`pwd`/../tools/arm-bcm2708/arm-rpi-4.9.3-linux-gnueabihf
-RPI_OPT_VC=`pwd`/../firmware/hardfp/opt/vc
+FFSRC=`pwd`
+
+RPI_TOOLROOT=$FFSRC/../tools/arm-bcm2708/arm-rpi-4.9.3-linux-gnueabihf
+RPI_OPT_VC=$FFSRC/../firmware/hardfp/opt/vc
 
 RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
 RPI_LIBDIRS="-L$RPI_TOOLROOT/lib -L$RPI_OPT_VC/lib"
@@ -9,19 +11,24 @@ RPI_DEFINES="-D__VCCOREVER__=0x4000000 -mfpu=neon-vfpv4"
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
 
-USR_PREFIX=`pwd`/install
-LIB_PREFIX=$USR_PREFIX/lib/arm-linux-gnueabihf
-INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
-
 SHARED_LIBS="--enable-shared"
 if [ "$1" == "--noshared" ]; then
   SHARED_LIBS="--disable-shared"
+  OUT=out/x-armv7-static-rel
   echo Static libs
 else
   echo Shared libs
+  OUT=out/x-armv7-shared-rel
 fi
 
-./configure --enable-cross-compile\
+USR_PREFIX=$FFSRC/$OUT/install
+LIB_PREFIX=$USR_PREFIX/lib/arm-linux-gnueabihf
+INC_PREFIX=$USR_PREFIX/include/arm-linux-gnueabihf
+
+mkdir -p $FFSRC/$OUT
+cd $FFSRC/$OUT
+
+$FFSRC/configure --enable-cross-compile\
  --prefix=$USR_PREFIX\
  --libdir=$LIB_PREFIX\
  --incdir=$INC_PREFIX\
