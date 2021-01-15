@@ -36,14 +36,14 @@ class tstats:
     def __gt__(self, other):
         return self.elapsed > other.elapsed
 
-    def time_file(name, prefix):
+    def time_file(name, prefix, ffmpeg="./ffmpeg"):
         stats = tstats()
         stats.name = name
         start_time = time.clock_gettime(time.CLOCK_MONOTONIC);
-        cproc = subprocess.Popen(["./ffmpeg",
-                                  "-hwaccel", "rpi",
+        cproc = subprocess.Popen([ffmpeg, "-no_cvt_hw",
+                                  "-vcodec", "hevc_rpi",
                                   "-t", "30", "-i", prefix + name,
-                                  "-f", "null", os.devnull], bufsize=-1, stdout=flog, stderr=flog);
+                                  "-f", "vout_rpi", os.devnull], bufsize=-1, stdout=flog, stderr=flog);
         pinfo = os.wait4(cproc.pid, 0)
         end_time = time.clock_gettime(time.CLOCK_MONOTONIC);
         stats.elapsed = end_time - start_time
@@ -71,6 +71,7 @@ To blank the screen before starting use "xdg-screensaver activate"
     argp.add_argument("--csv_in", help="CSV input filename")
     argp.add_argument("--prefix", help="Filename prefix (include terminal '/' if a directory).")
     argp.add_argument("--repeat", default=3, type=int, help="Run repeat count")
+    argp.add_argument("--ffmpeg", default="./ffmpeg", help="FFmpeg executable")
 
     args = argp.parse_args()
 
@@ -106,7 +107,7 @@ To blank the screen before starting use "xdg-screensaver activate"
 
         t0 = tstats({"name":f, "elapsed":999, "user":999, "sys":999})
         for i in range(args.repeat):
-            t = tstats.time_file(f, prefix)
+            t = tstats.time_file(f, prefix, args.ffmpeg)
             print ("...", t.times_str())
             if t0 > t:
                 t0 = t
