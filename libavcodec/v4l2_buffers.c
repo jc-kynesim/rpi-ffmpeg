@@ -58,7 +58,7 @@ static inline AVRational v4l2_get_timebase(V4L2Buffer *avbuf)
     return tb.num && tb.den ? tb : v4l2_timebase;
 }
 
-static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts)
+static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts, int no_rescale)
 {
     int64_t v4l2_pts;
 
@@ -66,12 +66,13 @@ static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts)
         pts = 0;
 
     /* convert pts to v4l2 timebase */
-    v4l2_pts = av_rescale_q(pts, v4l2_get_timebase(out), v4l2_timebase);
+    v4l2_pts = no_rescale ? pts :
+        av_rescale_q(pts, v4l2_get_timebase(out), v4l2_timebase);
     out->buf.timestamp.tv_usec = v4l2_pts % USEC_PER_SEC;
     out->buf.timestamp.tv_sec = v4l2_pts / USEC_PER_SEC;
 }
 
-static inline int64_t v4l2_get_pts(V4L2Buffer *avbuf)
+static inline int64_t v4l2_get_pts(V4L2Buffer *avbuf, int no_rescale)
 {
     int64_t v4l2_pts;
 
@@ -79,7 +80,8 @@ static inline int64_t v4l2_get_pts(V4L2Buffer *avbuf)
     v4l2_pts = (int64_t)avbuf->buf.timestamp.tv_sec * USEC_PER_SEC +
                         avbuf->buf.timestamp.tv_usec;
 
-    return av_rescale_q(v4l2_pts, v4l2_timebase, v4l2_get_timebase(avbuf));
+    return no_rescale ? v4l2_pts :
+        av_rescale_q(v4l2_pts, v4l2_timebase, v4l2_get_timebase(avbuf));
 }
 
 static enum AVColorPrimaries v4l2_get_color_primaries(V4L2Buffer *buf)
@@ -583,12 +585,12 @@ static int v4l2_buffer_swframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 
 int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 {
-    v4l2_set_pts(out, frame->pts);
+    v4l2_set_pts(out, frame->pts, 0);
 
     return v4l2_buffer_swframe_to_buf(frame, out);
 }
 
-int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
+int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf, int no_rescale_pts)
 {
     int ret;
 
@@ -605,7 +607,7 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
     frame->colorspace = v4l2_get_color_space(avbuf);
     frame->color_range = v4l2_get_color_range(avbuf);
     frame->color_trc = v4l2_get_color_trc(avbuf);
-    frame->pts = v4l2_get_pts(avbuf);
+    frame->pts = v4l2_get_pts(avbuf, no_rescale_pts);
     frame->pkt_dts = AV_NOPTS_VALUE;
 
     /* these values are updated also during re-init in v4l2_process_driver_event */
@@ -642,12 +644,13 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
         pkt->flags |= AV_PKT_FLAG_CORRUPT;
     }
 
-    pkt->dts = pkt->pts = v4l2_get_pts(avbuf);
+    pkt->dts = pkt->pts = v4l2_get_pts(avbuf, 0);
 
     return 0;
 }
 
-int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out, const void *extdata, size_t extlen)
+int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
+                                    const void *extdata, size_t extlen, int no_rescale_pts)
 {
     int ret;
 
@@ -661,7 +664,7 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out, const 
     if (ret)
         return ret;
 
-    v4l2_set_pts(out, pkt->pts);
+    v4l2_set_pts(out, pkt->pts, no_rescale_pts);
 
     if (pkt->flags & AV_PKT_FLAG_KEY)
         out->flags = V4L2_BUF_FLAG_KEYFRAME;
@@ -671,7 +674,7 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out, const 
 
 int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
 {
-    return ff_v4l2_buffer_avpkt_to_buf_ext(pkt, out, NULL, 0);
+    return ff_v4l2_buffer_avpkt_to_buf_ext(pkt, out, NULL, 0, 0);
 }
 
 int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)

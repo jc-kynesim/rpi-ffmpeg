@@ -63,7 +63,7 @@ static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *co
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
     else
-        av_log(avctx, AV_LOG_DEBUG, "VIDIOC_DECODER_CMD start OK\n", errno);
+        av_log(avctx, AV_LOG_DEBUG, "VIDIOC_DECODER_CMD start OK\n");
 
     return ret;
 }
@@ -168,17 +168,26 @@ static int v4l2_prepare_decoder(V4L2m2mContext *s)
 }
 
 #define XLAT_PTS 1
+#define NO_RESCALE_PTS 1
 
 static inline int64_t track_to_pts(AVCodecContext *avctx, unsigned int n)
 {
+#if NO_RESCALE_PTS
+    return n;
+#else
     const AVRational t = avctx->pkt_timebase.num ? avctx->pkt_timebase : avctx->time_base;
     return !t.num || !t.den ? (int64_t)n * 1000000 : ((int64_t)n * t.den) / (t.num);
+#endif
 }
 
 static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts)
 {
+#if NO_RESCALE_PTS
+    return pts;
+#else
     const AVRational t = avctx->pkt_timebase.num ? avctx->pkt_timebase : avctx->time_base;
     return (unsigned int)(!t.num || !t.den ? pts / 1000000 : (pts * t.num) / t.den);
+#endif
 }
 
 static void
@@ -298,7 +307,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
                 // On the offchance that get_packet left something that needs freeing in here
                 av_packet_unref(&avpkt);
                 // Calling enqueue with an empty pkt starts drain
-                ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt, NULL, 0);
+                ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt, NULL, 0, NO_RESCALE_PTS);
                 if (ret) {
                     av_log(avctx, AV_LOG_ERROR, "Failed to start drain: ret=%d\n", ret);
                     return ret;
@@ -317,7 +326,8 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
         return ret;
 
     ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt,
-                                         avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size);
+                                         avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size,
+                                         NO_RESCALE_PTS);
     s->extdata_sent = 1;
 
     if (ret == AVERROR(EAGAIN)) {
@@ -371,7 +381,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
             do {
                 // Dequeue frame will unref any previous contents of frame
                 // so we don't need an explicit unref when discarding
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1);
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, NO_RESCALE_PTS);
 
                 if (dst_rv < 0) {
                     av_log(avctx, AV_LOG_ERROR, "Packet dequeue failure: draining=%d, cap.done=%d, err=%d\n", s->draining, s->capture.done, dst_rv);
@@ -386,6 +396,18 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
     // If we got a frame this time ask for a pkt next time
     s->req_pkt = (dst_rv == 0);
+
+#if 0
+    if (dst_rv == 0)
+    {
+        static int z = 0;
+        if (++z > 50) {
+            av_log(avctx, AV_LOG_ERROR, "Streamoff and die?\n");
+            ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMOFF);
+            return -1;
+        }
+    }
+#endif
 
     return dst_rv == 0 ? 0 :
         src_rv < 0 ? src_rv :

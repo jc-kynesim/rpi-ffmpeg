@@ -698,7 +698,8 @@ int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* frame)
     return ff_v4l2_buffer_enqueue(avbuf);
 }
 
-int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const void * extdata, size_t extlen)
+int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
+                                   const void * extdata, size_t extlen, int no_rescale_pts)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
     V4L2Buffer* avbuf;
@@ -716,14 +717,14 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const 
     if (!avbuf)
         return AVERROR(EAGAIN);
 
-    ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen);
+    ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen, no_rescale_pts);
     if (ret)
         return ret;
 
     return ff_v4l2_buffer_enqueue(avbuf);
 }
 
-int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
+int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout, int no_rescale_pts)
 {
     V4L2Buffer *avbuf;
 
@@ -740,7 +741,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
         return AVERROR(EAGAIN);
     }
 
-    return ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
+    return ff_v4l2_buffer_buf_to_avframe(frame, avbuf, no_rescale_pts);
 }
 
 int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
