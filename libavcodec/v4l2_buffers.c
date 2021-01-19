@@ -54,34 +54,44 @@ static inline AVCodecContext *logger(V4L2Buffer *buf)
 static inline AVRational v4l2_get_timebase(V4L2Buffer *avbuf)
 {
     V4L2m2mContext *s = buf_to_m2mctx(avbuf);
-    const AVRational tb = s->avctx->pkt_timebase.num ? s->avctx->pkt_timebase : s->avctx->time_base;
+    const AVRational tb = s->avctx->pkt_timebase.num ?
+        s->avctx->pkt_timebase :
+        s->avctx->time_base;
     return tb.num && tb.den ? tb : v4l2_timebase;
 }
 
 static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts, int no_rescale)
 {
-    int64_t v4l2_pts;
-
-    if (pts == AV_NOPTS_VALUE)
-        pts = 0;
-
     /* convert pts to v4l2 timebase */
-    v4l2_pts = no_rescale ? pts :
-        av_rescale_q(pts, v4l2_get_timebase(out), v4l2_timebase);
+    const int64_t v4l2_pts =
+        no_rescale ? pts :
+        pts == AV_NOPTS_VALUE ? 0 :
+            av_rescale_q(pts, v4l2_get_timebase(out), v4l2_timebase);
     out->buf.timestamp.tv_usec = v4l2_pts % USEC_PER_SEC;
     out->buf.timestamp.tv_sec = v4l2_pts / USEC_PER_SEC;
 }
 
 static inline int64_t v4l2_get_pts(V4L2Buffer *avbuf, int no_rescale)
 {
-    int64_t v4l2_pts;
-
     /* convert pts back to encoder timebase */
-    v4l2_pts = (int64_t)avbuf->buf.timestamp.tv_sec * USEC_PER_SEC +
+    const int64_t v4l2_pts = (int64_t)avbuf->buf.timestamp.tv_sec * USEC_PER_SEC +
                         avbuf->buf.timestamp.tv_usec;
 
-    return no_rescale ? v4l2_pts :
-        av_rescale_q(v4l2_pts, v4l2_timebase, v4l2_get_timebase(avbuf));
+    return
+        no_rescale ? v4l2_pts :
+        v4l2_pts == 0 ? AV_NOPTS_VALUE :
+            av_rescale_q(v4l2_pts, v4l2_timebase, v4l2_get_timebase(avbuf));
+}
+
+static void set_buf_length(V4L2Buffer *out, unsigned int plane, uint32_t bytesused, uint32_t length)
+{
+    if (V4L2_TYPE_IS_MULTIPLANAR(out->buf.type)) {
+        out->planes[plane].bytesused = bytesused;
+        out->planes[plane].length = length;
+    } else {
+        out->buf.bytesused = bytesused;
+        out->buf.length = length;
+    }
 }
 
 static enum AVColorPrimaries v4l2_get_color_primaries(V4L2Buffer *buf)
@@ -306,7 +316,7 @@ static void v4l2_free_buffer(void *opaque, uint8_t *data)
                 ff_v4l2_buffer_enqueue(avbuf);
             }
             else {
-                av_log(logger(avbuf), AV_LOG_ERROR, "=== %s: Buffer freed but streamoff\n", avbuf->context->name);
+                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer freed but streamoff\n", avbuf->context->name);
             }
         }
 
@@ -402,17 +412,6 @@ static int v4l2_buf_to_bufref(V4L2Buffer *in, int plane, AVBufferRef **buf)
         av_buffer_unref(buf);
 
     return ret;
-}
-
-static void set_buf_length(V4L2Buffer *out, unsigned int plane, uint32_t bytesused, uint32_t length)
-{
-    if (V4L2_TYPE_IS_MULTIPLANAR(out->buf.type)) {
-        out->planes[plane].bytesused = bytesused;
-        out->planes[plane].length = length;
-    } else {
-        out->buf.bytesused = bytesused;
-        out->buf.length = length;
-    }
 }
 
 static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, int size, int offset)

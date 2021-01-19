@@ -167,33 +167,26 @@ static int v4l2_prepare_decoder(V4L2m2mContext *s)
     return 0;
 }
 
-#define XLAT_PTS 1
-#define NO_RESCALE_PTS 1
-
 static inline int64_t track_to_pts(AVCodecContext *avctx, unsigned int n)
 {
-#if NO_RESCALE_PTS
-    return n;
-#else
-    const AVRational t = avctx->pkt_timebase.num ? avctx->pkt_timebase : avctx->time_base;
-    return !t.num || !t.den ? (int64_t)n * 1000000 : ((int64_t)n * t.den) / (t.num);
-#endif
+    return (int64_t)n;
 }
 
 static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts)
 {
-#if NO_RESCALE_PTS
-    return pts;
-#else
-    const AVRational t = avctx->pkt_timebase.num ? avctx->pkt_timebase : avctx->time_base;
-    return (unsigned int)(!t.num || !t.den ? pts / 1000000 : (pts * t.num) / t.den);
-#endif
+    return (unsigned int)pts;
 }
 
+// FFmpeg requires us to propagate a number of vars from the coded pkt into
+// the decoded frame. The only thing that tracks like that in V4L2 stateful
+// is timestamp. PTS maps to timestamp for this decode. FFmpeg makes no
+// guarantees about PTS being unique or specified for every frame so replace
+// the supplied PTS with a simple incrementing number and keep a circular
+// buffer of all the things we want preserved (including the original PTS)
+// indexed by the tracking no.
 static void
 xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *const avpkt)
 {
-#if XLAT_PTS
     int64_t track_pts;
 
     // Avoid 0
@@ -214,14 +207,12 @@ xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *cons
         .track_pts        = track_pts
     };
     avpkt->pts = track_pts;
-#endif
 }
 
 // Returns -1 if we should discard the frame
 static int
 xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *const frame)
 {
-#if XLAT_PTS
     unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
     const V4L2m2mTrackEl *const t = s->track_els + n;
     if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
@@ -260,7 +251,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->best_effort_timestamp = frame->pts;
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
     av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
-#endif
     return 0;
 }
 
@@ -312,7 +302,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
                 // On the offchance that get_packet left something that needs freeing in here
                 av_packet_unref(&avpkt);
                 // Calling enqueue with an empty pkt starts drain
-                ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt, NULL, 0, NO_RESCALE_PTS);
+                ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt, NULL, 0, 1);
                 if (ret) {
                     av_log(avctx, AV_LOG_ERROR, "Failed to start drain: ret=%d\n", ret);
                     return ret;
@@ -332,7 +322,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
 
     ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt,
                                          avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size,
-                                         NO_RESCALE_PTS);
+                                         1);
     s->extdata_sent = 1;
 
     if (ret == AVERROR(EAGAIN)) {
@@ -394,7 +384,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // so we don't need an explicit unref when discarding
                 // This returns AVERROR(EAGAIN) if there isn't a frame ready yet
                 // but there is room in the input Q
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, NO_RESCALE_PTS);
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, 1);
 
                 if (dst_rv < 0 && dst_rv != AVERROR(EAGAIN)) {
                     if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
@@ -526,25 +516,33 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
 static av_cold int v4l2_decode_close(AVCodecContext *avctx)
 {
+    int rv;
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
-    return ff_v4l2_m2m_codec_end(avctx->priv_data);
-    av_log(avctx, AV_LOG_TRACE, ">>> %s\n", __func__);
+    rv = ff_v4l2_m2m_codec_end(avctx->priv_data);
+    av_log(avctx, AV_LOG_TRACE, ">>> %s: rv=%d\n", __func__, rv);
+    return rv;
 }
 
 static void v4l2_decode_flush(AVCodecContext *avctx)
 {
+    // An alternatve and more drastic form of flush is to simply do this:
+    //    v4l2_decode_close(avctx);
+    //    v4l2_decode_init(avctx);
+    // The downside is that this keeps a decoder open until all the frames
+    // associated with it have been returned.  This is a bit wasteful on
+    // possibly limited h/w resources and fails on a Pi for this reason unless
+    // more GPU mem is allocated than is the default.
 
-#if 0
-    v4l2_decode_close(avctx);
-    v4l2_decode_init(avctx);
-#else
     V4L2m2mPriv *priv = avctx->priv_data;
     V4L2m2mContext* s = priv->context;
     V4L2Context* output = &s->output;
     V4L2Context* capture = &s->capture;
     int ret, i;
 
-    av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
+    av_log(avctx, AV_LOG_TRACE, "<<< %s: streamon=%d\n", __func__, output->streamon);
+
+    if (!output->streamon)
+        goto done;
 
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
     if (ret < 0)
@@ -555,38 +553,21 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
             output->buffers[i].status = V4L2BUF_AVAILABLE;
     }
 
+    // V4L2 makes no guarantees about whether decoded frames are flushed or not
+    // so mark all frames we are tracking to be discarded if they appear
     for (i = 0; i != FF_V4L2_M2M_TRACK_SIZE; ++i)
         s->track_els[i].discard = 1;
 
-#if 0
-
-    ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMOFF);
-    if (ret < 0)
-        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", capture->name, ret);
-
-
-    ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
-    if (ret < 0)
-        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON %s error: %d\n", capture->name, ret);
-    ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMON);
-    if (ret < 0)
-        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON %s error: %d\n", output->name, ret);
-
-    struct v4l2_decoder_cmd cmd = {
-        .cmd = V4L2_DEC_CMD_START,
-        .flags = 0,
-    };
-
-    ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
-    if (ret < 0)
-        av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
-#endif
-
-    s->draining = 0;
+    // resend extradata
     s->extdata_sent = 0;
+    // clear EOS status vars
+    s->draining = 0;
     output->done = 0;
     capture->done = 0;
-#endif
+
+    // Stream on will occur when we actually submit a new frame
+
+done:
     av_log(avctx, AV_LOG_TRACE, ">>> %s\n", __func__);
 }
 
