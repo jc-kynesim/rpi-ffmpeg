@@ -52,7 +52,7 @@
 
 #include "libavutil/rpi_sand_fns.h"
 
-#define TRACE_ALL 1
+#define TRACE_ALL 0
 
 struct egl_setup {
    int conId;
@@ -160,6 +160,7 @@ make_window(struct AVFormatContext * const s,
    Window win;
    EGLContext ctx;
    bool fullscreen = false; /* Hook this up to a command line arg */
+   EGLConfig config;
 
    if (fullscreen) {
       int scrnum = DefaultScreen(dpy);
@@ -169,44 +170,51 @@ make_window(struct AVFormatContext * const s,
       height = DisplayHeight(dpy, scrnum);
    }
 
-   static const EGLint attribs[] = {
-      EGL_RED_SIZE, 1,
-      EGL_GREEN_SIZE, 1,
-      EGL_BLUE_SIZE, 1,
-      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-      EGL_NONE
-   };
-   EGLConfig config;
-   EGLint num_configs;
-   if (!eglChooseConfig(egl_dpy, attribs, &config, 1, &num_configs)) {
-      av_log(s, AV_LOG_ERROR, "Error: couldn't get an EGL visual config\n");
-      return -1;
+   {
+      EGLint num_configs;
+      static const EGLint attribs[] = {
+         EGL_RED_SIZE, 1,
+         EGL_GREEN_SIZE, 1,
+         EGL_BLUE_SIZE, 1,
+         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+         EGL_NONE
+      };
+
+      if (!eglChooseConfig(egl_dpy, attribs, &config, 1, &num_configs)) {
+         av_log(s, AV_LOG_ERROR, "Error: couldn't get an EGL visual config\n");
+         return -1;
+      }
    }
 
-   EGLint vid;
-   if (!eglGetConfigAttrib(egl_dpy, config, EGL_NATIVE_VISUAL_ID, &vid)) {
-      av_log(s, AV_LOG_ERROR, "Error: eglGetConfigAttrib() failed\n");
-      return -1;
+   {
+      EGLint vid;
+      if (!eglGetConfigAttrib(egl_dpy, config, EGL_NATIVE_VISUAL_ID, &vid)) {
+         av_log(s, AV_LOG_ERROR, "Error: eglGetConfigAttrib() failed\n");
+         return -1;
+      }
+
+      {
+         XVisualInfo visTemplate = {
+            .visualid = vid,
+         };
+         int num_visuals;
+         XVisualInfo *visinfo = XGetVisualInfo(dpy, VisualIDMask,
+                                               &visTemplate, &num_visuals);
+
+         /* window attributes */
+         attr.background_pixel = 0;
+         attr.border_pixel = 0;
+         attr.colormap = XCreateColormap( dpy, root, visinfo->visual, AllocNone);
+         attr.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask;
+         /* XXX this is a bad way to get a borderless window! */
+         mask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
+
+         win = XCreateWindow( dpy, root, x, y, width, height,
+                              0, visinfo->depth, InputOutput,
+                              visinfo->visual, mask, &attr );
+         XFree(visinfo);
+      }
    }
-
-   XVisualInfo visTemplate = {
-      .visualid = vid,
-   };
-   int num_visuals;
-   XVisualInfo *visinfo = XGetVisualInfo(dpy, VisualIDMask,
-                                         &visTemplate, &num_visuals);
-
-   /* window attributes */
-   attr.background_pixel = 0;
-   attr.border_pixel = 0;
-   attr.colormap = XCreateColormap( dpy, root, visinfo->visual, AllocNone);
-   attr.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask;
-   /* XXX this is a bad way to get a borderless window! */
-   mask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
-
-   win = XCreateWindow( dpy, root, x, y, width, height,
-                        0, visinfo->depth, InputOutput,
-                        visinfo->visual, mask, &attr );
 
    if (fullscreen)
       no_border(dpy, win);
@@ -226,35 +234,38 @@ make_window(struct AVFormatContext * const s,
 
    eglBindAPI(EGL_OPENGL_ES_API);
 
-   static const EGLint ctx_attribs[] = {
-      EGL_CONTEXT_CLIENT_VERSION, 2,
-      EGL_NONE
-   };
-   ctx = eglCreateContext(egl_dpy, config, EGL_NO_CONTEXT, ctx_attribs );
-   if (!ctx) {
-      av_log(s, AV_LOG_ERROR, "Error: eglCreateContext failed\n");
-      return -1;
+   {
+      static const EGLint ctx_attribs[] = {
+         EGL_CONTEXT_CLIENT_VERSION, 2,
+         EGL_NONE
+      };
+      ctx = eglCreateContext(egl_dpy, config, EGL_NO_CONTEXT, ctx_attribs );
+      if (!ctx) {
+         av_log(s, AV_LOG_ERROR, "Error: eglCreateContext failed\n");
+         return -1;
+      }
    }
 
-   XFree(visinfo);
 
    XMapWindow(dpy, win);
 
-   EGLSurface surf = eglCreateWindowSurface(egl_dpy, config,
-                                            (void *)(uintptr_t)win, NULL);
-   if (!surf) {
-      av_log(s, AV_LOG_ERROR, "Error: eglCreateWindowSurface failed\n");
-      return -1;
-   }
+   {
+      EGLSurface surf = eglCreateWindowSurface(egl_dpy, config,
+                                               (void *)(uintptr_t)win, NULL);
+      if (!surf) {
+         av_log(s, AV_LOG_ERROR, "Error: eglCreateWindowSurface failed\n");
+         return -1;
+      }
 
-   if (!eglMakeCurrent(egl_dpy, surf, surf, ctx)) {
-      av_log(s, AV_LOG_ERROR, "Error: eglCreateContext failed\n");
-      return -1;
-   }
+      if (!eglMakeCurrent(egl_dpy, surf, surf, ctx)) {
+         av_log(s, AV_LOG_ERROR, "Error: eglCreateContext failed\n");
+         return -1;
+      }
 
-   *winRet = win;
-   *ctxRet = ctx;
-   *surfRet = surf;
+      *winRet = win;
+      *ctxRet = ctx;
+      *surfRet = surf;
+   }
 
    return 0;
 }
@@ -272,20 +283,22 @@ compile_shader(struct AVFormatContext * const avctx, GLenum target, const char *
    glShaderSource(s, 1, (const GLchar **) &source, NULL);
    glCompileShader(s);
 
-   GLint ok;
-   glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+   {
+      GLint ok;
+      glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
 
-   if (!ok) {
-      GLchar *info;
-      GLint size;
+      if (!ok) {
+         GLchar *info;
+         GLint size;
 
-      glGetShaderiv(s, GL_INFO_LOG_LENGTH, &size);
-      info = malloc(size);
+         glGetShaderiv(s, GL_INFO_LOG_LENGTH, &size);
+         info = malloc(size);
 
-      glGetShaderInfoLog(s, size, NULL, info);
-      av_log(avctx, AV_LOG_ERROR, "Failed to compile shader: %ssource:\n%s\n", info, source);
+         glGetShaderInfoLog(s, size, NULL, info);
+         av_log(avctx, AV_LOG_ERROR, "Failed to compile shader: %ssource:\n%s\n", info, source);
 
-      return 0;
+         return 0;
+      }
    }
 
    return s;
@@ -304,23 +317,25 @@ static GLuint link_program(struct AVFormatContext * const s, GLint vs, GLint fs)
    glAttachShader(prog, fs);
    glLinkProgram(prog);
 
-   GLint ok;
-   glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-   if (!ok) {
-      /* Some drivers return a size of 1 for an empty log.  This is the size
-       * of a log that contains only a terminating NUL character.
-       */
-      GLint size;
-      GLchar *info = NULL;
-      glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &size);
-      if (size > 1) {
-         info = malloc(size);
-         glGetProgramInfoLog(prog, size, NULL, info);
-      }
+   {
+      GLint ok;
+      glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+      if (!ok) {
+         /* Some drivers return a size of 1 for an empty log.  This is the size
+          * of a log that contains only a terminating NUL character.
+          */
+         GLint size;
+         GLchar *info = NULL;
+         glGetProgramiv(prog, GL_INFO_LOG_LENGTH, &size);
+         if (size > 1) {
+            info = malloc(size);
+            glGetProgramInfoLog(prog, size, NULL, info);
+         }
 
-      av_log(s, AV_LOG_ERROR, "Failed to link: %s\n",
-              (info != NULL) ? info : "<empty log>");
-      return 0;
+         av_log(s, AV_LOG_ERROR, "Failed to link: %s\n",
+                 (info != NULL) ? info : "<empty log>");
+         return 0;
+      }
    }
 
    return prog;
@@ -358,13 +373,16 @@ gl_setup(struct AVFormatContext * const s)
 
    glUseProgram(prog);
 
-   static const float verts[] = {
-      -1, -1,
-      1, -1,
-      1, 1,
-      -1, 1,
-   };
-   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, verts);
+   {
+      static const float verts[] = {
+         -1, -1,
+         1, -1,
+         1, 1,
+         -1, 1,
+      };
+      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, verts);
+   }
+
    glEnableVertexAttribArray(0);
    return 0;
 }
@@ -472,26 +490,29 @@ static int do_display(AVFormatContext * const s, egl_display_env_t * const de, A
 
         *a = EGL_NONE;
 
+#if TRACE_ALL
         for (a = attribs, i = 0; *a != EGL_NONE; a += 2, ++i) {
            av_log(s, AV_LOG_INFO, "[%2d] %4x: %d\n", i, a[0], a[1]);
         }
+#endif
+        {
+           const EGLImage image = eglCreateImageKHR(de->setup.egl_dpy,
+                                              EGL_NO_CONTEXT,
+                                              EGL_LINUX_DMA_BUF_EXT,
+                                              NULL, attribs);
+           if (!image) {
+              av_log(s, AV_LOG_ERROR, "Failed to import fd %d\n", desc->objects[0].fd);
+              return -1;
+           }
 
-        EGLImage image = eglCreateImageKHR(de->setup.egl_dpy,
-                                           EGL_NO_CONTEXT,
-                                           EGL_LINUX_DMA_BUF_EXT,
-                                           NULL, attribs);
-        if (!image) {
-           fprintf(stderr, "Failed to import fd %d\n", desc->objects[0].fd);
-           exit(1);
+           glGenTextures(1, &da->texture);
+           glBindTexture(GL_TEXTURE_EXTERNAL_OES, da->texture);
+           glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+           glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+           glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
+
+           eglDestroyImageKHR(de->setup.egl_dpy, image);
         }
-
-        glGenTextures(1, &da->texture);
-        glBindTexture(GL_TEXTURE_EXTERNAL_OES, da->texture);
-        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
-
-        eglDestroyImageKHR(de->setup.egl_dpy, image);
 
         da->fd = desc->objects[0].fd;
 
@@ -578,7 +599,9 @@ static void * display_thread(void * v)
        goto fail;
     }
 
+#if TRACE_ALL
     av_log(s, AV_LOG_INFO, "--- %s: Start done\n", __func__);
+#endif
     sem_post(&de->display_start_sem);
 
     for (;;) {
@@ -698,7 +721,7 @@ static int egl_vout_init(struct AVFormatContext * s)
     egl_display_env_t * const de = s->priv_data;
     unsigned int i;
 
-    av_log(s, AV_LOG_INFO, "<<< %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
     de->setup = (struct egl_setup){0};
 
@@ -718,7 +741,7 @@ static int egl_vout_init(struct AVFormatContext * s)
        return -1;
     }
 
-    av_log(s, AV_LOG_INFO, ">>> %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, ">>> %s\n", __func__);
 
     return 0;
 }
@@ -727,7 +750,7 @@ static void egl_vout_deinit(struct AVFormatContext * s)
 {
     egl_display_env_t * const de = s->priv_data;
 
-    av_log(s, AV_LOG_INFO, "<<< %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
     de->q_terminate = 1;
     sem_post(&de->q_sem);
@@ -738,7 +761,7 @@ static void egl_vout_deinit(struct AVFormatContext * s)
     av_frame_free(&de->q_next);
     av_frame_free(&de->q_this);
 
-    av_log(s, AV_LOG_INFO, ">>> %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, ">>> %s\n", __func__);
 }
 
 #define OFFSET(x) offsetof(egl_display_env_t, x)
