@@ -262,13 +262,17 @@ static inline int stream_started(const V4L2m2mContext * const s) {
 #define NQ_OK        0
 #define NQ_Q_FULL    1
 #define NQ_SRC_EMPTY 2
-#define NQ_DEAD      3
+#define NQ_DRAINING  3
+#define NQ_DEAD      4
+
+#define TRY_DQ(nq_status) ((nq_status) >= NQ_OK && (nq_status) <= NQ_DRAINING)
 
 // AVERROR_EOF     Flushing an already flushed stream
 // -ve             Error (all errors except EOF are unexpected)
 // NQ_OK (0)       OK
 // NQ_Q_FULL       Dst full (retry if we think V4L2 Q has space now)
 // NQ_SRC_EMPTY    Src empty (do not retry)
+// NQ_DRAINING     At EOS, dQ dest until EOS there too
 // NQ_DEAD         Not running (do not retry, do not attempt capture dQ)
 
 static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const s)
@@ -307,7 +311,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
                     return ret;
                 }
             }
-            return NQ_SRC_EMPTY;
+            return NQ_DRAINING;
         }
 
         if (ret < 0) {
@@ -363,7 +367,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         // return now. rv will be AVERROR(EAGAIN) indicating that we want more input
         // This should mean that once decode starts we enter a stable state where
         // we alternately ask for input and produce output
-        if (s->req_pkt && src_rv == NQ_SRC_EMPTY && !s->draining)
+        if (s->req_pkt && src_rv == NQ_SRC_EMPTY)
             break;
 
         if (src_rv == NQ_Q_FULL && dst_rv == AVERROR(EAGAIN)) {
@@ -373,9 +377,8 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
         // Try to get a new frame if
         // (a) we haven't already got one AND
-        // (b) enqueue returned a status indicating that decode is alive
-        if (dst_rv != 0 &&
-            (src_rv == NQ_OK || src_rv == NQ_Q_FULL || src_rv == NQ_SRC_EMPTY)) {
+        // (b) enqueue returned a status indicating that decode should be attempted
+        if (dst_rv != 0 && TRY_DQ(src_rv)) {
             do {
                 // Dequeue frame will unref any previous contents of frame
                 // so we don't need an explicit unref when discarding
@@ -383,16 +386,12 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // but there is room in the input Q
                 dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, 1);
 
-                if (dst_rv < 0 && dst_rv != AVERROR(EAGAIN)) {
-                    if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
-                        av_log(avctx, AV_LOG_DEBUG,
-                               "Dequeue EOF: draining=%d, cap.done=%d\n",
-                               s->draining, s->capture.done);
-                    else
-                        av_log(avctx, AV_LOG_ERROR,
-                               "Packet dequeue failure: draining=%d, cap.done=%d, err=%d\n",
-                               s->draining, s->capture.done, dst_rv);
-                }
+                if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
+                    av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",
+                           s->draining, s->capture.done);
+                else if (dst_rv && dst_rv != AVERROR(EAGAIN))
+                    av_log(avctx, AV_LOG_ERROR, "Packet dequeue failure: draining=%d, cap.done=%d, err=%d\n",
+                           s->draining, s->capture.done, dst_rv);
 
                 // Go again if we got a frame that we need to discard
             } while (dst_rv == 0 && xlat_pts_out(avctx, s, frame));
