@@ -359,9 +359,6 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     do {
         src_rv = try_enqueue_src(avctx, s);
 
-        if (src_rv < 0)
-            av_log(avctx, AV_LOG_ERROR, "Packet enqueue failure: err=%d\n", src_rv);
-
         // If we got a frame last time and we have nothing to enqueue then
         // return now. rv will be AVERROR(EAGAIN) indicating that we want more input
         // This should mean that once decode starts we enter a stable state where
