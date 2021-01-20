@@ -24,6 +24,7 @@
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 
+#include "libavutil/avassert.h"
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_drm.h"
 #include "libavutil/pixfmt.h"
@@ -272,14 +273,12 @@ static inline int stream_started(const V4L2m2mContext * const s) {
 
 static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
-    AVPacket avpkt = {0};
     int ret = 0;
     int ret2 = 0;
 
-    if (s->buf_pkt.size) {
-        av_packet_move_ref(&avpkt, &s->buf_pkt);
-    } else {
-        ret = ff_decode_get_packet(avctx, &avpkt);
+    if (!s->buf_pkt.size) {
+        ret = ff_decode_get_packet(avctx, &s->buf_pkt);
+
         if (ret == AVERROR(EAGAIN)) {
             if (!stream_started(s)) {
                 av_log(avctx, AV_LOG_TRACE, "%s: receive_frame before 1st coded packet\n", __func__);
@@ -288,9 +287,10 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
             return NQ_SRC_EMPTY;
         }
 
-        if (ret == AVERROR_EOF || avpkt.size == 0) {
+        if (ret == AVERROR_EOF) {
             // EOF - enter drain mode
-            av_log(avctx, AV_LOG_TRACE, "--- EOS req: ret=%d, size=%d, started=%d, drain=%d\n", ret, avpkt.size, stream_started(s), s->draining);
+            av_log(avctx, AV_LOG_TRACE, "--- EOS req: ret=%d, size=%d, started=%d, drain=%d\n",
+                   ret, s->buf_pkt.size, stream_started(s), s->draining);
             if (!stream_started(s)) {
                 av_log(avctx, AV_LOG_DEBUG, "EOS on flushed stream\n");
                 s->draining = 1;
@@ -299,10 +299,9 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
             }
 
             if (!s->draining) {
-                // On the offchance that get_packet left something that needs freeing in here
-                av_packet_unref(&avpkt);
                 // Calling enqueue with an empty pkt starts drain
-                ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt, NULL, 0, 1);
+                av_assert0(s->buf_pkt.size == 0);
+                ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, NULL, 0, 1);
                 if (ret) {
                     av_log(avctx, AV_LOG_ERROR, "Failed to start drain: ret=%d\n", ret);
                     return ret;
@@ -311,28 +310,29 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
             return NQ_SRC_EMPTY;
         }
 
-        if (ret < 0)
+        if (ret < 0) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to get coded packet: err=%d\n", ret);
             return ret;
+        }
 
-        xlat_pts_in(avctx, s, &avpkt);
+        xlat_pts_in(avctx, s, &s->buf_pkt);
     }
 
     if ((ret = check_output_streamon(avctx, s)) != 0)
         return ret;
 
-    ret = ff_v4l2_context_enqueue_packet(&s->output, &avpkt,
+    ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt,
                                          avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size,
                                          1);
-    s->extdata_sent = 1;
 
     if (ret == AVERROR(EAGAIN)) {
-        // Out of input buffers - stash
-        av_packet_move_ref(&s->buf_pkt, &avpkt);
+        // Out of input buffers - keep packet
         ret = NQ_Q_FULL;
     }
     else {
         // In all other cases we are done with this packet
-        av_packet_unref(&avpkt);
+        av_packet_unref(&s->buf_pkt);
+        s->extdata_sent = 1;
 
         if (ret) {
             av_log(avctx, AV_LOG_ERROR, "Packet enqueue failure: err=%d\n", ret);
