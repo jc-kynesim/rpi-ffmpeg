@@ -277,9 +277,11 @@ static inline int stream_started(const V4L2m2mContext * const s) {
 
 static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
-    int ret = 0;
-    int ret2 = 0;
+    int ret;
 
+    // If we don't already have a coded packet - get a new one
+    // We will already have a coded pkt if the output Q was full last time we
+    // tried to Q it
     if (!s->buf_pkt.size) {
         ret = ff_decode_get_packet(avctx, &s->buf_pkt);
 
@@ -345,10 +347,12 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     }
 
     // Start if we haven't
-    ret2 = v4l2_try_start(avctx);
-    if (ret2) {
-        av_log(avctx, AV_LOG_DEBUG, "Start failure: err=%d\n", ret2);
-        ret = (ret2 == AVERROR(ENOMEM)) ? ret2 : NQ_DEAD;
+    {
+        const int ret2 = v4l2_try_start(avctx);
+        if (ret2) {
+            av_log(avctx, AV_LOG_DEBUG, "Start failure: err=%d\n", ret2);
+            ret = (ret2 == AVERROR(ENOMEM)) ? ret2 : NQ_DEAD;
+        }
     }
 
     return ret;
@@ -381,7 +385,8 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         if (dst_rv != 0 && TRY_DQ(src_rv)) {
             do {
                 // Dequeue frame will unref any previous contents of frame
-                // so we don't need an explicit unref when discarding
+                // if it returns success so we don't need an explicit unref
+                // when discarding
                 // This returns AVERROR(EAGAIN) if there isn't a frame ready yet
                 // but there is room in the input Q
                 dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, 1);
@@ -402,6 +407,8 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         // (b) enqueue failed due to input Q full AND there is now room
     } while (src_rv == NQ_OK || (src_rv == NQ_Q_FULL && dst_rv == AVERROR(EAGAIN)) );
 
+    // Ensure that the frame contains nothing if we aren't returning a frame
+    // (might happen when discarding)
     if (dst_rv)
         av_frame_unref(frame);
 
