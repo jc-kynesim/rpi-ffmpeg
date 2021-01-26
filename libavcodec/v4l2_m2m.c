@@ -330,6 +330,8 @@ static void v4l2_m2m_destroy_context(void *opaque, uint8_t *context)
 
     close(s->fd);
 
+    av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Context destroyed\n");
+
     av_free(s);
 }
 
@@ -340,6 +342,8 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
 
     if (!s)
         return 0;
+
+    av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Codec end\n");
 
     if (av_codec_is_decoder(s->avctx->codec))
         av_packet_unref(&s->buf_pkt);
@@ -360,8 +364,8 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
     // This is only called on avctx close so after this point we don't have that
     // Crash sooner if we find we are using it (can still log with avctx = NULL)
     s->avctx = NULL;
-    av_buffer_unref(&priv->context_ref);
     priv->context = NULL;
+    av_buffer_unref(&priv->context_ref);
 
     return 0;
 }
