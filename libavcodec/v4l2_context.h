@@ -95,6 +95,8 @@ typedef struct V4L2Context {
     AVBufferRef *frames_ref;
     int q_count;
 
+    uint32_t capabilities;
+
 } V4L2Context;
 
 /**

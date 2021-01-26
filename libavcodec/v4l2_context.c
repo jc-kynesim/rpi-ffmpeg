@@ -501,6 +501,7 @@ static int v4l2_release_buffers(V4L2Context* ctx)
         .count = 0, /* 0 -> unmap all buffers from the driver */
     };
     int ret, i, j;
+    const int fd = ctx_to_m2mctx(ctx)->fd;
 
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer *buffer = &ctx->buffers[i];
@@ -532,7 +533,7 @@ unmap:
         }
     }
 
-    ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_REQBUFS, &req);
+    ret = (fd == -1) ? 0 : ioctl(fd, VIDIOC_REQBUFS, &req);
     if (ret < 0) {
             av_log(logger(ctx), AV_LOG_ERROR, "release all %s buffers (%s)\n",
                 ctx->name, av_err2str(AVERROR(errno)));
@@ -837,6 +838,7 @@ int ff_v4l2_context_init(V4L2Context* ctx)
     }
 
     ctx->num_buffers = req.count;
+    ctx->capabilities = req.capabilities;
     ctx->buffers = av_mallocz(ctx->num_buffers * sizeof(V4L2Buffer));
     if (!ctx->buffers) {
         av_log(logger(ctx), AV_LOG_ERROR, "%s malloc enomem\n", ctx->name);
