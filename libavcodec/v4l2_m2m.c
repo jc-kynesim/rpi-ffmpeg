@@ -361,11 +361,8 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
 
     ff_v4l2_context_release(&s->output);
 
-    if ((s->capture.capabilities & V4L2_BUF_CAP_SUPPORTS_ORPHANED_BUFS) != 0) {
-        av_log(s->avctx, AV_LOG_DEBUG, "Orphan support OK - close V4L2 decode\n");
-        close(s->fd);
-        s->fd = -1;
-    }
+    close(s->fd);
+    s->fd = -1;
 
     s->self_ref = NULL;
     // This is only called on avctx close so after this point we don't have that

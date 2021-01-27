@@ -495,12 +495,8 @@ static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 
 static int v4l2_release_buffers(V4L2Context* ctx)
 {
-    struct v4l2_requestbuffers req = {
-        .memory = V4L2_MEMORY_MMAP,
-        .type = ctx->type,
-        .count = 0, /* 0 -> unmap all buffers from the driver */
-    };
-    int ret, i, j;
+    int i, j;
+    int ret = 0;
     const int fd = ctx_to_m2mctx(ctx)->fd;
 
     for (i = 0; i < ctx->num_buffers; i++) {
@@ -533,17 +529,25 @@ unmap:
         }
     }
 
-    ret = (fd == -1) ? 0 : ioctl(fd, VIDIOC_REQBUFS, &req);
-    if (ret < 0) {
-            av_log(logger(ctx), AV_LOG_ERROR, "release all %s buffers (%s)\n",
-                ctx->name, av_err2str(AVERROR(errno)));
+    if (fd != -1) {
+        struct v4l2_requestbuffers req = {
+            .memory = V4L2_MEMORY_MMAP,
+            .type = ctx->type,
+            .count = 0, /* 0 -> unmap all buffers from the driver */
+        };
 
-            if (ctx_to_m2mctx(ctx)->output_drm)
-                av_log(logger(ctx), AV_LOG_ERROR,
-                    "Make sure the DRM client releases all FB/GEM objects before closing the codec (ie):\n"
-                    "for all buffers: \n"
-                    "  1. drmModeRmFB(..)\n"
-                    "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
+        ret = ioctl(fd, VIDIOC_REQBUFS, &req);
+        if (ret < 0) {
+                av_log(logger(ctx), AV_LOG_ERROR, "release all %s buffers (%s)\n",
+                    ctx->name, av_err2str(AVERROR(errno)));
+
+                if (ctx_to_m2mctx(ctx)->output_drm)
+                    av_log(logger(ctx), AV_LOG_ERROR,
+                        "Make sure the DRM client releases all FB/GEM objects before closing the codec (ie):\n"
+                        "for all buffers: \n"
+                        "  1. drmModeRmFB(..)\n"
+                        "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
+        }
     }
 
     return ret;
@@ -838,7 +842,6 @@ int ff_v4l2_context_init(V4L2Context* ctx)
     }
 
     ctx->num_buffers = req.count;
-    ctx->capabilities = req.capabilities;
     ctx->buffers = av_mallocz(ctx->num_buffers * sizeof(V4L2Buffer));
     if (!ctx->buffers) {
         av_log(logger(ctx), AV_LOG_ERROR, "%s malloc enomem\n", ctx->name);
