@@ -536,16 +536,17 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     // possibly limited h/w resources and fails on a Pi for this reason unless
     // more GPU mem is allocated than is the default.
 
-    V4L2m2mPriv *priv = avctx->priv_data;
-    V4L2m2mContext* s = priv->context;
-    V4L2Context* output = &s->output;
-    V4L2Context* capture = &s->capture;
+    V4L2m2mPriv * const priv = avctx->priv_data;
+    V4L2m2mContext * const s = priv->context;
+    V4L2Context * const output = &s->output;
+    V4L2Context * const capture = &s->capture;
     int ret, i;
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s: streamon=%d\n", __func__, output->streamon);
 
-    if (!output->streamon)
-        goto done;
+    // Reflushing everything is benign, quick and avoids having to worry about
+    // states like EOS processing so don't try to optimize out (having got it
+    // wrong once)
 
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
     if (ret < 0)
@@ -569,8 +570,6 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     capture->done = 0;
 
     // Stream on will occur when we actually submit a new frame
-
-done:
     av_log(avctx, AV_LOG_TRACE, ">>> %s\n", __func__);
 }
 
