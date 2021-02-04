@@ -117,7 +117,7 @@ incomplete_block_loop_end_y8:
     add w11, w11, #128
     // increment the row counter
     add w12, w12, #1
-
+    
     // process the next row if we haven't finished yet
     cmp w15, w12
     bgt row_loop
@@ -235,5 +235,264 @@ incomplete_block_loop_end_c8:
 
     ret
 endfunc
+
+//void ff_rpi_sand30_lines_to_planar_y16(
+//  uint8_t * dest,             // [x0]
+//  unsigned int dst_stride,    // [w1] -> assumed to be equal to _w
+//  const uint8_t * src,        // [x2]
+//  unsigned int src_stride1,   // [w3] -> 128
+//  unsigned int src_stride2,   // [w4]
+//  unsigned int _x,            // [w5]
+//  unsigned int y,             // [w6]
+//  unsigned int _w,            // [w7]
+//  unsigned int h);            // [sp, #0]
+
+function ff_rpi_sand30_lines_to_planar_y16, export=1
+    str x19, [sp, #-8]
+    str x20, [sp, #-16]
+    str x21, [sp, #-24]
+    str x22, [sp, #-32]
+    str x23, [sp, #-40]
+    
+    // w6 = argument h
+    ldr w6, [sp, #0]
+
+    // slice_inc = ((stride2 - 1) * stride1)
+    mov w5, w4
+    sub w5, w5, #1
+    lsl w5, w5, #7
+
+    // total number of bytes per row = (width / 3) * 4
+    mov w8, w7
+    mov w9, #3
+    udiv w8, w8, w9
+    lsl w8, w8, #2
+
+    // number of full 128 byte blocks to be processed
+    mov w9, #96
+    udiv w9, w7, w9 // = (width * 4) / (3*128) = width/96
+
+    // w10 = number of full integers to process (4 bytes)
+    // w11 = remaning zero to two 10bit values still to copy over
+    mov w12, #96
+    mul w12, w9, w12
+    sub w12, w7, w12  // width - blocks*96 = remaining points per row
+    mov w11, #3
+    udiv w10, w12, w11 // full integers to process = w12 / 3 
+    mul w11, w10, w11  // #integers *3
+    sub w11, w12, w11  // remaining 0-2 points = remaining points - integers*3
+
+    // increase w9 by one if w10+w11 is not zero, and decrease the row count by one
+    // this is to efficiently copy incomplete blocks at the end of the rows
+    // the last row is handled explicitly to avoid writing out of bounds
+    add w22, w10, w11
+    cmp w22, #0
+    cset w22, ne // 1 iff w10+w11 not zero, 0 otherwise
+    add w9, w9, w22
+    sub w6, w6, #1
+
+    // store the number of bytes in w20 which we copy too much for every row
+    // when the width of the frame is not a multiple of 96 (128bytes storing 96 10bit values)
+    mov w20, #3
+    mul w21, w10, w20
+    mov w20, #96
+    sub w20, w20, w21 // w20 = 96 - #integers*3
+    sub w20, w20, w11 // w20 = 96 - #integers*3 - rem. points
+    cmp w20, #96
+    cset w21, eq
+    mov w23, #96
+    mul w23, w23, w21 // 0 or 1 * 96
+    sub w20, w20, w23 // = w20 mod 96
+    lsl w20, w20, #1  // convert to bytes (*2 since we store 16bits per value)
+    
+    mov w23, #0 // flag to check whether the last line had already been processed
+    
+    // bitmask to clear the uppper 6bits of the result values
+    mov x19, #0x03ff03ff03ff03ff
+    dup v22.2d, x19
+
+    // row counter = 0
+    eor w12, w12, w12
+row_loop_y16:
+    cmp w12, w6               // jump to row_loop_y16_fin if we processed all rows
+    bge row_loop_y16_fin
+
+    mov x13, x2               // row src
+    eor w14, w14, w14         // full block counter
+block_loop_y16:
+    cmp w14, w9
+    bge block_loop_y16_fin
+
+    // load 64 bytes
+    ld1 { v0.4s,  v1.4s, v2.4s, v3.4s }, [x13], #64
+   
+    // process v0 and v1
+    xtn v16.4h, v0.4s
+    ushr v0.4s, v0.4s, #10
+    xtn v17.4h, v0.4s
+    ushr v0.4s, v0.4s, #10
+    xtn v18.4h, v0.4s
+   
+    xtn2 v16.8h, v1.4s
+    and v16.16b, v16.16b, v22.16b
+    ushr v1.4s, v1.4s, #10
+    xtn2 v17.8h, v1.4s
+    and v17.16b, v17.16b, v22.16b
+    ushr v1.4s, v1.4s, #10
+    xtn2 v18.8h, v1.4s
+    and v18.16b, v18.16b, v22.16b
+
+    st3 { v16.8h, v17.8h, v18.8h }, [x0], #48
+
+    // process v2 and v3
+    xtn v23.4h, v2.4s
+    ushr v2.4s, v2.4s, #10
+    xtn v24.4h, v2.4s
+    ushr v2.4s, v2.4s, #10
+    xtn v25.4h, v2.4s
+    
+    xtn2 v23.8h, v3.4s
+    and v23.16b, v23.16b, v22.16b
+    ushr v3.4s, v3.4s, #10
+    xtn2 v24.8h, v3.4s
+    and v24.16b, v24.16b, v22.16b
+    ushr v3.4s, v3.4s, #10
+    xtn2 v25.8h, v3.4s
+    and v25.16b, v25.16b, v22.16b
+
+    st3 { v23.8h, v24.8h, v25.8h }, [x0], #48
+
+    // load the second half of the block -> 64 bytes into registers v4-v7
+    ld1 { v4.4s,  v5.4s,  v6.4s,  v7.4s }, [x13], #64
+    
+    // process v4 and v5
+    xtn v16.4h, v4.4s
+    ushr v4.4s, v4.4s, #10
+    xtn v17.4h, v4.4s
+    ushr v4.4s, v4.4s, #10
+    xtn v18.4h, v4.4s
+   
+    xtn2 v16.8h, v5.4s 
+    and v16.16b, v16.16b, v22.16b
+    ushr v5.4s, v5.4s, #10
+    xtn2 v17.8h, v5.4s
+    and v17.16b, v17.16b, v22.16b
+    ushr v5.4s, v5.4s, #10
+    xtn2 v18.8h, v5.4s
+    and v18.16b, v18.16b, v22.16b
+
+    st3 { v16.8h, v17.8h, v18.8h }, [x0], #48
+
+    // v6 and v7
+    xtn v23.4h, v6.4s
+    ushr v6.4s, v6.4s, #10
+    xtn v24.4h, v6.4s
+    ushr v6.4s, v6.4s, #10
+    xtn v25.4h, v6.4s
+   
+    xtn2 v23.8h, v7.4s 
+    and v23.16b, v23.16b, v22.16b
+    ushr v7.4s, v7.4s, #10
+    xtn2 v24.8h, v7.4s
+    and v24.16b, v24.16b, v22.16b
+    ushr v7.4s, v7.4s, #10
+    xtn2 v25.8h, v7.4s
+    and v25.16b, v25.16b, v22.16b
+
+    st3 { v23.8h, v24.8h, v25.8h }, [x0], #48
+ 
+    add x13, x13, x5          // row src += slice_inc
+    add w14, w14, #1
+    b block_loop_y16
+block_loop_y16_fin:
+
+    
+
+
+    add x2, x2, #128          // src += stride1 (start of the next row)
+    sub x0, x0, x20           // subtract the bytes we copied too much from dst
+    add w12, w12, #1
+    b row_loop_y16
+row_loop_y16_fin:
+
+    // check whether we have incomplete blocks at the end of every row
+    // in that case decrease row block count by one
+    // change height back to it's original value (meaning increase it by 1)
+    // and jump back to another iteration of row_loop_y16
+
+    cmp w23, #1
+    beq row_loop_y16_fin2 // don't continue here if we already processed the last row
+    add w6, w6, #1    // increase height to the original value
+    sub w9, w9, w22   // block count - 1 or 0, depending on the remaining bytes count
+    mov w23, #1
+    b row_loop_y16
+row_loop_y16_fin2:
+
+    add x0, x0, x20 // with the last row we didn't actually move the dst ptr to far ahead, therefore readd the diference
+
+    // now we've got to handle the last block in the last row
+    eor w12, w12, w12 // w12 = 0 = counter
+integer_loop_y16:
+    cmp w12, w10
+    bge integer_loop_y16_fin
+    ldr w14, [x2], #4
+    and w15, w14, #0x3ff
+    strh w15, [x0], #2
+    lsr w14, w14, #10
+    and w15, w14, #0x3ff
+    strh w15, [x0], #2
+    lsr w14, w14, #10
+    and w15, w14, #0x3ff
+    strh w15, [x0], #2
+    add w12, w12, #1
+    b integer_loop_y16
+integer_loop_y16_fin:
+
+final_values_y16:
+    // remaining point count = w11
+    ldr w14, [x2], #4
+    cmp w11, #0
+    beq final_values_y16_fin
+    and w15, w14, #0x3ff
+    strh w15, [x0], #2
+    cmp w11, #1
+    beq final_values_y16_fin
+    lsr w14, w14, #10
+    and w15, w14, #0x3ff
+    strh w15, [x0], #2
+final_values_y16_fin:
+
+    ldr x23, [sp, #-40]
+    ldr x22, [sp, #-32]
+    ldr x21, [sp, #-24]
+    ldr x20, [sp, #-16]
+    ldr x19, [sp, #-8]
+
+    ret
+endfunc
+
+//void ff_rpi_sand30_lines_to_planar_c16(
+//  uint8_t * dst_u,
+//  unsigned int dst_stride_u,
+//  uint8_t * dst_v,
+//  unsigned int dst_stride_v,
+//  const uint8_t * src,
+//  unsigned int stride1,
+//  unsigned int stride2,
+//  unsigned int _x,
+//  unsigned int y,
+//  unsigned int _w,
+//  unsigned int h);
+
+//void ff_rpi_sand30_lines_to_planar_p010(
+//  uint8_t * dest,
+//  unsigned int dst_stride,
+//  const uint8_t * src,
+//  unsigned int src_stride1,
+//  unsigned int src_stride2,
+//  unsigned int _x,
+//  unsigned int y,
+//  unsigned int _w,
+//  unsigned int h);
 
 
