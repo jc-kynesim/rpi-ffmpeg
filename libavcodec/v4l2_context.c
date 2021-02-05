@@ -197,15 +197,15 @@ static int v4l2_handle_event(V4L2Context *ctx)
     if (full_reinit) {
         s->output.height = v4l2_get_height(&out_fmt);
         s->output.width = v4l2_get_width(&out_fmt);
-        s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
     }
+    s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
 
     reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
     if (reinit) {
         s->capture.height = v4l2_get_height(&cap_fmt);
         s->capture.width = v4l2_get_width(&cap_fmt);
-        s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
     }
+    s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
 
     if (full_reinit || reinit)
         s->reinit = 1;
