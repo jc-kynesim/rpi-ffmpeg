@@ -435,7 +435,7 @@ row_loop_y16_fin2:
 integer_loop_y16:
     cmp w12, w10
     bge integer_loop_y16_fin
-    ldr w14, [x2], #4
+    ldr w14, [x13], #4
     and w15, w14, #0x3ff
     strh w15, [x0], #2
     lsr w14, w14, #10
@@ -450,7 +450,7 @@ integer_loop_y16_fin:
 
 final_values_y16:
     // remaining point count = w11
-    ldr w14, [x2], #4
+    ldr w14, [x13], #4
     cmp w11, #0
     beq final_values_y16_fin
     and w15, w14, #0x3ff
