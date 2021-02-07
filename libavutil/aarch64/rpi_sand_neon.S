@@ -472,17 +472,203 @@ final_values_y16_fin:
 endfunc
 
 //void ff_rpi_sand30_lines_to_planar_c16(
-//  uint8_t * dst_u,
-//  unsigned int dst_stride_u,
-//  uint8_t * dst_v,
-//  unsigned int dst_stride_v,
-//  const uint8_t * src,
-//  unsigned int stride1,
-//  unsigned int stride2,
-//  unsigned int _x,
-//  unsigned int y,
-//  unsigned int _w,
-//  unsigned int h);
+//  uint8_t * dst_u,            // [x0]
+//  unsigned int dst_stride_u,  // [w1] == _w*2
+//  uint8_t * dst_v,            // [x2]
+//  unsigned int dst_stride_v,  // [w3] == _w*2
+//  const uint8_t * src,        // [x4]
+//  unsigned int stride1,       // [w5] == 128
+//  unsigned int stride2,       // [w6] 
+//  unsigned int _x,            // [w7] == 0
+//  unsigned int y,             // [sp, #0] == 0
+//  unsigned int _w,            // [sp, #8] -> w3
+//  unsigned int h);            // [sp, #16] -> w7
+
+.macro rpi_sand30_lines_to_planar_c16_block_half
+    ld1 { v0.4s,  v1.4s, v2.4s, v3.4s }, [x13], #64
+
+    xtn v4.4h, v0.4s
+    ushr v0.4s, v0.4s, #10
+    xtn v5.4h, v0.4s
+    ushr v0.4s, v0.4s, #10
+    xtn v6.4h, v0.4s
+    xtn2 v4.8h, v1.4s
+    ushr v1.4s, v1.4s, #10
+    xtn2 v5.8h, v1.4s
+    ushr v1.4s, v1.4s, #10
+    xtn2 v6.8h, v1.4s
+    and v4.16b, v4.16b, v16.16b
+    and v5.16b, v5.16b, v16.16b
+    and v6.16b, v6.16b, v16.16b
+    st3 { v4.8h, v5.8h, v6.8h }, [sp], #48
+    
+    xtn v4.4h, v2.4s
+    ushr v2.4s, v2.4s, #10
+    xtn v5.4h, v2.4s
+    ushr v2.4s, v2.4s, #10
+    xtn v6.4h, v2.4s
+    xtn2 v4.8h, v3.4s
+    ushr v3.4s, v3.4s, #10
+    xtn2 v5.8h, v3.4s
+    ushr v3.4s, v3.4s, #10
+    xtn2 v6.8h, v3.4s
+    and v4.16b, v4.16b, v16.16b
+    and v5.16b, v5.16b, v16.16b
+    and v6.16b, v6.16b, v16.16b
+    st3 { v4.8h, v5.8h, v6.8h }, [sp]
+    sub sp, sp, #48
+.endm
+
+function ff_rpi_sand30_lines_to_planar_c16, export=1
+    str x19, [sp, #-8]
+    str x20, [sp, #-16]
+    str x21, [sp, #-24]
+    str x22, [sp, #-32]
+    str x23, [sp, #-40]
+
+    ldr w3, [sp, #8]    // w3 = width
+    ldr w7, [sp, #16]   // w7 = height
+
+    // reserve space on the stack for intermediate results
+    sub sp, sp, #256
+    mov x23, x0
+
+    // number of 128byte blocks per row, w8 = width / 48
+    mov w9, #48
+    udiv w8, w3, w9
+
+    // remaining pixels (rem_pix) per row, w9 = width - w8 * 48
+    mul w9, w8, w9
+    sub w9, w3, w9
+
+    // row offset, the beginning of the next row to process
+    eor w10, w10, w10
+
+    // offset to the beginning of the next block, w11 = stride2 * 128 - 128
+    lsl w11, w6, #7
+    sub w11, w11, #128
+
+    // decrease the height by one and in case of remaining pixels increase the block count by one
+    sub w7, w7, #1
+    cmp w9, #0
+    cset w19, ne    // w19 == 1 iff reamining pixels != 0
+    add w8, w8, w19
+
+    // bytes we have to move dst back by at the end of every row
+    mov w21, #48
+    mul w21, w21, w19 
+    sub w21, w21, w9
+    lsl w21, w21, #1    // w21 = (#48 * w19 - rem_pix) * 2
+
+    mov w20, #0     // w20 = flag, last row processed
+
+    mov x12, #0x03ff03ff03ff03ff
+    dup v16.2d, x12
+
+    // iterate through rows, row counter = w12 = 0
+    eor w12, w12, w12
+row_loop_c16:
+    cmp w12, w7
+    bge row_loop_c16_fin
+
+    // address of row data = src + row_offset
+    mov x13, x4
+    add x13, x13, x10
+
+    eor w14, w14, w14
+block_loop_c16:
+    cmp w14, w8
+    bge block_loop_c16_fin
+
+    rpi_sand30_lines_to_planar_c16_block_half
+
+    ld2 { v0.8h, v1.8h }, [sp], #32
+    ld2 { v2.8h, v3.8h }, [sp], #32
+    ld2 { v4.8h, v5.8h }, [sp]
+    sub sp, sp, #64
+
+    st1 { v0.8h }, [x0], #16
+    st1 { v2.8h }, [x0], #16
+    st1 { v4.8h }, [x0], #16
+    st1 { v1.8h }, [x2], #16
+    st1 { v3.8h }, [x2], #16
+    st1 { v5.8h }, [x2], #16
+
+    rpi_sand30_lines_to_planar_c16_block_half
+
+    ld2 { v0.8h, v1.8h }, [sp], #32
+    ld2 { v2.8h, v3.8h }, [sp], #32
+    ld2 { v4.8h, v5.8h }, [sp]
+    sub sp, sp, #64
+
+    st1 { v0.8h }, [x0], #16
+    st1 { v2.8h }, [x0], #16
+    st1 { v4.8h }, [x0], #16
+    st1 { v1.8h }, [x2], #16
+    st1 { v3.8h }, [x2], #16
+    st1 { v5.8h }, [x2], #16
+
+    add x13, x13, x11 // offset to next block
+    add w14, w14, #1
+    b block_loop_c16
+block_loop_c16_fin:
+
+    add w10, w10, #128
+    add w12, w12, #1
+    sub x0, x0, x21  // move dst pointers back by x21
+    sub x2, x2, x21
+    b row_loop_c16
+row_loop_c16_fin:
+
+    cmp w20, #1
+    beq row_loop_c16_fin2
+    mov w20, #1
+    sub w8, w8, w19 // decrease block count by w19
+    add w7, w7, #1 // increase height
+    b row_loop_c16
+
+row_loop_c16_fin2:
+    add x0, x0, x21 // readd x21 in case of the last row
+    add x2, x2, x21 // so that we can write out the few remaining pixels
+
+    // last incomplete block to be finished
+    // read operations are fine, stride2 is more than large enough even if rem_pix is 0
+    rpi_sand30_lines_to_planar_c16_block_half
+    ld2 { v0.8h, v1.8h }, [sp], #32
+    ld2 { v2.8h, v3.8h }, [sp], #32
+    ld2 { v4.8h, v5.8h }, [sp], #32
+    rpi_sand30_lines_to_planar_c16_block_half
+    ld2 { v0.8h, v1.8h }, [sp], #32
+    ld2 { v2.8h, v3.8h }, [sp], #32
+    ld2 { v4.8h, v5.8h }, [sp]
+    sub sp, sp, #160
+
+    mov x4, sp
+    eor w20, w20, w20
+    add w9, w9, #2
+rem_pix_c16_loop:
+    cmp w20, w9
+    bge rem_pix_c16_fin
+
+    ldr w22, [x4], #4
+    str w22, [x0], #2
+    lsr w22, w22, #16
+    str w22, [x2], #2 
+
+    add w20, w20, #1
+    b rem_pix_c16_loop
+rem_pix_c16_fin:
+
+    add sp, sp, #256
+    ldr x23, [sp, #-40]
+    ldr x22, [sp, #-32]
+    ldr x21, [sp, #-24]
+    ldr x20, [sp, #-16]
+    ldr x19, [sp, #-8]
+    ret
+endfunc
+
+
 
 //void ff_rpi_sand30_lines_to_planar_p010(
 //  uint8_t * dest,
@@ -494,5 +680,4 @@ endfunc
 //  unsigned int y,
 //  unsigned int _w,
 //  unsigned int h);
-
 
