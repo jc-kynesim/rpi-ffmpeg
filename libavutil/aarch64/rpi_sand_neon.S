@@ -531,7 +531,6 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
 
     // reserve space on the stack for intermediate results
     sub sp, sp, #256
-    mov x23, x0
 
     // number of 128byte blocks per row, w8 = width / 48
     mov w9, #48
@@ -645,7 +644,6 @@ row_loop_c16_fin2:
 
     mov x4, sp
     eor w20, w20, w20
-    add w9, w9, #2
 rem_pix_c16_loop:
     cmp w20, w9
     bge rem_pix_c16_fin
