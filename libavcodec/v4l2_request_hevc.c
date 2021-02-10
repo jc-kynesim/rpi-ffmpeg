@@ -131,6 +131,24 @@ static uint8_t get_ref_pic_index(const HEVCContext *h, const HEVCFrame *frame,
     return 0;
 }
 
+static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
+{
+    unsigned int z = 0;
+    while (idx--) {
+        if (*b++ == 0) {
+            ++z;
+            if (z >= 2 && *b == 3) {
+                ++b;
+                z = 0;
+            }
+        }
+        else {
+            z = 0;
+        }
+    }
+    return b;
+}
+
 static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
                                                 struct v4l2_ctrl_hevc_slice_params *slice_params)
 {
@@ -140,8 +158,8 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
     RefPicList *rpl;
 
     *slice_params = (struct v4l2_ctrl_hevc_slice_params) {
-        .bit_size = 0,
-        .data_bit_offset = get_bits_count(&h->HEVClc->gb),
+        .bit_size = 0, // Set later
+        .data_bit_offset = 0, // Set later
 
         /* ISO/IEC 23008-2, ITU-T Rec. H.265: General slice segment header */
         .slice_segment_addr = sh->slice_segment_addr,
@@ -469,6 +487,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
     V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)h->ref->frame->data[0];
     int ret, slice = FFMIN(controls->num_slices, MAX_SLICES - 1);
+    uint32_t boff = (ptr_from_index(buffer, h->HEVClc->gb.index/8 + 1) - buffer) * 8 - 1;
 
     if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED && slice) {
         ret = v4l2_request_hevc_queue_decode(avctx, 0);
@@ -483,16 +502,19 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     v4l2_request_hevc_fill_slice_params(h, &controls->slice_params[slice]);
 
     if (ctx->start_code == V4L2_MPEG_VIDEO_HEVC_START_CODE_ANNEX_B) {
+        // ?? Do we really not need the nal type ??
         ret = ff_v4l2_request_append_output_buffer(avctx, h->ref->frame, nalu_slice_start_code, 3);
         if (ret)
             return ret;
     }
+    boff += req->output.used;
 
     ret = ff_v4l2_request_append_output_buffer(avctx, h->ref->frame, buffer, size);
     if (ret)
         return ret;
 
     controls->slice_params[slice].bit_size = req->output.used * 8; //FIXME
+    controls->slice_params[slice].data_bit_offset = boff; //FIXME
     controls->num_slices++;
     return 0;
 }
