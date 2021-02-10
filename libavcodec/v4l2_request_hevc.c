@@ -508,7 +508,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         if (ret)
             return ret;
     }
-    boff += req->output.used;
+    boff += req->output.used * 8;
 
     ret = ff_v4l2_request_append_output_buffer(avctx, h->ref->frame, buffer, size);
     if (ret)
