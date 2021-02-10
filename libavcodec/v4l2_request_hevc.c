@@ -487,7 +487,8 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
     V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)h->ref->frame->data[0];
     int ret, slice = FFMIN(controls->num_slices, MAX_SLICES - 1);
-    uint32_t boff = (ptr_from_index(buffer, h->HEVClc->gb.index/8 + 1) - buffer) * 8 - 1;
+    int bcount = get_bits_count(&h->HEVClc->gb);
+    uint32_t boff = (ptr_from_index(buffer, bcount/8 + 1) - (buffer + bcount/8 + 1)) * 8 + bcount;
 
     if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED && slice) {
         ret = v4l2_request_hevc_queue_decode(avctx, 0);
