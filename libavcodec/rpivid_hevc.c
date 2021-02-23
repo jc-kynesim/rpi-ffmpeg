@@ -26,6 +26,11 @@
 
 #define OPT_PHASE_TIMING 0      // Generate stats for phase usage
 
+#define OPT_EMU 0
+
+#define TRACE_DEV 0
+#define TRACE_ENTRY 0
+
 #define NUM_SCALING_FACTORS 4064
 
 #define AXI_BASE64 0
@@ -223,6 +228,10 @@ typedef struct dec_env_s {
     uint32_t        reg_slicestart;
     unsigned int    wpp_entry_x;
     unsigned int    wpp_entry_y;
+
+    const uint8_t * nal_buffer;
+    size_t          nal_size;
+
     uint16_t        slice_msgs[2*HEVC_MAX_REFS*8+3];
     uint8_t         scaling_factors[NUM_SCALING_FACTORS];
 //    unsigned int    RefPicList[2][HEVC_MAX_REFS];
@@ -310,9 +319,6 @@ static inline int rpi_sem_wait(sem_t * const sem)
 
 //============================================================================
 
-#define TRACE_DEV 0
-#define TRACE_ENTRY 0
-
 #define REGS_NAME "/dev/rpivid-hevcmem"
 #define REGS_SIZE 0x10000
 #define INTS_NAME "/dev/rpivid-intcmem"
@@ -363,11 +369,19 @@ static void unmap_devp(volatile uint32_t ** const p_gpio_map, size_t size)
 
 static inline void apb_write_vc_addr(const RPI_T *const rpi, const uint32_t addr, const vid_vc_addr_t data)
 {
+#if TRACE_DEV
+    printf("W %x %08x\n", addr, MANGLE64(data));
+#endif
+
     rpi->regs[addr >> 2] = MANGLE64(data);
 }
 
 static inline void apb_write_vc_len(const RPI_T *const rpi, const uint32_t addr, const unsigned int data)
 {
+#if TRACE_DEV
+    printf("W %x %08x\n", addr, data >> 6);
+#endif
+
     rpi->regs[addr >> 2] = data >> 6;  // ?? rnd64 - but not currently needed
 }
 
@@ -409,7 +423,7 @@ static inline void int_wait(const RPI_T * const rpi, const unsigned int phase)
     rpi->ints[0] = ival & mask_reset;
 }
 
-#if TRACE_DEV
+#if TRACE_DEV && 0
 static void apb_dump_regs(const RPI_T * const rpi, uint16_t addr, int num) {
     int i;
 
@@ -607,6 +621,11 @@ static const uint8_t prob_init[3][156] = {
 static int p1_apb_write(dec_env_t * const de, const uint16_t addr, const uint32_t data) {
     if (de->cmd_len==de->cmd_max)
         av_assert0(de->cmd_fifo = realloc(de->cmd_fifo, (de->cmd_max*=2)*sizeof(struct RPI_CMD)));
+
+#if TRACE_DEV
+    printf("[%02x] %x %x\n", de->cmd_len, addr, data);
+#endif
+
     de->cmd_fifo[de->cmd_len].addr = addr;
     de->cmd_fifo[de->cmd_len].data = data;
     return de->cmd_len++;
@@ -1432,7 +1451,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
         // Trigger command FIFO
         apb_write(rpi, RPI_CFNUM, de->cmd_len);
-#if TRACE_DEV
+#if TRACE_DEV && 0
         apb_dump_regs(rpi, 0x0, 32);
         apb_dump_regs(rpi, 0x8000, 24);
         axi_dump(de, ((uint64_t)a64)<<6, de->cmd_len * sizeof(struct RPI_CMD));
@@ -1563,7 +1582,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         apb_write_vc_addr(rpi, RPI_COLBASE, rpi->gcolbuf.vc + de->dpbno_col * rpi->col_picsize);
     }
 
-#if TRACE_DEV
+#if TRACE_DEV && 0
     apb_dump_regs(rpi, 0x0, 32);
     apb_dump_regs(rpi, 0x8000, 24);
 #endif
@@ -1617,12 +1636,58 @@ fail:
 
 //////////////////////////////////////////////////////////////////////////////
 
+
+#if TRACE_DEV
+static void dump_data(const uint8_t * p, size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i += 16) {
+        size_t j;
+        printf("%04x", i);
+        for (j = 0; j != 16; ++j) {
+            printf("%c%02x", i == 8 ? '-' : ' ', p[i+j]);
+        }
+        printf("\n");
+    }
+}
+#endif
+
+
+static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
+{
+    unsigned int z = 0;
+    while (idx--) {
+        if (*b++ == 0) {
+            ++z;
+            if (z >= 2 && *b == 3) {
+                ++b;
+                z = 0;
+            }
+        }
+        else {
+            z = 0;
+        }
+    }
+    return b;
+}
+
 static void WriteBitstream(dec_env_t * const de, const HEVCContext * const s) {
-    const int rpi_use_emu = 0; // FFmpeg removes emulation prevention bytes
+    const int rpi_use_emu = OPT_EMU; // FFmpeg removes emulation prevention bytes
     const int offset = 0; // Always 64-byte aligned in sim, need not be on real hardware
     const GetBitContext *gb = &s->HEVClc->gb;
+
+#if OPT_EMU
+    const uint8_t *ptr = ptr_from_index(de->nal_buffer, gb->index/8 + 1);
+    const int len = de->nal_size - (ptr - de->nal_buffer);
+#else
     const int len = 1 + gb->size_in_bits/8 - gb->index/8;
     const void *ptr = &gb->buffer[gb->index/8];
+#endif
+
+#if TRACE_DEV
+    printf("Index=%d, /8=%#x\n", gb->index, gb->index/8);
+    dump_data(de->nal_buffer, 128);
+#endif
 
     p1_axi_write(de, len, ptr, p1_apb_write(de, RPI_BFBASE, 0)); // BFBASE set later
     p1_apb_write(de, RPI_BFNUM, len);
@@ -1742,8 +1807,13 @@ static int rpi_hevc_decode_slice(
     }
     de->state = RPIVID_DECODE_SLICE;
 
+    de->nal_buffer = buffer;
+    de->nal_size   = size;
+
+#if !OPT_EMU
 //    ff_hevc_cabac_init(s, ctb_addr_ts);
     cabac_start_align(s);
+#endif
     if (s->ps.sps->scaling_list_enable_flag)
         populate_scaling_factors(de, s);
     pps->entropy_coding_sync_enabled_flag? wpp_decode_slice(de, s, ctb_addr_ts)
@@ -1989,6 +2059,8 @@ static int rpi_hevc_init(AVCodecContext *avctx) {
             goto fail;
         }
     }
+
+    av_log(avctx, AV_LOG_INFO, "RPI HEVC h/w accel init OK\n");
 
     return 0;
 
