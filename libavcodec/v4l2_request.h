@@ -52,11 +52,16 @@ typedef struct V4L2PhaseEnv {
     unsigned int order;
 } V4L2PhaseEnv;
 
+struct qent_dst;
+
 typedef struct V4L2RequestDescriptor {
     AVDRMFrameDescriptor drm;
     int request_fd;
     V4L2RequestBuffer output;
     V4L2RequestBuffer capture;
+
+    // Media
+    struct qent_dst * qe_dst;
 
     // Phase control
     V4L2PhaseInfo phase;

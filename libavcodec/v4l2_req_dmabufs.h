@@ -1,13 +1,19 @@
 #ifndef DMABUFS_H
 #define DMABUFS_H
 
-struct dmabufs_ctrl;
+struct dmabufs_ctl;
 struct dmabuf_h;
 
-struct dmabufs_ctrl * dmabufs_ctrl_new(void);
-void dmabufs_ctrl_delete(struct dmabufs_ctrl * const dbsc);
+struct dmabufs_ctl * dmabufs_ctl_new(void);
+void dmabufs_ctl_delete(struct dmabufs_ctl ** const pdbsc);
 
-struct dmabuf_h * dmabuf_alloc(struct dmabufs_ctrl * dbsc, size_t size);
+// Need not preserve old contents
+// On NULL return old buffer is freed
+struct dmabuf_h * dmabuf_realloc(struct dmabufs_ctl * dbsc, struct dmabuf_h *, size_t size);
+
+static inline struct dmabuf_h * dmabuf_alloc(struct dmabufs_ctl * dbsc, size_t size) {
+    return dmabuf_realloc(dbsc, NULL, size);
+}
 /* Create from existing fd - dups(fd) */
 struct dmabuf_h * dmabuf_import(int fd, size_t size);
 void * dmabuf_map(struct dmabuf_h * const dh);

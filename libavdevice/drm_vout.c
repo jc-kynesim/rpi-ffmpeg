@@ -44,7 +44,7 @@
 
 #include "libavutil/rpi_sand_fns.h"
 
-#define TRACE_ALL 0
+#define TRACE_ALL 1
 
 #define NUM_BUFFERS 4
 #define RPI_DISPLAY_ALL 0
@@ -151,7 +151,7 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
 
         for (i = 0; i < desc->nb_objects; ++i) {
             if (drmPrimeFDToHandle(de->drm_fd, desc->objects[i].fd, da->bo_handles + i) != 0) {
-                av_log(s, AV_LOG_WARNING, "drmPrimeFDToHandle failed: %s\n", ERRSTR);
+                av_log(s, AV_LOG_WARNING, "drmPrimeFDToHandle[%d](%d) failed: %s\n", i, desc->objects[i].fd, ERRSTR);
                 return -1;
             }
         }
@@ -271,7 +271,7 @@ static int drm_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
 #endif
 
     if ((src_frame->flags & AV_FRAME_FLAG_CORRUPT) != 0) {
-        av_log(s, AV_LOG_WARNING, "Discard corrupt frame: ts=%" PRId64 "\n", src_frame->format, src_frame->pts);
+        av_log(s, AV_LOG_WARNING, "Discard corrupt frame: fmt=%d, ts=%" PRId64 "\n", src_frame->format, src_frame->pts);
         return 0;
     }
 

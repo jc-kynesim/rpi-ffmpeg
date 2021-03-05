@@ -44,6 +44,111 @@
 #include "v4l2_req_pollqueue.h"
 #include "v4l2_req_utils.h"
 
+
+
+struct weak_link_master {
+    atomic_int ref_count;    /* 0 is single ref for easier atomics */
+    pthread_rwlock_t lock;
+    void * ptr;
+};
+
+// Dummy struct (always coerced) for client links
+struct weak_link_client;
+
+static inline struct weak_link_master * weak_link_x(struct weak_link_client * c)
+{
+    return (struct weak_link_master *)c;
+}
+
+static struct weak_link_master * weak_link_new(void * p)
+{
+    struct weak_link_master * w = malloc(sizeof(*w));
+    if (!w)
+        return NULL;
+    w->ptr = p;
+    if (pthread_rwlock_init(&w->lock, NULL)) {
+        free(w);
+        return NULL;
+    }
+    return w;
+}
+
+static void weak_link_do_unref(struct weak_link_master * const w)
+{
+    int n = atomic_fetch_sub(&w->ref_count, 1);
+    if (n)
+        return;
+
+    pthread_rwlock_destroy(&w->lock);
+    free(w);
+}
+
+// Unref & break link
+static void weak_link_break(struct weak_link_master ** ppLink)
+{
+    struct weak_link_master * const w = *ppLink;
+    if (!w)
+        return;
+
+    *ppLink = NULL;
+    pthread_rwlock_wrlock(&w->lock);
+    w->ptr = NULL;
+    pthread_rwlock_unlock(&w->lock);
+
+    weak_link_do_unref(w);
+}
+
+static struct weak_link_client* weak_link_ref(struct weak_link_master * w)
+{
+    atomic_fetch_add(&w->ref_count, 1);
+    return (struct weak_link_client*)w;
+}
+
+static void weak_link_unref(struct weak_link_client ** ppLink)
+{
+    struct weak_link_master * const w = weak_link_x(*ppLink);
+    if (!w)
+        return;
+
+    *ppLink = NULL;
+    weak_link_do_unref(w);
+}
+
+// Returns NULL if link broken - in this case it will also zap
+//   *ppLink and unref the weak_link.
+// Returns NULL if *ppLink is NULL (so a link once broken stays broken)
+//
+// The above does mean that there is a race if this is called simultainiously
+// by two threads using the same weak_link_client (so don't do that)
+static void * weak_link_lock(struct weak_link_client ** ppLink)
+{
+    struct weak_link_master * const w = weak_link_x(*ppLink);
+
+    if (!w)
+        return NULL;
+
+    if (pthread_rwlock_rdlock(&w->lock))
+        goto broken;
+
+    if (w->ptr)
+        return w->ptr;
+
+    pthread_rwlock_unlock(&w->lock);
+
+broken:
+    *ppLink = NULL;
+    weak_link_do_unref(w);
+    return NULL;
+}
+
+// Ignores a NULL c (so can be on the return path of both broken & live links)
+static void weak_link_unlock(struct weak_link_client * c)
+{
+    struct weak_link_master * const w = weak_link_x(c);
+    if (w)
+        pthread_rwlock_unlock(&w->lock);
+}
+
 struct media_request;
 
 struct media_pool {
@@ -62,6 +167,15 @@ struct media_request {
 };
 
 
+static inline int do_trywait(sem_t *const sem)
+{
+    while (sem_trywait(sem)) {
+        if (errno != EINTR)
+            return -errno;
+    }
+    return 0;
+}
+
 static inline int do_wait(sem_t *const sem)
 {
     while (sem_wait(sem)) {
@@ -77,27 +191,28 @@ static MediaBufsStatus video_fmt_supported(uint32_t pixelformat, enum v4l2_buf_t
     return 0;
 }
 
-static int v4l2_request_buffers(int video_fd, unsigned int type,
-             unsigned int buffers_count)
+static int request_buffers(int video_fd, unsigned int type,
+                           enum v4l2_memory memory, unsigned int buffers_count)
 {
     struct v4l2_requestbuffers buffers;
     int rc;
 
     memset(&buffers, 0, sizeof(buffers));
     buffers.type = type;
-    buffers.memory = V4L2_MEMORY_MMAP;
+    buffers.memory = memory;
     buffers.count = buffers_count;
 
     rc = ioctl(video_fd, VIDIOC_REQBUFS, &buffers);
     if (rc < 0) {
-        request_log("Unable to request buffers: %s\n", strerror(errno));
-        return -1;
+        rc = -errno;
+        request_log("Unable to request buffers: %s\n", strerror(-rc));
+        return rc;
     }
 
     return 0;
 }
 
-static int v4l2_set_control(int video_fd,
+static int set_control(int video_fd,
              struct media_request * const mreq,
              unsigned int id, void *data,
              unsigned int size)
@@ -123,14 +238,15 @@ static int v4l2_set_control(int video_fd,
 
     rc = ioctl(video_fd, VIDIOC_S_EXT_CTRLS, &controls);
     if (rc < 0) {
-        request_log("Unable to set control %d: %s\n", id, strerror(errno));
-        return -1;
+        rc = -errno;
+        request_log("Unable to set control %d: %s\n", id, strerror(-rc));
+        return rc;
     }
 
     return 0;
 }
 
-static int v4l2_set_stream(int video_fd, unsigned int type, bool enable)
+static int set_stream(int video_fd, unsigned int type, bool enable)
 {
     enum v4l2_buf_type buf_type = type;
     int rc;
@@ -138,9 +254,10 @@ static int v4l2_set_stream(int video_fd, unsigned int type, bool enable)
     rc = ioctl(video_fd, enable ? VIDIOC_STREAMON : VIDIOC_STREAMOFF,
            &buf_type);
     if (rc < 0) {
+        rc = -errno;
         request_log("Unable to %sable stream: %s\n",
-                enable ? "en" : "dis", strerror(errno));
-        return -1;
+                enable ? "en" : "dis", strerror(-rc));
+        return rc;
     }
 
     return 0;
@@ -204,6 +321,15 @@ static void media_request_done(void *v, short revents)
     mp->free_reqs = req;
     pthread_mutex_unlock(&mp->lock);
     sem_post(&mp->sem);
+}
+
+int media_request_abort(struct media_request * const req)
+{
+    if (req == NULL)
+        return 0;
+
+    media_request_done(req, 0);
+    return 0;
 }
 
 static void delete_req_chain(struct media_request * const chain)
@@ -272,10 +398,13 @@ fail0:
     return NULL;
 }
 
-void media_pool_delete(struct media_pool * mp)
+void media_pool_delete(struct media_pool ** pMp)
 {
+    struct media_pool * const mp = *pMp;
+
     if (!mp)
         return;
+    *pMp = NULL;
 
     delete_req_chain(mp->free_reqs);
     close(mp->fd);
@@ -315,6 +444,7 @@ struct qent_dst {
     bool waiting;
     pthread_mutex_t lock;
     pthread_cond_t cond;
+    struct weak_link_client * mbc_wl;
 };
 
 
@@ -372,6 +502,20 @@ static struct qent_src * qe_src_new(void)
     };
     return be_src;
 }
+
+static struct qent_dst * qe_dst_new(void)
+{
+    struct qent_dst *const be_dst = malloc(sizeof(*be_dst));
+    if (!be_dst)
+        return NULL;
+    *be_dst = (struct qent_dst){
+        .base = QENT_BASE_INITIALIZER,
+        .lock = PTHREAD_MUTEX_INITIALIZER,
+        .cond = PTHREAD_COND_INITIALIZER
+    };
+    return be_dst;
+}
+
 
 static void bq_put_free(struct buf_pool *const bp, struct qent_base * be)
 {
@@ -459,11 +603,23 @@ static void queue_put_inuse(struct buf_pool *const bp, struct qent_base *be)
     pthread_mutex_unlock(&bp->lock);
 }
 
-static struct qent_base *queue_get_free(struct buf_pool *const bp, struct pollqueue *const pq)
+static struct qent_base *queue_get_free(struct buf_pool *const bp)
 {
     struct qent_base *buf;
 
     if (do_wait(&bp->free_sem))
+        return NULL;
+    pthread_mutex_lock(&bp->lock);
+    buf = bq_get_free(bp);
+    pthread_mutex_unlock(&bp->lock);
+    return buf;
+}
+
+static struct qent_base *queue_tryget_free(struct buf_pool *const bp)
+{
+    struct qent_base *buf;
+
+    if (do_trywait(&bp->free_sem))
         return NULL;
     pthread_mutex_lock(&bp->lock);
     buf = bq_get_free(bp);
@@ -520,6 +676,8 @@ struct mediabufs_ctl {
     struct buf_pool * dst;
     struct polltask * pt;
     struct pollqueue * pq;
+    struct weak_link_master * this_wlm;
+
     struct v4l2_format src_fmt;
     struct v4l2_format dst_fmt;
 };
@@ -701,11 +859,16 @@ int qent_src_data_copy(struct qent_src *const be_src, const void *const src, con
     return 0;
 }
 
-int qent_dst_dup_fd(const struct qent_dst *const be_dst, unsigned int plane)
+const struct dmabuf_h * qent_dst_dmabuf(const struct qent_dst *const be_dst, unsigned int plane)
 {
     const struct qent_base *const be = &be_dst->base;
 
-    return dup(dmabuf_fd(be->dh[plane]));
+    return (plane >= sizeof(be->dh)/sizeof(be->dh[0])) ? NULL : be->dh[plane];
+}
+
+int qent_dst_dup_fd(const struct qent_dst *const be_dst, unsigned int plane)
+{
+    return dup(dmabuf_fd(qent_dst_dmabuf(be_dst, plane)));
 }
 
 MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
@@ -751,13 +914,13 @@ fail1:
 
 
 static int qe_alloc_from_fmt(struct qent_base *const be,
-                   struct dmabufs_ctrl *const dbsc,
+                   struct dmabufs_ctl *const dbsc,
                    const struct v4l2_format *const fmt)
 {
     if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
         unsigned int i;
         for (i = 0; i != fmt->fmt.pix_mp.num_planes; ++i) {
-            be->dh[i] = dmabuf_alloc(dbsc,
+            be->dh[i] = dmabuf_realloc(dbsc, be->dh[i],
                 fmt->fmt.pix_mp.plane_fmt[i].sizeimage);
             /* On failure tidy up and die */
             if (!be->dh[i]) {
@@ -775,7 +938,7 @@ static int qe_alloc_from_fmt(struct qent_base *const be,
 #warning Fixed bitbuf size
         if (size < 0x100000)
             size = 0x100000;
-        be->dh[0] = dmabuf_alloc(dbsc, size);
+        be->dh[0] = dmabuf_realloc(dbsc, be->dh[0], size);
         if (!be->dh[0])
             return -1;
     }
@@ -902,10 +1065,28 @@ void qent_dst_delete(struct qent_dst *const be_dst)
     if (!be_dst)
         return;
 
+    weak_link_unref(&be_dst->mbc_wl);
     pthread_cond_destroy(&be_dst->cond);
     pthread_mutex_destroy(&be_dst->lock);
     qe_base_uninit(&be_dst->base);
     free(be_dst);
+}
+
+void qent_dst_free(struct qent_dst ** const pbe_dst)
+{
+    struct qent_dst * const be_dst = *pbe_dst;
+    struct mediabufs_ctl * mbc;
+    if (!be_dst)
+        return;
+
+    *pbe_dst = NULL;
+    if ((mbc = weak_link_lock(&be_dst->mbc_wl)) != NULL) {
+        queue_put_free(mbc->dst, &be_dst->base);
+        weak_link_unlock(be_dst->mbc_wl);
+    }
+    else {
+        qent_dst_delete(be_dst);
+    }
 }
 
 MediaBufsStatus qent_dst_import_fd(struct qent_dst *const be_dst,
@@ -926,49 +1107,61 @@ MediaBufsStatus qent_dst_import_fd(struct qent_dst *const be_dst,
     return MEDIABUFS_STATUS_SUCCESS;
 }
 
-struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struct dmabufs_ctrl *const dbsc)
+static int create_dst_buf(struct mediabufs_ctl *const mbc)
 {
-    struct qent_dst *const be_dst = malloc(sizeof(*be_dst));
-
-    if (!be_dst)
-        return NULL;
-
-    *be_dst = (struct qent_dst){
-        .base = QENT_BASE_INITIALIZER,
-        .lock = PTHREAD_MUTEX_INITIALIZER,
-        .cond = PTHREAD_COND_INITIALIZER
+    struct v4l2_create_buffers cbuf = {
+        .count = 1,
+        .memory = V4L2_MEMORY_DMABUF,
+        .format = mbc->dst_fmt,
     };
 
+    while (ioctl(mbc->vfd, VIDIOC_CREATE_BUFS, &cbuf)) {
+        const int err = -errno;
+        if (err != EINTR) {
+            request_err(mbc->dc, "%s: Failed to create V4L2 buffer\n", __func__);
+            return -err;
+        }
+    }
+    return cbuf.index;
+}
+
+struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struct dmabufs_ctl *const dbsc)
+{
+    struct qent_dst * be_dst;
+
     if (mbc == NULL) {
-        be_dst->base.status = QENT_IMPORT;
+        be_dst = qe_dst_new();
+        if (be_dst)
+            be_dst->base.status = QENT_IMPORT;
         return be_dst;
     }
 
-    if (qe_alloc_from_fmt(&be_dst->base, dbsc, &mbc->dst_fmt))
-        goto fail;
+    be_dst = base_to_dst(queue_tryget_free(mbc->dst));
+    if (!be_dst) {
+        int index;
 
-    {
-        struct v4l2_create_buffers cbuf = {
-            .count = 1,
-            .memory = V4L2_MEMORY_DMABUF,
-            .format = mbc->dst_fmt,
-        };
+        be_dst = qe_dst_new();
+        if (!be_dst)
+            return NULL;
 
-        while (ioctl(mbc->vfd, VIDIOC_CREATE_BUFS, &cbuf)) {
-            if (errno != EINTR) {
-                request_err(mbc->dc, "%s: Failed to create V4L2 buffer\n", __func__);
-                goto fail;
-            }
+        if ((be_dst->mbc_wl = weak_link_ref(mbc->this_wlm)) == NULL ||
+            (index = create_dst_buf(mbc)) < 0) {
+            qent_dst_delete(be_dst);
+            return NULL;
         }
 
-        be_dst->base.index = cbuf.index;
+        be_dst->base.index = (uint32_t)index;
+    }
+
+    if (qe_alloc_from_fmt(&be_dst->base, dbsc, &mbc->dst_fmt)) {
+        /* Given  how create buf works we can't uncreate it on alloc failure
+         * all we can do is put it on the free Q
+        */
+        queue_put_free(mbc->dst, &be_dst->base);
+        return NULL;
     }
 
     return be_dst;
-
-fail:
-    qent_dst_delete(be_dst);
-    return NULL;
 }
 
 const struct v4l2_format *mediabufs_dst_fmt(struct mediabufs_ctl *const mbc)
@@ -1006,18 +1199,48 @@ MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
         if (status != MEDIABUFS_ERROR_UNSUPPORTED_BUFFERTYPE)
             return status;
     }
+
+    if (status != MEDIABUFS_STATUS_SUCCESS)
+        return status;
+
+    /* Try to create a buffer - don't alloc */
     return status;
+}
+
+MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, unsigned int n)
+{
+    // **** request buffers
+    unsigned int i;
+
+    for (i = 0; i != n; ++i)
+    {
+        int index;
+        struct qent_dst * const be_dst = qe_dst_new();
+        if (!be_dst)
+            return MEDIABUFS_ERROR_OPERATION_FAILED;
+
+        index = create_dst_buf(mbc);
+        if (index < 0) {
+            qent_dst_delete(be_dst);
+            return MEDIABUFS_ERROR_OPERATION_FAILED;
+        }
+
+        // Add index to free chain
+        be_dst->base.index = (uint32_t)index;
+        queue_put_free(mbc->dst, &be_dst->base);
+    }
+    return MEDIABUFS_STATUS_SUCCESS;
 }
 
 struct qent_src *mediabufs_src_qent_get(struct mediabufs_ctl *const mbc)
 {
-    struct qent_base * buf = queue_get_free(mbc->src, mbc->pq);
+    struct qent_base * buf = queue_get_free(mbc->src);
     return base_to_src(buf);
 }
 
 /* src format must have been set up before this */
 MediaBufsStatus mediabufs_src_pool_create(struct mediabufs_ctl *const mbc,
-                  struct dmabufs_ctrl * const dbsc,
+                  struct dmabufs_ctl * const dbsc,
                   unsigned int n)
 {
     unsigned int i;
@@ -1073,22 +1296,23 @@ fail:
  * Set stuff order:
  *  Set src fmt
  *  Set parameters (sps) on vfd
- *  Negotiate dst format
+ *  Negotiate dst format (dst_fmt_set)
  *  Create src buffers
+ *  Alloc a dst buffer or Create dst slots
 */
 MediaBufsStatus mediabufs_stream_on(struct mediabufs_ctl *const mbc)
 {
     if (mbc->stream_on)
         return MEDIABUFS_STATUS_SUCCESS;
 
-    if (v4l2_set_stream(mbc->vfd, mbc->src_fmt.type, true) < 0) {
+    if (set_stream(mbc->vfd, mbc->src_fmt.type, true) < 0) {
         request_log("Failed to set stream on src type %d\n", mbc->src_fmt.type);
         return MEDIABUFS_ERROR_OPERATION_FAILED;
     }
 
-    if (v4l2_set_stream(mbc->vfd, mbc->dst_fmt.type, true) < 0) {
+    if (set_stream(mbc->vfd, mbc->dst_fmt.type, true) < 0) {
         request_log("Failed to set stream on dst type %d\n", mbc->dst_fmt.type);
-        v4l2_set_stream(mbc->vfd, mbc->src_fmt.type, false);
+        set_stream(mbc->vfd, mbc->src_fmt.type, false);
         return MEDIABUFS_ERROR_OPERATION_FAILED;
     }
 
@@ -1103,12 +1327,12 @@ MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc)
     if (!mbc->stream_on)
         return MEDIABUFS_STATUS_SUCCESS;
 
-    if (v4l2_set_stream(mbc->vfd, mbc->src_fmt.type, false) < 0) {
+    if (set_stream(mbc->vfd, mbc->src_fmt.type, false) < 0) {
         request_log("Failed to set stream off src type %d\n", mbc->src_fmt.type);
         status = MEDIABUFS_ERROR_OPERATION_FAILED;
     }
 
-    if (v4l2_set_stream(mbc->vfd, mbc->dst_fmt.type, false) < 0) {
+    if (set_stream(mbc->vfd, mbc->dst_fmt.type, false) < 0) {
         request_log("Failed to set stream off dst type %d\n", mbc->dst_fmt.type);
         status = MEDIABUFS_ERROR_OPERATION_FAILED;
     }
@@ -1121,7 +1345,7 @@ MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
                 unsigned int id, void *data,
                 unsigned int size)
 {
-    int rv = v4l2_set_control(mbc->vfd, mreq, id, data, size);
+    int rv = set_control(mbc->vfd, mreq, id, data, size);
     return !rv ? MEDIABUFS_STATUS_SUCCESS : MEDIABUFS_ERROR_OPERATION_FAILED;
 }
 
@@ -1149,13 +1373,16 @@ static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
     if (!mbc)
         return;
 
+    // Break the weak link first
+    weak_link_break(&mbc->this_wlm);
+
     polltask_delete(&mbc->pt);
 
     mediabufs_stream_off(mbc);
 
     /* Empty v4l2 buffer stash */
-    v4l2_request_buffers(mbc->vfd, mbc->src_fmt.type, 0);
-    v4l2_request_buffers(mbc->vfd, mbc->dst_fmt.type, 0);
+    request_buffers(mbc->vfd, V4L2_MEMORY_MMAP, mbc->src_fmt.type, 0);
+    request_buffers(mbc->vfd, V4L2_MEMORY_MMAP, mbc->dst_fmt.type, 0);
 
     queue_delete(mbc->dst);
     queue_delete(mbc->src);
@@ -1165,9 +1392,10 @@ static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
     free(mbc);
 }
 
-void mediabufs_ctl_ref(struct mediabufs_ctl *const mbc)
+struct mediabufs_ctl * mediabufs_ctl_ref(struct mediabufs_ctl *const mbc)
 {
     atomic_fetch_add(&mbc->ref_count, 1);
+    return mbc;
 }
 
 void mediabufs_ctl_unref(struct mediabufs_ctl **const pmbc)
@@ -1199,6 +1427,10 @@ struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, st
     mbc->pq = pq;
     pthread_mutex_init(&mbc->lock, NULL);
 
+    /* Pick a default  - could we scan for this? */
+    if (vpath == NULL)
+        vpath = "/dev/media0";
+
     mbc->vfd = open(vpath, O_RDWR);
     if (mbc->vfd == -1) {
         request_err(dc, "Failed to open video dev '%s': %s\n", vpath, strerror(errno));
@@ -1215,12 +1447,17 @@ struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, st
     mbc->pt = polltask_new(mbc->vfd, POLLIN | POLLOUT, mediabufs_poll_cb, mbc);
     if (!mbc->pt)
         goto fail3;
+    mbc->this_wlm = weak_link_new(mbc);
+    if (!mbc->this_wlm)
+        goto fail4;
 
     /* Cannot add polltask now - polling with nothing pending
      * generates infinite error polls
     */
     return mbc;
 
+fail4:
+    polltask_delete(&mbc->pt);
 fail3:
     queue_delete(mbc->dst);
 fail2:

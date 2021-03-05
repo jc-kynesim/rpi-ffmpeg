@@ -287,8 +287,10 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
     }
 
     desc->nb_objects = 1;
-    desc->objects[0].fd = req->capture.fd;
+    desc->objects[0].fd = -1;
+//    desc->objects[0].fd = req->capture.fd;
     desc->objects[0].size = req->capture.size;
+    av_log(NULL, AV_LOG_INFO, "%s: fd=%d\n", __func__, desc->objects[0].fd);
 
     desc->nb_layers = 1;
     layer->nb_planes = 2;
@@ -330,8 +332,8 @@ static int v4l2_request_queue_decode(AVCodecContext *avctx, AVFrame *frame, stru
 
     av_log(avctx, AV_LOG_DEBUG, "%s: avctx=%p used=%u controls=%d index=%d fd=%d request_fd=%d first_slice=%d last_slice=%d\n", __func__, avctx, req->output.used, count, req->capture.index, req->capture.fd, req->request_fd, first_slice, last_slice);
 
-    if (first_slice)
-        ctx->timestamp++;
+//    if (first_slice)
+//        ctx->timestamp++;
 
     ret = v4l2_request_set_controls(ctx, req->request_fd, control, count);
     if (ret < 0) {
@@ -409,8 +411,9 @@ static int v4l2_request_queue_decode(AVCodecContext *avctx, AVFrame *frame, stru
     // TODO: check errors
     // buffer.flags & V4L2_BUF_FLAG_ERROR
 
-    if (last_slice)
+    if (last_slice) {
         return v4l2_request_set_drm_descriptor(req, &ctx->format);
+    }
 
     return 0;
 
@@ -938,6 +941,9 @@ static int v4l2_request_buffer_alloc(AVCodecContext *avctx, V4L2RequestBuffer *b
 
         buf->addr = (uint8_t*)addr;
     } else {
+#if 0
+        buf->fd = -1;
+#else
         struct v4l2_exportbuffer exportbuffer = {
             .type = type,
             .index = buf->index,
@@ -951,9 +957,10 @@ static int v4l2_request_buffer_alloc(AVCodecContext *avctx, V4L2RequestBuffer *b
         }
 
         buf->fd = exportbuffer.fd;
+#endif
     }
 
-    av_log(avctx, AV_LOG_DEBUG, "%s: buf=%p index=%d fd=%d addr=%p width=%u height=%u size=%u\n", __func__, buf, buf->index, buf->fd, buf->addr, buf->width, buf->height, buf->size);
+    av_log(avctx, AV_LOG_INFO, "%s: buf=%p index=%d fd=%d addr=%p width=%u height=%u size=%u\n", __func__, buf, buf->index, buf->fd, buf->addr, buf->width, buf->height, buf->size);
     return 0;
 }
 

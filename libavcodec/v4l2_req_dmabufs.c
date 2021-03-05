@@ -18,7 +18,7 @@
 #define DMABUF_NAME2  "/dev/dma_heap/reserved"
 
 
-struct dmabufs_ctrl {
+struct dmabufs_ctl {
     int fd;
     size_t page_size;
 };
@@ -52,27 +52,38 @@ struct dmabuf_h * dmabuf_import(int fd, size_t size)
     return dh;
 }
 
-struct dmabuf_h * dmabuf_alloc(struct dmabufs_ctrl * dbsc, size_t size)
+struct dmabuf_h * dmabuf_realloc(struct dmabufs_ctl * dbsc, struct dmabuf_h * old, size_t size)
 {
-    struct dmabuf_h * dh = malloc(sizeof(*dh));
+    struct dmabuf_h * dh;
     struct dma_heap_allocation_data data = {
         .len = (size + dbsc->page_size - 1) & ~(dbsc->page_size - 1),
         .fd = 0,
         .fd_flags = O_RDWR,
         .heap_flags = 0
     };
+    int i = 0;
 
-    if (!dh || !size)
+    if (old != NULL) {
+        if (old->size == data.len) {
+            request_log("Alloc reuse fd=%d\n", dh->fd);
+            return old;
+        }
+        dmabuf_free(old);
+    }
+
+    if (size == 0 ||
+        (dh = malloc(sizeof(*dh))) == NULL)
         return NULL;
-
-    while (ioctl(dbsc->fd, DMA_HEAP_IOCTL_ALLOC, &data) == -1) {
-        if (errno == EINTR)
-            continue;
+retry:
+    while (ioctl(dbsc->fd, DMA_HEAP_IOCTL_ALLOC, &data)) {
+        int err = errno;
         request_log("Failed to alloc %" PRIu64 " from dma-heap(fd=%d): %d (%s)\n",
                 data.len,
                 dbsc->fd,
-                errno,
-                strerror(errno));
+                err,
+                strerror(err));
+        if (err == EINTR)
+            continue;
         goto fail;
     }
 
@@ -81,6 +92,11 @@ struct dmabuf_h * dmabuf_alloc(struct dmabufs_ctrl * dbsc, size_t size)
         .size = (size_t)data.len,
         .mapptr = MAP_FAILED
     };
+
+    request_log("Alloc fd=%d, size=%#zx\n", data.fd, dh->size);
+
+    if (data.fd == 0 && ++i < 5)
+        goto retry;
 
     return dh;
 
@@ -174,6 +190,8 @@ void dmabuf_len_set(struct dmabuf_h * const dh, const size_t len)
 
 void dmabuf_free(struct dmabuf_h * dh)
 {
+    request_log("%s\n", __func__);
+
     if (!dh)
         return;
 
@@ -184,9 +202,9 @@ void dmabuf_free(struct dmabuf_h * dh)
     free(dh);
 }
 
-struct dmabufs_ctrl * dmabufs_ctrl_new(void)
+struct dmabufs_ctl * dmabufs_ctl_new(void)
 {
-    struct dmabufs_ctrl * dbsc = malloc(sizeof(*dbsc));
+    struct dmabufs_ctl * dbsc = malloc(sizeof(*dbsc));
 
     if (!dbsc)
         return NULL;
@@ -215,10 +233,13 @@ fail:
     return NULL;
 }
 
-void dmabufs_ctrl_delete(struct dmabufs_ctrl * const dbsc)
+void dmabufs_ctl_delete(struct dmabufs_ctl ** const pDbsc)
 {
+    struct dmabufs_ctl * const dbsc = *pDbsc;
+
     if (!dbsc)
         return;
+    *pDbsc = NULL;
 
     while (close(dbsc->fd) == -1 && errno == EINTR)
         /* loop */;

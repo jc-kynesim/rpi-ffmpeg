@@ -23,7 +23,39 @@
 #include "hevc-ctrls.h"
 #include "v4l2_phase.h"
 
+#include "v4l2_req_devscan.h"
+#include "v4l2_req_dmabufs.h"
+#include "v4l2_req_pollqueue.h"
+#include "v4l2_req_media.h"
+#include "v4l2_req_utils.h"
+
 #define MAX_SLICES 16
+
+#include <drm_fourcc.h>
+
+#ifndef DRM_FORMAT_NV15
+#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#endif
+
+#ifndef DRM_FORMAT_NV20
+#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
+#endif
+
+// P030 should be defined in drm_fourcc.h and hopefully will be sometime
+// in the future but until then...
+#ifndef DRM_FORMAT_P030
+#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
+#endif
+
+#ifndef DRM_FORMAT_NV15
+#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#endif
+
+#ifndef DRM_FORMAT_NV20
+#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
+#endif
+
+
 
 typedef struct V4L2RequestControlsHEVC {
     struct v4l2_ctrl_hevc_sps sps;
@@ -42,7 +74,20 @@ typedef struct V4L2RequestContextHEVC {
 
     unsigned int order;
     V4L2PhaseControl * pctrl;
+
+    struct devscan *devscan;
+    struct dmabufs_ctl *dbufs;
+    struct pollqueue *pq;
+    struct media_pool * mpool;
+    struct mediabufs_ctl *mbufs;
 } V4L2RequestContextHEVC;
+
+typedef struct V4L2ReqFrameDataPrivHEVC {
+    int not_first_slice;
+    struct mediabufs_ctl *mbufs;
+    struct media_request *req;
+    struct qent_src *qe_src;  // qe_dst held in V4L2RequestDescriptor (data[0])
+} V4L2ReqFrameDataPrivHEVC;
 
 static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
@@ -319,6 +364,43 @@ static void fill_sps(struct v4l2_ctrl_hevc_sps *ctrl, const HEVCContext *h)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_STRONG_INTRA_SMOOTHING_ENABLED;
 }
 
+// Called before finally returning the frame to the user
+// Set corrupt flag here as this is actually the frame structure that
+// is going to the user (in MT land each thread has its own pool)
+static int v4l2_request_post_process(void *logctx, AVFrame *frame)
+{
+    V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)frame->data[0];
+    FrameDecodeData * const fdd = (FrameDecodeData*)frame->private_ref->data;
+    V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
+
+    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+    if (rd->qe_dst) {
+        MediaBufsStatus stat = qent_dst_wait(rd->qe_dst);
+        if (stat != MEDIABUFS_STATUS_SUCCESS) {
+            av_log(logctx, AV_LOG_ERROR, "%s: Decode fail\n", __func__);
+        }
+        mediabufs_ctl_unref(&rfdp->mbufs);
+    }
+
+    if (rd) {
+        av_log(logctx, AV_LOG_DEBUG, "%s: flags=%#x, ts=%ld.%06ld\n", __func__, rd->capture.buffer.flags,
+               rd->capture.buffer.timestamp.tv_sec, rd->capture.buffer.timestamp.tv_usec);
+        frame->flags = (rd->capture.buffer.flags & V4L2_BUF_FLAG_ERROR) == 0 ? 0 : AV_FRAME_FLAG_CORRUPT;
+    }
+
+
+
+    return 0;
+}
+
+static void v4l2_req_frame_data_priv_free(void * priv)
+{
+    V4L2ReqFrameDataPrivHEVC * const rfdp = priv;
+    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+    mediabufs_ctl_unref(&rfdp->mbufs);
+    free(rfdp);
+}
+
 static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
                                          av_unused const uint8_t *buffer,
                                          av_unused uint32_t size)
@@ -331,9 +413,11 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
                             sps->scaling_list_enable_flag ?
                             &sps->scaling_list : NULL;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
+    V4L2RequestDescriptor *const rd = (V4L2RequestDescriptor *)h->ref->frame->data[0];
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
     int rv;
 
+    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
     fill_sps(&controls->sps, h);
 
     if (sl) {
@@ -434,13 +518,145 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
 
     controls->first_slice = 1;
     controls->num_slices = 0;
+    ctx->base.timestamp++;
 
     if ((rv = ff_v4l2_request_reset_frame(avctx, h->ref->frame)) != 0)
         return rv;
 
+    {
+        FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
+        fdd->post_process = v4l2_request_post_process;
+        if (fdd->hwaccel_priv) {
+            av_log(avctx, AV_LOG_WARNING, "%s: HWaccel already allocated\n", __func__);
+        }
+        else {
+            V4L2ReqFrameDataPrivHEVC * const rfdp = av_mallocz(sizeof(*rfdp));
+            if (!rfdp)
+                return AVERROR(ENOMEM);
+            fdd->hwaccel_priv = rfdp;
+            fdd->hwaccel_priv_free = v4l2_req_frame_data_priv_free;
+
+            rfdp->mbufs = mediabufs_ctl_ref(ctx->mbufs);
+
+            rfdp->req = media_request_get(ctx->mpool);
+            if (!rfdp->req) {
+                av_log(avctx, AV_LOG_ERROR, "%s: Failed to alloc media request\n", __func__);
+                return AVERROR_UNKNOWN;
+            }
+
+            if (mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_SPS,
+                                       &controls->sps, sizeof(controls->sps)) != MEDIABUFS_STATUS_SUCCESS) {
+                av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl SPS\n", __func__);
+                return AVERROR_UNKNOWN;
+            }
+            if (mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_PPS,
+                                       &controls->pps, sizeof(controls->pps)) != MEDIABUFS_STATUS_SUCCESS) {
+                av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl PPS\n", __func__);
+                return AVERROR_UNKNOWN;
+            }
+            if (sl &&
+                mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX,
+                                       &controls->scaling_matrix, sizeof(controls->scaling_matrix)) != MEDIABUFS_STATUS_SUCCESS) {
+                av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl scaling matrix\n", __func__);
+                return AVERROR_UNKNOWN;
+            }
+
+            // qe_dst needs to be bound to the data buffer and only returned when that is
+            if (!rd->qe_dst)
+            {
+                if ((rd->qe_dst = mediabufs_dst_qent_alloc(ctx->mbufs, ctx->dbufs)) == NULL) {
+                    av_log(avctx, AV_LOG_ERROR, "%s: Failed to get dst buffer\n", __func__);
+                    return AVERROR(ENOMEM);
+                }
+            }
+        }
+    }
+
+
     ff_v4l2_request_start_phase_control(h->ref->frame, ctx->pctrl);
 
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+
+    return 0;
+}
+
+// Object fd & size will be zapped by this & need setting later
+static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_format * const format)
+{
+    AVDRMLayerDescriptor *layer = &desc->layers[0];
+    uint32_t pixelformat = V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.pixelformat : format->fmt.pix.pixelformat;
+
+    switch (pixelformat) {
+    case V4L2_PIX_FMT_NV12:
+        layer->format = DRM_FORMAT_NV12;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        break;
+#if CONFIG_SAND
+    case V4L2_PIX_FMT_NV12_COL128:
+        layer->format = DRM_FORMAT_NV12;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
+        break;
+    case V4L2_PIX_FMT_NV12_10_COL128:
+        layer->format = DRM_FORMAT_P030;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
+        break;
+#endif
+#ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
+    case V4L2_PIX_FMT_SUNXI_TILED_NV12:
+        layer->format = DRM_FORMAT_NV12;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_ALLWINNER_TILED;
+        break;
+#endif
+#if defined(V4L2_PIX_FMT_NV15) && defined(DRM_FORMAT_NV15)
+    case V4L2_PIX_FMT_NV15:
+        layer->format = DRM_FORMAT_NV15;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        break;
+#endif
+    case V4L2_PIX_FMT_NV16:
+        layer->format = DRM_FORMAT_NV16;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        break;
+#if defined(V4L2_PIX_FMT_NV20) && defined(DRM_FORMAT_NV20)
+    case V4L2_PIX_FMT_NV20:
+        layer->format = DRM_FORMAT_NV20;
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        break;
+#endif
+    default:
+        return -1;
+    }
+
+    desc->nb_objects = 1;
+    desc->objects[0].fd = -1;
+    desc->objects[0].size = 0;
+
+    desc->nb_layers = 1;
+    layer->nb_planes = 2;
+
+    layer->planes[0].object_index = 0;
+    layer->planes[0].offset = 0;
+    layer->planes[0].pitch = V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.plane_fmt[0].bytesperline : format->fmt.pix.bytesperline;
+#if CONFIG_SAND
+    if (pixelformat == V4L2_PIX_FMT_NV12_COL128) {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = format->fmt.pix.height * 128;
+        layer->planes[0].pitch = format->fmt.pix.width;
+        layer->planes[1].pitch = format->fmt.pix.width;
+    }
+    else if (pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = format->fmt.pix.height * 128;
+        layer->planes[0].pitch = format->fmt.pix.width * 2; // Lies but it keeps DRM import happy
+        layer->planes[1].pitch = format->fmt.pix.width * 2;
+    }
+    else
+#endif
+    {
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = layer->planes[0].pitch * (V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.height : format->fmt.pix.height);
+        layer->planes[1].pitch = layer->planes[0].pitch;
+    }
 
     return 0;
 }
@@ -450,6 +666,7 @@ static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
+    V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)h->ref->frame->data[0];
 
     struct v4l2_ext_control control[] = {
         {
@@ -474,8 +691,14 @@ static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
         },
     };
 
-    if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED)
-        return ff_v4l2_request_decode_slice(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control), controls->first_slice, last_slice);
+    if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED) {
+        int rv = ff_v4l2_request_decode_slice(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control), controls->first_slice, last_slice);
+
+        drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
+        rd->drm.objects[0].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, 0));
+        rd->drm.objects[0].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, 0));
+        return rv;
+    }
 
     return ff_v4l2_request_decode_frame(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control));
 }
@@ -489,6 +712,63 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     int ret, slice = FFMIN(controls->num_slices, MAX_SLICES - 1);
     int bcount = get_bits_count(&h->HEVClc->gb);
     uint32_t boff = (ptr_from_index(buffer, bcount/8 + 1) - (buffer + bcount/8 + 1)) * 8 + bcount;
+
+    FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
+    V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
+
+    if (rfdp->not_first_slice) {
+        MediaBufsStatus stat;
+
+        // Dispatch previous slice
+        stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, req->qe_dst, 0);
+        rfdp->req = NULL;
+        rfdp->qe_src = NULL;
+
+        if (stat != MEDIABUFS_STATUS_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "%s: Failed to start request\n", __func__);
+            return AVERROR_UNKNOWN;
+        }
+
+        // Get new req
+        if ((rfdp->req = media_request_get(ctx->mpool)) == NULL) {
+            av_log(avctx, AV_LOG_ERROR, "%s: Failed to alloc media request\n", __func__);
+            return AVERROR_UNKNOWN;
+        }
+    }
+    else {
+        rfdp->not_first_slice = 1;
+    }
+
+    {
+        struct v4l2_ctrl_hevc_slice_params slice_params;
+        v4l2_request_hevc_fill_slice_params(h, &slice_params);
+
+        slice_params.bit_size = size * 8;    //FIXME
+        slice_params.data_bit_offset = boff; //FIXME
+
+        if (mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS,
+                                   &slice_params, sizeof(slice_params)) != MEDIABUFS_STATUS_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl slice params\n", __func__);
+            return AVERROR_UNKNOWN;
+        }
+    }
+
+    if ((rfdp->qe_src = mediabufs_src_qent_get(rfdp->mbufs)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to get src buffer\n", __func__);
+        return AVERROR(ENOMEM);
+    }
+
+    if (qent_src_data_copy(rfdp->qe_src, buffer, size) != 0) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed data copy\n", __func__);
+        return AVERROR(ENOMEM);
+    }
+
+    {
+        struct timeval ts = {
+            .tv_usec = ctx->base.timestamp,
+        };
+        qent_src_params_set(rfdp->qe_src, &ts);
+    }
 
     if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED && slice) {
         ret = v4l2_request_hevc_queue_decode(avctx, 0);
@@ -529,25 +809,28 @@ static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx) {
 
 static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 {
-    int rv = v4l2_request_hevc_queue_decode(avctx, 1);
+    const HEVCContext * const h = avctx->priv_data;
+    FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
+    V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)h->ref->frame->data[0];
+    V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
+    MediaBufsStatus stat;
+    int rv;
+    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+
+    // Dispatch previous slice
+    stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, rd->qe_dst, 1);
+    rfdp->req = NULL;
+    rfdp->qe_src = NULL;
+
+    if (stat != MEDIABUFS_STATUS_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to start request\n", __func__);
+        return AVERROR_UNKNOWN;
+    }
+
+    rv = v4l2_request_hevc_queue_decode(avctx, 1);
     if (rv < 0)
         v4l2_request_hevc_abort_frame(avctx);
     return rv;
-}
-
-// Called before finally returning the frame to the user
-// Set corrupt flag here as this is actually the frame structure that
-// is going to the user (in MT land each thread has its own pool)
-static int v4l2_request_post_process(void *logctx, AVFrame *frame)
-{
-    V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)frame->data[0];
-    if (req) {
-        av_log(logctx, AV_LOG_DEBUG, "%s: flags=%#x, ts=%ld.%06ld\n", __func__, req->capture.buffer.flags,
-               req->capture.buffer.timestamp.tv_sec, req->capture.buffer.timestamp.tv_usec);
-        frame->flags = (req->capture.buffer.flags & V4L2_BUF_FLAG_ERROR) == 0 ? 0 : AV_FRAME_FLAG_CORRUPT;
-    }
-
-    return 0;
 }
 
 static int v4l2_request_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
@@ -562,11 +845,6 @@ static int v4l2_request_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
     ret = ff_attach_decode_data(frame);
     if (ret < 0)
         goto fail;
-
-    {
-        FrameDecodeData *fdd = (FrameDecodeData*)frame->private_ref->data;
-        fdd->post_process = v4l2_request_post_process;
-    }
 
     return 0;
 
@@ -625,6 +903,13 @@ static int v4l2_request_hevc_set_controls(AVCodecContext *avctx)
 static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
 {
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+
+    mediabufs_ctl_unref(&ctx->mbufs);
+    media_pool_delete(&ctx->mpool);
+    pollqueue_delete(&ctx->pq);
+    dmabufs_ctl_delete(&ctx->dbufs);
+    devscan_delete(&ctx->devscan);
+
     ff_v4l2_phase_control_deletez(&ctx->pctrl);
     return ff_v4l2_request_uninit(avctx);
 }
@@ -635,6 +920,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
     struct v4l2_ctrl_hevc_sps sps;
     int ret;
+    const struct decdev * decdev;
+    uint32_t src_pix_fmt = V4L2_PIX_FMT_HEVC_SLICE;
 
     struct v4l2_ext_control control[] = {
         {
@@ -647,13 +934,89 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     if ((ctx->pctrl = ff_v4l2_phase_control_new(2)) == NULL)
         return AVERROR(ENOMEM);
 
+    if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
+        return (AVERROR(-ret));
+    }
+    if ((decdev = devscan_find(ctx->devscan, src_pix_fmt)) == NULL)
+    {
+        av_log(avctx, AV_LOG_ERROR, "Failed to find a V4L2 device for H265\n");
+        goto fail0;
+    }
+    av_log(avctx, AV_LOG_ERROR, "Trying V4L2 devices: %s,%s\n",
+           decdev_media_path(decdev), decdev_video_path(decdev));
+
+    if ((ctx->dbufs = dmabufs_ctl_new()) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Unable to open dmabufs\n");
+        goto fail0;
+    }
+
+    if ((ctx->pq = pollqueue_new()) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Unable to create pollqueue\n");
+        goto fail1;
+    }
+
+    if ((ctx->mpool = media_pool_new(decdev_media_path(decdev), ctx->pq, 4)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Unable to create media pool\n");
+        goto fail2;
+    }
+
+    if ((ctx->mbufs = mediabufs_ctl_new(avctx, decdev_video_path(decdev), ctx->pq)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Unable to create media controls\n");
+        goto fail3;
+    }
+
     fill_sps(&sps, h);
+
+    if (mediabufs_src_fmt_set(ctx->mbufs, src_pix_fmt, avctx->width, avctx->height)) {
+        char tbuf1[5];
+        av_log(avctx, AV_LOG_ERROR, "Failed to set source format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), avctx->width, avctx->height);
+        goto fail4;
+    }
+
+    if (mediabufs_set_ext_ctrl(ctx->mbufs, NULL, V4L2_CID_MPEG_VIDEO_HEVC_SPS, &sps, sizeof(sps))) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to set initial SPS\n");
+        goto fail4;
+    }
+
+    if (mediabufs_dst_fmt_set(ctx->mbufs, 0 /** rt fmt **/, avctx->width, avctx->height)) {
+        char tbuf1[5];
+        av_log(avctx, AV_LOG_ERROR, "Failed to set destination format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), avctx->width, avctx->height);
+        goto fail4;
+    }
+
+    if (mediabufs_src_pool_create(ctx->mbufs, ctx->dbufs, 6)) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to create source pool\n");
+        goto fail4;
+    }
+
+    if (mediabufs_dst_slots_create(ctx->mbufs, 1)) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to create destination slots\n");
+        goto fail4;
+    }
+
+    if (mediabufs_stream_on(ctx->mbufs)) {
+        av_log(avctx, AV_LOG_ERROR, "Failed stream on\n");
+        goto fail4;
+    }
 
     ret = ff_v4l2_request_init(avctx, V4L2_PIX_FMT_HEVC_SLICE, 4 * 1024 * 1024, control, FF_ARRAY_ELEMS(control));
     if (ret)
         return ret;
 
     return v4l2_request_hevc_set_controls(avctx);
+
+fail4:
+    mediabufs_ctl_unref(&ctx->mbufs);
+fail3:
+    media_pool_delete(&ctx->mpool);
+fail2:
+    pollqueue_delete(&ctx->pq);
+fail1:
+    dmabufs_ctl_delete(&ctx->dbufs);
+fail0:
+    devscan_delete(&ctx->devscan);
+    return AVERROR(ENOMEM);
 }
 
 const AVHWAccel ff_hevc_v4l2request_hwaccel = {
