@@ -206,7 +206,7 @@ static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
     return b;
 }
 
-static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
+static void fill_slice_params(const HEVCContext *h,
                                                 struct v4l2_ctrl_hevc_slice_params *slice_params)
 {
     const HEVCFrame *pic = h->ref;
@@ -379,28 +379,22 @@ static void fill_sps(struct v4l2_ctrl_hevc_sps *ctrl, const HEVCContext *h)
 // Called before finally returning the frame to the user
 // Set corrupt flag here as this is actually the frame structure that
 // is going to the user (in MT land each thread has its own pool)
-static int v4l2_request_post_process(void *logctx, AVFrame *frame)
+static int frame_post_process(void *logctx, AVFrame *frame)
 {
     V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)frame->data[0];
     FrameDecodeData * const fdd = (FrameDecodeData*)frame->private_ref->data;
     V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
 
     av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+    frame->flags &= ~AV_FRAME_FLAG_CORRUPT;
     if (rd->qe_dst) {
         MediaBufsStatus stat = qent_dst_wait(rd->qe_dst);
         if (stat != MEDIABUFS_STATUS_SUCCESS) {
             av_log(logctx, AV_LOG_ERROR, "%s: Decode fail\n", __func__);
+            frame->flags |= AV_FRAME_FLAG_CORRUPT;
         }
         mediabufs_ctl_unref(&rfdp->mbufs);
     }
-
-    if (rd) {
-        av_log(logctx, AV_LOG_DEBUG, "%s: flags=%#x, ts=%ld.%06ld\n", __func__, rd->capture.buffer.flags,
-               rd->capture.buffer.timestamp.tv_sec, rd->capture.buffer.timestamp.tv_usec);
-        frame->flags = (rd->capture.buffer.flags & V4L2_BUF_FLAG_ERROR) == 0 ? 0 : AV_FRAME_FLAG_CORRUPT;
-    }
-
-
 
     return 0;
 }
@@ -537,7 +531,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
 
     {
         FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
-        fdd->post_process = v4l2_request_post_process;
+        fdd->post_process = frame_post_process;
         if (fdd->hwaccel_priv) {
             av_log(avctx, AV_LOG_WARNING, "%s: HWaccel already allocated\n", __func__);
         }
@@ -585,7 +579,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     }
 
 
-    ff_v4l2_request_start_phase_control(h->ref->frame, ctx->pctrl);
+//    ff_v4l2_request_start_phase_control(h->ref->frame, ctx->pctrl);
 
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
 
@@ -673,7 +667,7 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     return 0;
 }
 
-static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
+static int queue_decode(AVCodecContext *avctx, int last_slice)
 {
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
@@ -704,7 +698,8 @@ static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
     };
 
     if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED) {
-        int rv = ff_v4l2_request_decode_slice(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control), controls->first_slice, last_slice);
+//        int rv = ff_v4l2_request_decode_slice(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control), controls->first_slice, last_slice);
+        int rv = 0;
 
         drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
         rd->drm.objects[0].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, 0));
@@ -712,7 +707,9 @@ static int v4l2_request_hevc_queue_decode(AVCodecContext *avctx, int last_slice)
         return rv;
     }
 
-    return ff_v4l2_request_decode_frame(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control));
+    av_log(avctx, AV_LOG_ERROR, "%s: NIF\n", __func__);
+    return AVERROR_BUG;
+//    return ff_v4l2_request_decode_frame(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control));
 }
 
 static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
@@ -753,7 +750,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
 
     {
         struct v4l2_ctrl_hevc_slice_params slice_params;
-        v4l2_request_hevc_fill_slice_params(h, &slice_params);
+        fill_slice_params(h, &slice_params);
 
         slice_params.bit_size = size * 8;    //FIXME
         slice_params.data_bit_offset = boff; //FIXME
@@ -784,29 +781,32 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     }
 
     if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED && slice) {
-        ret = v4l2_request_hevc_queue_decode(avctx, 0);
+        ret = queue_decode(avctx, 0);
         if (ret)
             return ret;
 
-        ff_v4l2_request_reset_frame(avctx, h->ref->frame);
+// *** ???
+//        ff_v4l2_request_reset_frame(avctx, h->ref->frame);
         slice = controls->num_slices = 0;
         controls->first_slice = 0;
     }
 
-    v4l2_request_hevc_fill_slice_params(h, &controls->slice_params[slice]);
+    fill_slice_params(h, &controls->slice_params[slice]);
 
     if (ctx->start_code == V4L2_MPEG_VIDEO_HEVC_START_CODE_ANNEX_B) {
         // ?? Do we really not need the nal type ??
-        ret = ff_v4l2_request_append_output_buffer(avctx, h->ref->frame, nalu_slice_start_code, 3);
-        if (ret)
-            return ret;
+        av_log(avctx, AV_LOG_ERROR, "%s: NIF\n", __func__);
+
+//        ret = ff_v4l2_request_append_output_buffer(avctx, h->ref->frame, nalu_slice_start_code, 3);
+//        if (ret)
+//            return ret;
     }
     boff += req->output.used * 8;
-
+#if 0
     ret = ff_v4l2_request_append_output_buffer(avctx, h->ref->frame, buffer, size);
     if (ret)
         return ret;
-
+#endif
     controls->slice_params[slice].bit_size = req->output.used * 8; //FIXME
     controls->slice_params[slice].data_bit_offset = boff; //FIXME
     controls->num_slices++;
@@ -814,10 +814,10 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
 }
 
 static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx) {
-    const HEVCContext *h = avctx->priv_data;
+//    const HEVCContext *h = avctx->priv_data;
 
-    if (h->ref != NULL)
-        ff_v4l2_request_abort_phase_control(h->ref->frame);
+//    if (h->ref != NULL)
+//        ff_v4l2_request_abort_phase_control(h->ref->frame);
 }
 
 static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
@@ -840,12 +840,13 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
         return AVERROR_UNKNOWN;
     }
 
-    rv = v4l2_request_hevc_queue_decode(avctx, 1);
+    rv = queue_decode(avctx, 1);
     if (rv < 0)
         v4l2_request_hevc_abort_frame(avctx);
     return rv;
 }
 
+#if 0
 static int v4l2_request_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
 {
     int ret;
@@ -869,48 +870,52 @@ fail:
 
     return ret;
 }
+#endif
 
-static int v4l2_request_hevc_set_controls(AVCodecContext *avctx)
+static int set_controls(AVCodecContext *avctx)
 {
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
     int ret;
 
-    struct v4l2_ext_control control[] = {
+    struct v4l2_query_ext_ctrl querys[] = {
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_DECODE_MODE, },
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_START_CODE, },
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS, },
+    };
+
+    struct v4l2_ext_control ctrls[] = {
         { .id = V4L2_CID_MPEG_VIDEO_HEVC_DECODE_MODE, },
         { .id = V4L2_CID_MPEG_VIDEO_HEVC_START_CODE, },
     };
-    struct v4l2_query_ext_ctrl slice_params = {
-        .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS,
-    };
 
-    ctx->decode_mode = ff_v4l2_request_query_control_default_value(avctx, V4L2_CID_MPEG_VIDEO_HEVC_DECODE_MODE);
+    mediabufs_ctl_query_ext_ctrls(ctx->mbufs, querys, FF_ARRAY_ELEMS(querys));
+
+    ctx->decode_mode = querys[0].default_value;
+
     if (ctx->decode_mode != V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED &&
         ctx->decode_mode != V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_FRAME_BASED) {
         av_log(avctx, AV_LOG_ERROR, "%s: unsupported decode mode, %d\n", __func__, ctx->decode_mode);
         return AVERROR(EINVAL);
     }
 
-    ctx->start_code = ff_v4l2_request_query_control_default_value(avctx, V4L2_CID_MPEG_VIDEO_HEVC_START_CODE);
+    ctx->start_code = querys[1].default_value;
     if (ctx->start_code != V4L2_MPEG_VIDEO_HEVC_START_CODE_NONE &&
         ctx->start_code != V4L2_MPEG_VIDEO_HEVC_START_CODE_ANNEX_B) {
         av_log(avctx, AV_LOG_ERROR, "%s: unsupported start code, %d\n", __func__, ctx->start_code);
         return AVERROR(EINVAL);
     }
 
-    ret = ff_v4l2_request_query_control(avctx, &slice_params);
-    if (ret)
-        return ret;
-
-    ctx->max_slices = slice_params.elems;
+    ctx->max_slices = querys[2].elems;
     if (ctx->max_slices > MAX_SLICES) {
         av_log(avctx, AV_LOG_ERROR, "%s: unsupported max slices, %d\n", __func__, ctx->max_slices);
         return AVERROR(EINVAL);
     }
 
-    control[0].value = ctx->decode_mode;
-    control[1].value = ctx->start_code;
+    ctrls[0].value = ctx->decode_mode;
+    ctrls[1].value = ctx->start_code;
 
-    return ff_v4l2_request_set_controls(avctx, control, FF_ARRAY_ELEMS(control));
+    ret = mediabufs_ctl_set_ext_ctrls(ctx->mbufs, NULL, ctrls, FF_ARRAY_ELEMS(ctrls));
+    return !ret ? 0 : AVERROR(-ret);
 }
 
 static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
@@ -923,7 +928,7 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     dmabufs_ctl_delete(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
 
-    ff_v4l2_phase_control_deletez(&ctx->pctrl);
+//    ff_v4l2_phase_control_deletez(&ctx->pctrl);
     return ff_v4l2_request_uninit(avctx);
 }
 
@@ -944,8 +949,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         },
     };
 
-    if ((ctx->pctrl = ff_v4l2_phase_control_new(2)) == NULL)
-        return AVERROR(ENOMEM);
+//    if ((ctx->pctrl = ff_v4l2_phase_control_new(2)) == NULL)
+//        return AVERROR(ENOMEM);
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
@@ -1017,7 +1022,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     if (ret)
         return ret;
 
-    return v4l2_request_hevc_set_controls(avctx);
+    return set_controls(avctx);
 
 fail4:
     mediabufs_ctl_unref(&ctx->mbufs);
@@ -1037,7 +1042,7 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_HEVC,
     .pix_fmt        = AV_PIX_FMT_DRM_PRIME,
-    .alloc_frame    = v4l2_request_hevc_alloc_frame,
+//    .alloc_frame    = v4l2_request_hevc_alloc_frame,
     .start_frame    = v4l2_request_hevc_start_frame,
     .decode_slice   = v4l2_request_hevc_decode_slice,
     .end_frame      = v4l2_request_hevc_end_frame,

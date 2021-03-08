@@ -29,6 +29,7 @@ e.h
 #include <stdint.h>
 
 struct v4l2_format;
+struct v4l2_query_ext_ctrl;
 
 struct pollqueue;
 struct media_request;
@@ -105,16 +106,22 @@ MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
                const unsigned int width,
                const unsigned int height);
 struct qent_src *mediabufs_src_qent_get(struct mediabufs_ctl *const mbc);
+
+int mediabufs_ctl_set_ext_ctrls(struct mediabufs_ctl * mbc, struct media_request * const mreq,
+                                struct v4l2_ext_control control_array[], unsigned int n);
 MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
                 struct media_request * const mreq,
                 unsigned int id, void *data,
                 unsigned int size);
+int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl ctrls[], unsigned int n);
+
 MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
                    const uint32_t pixfmt,
                    const uint32_t width, const uint32_t height);
 MediaBufsStatus mediabufs_src_pool_create(struct mediabufs_ctl *const rw,
                   struct dmabufs_ctl * const dbsc,
                   unsigned int n);
+
 struct mediabufs_ctl * mediabufs_ctl_new(void * const dc,
                      const char *vpath, struct pollqueue *const pq);
 void mediabufs_ctl_unref(struct mediabufs_ctl **const pmbc);

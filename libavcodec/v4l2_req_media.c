@@ -212,39 +212,6 @@ static int request_buffers(int video_fd, unsigned int type,
     return 0;
 }
 
-static int set_control(int video_fd,
-             struct media_request * const mreq,
-             unsigned int id, void *data,
-             unsigned int size)
-{
-    struct v4l2_ext_control control;
-    struct v4l2_ext_controls controls;
-    int rc;
-
-    memset(&control, 0, sizeof(control));
-    memset(&controls, 0, sizeof(controls));
-
-    control.id = id;
-    control.ptr = data;
-    control.size = size;
-
-    controls.controls = &control;
-    controls.count = 1;
-
-    if (mreq) {
-        controls.which = V4L2_CTRL_WHICH_REQUEST_VAL;
-        controls.request_fd = media_request_fd(mreq);
-    }
-
-    rc = ioctl(video_fd, VIDIOC_S_EXT_CTRLS, &controls);
-    if (rc < 0) {
-        rc = -errno;
-        request_log("Unable to set control %d: %s\n", id, strerror(-rc));
-        return rc;
-    }
-
-    return 0;
-}
 
 static int set_stream(int video_fd, unsigned int type, bool enable)
 {
@@ -1340,12 +1307,42 @@ MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc)
     return status;
 }
 
+int mediabufs_ctl_set_ext_ctrls(struct mediabufs_ctl * mbc, struct media_request * const mreq, struct v4l2_ext_control control_array[], unsigned int n)
+{
+    struct v4l2_ext_controls controls = {
+        .controls = control_array,
+        .count = n
+    };
+
+    if (mreq) {
+        controls.which = V4L2_CTRL_WHICH_REQUEST_VAL;
+        controls.request_fd = media_request_fd(mreq);
+    }
+
+    while (ioctl(mbc->vfd, VIDIOC_S_EXT_CTRLS, &controls))
+    {
+        const int err = errno;
+        if (err != EINTR) {
+            request_err(mbc->dc, "Unable to set controls: %s\n", strerror(err));
+            return -err;
+        }
+    }
+
+    return 0;
+}
+
 MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
                 struct media_request * const mreq,
                 unsigned int id, void *data,
                 unsigned int size)
 {
-    int rv = set_control(mbc->vfd, mreq, id, data, size);
+    struct v4l2_ext_control control = {
+        .id = id,
+        .ptr = data,
+        .size = size
+    };
+
+    int rv = mediabufs_ctl_set_ext_ctrls(mbc, mreq, &control, 1);
     return !rv ? MEDIABUFS_STATUS_SUCCESS : MEDIABUFS_ERROR_OPERATION_FAILED;
 }
 
@@ -1366,6 +1363,24 @@ MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
         }
 
     return MEDIABUFS_STATUS_SUCCESS;
+}
+
+int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl ctrls[], unsigned int n)
+{
+    int rv = 0;
+    while (n--) {
+        while (ioctl(mbc->vfd, VIDIOC_QUERY_EXT_CTRL, ctrls)) {
+            const int err = errno;
+            if (err != EINTR) {
+                request_err(mbc->dc, "Failed to query ext id=%#x, err=%d\n", ctrls->id, err);
+                ctrls->type = 0; // 0 is invalid
+                rv = -err;
+                break;
+            }
+        }
+        ++ctrls;
+    }
+    return rv;
 }
 
 static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
