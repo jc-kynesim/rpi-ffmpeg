@@ -61,6 +61,7 @@ typedef struct V4L2RequestDescriptor {
     V4L2RequestBuffer capture;
 
     // Media
+    uint64_t timestamp;
     struct qent_dst * qe_dst;
 
     // Phase control

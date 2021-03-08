@@ -91,7 +91,19 @@ typedef struct V4L2ReqFrameDataPrivHEVC {
 
 static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
-static void v4l2_request_hevc_fill_pred_table(const HEVCContext *h, struct v4l2_hevc_pred_weight_table *table)
+static inline uint64_t frame_capture_timestamp(const AVFrame * const frame)
+{
+    const V4L2RequestDescriptor *const rd = (V4L2RequestDescriptor *)frame->data[0];
+    return rd->timestamp;
+}
+
+static inline void frame_set_capture_timestamp(AVFrame * const frame, const uint64_t timestamp)
+{
+    V4L2RequestDescriptor *const rd = (V4L2RequestDescriptor *)frame->data[0];
+    rd->timestamp = timestamp;
+}
+
+static void fill_pred_table(const HEVCContext *h, struct v4l2_hevc_pred_weight_table *table)
 {
     int32_t luma_weight_denom, chroma_weight_denom;
     const SliceHeader *sh = &h->sh;
@@ -138,19 +150,19 @@ static int find_frame_rps_type(const HEVCContext *h, uint64_t timestamp)
 
     for (i = 0; i < h->rps[ST_CURR_BEF].nb_refs; i++) {
         frame = h->rps[ST_CURR_BEF].ref[i];
-        if (frame && timestamp == ff_v4l2_request_get_capture_timestamp(frame->frame))
+        if (frame && timestamp == frame_capture_timestamp(frame->frame))
             return V4L2_HEVC_DPB_ENTRY_RPS_ST_CURR_BEFORE;
     }
 
     for (i = 0; i < h->rps[ST_CURR_AFT].nb_refs; i++) {
         frame = h->rps[ST_CURR_AFT].ref[i];
-        if (frame && timestamp == ff_v4l2_request_get_capture_timestamp(frame->frame))
+        if (frame && timestamp == frame_capture_timestamp(frame->frame))
             return V4L2_HEVC_DPB_ENTRY_RPS_ST_CURR_AFTER;
     }
 
     for (i = 0; i < h->rps[LT_CURR].nb_refs; i++) {
         frame = h->rps[LT_CURR].ref[i];
-        if (frame && timestamp == ff_v4l2_request_get_capture_timestamp(frame->frame))
+        if (frame && timestamp == frame_capture_timestamp(frame->frame))
             return V4L2_HEVC_DPB_ENTRY_RPS_LT_CURR;
     }
 
@@ -165,7 +177,7 @@ static uint8_t get_ref_pic_index(const HEVCContext *h, const HEVCFrame *frame,
     if (!frame)
         return 0;
 
-    timestamp = ff_v4l2_request_get_capture_timestamp(frame->frame);
+    timestamp = frame_capture_timestamp(frame->frame);
 
     for (uint8_t i = 0; i < slice_params->num_active_dpb_entries; i++) {
         struct v4l2_hevc_dpb_entry *entry = &slice_params->dpb[i];
@@ -271,7 +283,7 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
         if (frame != pic && (frame->flags & (HEVC_FRAME_FLAG_LONG_REF | HEVC_FRAME_FLAG_SHORT_REF))) {
             struct v4l2_hevc_dpb_entry *entry = &slice_params->dpb[entries++];
 
-            entry->timestamp = ff_v4l2_request_get_capture_timestamp(frame->frame);
+            entry->timestamp = frame_capture_timestamp(frame->frame);
             entry->rps = find_frame_rps_type(h, entry->timestamp);
             entry->field_pic = frame->frame->interlaced_frame;
 
@@ -295,7 +307,7 @@ static void v4l2_request_hevc_fill_slice_params(const HEVCContext *h,
             slice_params->ref_idx_l1[i] = get_ref_pic_index(h, rpl->ref[i], slice_params);
     }
 
-    v4l2_request_hevc_fill_pred_table(h, &slice_params->pred_weight_table);
+    fill_pred_table(h, &slice_params->pred_weight_table);
 
     slice_params->num_entry_point_offsets = sh->num_entry_point_offsets;
     if (slice_params->num_entry_point_offsets > 256) {
@@ -767,6 +779,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         struct timeval ts = {
             .tv_usec = ctx->base.timestamp,
         };
+        frame_set_capture_timestamp(h->ref->frame, ctx->base.timestamp * 1000); // dpb timestamps are in ns
         qent_src_params_set(rfdp->qe_src, &ts);
     }
 
