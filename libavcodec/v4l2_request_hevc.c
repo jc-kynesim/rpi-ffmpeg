@@ -1018,7 +1018,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    ret = ff_v4l2_request_init(avctx, V4L2_PIX_FMT_HEVC_SLICE, 4 * 1024 * 1024, control, FF_ARRAY_ELEMS(control));
+    ret = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_DRM);
+//    ret = ff_v4l2_request_init(avctx, V4L2_PIX_FMT_HEVC_SLICE, 4 * 1024 * 1024, control, FF_ARRAY_ELEMS(control));
     if (ret)
         return ret;
 
@@ -1037,6 +1038,135 @@ fail0:
     return AVERROR(ENOMEM);
 }
 
+
+
+
+static void v4l2_req_frame_free(void *opaque, uint8_t *data)
+{
+    AVCodecContext *avctx = opaque;
+    V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)data;
+
+    av_log(NULL, AV_LOG_DEBUG, "%s: avctx=%p data=%p request_fd=%d\n", __func__, avctx, data, req->request_fd);
+
+    if (req->request_fd >= 0)
+        close(req->request_fd);
+
+//    v4l2_request_buffer_free(&req->capture);
+//    v4l2_request_buffer_free(&req->output);
+
+    av_free(data);
+}
+
+static AVBufferRef *v4l2_req_frame_alloc(void *opaque, int size)
+{
+    AVCodecContext *avctx = opaque;
+    V4L2RequestContext *ctx = avctx->internal->hwaccel_priv_data;
+    V4L2RequestDescriptor *req;
+    AVBufferRef *ref;
+    uint8_t *data;
+    int ret;
+
+    data = av_mallocz(size);
+    if (!data)
+        return NULL;
+
+    av_log(avctx, AV_LOG_DEBUG, "%s: avctx=%p size=%d data=%p\n", __func__, avctx, size, data);
+    ref = av_buffer_create(data, size, v4l2_req_frame_free, avctx, 0);
+    if (!ref) {
+        av_freep(&data);
+        return NULL;
+    }
+    req = (V4L2RequestDescriptor*)data;
+    req->request_fd = -1;
+    req->output.fd = -1;
+    req->capture.fd = -1;
+#if 0
+    ret = v4l2_request_buffer_alloc(avctx, &req->output, ctx->output_type);
+    if (ret < 0) {
+        av_buffer_unref(&ref);
+        return NULL;
+    }
+
+    ret = v4l2_request_buffer_alloc(avctx, &req->capture, ctx->format.type);
+    if (ret < 0) {
+        av_buffer_unref(&ref);
+        return NULL;
+    }
+
+    ret = ioctl(ctx->media_fd, MEDIA_IOC_REQUEST_ALLOC, &req->request_fd);
+    if (ret < 0) {
+        av_log(avctx, AV_LOG_ERROR, "%s: request alloc failed, %s (%d)\n", __func__, strerror(errno), errno);
+        av_buffer_unref(&ref);
+        return NULL;
+    }
+#endif
+    av_log(avctx, AV_LOG_INFO, "%s: avctx=%p size=%d data=%p request_fd=%d\n", __func__, avctx, size, data, req->request_fd);
+    return ref;
+}
+
+static void v4l2_req_pool_free(void *opaque)
+{
+    av_log(NULL, AV_LOG_DEBUG, "%s: opaque=%p\n", __func__, opaque);
+}
+
+static void v4l2_req_hwframe_ctx_free(AVHWFramesContext *hwfc)
+{
+    av_log(NULL, AV_LOG_DEBUG, "%s: hwfc=%p pool=%p\n", __func__, hwfc, hwfc->pool);
+
+    av_buffer_pool_flush(hwfc->pool);
+    av_buffer_pool_uninit(&hwfc->pool);
+}
+
+static int v4l2_req_hevc_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
+{
+    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
+    AVHWFramesContext *hwfc = (AVHWFramesContext*)hw_frames_ctx->data;
+    const struct v4l2_format *vfmt = mediabufs_dst_fmt(ctx->mbufs);
+
+    hwfc->format = AV_PIX_FMT_DRM_PRIME;
+    hwfc->sw_format = AV_PIX_FMT_NV12;
+    if (V4L2_TYPE_IS_MULTIPLANAR(vfmt->type)) {
+        hwfc->width = vfmt->fmt.pix_mp.width;
+        hwfc->height = vfmt->fmt.pix_mp.height;
+    } else {
+        hwfc->width = vfmt->fmt.pix.width;
+        hwfc->height = vfmt->fmt.pix.height;
+#if CONFIG_SAND
+        if (vfmt->fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_COL128) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_8;
+        }
+        else if (vfmt->fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_10;
+        }
+#endif
+    }
+
+    hwfc->pool = av_buffer_pool_init2(sizeof(V4L2RequestDescriptor), avctx, v4l2_req_frame_alloc, v4l2_req_pool_free);
+    if (!hwfc->pool)
+        return AVERROR(ENOMEM);
+
+    hwfc->free = v4l2_req_hwframe_ctx_free;
+
+    hwfc->initial_pool_size = 1;
+
+    switch (avctx->codec_id) {
+    case AV_CODEC_ID_VP9:
+        hwfc->initial_pool_size += 8;
+        break;
+    case AV_CODEC_ID_VP8:
+        hwfc->initial_pool_size += 3;
+        break;
+    default:
+        hwfc->initial_pool_size += 2;
+    }
+
+    av_log(avctx, AV_LOG_INFO, "%s: avctx=%p ctx=%p hw_frames_ctx=%p hwfc=%p pool=%p width=%d height=%d initial_pool_size=%d\n", __func__, avctx, ctx, hw_frames_ctx, hwfc, hwfc->pool, hwfc->width, hwfc->height, hwfc->initial_pool_size);
+
+    return 0;
+}
+
+
+
 const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .name           = "hevc_v4l2request",
     .type           = AVMEDIA_TYPE_VIDEO,
@@ -1051,6 +1181,6 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .init           = v4l2_request_hevc_init,
     .uninit         = v4l2_request_hevc_uninit,
     .priv_data_size = sizeof(V4L2RequestContextHEVC),
-    .frame_params   = ff_v4l2_request_frame_params,
+    .frame_params   = v4l2_req_hevc_frame_params,
     .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_MT_SAFE,
 };
