@@ -570,29 +570,6 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
 
             rfdp->mbufs = mediabufs_ctl_ref(ctx->mbufs);
 
-            rfdp->req = media_request_get(ctx->mpool);
-            if (!rfdp->req) {
-                av_log(avctx, AV_LOG_ERROR, "%s: Failed to alloc media request\n", __func__);
-                return AVERROR_UNKNOWN;
-            }
-
-            if (mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_SPS,
-                                       &controls->sps, sizeof(controls->sps)) != MEDIABUFS_STATUS_SUCCESS) {
-                av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl SPS\n", __func__);
-                return AVERROR_UNKNOWN;
-            }
-            if (mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_PPS,
-                                       &controls->pps, sizeof(controls->pps)) != MEDIABUFS_STATUS_SUCCESS) {
-                av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl PPS\n", __func__);
-                return AVERROR_UNKNOWN;
-            }
-            if (sl &&
-                mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX,
-                                       &controls->scaling_matrix, sizeof(controls->scaling_matrix)) != MEDIABUFS_STATUS_SUCCESS) {
-                av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl scaling matrix\n", __func__);
-                return AVERROR_UNKNOWN;
-            }
-
             // qe_dst needs to be bound to the data buffer and only returned when that is
             if (!rd->qe_dst)
             {
@@ -693,13 +670,12 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     return 0;
 }
 
-#if 0
-static int queue_decode(AVCodecContext *avctx, int last_slice)
+static int set_req_ctls(AVCodecContext *avctx, struct media_request * const mreq)
 {
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
-    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
+    int rv;
 
     struct v4l2_ext_control control[] = {
         {
@@ -713,32 +689,23 @@ static int queue_decode(AVCodecContext *avctx, int last_slice)
             .size = sizeof(controls->pps),
         },
         {
-            .id = V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX,
-            .ptr = &controls->scaling_matrix,
-            .size = sizeof(controls->scaling_matrix),
-        },
-        {
             .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS,
             .ptr = &controls->slice_params,
             .size = sizeof(controls->slice_params[0]) * FFMAX(FFMIN(controls->num_slices, MAX_SLICES), ctx->max_slices),
         },
+        // *** Make optional
+        {
+            .id = V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX,
+            .ptr = &controls->scaling_matrix,
+            .size = sizeof(controls->scaling_matrix),
+        },
     };
 
-    if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED) {
-//        int rv = ff_v4l2_request_decode_slice(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control), controls->first_slice, last_slice);
-        int rv = 0;
-
-        drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
-        rd->drm.objects[0].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, 0));
-        rd->drm.objects[0].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, 0));
-        return rv;
-    }
-
-    av_log(avctx, AV_LOG_ERROR, "%s: NIF\n", __func__);
-    return AVERROR_BUG;
+    rv = mediabufs_ctl_set_ext_ctrls(ctx->mbufs, mreq, control, FF_ARRAY_ELEMS(control));
 //    return ff_v4l2_request_decode_frame(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control));
+
+    return rv;
 }
-#endif
 
 static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
 {
@@ -757,18 +724,15 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         MediaBufsStatus stat;
 
         // Dispatch previous slice
-        stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, req->qe_dst, 0);
+//        stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, req->qe_dst, 0);
+        stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src,
+                                       controls->first_slice ? req->qe_dst : NULL, 0);
         rfdp->req = NULL;
         rfdp->qe_src = NULL;
+        controls->first_slice = 0;
 
         if (stat != MEDIABUFS_STATUS_SUCCESS) {
             av_log(avctx, AV_LOG_ERROR, "%s: Failed to start request\n", __func__);
-            return AVERROR_UNKNOWN;
-        }
-
-        // Get new req
-        if ((rfdp->req = media_request_get(ctx->mpool)) == NULL) {
-            av_log(avctx, AV_LOG_ERROR, "%s: Failed to alloc media request\n", __func__);
             return AVERROR_UNKNOWN;
         }
     }
@@ -776,19 +740,24 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         rfdp->not_first_slice = 1;
     }
 
-    {
-        struct v4l2_ctrl_hevc_slice_params slice_params;
-        fill_slice_params(h, &slice_params);
 
-        slice_params.bit_size = size * 8;    //FIXME
-        slice_params.data_bit_offset = boff; //FIXME
-
-        if (mediabufs_set_ext_ctrl(rfdp->mbufs, rfdp->req, V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS,
-                                   &slice_params, sizeof(slice_params)) != MEDIABUFS_STATUS_SUCCESS) {
-            av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl slice params\n", __func__);
-            return AVERROR_UNKNOWN;
-        }
+    // Get new req
+    if ((rfdp->req = media_request_get(ctx->mpool)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to alloc media request\n", __func__);
+        return AVERROR_UNKNOWN;
     }
+
+    fill_slice_params(h, controls->slice_params + slice);
+
+    controls->slice_params[slice].bit_size = size * 8;    //FIXME
+    controls->slice_params[slice].data_bit_offset = boff; //FIXME
+
+    controls->num_slices++;
+    if (set_req_ctls(avctx, rfdp->req)) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to set ext ctrl slice params\n", __func__);
+        return AVERROR_UNKNOWN;
+    }
+    controls->num_slices = 0;
 
     if ((rfdp->qe_src = mediabufs_src_qent_get(rfdp->mbufs)) == NULL) {
         av_log(avctx, AV_LOG_ERROR, "%s: Failed to get src buffer\n", __func__);
@@ -806,17 +775,6 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         };
         frame_set_capture_timestamp(h->ref->frame, ctx->timestamp * 1000); // dpb timestamps are in ns
         qent_src_params_set(rfdp->qe_src, &ts);
-    }
-
-    if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED && slice) {
-//        ret = queue_decode(avctx, 0);
-//        if (ret)
-//            return ret;
-
-// *** ???
-//        ff_v4l2_request_reset_frame(avctx, h->ref->frame);
-        slice = controls->num_slices = 0;
-        controls->first_slice = 0;
     }
 
     fill_slice_params(h, &controls->slice_params[slice]);
@@ -837,7 +795,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
 #endif
 //    controls->slice_params[slice].bit_size = req->output.used * 8; //FIXME
 //    controls->slice_params[slice].data_bit_offset = boff; //FIXME
-    controls->num_slices++;
+//    controls->num_slices++;
     return 0;
 }
 
@@ -856,10 +814,11 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
     MediaBufsStatus stat;
+    V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
 //    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
 
     // Dispatch previous slice
-    stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, rd->qe_dst, 1);
+    stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, controls->first_slice ? rd->qe_dst : NULL, 1);
     rfdp->req = NULL;
     rfdp->qe_src = NULL;
 
