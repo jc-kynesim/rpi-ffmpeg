@@ -45,6 +45,45 @@
 #include "v4l2_req_utils.h"
 
 
+/* floor(log2(x)) */
+static unsigned int log2_size(size_t x)
+{
+    unsigned int n = 0;
+
+    if (x & ~0xffff) {
+        n += 16;
+        x >>= 16;
+    }
+    if (x & ~0xff) {
+        n += 8;
+        x >>= 8;
+    }
+    if (x & ~0xf) {
+        n += 4;
+        x >>= 4;
+    }
+    if (x & ~3) {
+        n += 2;
+        x >>= 2;
+    }
+    return (x & ~1) ? n + 1 : n;
+}
+
+static size_t round_up_size(const size_t x)
+{
+    /* Admit no size < 256 */
+    const unsigned int n = x < 256 ? 8 : log2_size(x) - 1;
+
+    return x >= (3 << n) ? 4 << n : (3 << n);
+}
+
+static size_t next_size(const size_t x)
+{
+    return round_up_size(x + 1);
+}
+
+
+
 
 struct weak_link_master {
     atomic_int ref_count;    /* 0 is single ref for easier atomics */
@@ -807,14 +846,20 @@ int qent_src_params_set(struct qent_src *const be_src, const struct timeval * ti
     return 0;
 }
 
-int qent_src_data_copy(struct qent_src *const be_src, const void *const src, const size_t len)
+int qent_src_data_copy(struct qent_src *const be_src, const void *const src, const size_t len, struct dmabufs_ctl * dbsc)
 {
     void * dst;
     struct qent_base *const be = &be_src->base;
 
-    if (len > dmabuf_size(be->dh[0])) {
-        request_log("%s: Overrun %d > %d\n", __func__, len, dmabuf_size(be->dh[0]));
-        return -1;
+    if (!be->dh[0] || len > dmabuf_size(be->dh[0])) {
+        size_t newsize = round_up_size(len);
+        int rv;
+        request_log("%s: Overrun %d > %d; trying %d\n", __func__, len, dmabuf_size(be->dh[0]), newsize);
+        if (dbsc &&
+            (be->dh[0] = dmabuf_realloc(dbsc, be->dh[0], newsize)) == NULL) {
+            request_log("%s: Realloc %d failed\n", __func__, newsize);
+            return -ENOMEM;
+        }
     }
     dmabuf_write_start(be->dh[0]);
     dst = dmabuf_map(be->dh[0]);

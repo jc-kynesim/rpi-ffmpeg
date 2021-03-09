@@ -70,7 +70,8 @@ struct dmabuf_h;
 struct dmabufs_ctl;
 
 int qent_src_params_set(struct qent_src *const be, const struct timeval * timestamp);
-int qent_src_data_copy(struct qent_src *const be, const void *const src, const size_t len);
+// dbsc may be NULL if realloc not required
+int qent_src_data_copy(struct qent_src *const be_src, const void *const src, const size_t len, struct dmabufs_ctl * dbsc);
 const struct dmabuf_h * qent_dst_dmabuf(const struct qent_dst *const be, unsigned int plane);
 int qent_dst_dup_fd(const struct qent_dst *const be, unsigned int plane);
 MediaBufsStatus qent_dst_wait(struct qent_dst *const be);

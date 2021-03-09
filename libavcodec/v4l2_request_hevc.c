@@ -376,6 +376,115 @@ static void fill_sps(struct v4l2_ctrl_hevc_sps *ctrl, const HEVCContext *h)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_STRONG_INTRA_SMOOTHING_ENABLED;
 }
 
+static void fill_scaling_matrix(const ScalingList * const sl,
+                                struct v4l2_ctrl_hevc_scaling_matrix * const sm)
+{
+    unsigned int i;
+
+    for (i = 0; i < 6; i++) {
+        unsigned int j;
+
+        for (j = 0; j < 16; j++)
+            sm->scaling_list_4x4[i][j] = sl->sl[0][i][j];
+        for (j = 0; j < 64; j++) {
+            sm->scaling_list_8x8[i][j]   = sl->sl[1][i][j];
+            sm->scaling_list_16x16[i][j] = sl->sl[2][i][j];
+            if (i < 2)
+                sm->scaling_list_32x32[i][j] = sl->sl[3][i * 3][j];
+        }
+        sm->scaling_list_dc_coef_16x16[i] = sl->sl_dc[0][i];
+        if (i < 2)
+            sm->scaling_list_dc_coef_32x32[i] = sl->sl_dc[1][i * 3];
+    }
+}
+
+static void fill_pps(const HEVCPPS * const pps, struct v4l2_ctrl_hevc_pps * const ctrl)
+{
+    uint64_t flags = 0;
+
+    if (pps->dependent_slice_segments_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_DEPENDENT_SLICE_SEGMENT;
+
+    if (pps->output_flag_present_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_OUTPUT_FLAG_PRESENT;
+
+    if (pps->sign_data_hiding_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_SIGN_DATA_HIDING_ENABLED;
+
+    if (pps->cabac_init_present_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_CABAC_INIT_PRESENT;
+
+    if (pps->constrained_intra_pred_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_CONSTRAINED_INTRA_PRED;
+
+    if (pps->transform_skip_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_TRANSFORM_SKIP_ENABLED;
+
+    if (pps->cu_qp_delta_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_CU_QP_DELTA_ENABLED;
+
+    if (pps->pic_slice_level_chroma_qp_offsets_present_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_PPS_SLICE_CHROMA_QP_OFFSETS_PRESENT;
+
+    if (pps->weighted_pred_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_WEIGHTED_PRED;
+
+    if (pps->weighted_bipred_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_WEIGHTED_BIPRED;
+
+    if (pps->transquant_bypass_enable_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_TRANSQUANT_BYPASS_ENABLED;
+
+    if (pps->tiles_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_TILES_ENABLED;
+
+    if (pps->entropy_coding_sync_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_ENTROPY_CODING_SYNC_ENABLED;
+
+    if (pps->loop_filter_across_tiles_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_LOOP_FILTER_ACROSS_TILES_ENABLED;
+
+    if (pps->seq_loop_filter_across_slices_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_PPS_LOOP_FILTER_ACROSS_SLICES_ENABLED;
+
+    if (pps->deblocking_filter_override_enabled_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_DEBLOCKING_FILTER_OVERRIDE_ENABLED;
+
+    if (pps->disable_dbf)
+        flags |= V4L2_HEVC_PPS_FLAG_PPS_DISABLE_DEBLOCKING_FILTER;
+
+    if (pps->lists_modification_present_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_LISTS_MODIFICATION_PRESENT;
+
+    if (pps->slice_header_extension_present_flag)
+        flags |= V4L2_HEVC_PPS_FLAG_SLICE_SEGMENT_HEADER_EXTENSION_PRESENT;
+
+    /* ISO/IEC 23008-2, ITU-T Rec. H.265: Picture parameter set */
+    *ctrl = (struct v4l2_ctrl_hevc_pps) {
+        .num_extra_slice_header_bits = pps->num_extra_slice_header_bits,
+        .init_qp_minus26 = pps->pic_init_qp_minus26,
+        .diff_cu_qp_delta_depth = pps->diff_cu_qp_delta_depth,
+        .pps_cb_qp_offset = pps->cb_qp_offset,
+        .pps_cr_qp_offset = pps->cr_qp_offset,
+        .pps_beta_offset_div2 = pps->beta_offset / 2,
+        .pps_tc_offset_div2 = pps->tc_offset / 2,
+        .log2_parallel_merge_level_minus2 = pps->log2_parallel_merge_level - 2,
+        .flags = flags
+    };
+
+
+    if (pps->tiles_enabled_flag) {
+        ctrl->num_tile_columns_minus1 = pps->num_tile_columns - 1;
+        ctrl->num_tile_rows_minus1 = pps->num_tile_rows - 1;
+
+        for (int i = 0; i < pps->num_tile_columns; i++)
+            ctrl->column_width_minus1[i] = pps->column_width[i] - 1;
+
+        for (int i = 0; i < pps->num_tile_rows; i++)
+            ctrl->row_height_minus1[i] = pps->row_height[i] - 1;
+    }
+}
+
 // Called before finally returning the frame to the user
 // Set corrupt flag here as this is actually the frame structure that
 // is going to the user (in MT land each thread has its own pool)
@@ -385,7 +494,7 @@ static int frame_post_process(void *logctx, AVFrame *frame)
     FrameDecodeData * const fdd = (FrameDecodeData*)frame->private_ref->data;
     V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
 
-    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+//    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
     frame->flags &= ~AV_FRAME_FLAG_CORRUPT;
     if (rd->qe_dst) {
         MediaBufsStatus stat = qent_dst_wait(rd->qe_dst);
@@ -402,7 +511,7 @@ static int frame_post_process(void *logctx, AVFrame *frame)
 static void v4l2_req_frame_data_priv_free(void * priv)
 {
     V4L2ReqFrameDataPrivHEVC * const rfdp = priv;
-    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+//    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
     mediabufs_ctl_unref(&rfdp->mbufs);
     free(rfdp);
 }
@@ -421,113 +530,21 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
     V4L2RequestDescriptor *const rd = (V4L2RequestDescriptor *)h->ref->frame->data[0];
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    int rv;
 
-    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+//    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
     fill_sps(&controls->sps, h);
 
-    if (sl) {
-        for (int i = 0; i < 6; i++) {
-            for (int j = 0; j < 16; j++)
-                controls->scaling_matrix.scaling_list_4x4[i][j] = sl->sl[0][i][j];
-            for (int j = 0; j < 64; j++) {
-                controls->scaling_matrix.scaling_list_8x8[i][j]   = sl->sl[1][i][j];
-                controls->scaling_matrix.scaling_list_16x16[i][j] = sl->sl[2][i][j];
-                if (i < 2)
-                    controls->scaling_matrix.scaling_list_32x32[i][j] = sl->sl[3][i * 3][j];
-            }
-            controls->scaling_matrix.scaling_list_dc_coef_16x16[i] = sl->sl_dc[0][i];
-            if (i < 2)
-                controls->scaling_matrix.scaling_list_dc_coef_32x32[i] = sl->sl_dc[1][i * 3];
-        }
-    }
+    if (sl)
+        fill_scaling_matrix(sl, &controls->scaling_matrix);
 
-    /* ISO/IEC 23008-2, ITU-T Rec. H.265: Picture parameter set */
-    controls->pps = (struct v4l2_ctrl_hevc_pps) {
-        .num_extra_slice_header_bits = pps->num_extra_slice_header_bits,
-        .init_qp_minus26 = pps->pic_init_qp_minus26,
-        .diff_cu_qp_delta_depth = pps->diff_cu_qp_delta_depth,
-        .pps_cb_qp_offset = pps->cb_qp_offset,
-        .pps_cr_qp_offset = pps->cr_qp_offset,
-        .pps_beta_offset_div2 = pps->beta_offset / 2,
-        .pps_tc_offset_div2 = pps->tc_offset / 2,
-        .log2_parallel_merge_level_minus2 = pps->log2_parallel_merge_level - 2,
-    };
-
-    if (pps->dependent_slice_segments_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_DEPENDENT_SLICE_SEGMENT;
-
-    if (pps->output_flag_present_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_OUTPUT_FLAG_PRESENT;
-
-    if (pps->sign_data_hiding_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_SIGN_DATA_HIDING_ENABLED;
-
-    if (pps->cabac_init_present_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_CABAC_INIT_PRESENT;
-
-    if (pps->constrained_intra_pred_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_CONSTRAINED_INTRA_PRED;
-
-    if (pps->transform_skip_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_TRANSFORM_SKIP_ENABLED;
-
-    if (pps->cu_qp_delta_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_CU_QP_DELTA_ENABLED;
-
-    if (pps->pic_slice_level_chroma_qp_offsets_present_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_PPS_SLICE_CHROMA_QP_OFFSETS_PRESENT;
-
-    if (pps->weighted_pred_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_WEIGHTED_PRED;
-
-    if (pps->weighted_bipred_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_WEIGHTED_BIPRED;
-
-    if (pps->transquant_bypass_enable_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_TRANSQUANT_BYPASS_ENABLED;
-
-    if (pps->tiles_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_TILES_ENABLED;
-
-    if (pps->entropy_coding_sync_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_ENTROPY_CODING_SYNC_ENABLED;
-
-    if (pps->loop_filter_across_tiles_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_LOOP_FILTER_ACROSS_TILES_ENABLED;
-
-    if (pps->seq_loop_filter_across_slices_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_PPS_LOOP_FILTER_ACROSS_SLICES_ENABLED;
-
-    if (pps->deblocking_filter_override_enabled_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_DEBLOCKING_FILTER_OVERRIDE_ENABLED;
-
-    if (pps->disable_dbf)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_PPS_DISABLE_DEBLOCKING_FILTER;
-
-    if (pps->lists_modification_present_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_LISTS_MODIFICATION_PRESENT;
-
-    if (pps->slice_header_extension_present_flag)
-        controls->pps.flags |= V4L2_HEVC_PPS_FLAG_SLICE_SEGMENT_HEADER_EXTENSION_PRESENT;
-
-    if (pps->tiles_enabled_flag) {
-        controls->pps.num_tile_columns_minus1 = pps->num_tile_columns - 1;
-        controls->pps.num_tile_rows_minus1 = pps->num_tile_rows - 1;
-
-        for (int i = 0; i < pps->num_tile_columns; i++)
-            controls->pps.column_width_minus1[i] = pps->column_width[i] - 1;
-
-        for (int i = 0; i < pps->num_tile_rows; i++)
-            controls->pps.row_height_minus1[i] = pps->row_height[i] - 1;
-    }
+    fill_pps(h->ps.pps, &controls->pps);
 
     controls->first_slice = 1;
     controls->num_slices = 0;
     ctx->base.timestamp++;
 
-    if ((rv = ff_v4l2_request_reset_frame(avctx, h->ref->frame)) != 0)
-        return rv;
+//    if ((rv = ff_v4l2_request_reset_frame(avctx, h->ref->frame)) != 0)
+//        return rv;
 
     {
         FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
@@ -581,7 +598,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
 
 //    ff_v4l2_request_start_phase_control(h->ref->frame, ctx->pctrl);
 
-    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+//    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
 
     return 0;
 }
@@ -667,6 +684,7 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     return 0;
 }
 
+#if 0
 static int queue_decode(AVCodecContext *avctx, int last_slice)
 {
     const HEVCContext *h = avctx->priv_data;
@@ -711,6 +729,7 @@ static int queue_decode(AVCodecContext *avctx, int last_slice)
     return AVERROR_BUG;
 //    return ff_v4l2_request_decode_frame(avctx, h->ref->frame, control, FF_ARRAY_ELEMS(control));
 }
+#endif
 
 static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
 {
@@ -767,7 +786,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         return AVERROR(ENOMEM);
     }
 
-    if (qent_src_data_copy(rfdp->qe_src, buffer, size) != 0) {
+    if (qent_src_data_copy(rfdp->qe_src, buffer, size, ctx->dbufs) != 0) {
         av_log(avctx, AV_LOG_ERROR, "%s: Failed data copy\n", __func__);
         return AVERROR(ENOMEM);
     }
@@ -781,9 +800,9 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     }
 
     if (ctx->decode_mode == V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED && slice) {
-        ret = queue_decode(avctx, 0);
-        if (ret)
-            return ret;
+//        ret = queue_decode(avctx, 0);
+//        if (ret)
+//            return ret;
 
 // *** ???
 //        ff_v4l2_request_reset_frame(avctx, h->ref->frame);
@@ -826,9 +845,9 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
     V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)h->ref->frame->data[0];
     V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
+    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
     MediaBufsStatus stat;
-    int rv;
-    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+//    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
 
     // Dispatch previous slice
     stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, rd->qe_dst, 1);
@@ -840,10 +859,14 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
         return AVERROR_UNKNOWN;
     }
 
-    rv = queue_decode(avctx, 1);
-    if (rv < 0)
-        v4l2_request_hevc_abort_frame(avctx);
-    return rv;
+    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+
+    // Set the drm_prime desriptor
+    drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
+    rd->drm.objects[0].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, 0));
+    rd->drm.objects[0].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, 0));
+
+    return 0;
 }
 
 #if 0
@@ -929,7 +952,11 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     devscan_delete(&ctx->devscan);
 
 //    ff_v4l2_phase_control_deletez(&ctx->pctrl);
-    return ff_v4l2_request_uninit(avctx);
+    if (avctx->hw_frames_ctx) {
+        AVHWFramesContext *hwfc = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+        av_buffer_pool_flush(hwfc->pool);
+    }
+    return 0;
 }
 
 static int v4l2_request_hevc_init(AVCodecContext *avctx)

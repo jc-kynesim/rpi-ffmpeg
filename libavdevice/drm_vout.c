@@ -44,7 +44,7 @@
 
 #include "libavutil/rpi_sand_fns.h"
 
-#define TRACE_ALL 1
+#define TRACE_ALL 0
 
 #define NUM_BUFFERS 4
 #define RPI_DISPLAY_ALL 0
