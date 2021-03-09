@@ -19,9 +19,9 @@
 #include "decode.h"
 #include "hevcdec.h"
 #include "hwconfig.h"
-#include "v4l2_request.h"
+
 #include "hevc-ctrls.h"
-#include "v4l2_phase.h"
+#include "libavutil/hwcontext_drm.h"
 
 #include "v4l2_req_devscan.h"
 #include "v4l2_req_dmabufs.h"
@@ -56,6 +56,13 @@
 #endif
 
 
+typedef struct V4L2MediaReqDescriptor {
+    AVDRMFrameDescriptor drm;
+
+    // Media
+    uint64_t timestamp;
+    struct qent_dst * qe_dst;
+} V4L2MediaReqDescriptor;
 
 typedef struct V4L2RequestControlsHEVC {
     struct v4l2_ctrl_hevc_sps sps;
@@ -67,13 +74,15 @@ typedef struct V4L2RequestControlsHEVC {
 } V4L2RequestControlsHEVC;
 
 typedef struct V4L2RequestContextHEVC {
-    V4L2RequestContext base;
+//    V4L2RequestContext base;
+    unsigned int timestamp;  // ?? maybe uint64_t
+
     int decode_mode;
     int start_code;
     int max_slices;
 
     unsigned int order;
-    V4L2PhaseControl * pctrl;
+//    V4L2PhaseControl * pctrl;
 
     struct devscan *devscan;
     struct dmabufs_ctl *dbufs;
@@ -86,20 +95,20 @@ typedef struct V4L2ReqFrameDataPrivHEVC {
     int not_first_slice;
     struct mediabufs_ctl *mbufs;
     struct media_request *req;
-    struct qent_src *qe_src;  // qe_dst held in V4L2RequestDescriptor (data[0])
+    struct qent_src *qe_src;  // qe_dst held in V4L2MediaReqDescriptor (data[0])
 } V4L2ReqFrameDataPrivHEVC;
 
 static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
 static inline uint64_t frame_capture_timestamp(const AVFrame * const frame)
 {
-    const V4L2RequestDescriptor *const rd = (V4L2RequestDescriptor *)frame->data[0];
+    const V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)frame->data[0];
     return rd->timestamp;
 }
 
 static inline void frame_set_capture_timestamp(AVFrame * const frame, const uint64_t timestamp)
 {
-    V4L2RequestDescriptor *const rd = (V4L2RequestDescriptor *)frame->data[0];
+    V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)frame->data[0];
     rd->timestamp = timestamp;
 }
 
@@ -490,7 +499,7 @@ static void fill_pps(const HEVCPPS * const pps, struct v4l2_ctrl_hevc_pps * cons
 // is going to the user (in MT land each thread has its own pool)
 static int frame_post_process(void *logctx, AVFrame *frame)
 {
-    V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)frame->data[0];
+    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)frame->data[0];
     FrameDecodeData * const fdd = (FrameDecodeData*)frame->private_ref->data;
     V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
 
@@ -528,7 +537,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
                             sps->scaling_list_enable_flag ?
                             &sps->scaling_list : NULL;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
-    V4L2RequestDescriptor *const rd = (V4L2RequestDescriptor *)h->ref->frame->data[0];
+    V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)h->ref->frame->data[0];
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
 
 //    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
@@ -541,7 +550,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
 
     controls->first_slice = 1;
     controls->num_slices = 0;
-    ctx->base.timestamp++;
+    ctx->timestamp++;
 
 //    if ((rv = ff_v4l2_request_reset_frame(avctx, h->ref->frame)) != 0)
 //        return rv;
@@ -690,7 +699,7 @@ static int queue_decode(AVCodecContext *avctx, int last_slice)
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
-    V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)h->ref->frame->data[0];
+    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
 
     struct v4l2_ext_control control[] = {
         {
@@ -736,8 +745,8 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
-    V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)h->ref->frame->data[0];
-    int ret, slice = FFMIN(controls->num_slices, MAX_SLICES - 1);
+    V4L2MediaReqDescriptor *req = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
+    int slice = FFMIN(controls->num_slices, MAX_SLICES - 1);
     int bcount = get_bits_count(&h->HEVClc->gb);
     uint32_t boff = (ptr_from_index(buffer, bcount/8 + 1) - (buffer + bcount/8 + 1)) * 8 + bcount;
 
@@ -793,9 +802,9 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
 
     {
         struct timeval ts = {
-            .tv_usec = ctx->base.timestamp,
+            .tv_usec = ctx->timestamp,
         };
-        frame_set_capture_timestamp(h->ref->frame, ctx->base.timestamp * 1000); // dpb timestamps are in ns
+        frame_set_capture_timestamp(h->ref->frame, ctx->timestamp * 1000); // dpb timestamps are in ns
         qent_src_params_set(rfdp->qe_src, &ts);
     }
 
@@ -820,14 +829,14 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
 //        if (ret)
 //            return ret;
     }
-    boff += req->output.used * 8;
+//    boff += req->output.used * 8;
 #if 0
     ret = ff_v4l2_request_append_output_buffer(avctx, h->ref->frame, buffer, size);
     if (ret)
         return ret;
 #endif
-    controls->slice_params[slice].bit_size = req->output.used * 8; //FIXME
-    controls->slice_params[slice].data_bit_offset = boff; //FIXME
+//    controls->slice_params[slice].bit_size = req->output.used * 8; //FIXME
+//    controls->slice_params[slice].data_bit_offset = boff; //FIXME
     controls->num_slices++;
     return 0;
 }
@@ -843,7 +852,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 {
     const HEVCContext * const h = avctx->priv_data;
     FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
-    V4L2RequestDescriptor *rd = (V4L2RequestDescriptor*)h->ref->frame->data[0];
+    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
     V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
     MediaBufsStatus stat;
@@ -968,14 +977,6 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const struct decdev * decdev;
     uint32_t src_pix_fmt = V4L2_PIX_FMT_HEVC_SLICE;
 
-    struct v4l2_ext_control control[] = {
-        {
-            .id = V4L2_CID_MPEG_VIDEO_HEVC_SPS,
-            .ptr = &sps,
-            .size = sizeof(sps),
-        },
-    };
-
 //    if ((ctx->pctrl = ff_v4l2_phase_control_new(2)) == NULL)
 //        return AVERROR(ENOMEM);
 
@@ -1071,12 +1072,14 @@ fail0:
 static void v4l2_req_frame_free(void *opaque, uint8_t *data)
 {
     AVCodecContext *avctx = opaque;
-    V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)data;
+    V4L2MediaReqDescriptor *req = (V4L2MediaReqDescriptor*)data;
 
-    av_log(NULL, AV_LOG_DEBUG, "%s: avctx=%p data=%p request_fd=%d\n", __func__, avctx, data, req->request_fd);
+    av_log(NULL, AV_LOG_DEBUG, "%s: avctx=%p data=%p\n", __func__, avctx, data);
 
-    if (req->request_fd >= 0)
-        close(req->request_fd);
+    qent_dst_free(&req->qe_dst);
+
+//    if (req->request_fd >= 0)
+//        close(req->request_fd);
 
 //    v4l2_request_buffer_free(&req->capture);
 //    v4l2_request_buffer_free(&req->output);
@@ -1087,11 +1090,11 @@ static void v4l2_req_frame_free(void *opaque, uint8_t *data)
 static AVBufferRef *v4l2_req_frame_alloc(void *opaque, int size)
 {
     AVCodecContext *avctx = opaque;
-    V4L2RequestContext *ctx = avctx->internal->hwaccel_priv_data;
-    V4L2RequestDescriptor *req;
+//    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
+//    V4L2MediaReqDescriptor *req;
     AVBufferRef *ref;
     uint8_t *data;
-    int ret;
+//    int ret;
 
     data = av_mallocz(size);
     if (!data)
@@ -1103,11 +1106,11 @@ static AVBufferRef *v4l2_req_frame_alloc(void *opaque, int size)
         av_freep(&data);
         return NULL;
     }
-    req = (V4L2RequestDescriptor*)data;
+#if 0
+    req = (V4L2MediaReqDescriptor*)data;
     req->request_fd = -1;
     req->output.fd = -1;
     req->capture.fd = -1;
-#if 0
     ret = v4l2_request_buffer_alloc(avctx, &req->output, ctx->output_type);
     if (ret < 0) {
         av_buffer_unref(&ref);
@@ -1126,8 +1129,8 @@ static AVBufferRef *v4l2_req_frame_alloc(void *opaque, int size)
         av_buffer_unref(&ref);
         return NULL;
     }
-#endif
     av_log(avctx, AV_LOG_INFO, "%s: avctx=%p size=%d data=%p request_fd=%d\n", __func__, avctx, size, data, req->request_fd);
+#endif
     return ref;
 }
 
@@ -1168,7 +1171,7 @@ static int v4l2_req_hevc_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fra
 #endif
     }
 
-    hwfc->pool = av_buffer_pool_init2(sizeof(V4L2RequestDescriptor), avctx, v4l2_req_frame_alloc, v4l2_req_pool_free);
+    hwfc->pool = av_buffer_pool_init2(sizeof(V4L2MediaReqDescriptor), avctx, v4l2_req_frame_alloc, v4l2_req_pool_free);
     if (!hwfc->pool)
         return AVERROR(ENOMEM);
 
