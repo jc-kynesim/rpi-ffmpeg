@@ -31,6 +31,10 @@
 #include "imgutils.h"
 #include "libavutil/rpi_sand_fns.h"
 
+#include <linux/mman.h>
+#include <linux/dma-buf.h>
+#include <linux/dma-heap.h>
+
 
 static void drm_device_free(AVHWDeviceContext *hwdev)
 {
@@ -92,9 +96,26 @@ static int drm_get_buffer(AVHWFramesContext *hwfc, AVFrame *frame)
 typedef struct DRMMapping {
     // Address and length of each mmap()ed region.
     int nb_regions;
+    unsigned int dmaflags;
     void *address[AV_DRM_MAX_PLANES];
     size_t length[AV_DRM_MAX_PLANES];
+    int fds[AV_DRM_MAX_PLANES];
 } DRMMapping;
+
+static int dmasync(const int fd, const unsigned int flags)
+{
+    struct dma_buf_sync sync = {
+        .flags = flags
+    };
+    while (ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == -1) {
+        const int err = errno;
+        if (errno == EINTR)
+            continue;
+        av_log(NULL, AV_LOG_WARNING, "%s: ioctl failed: flags=%#x\n", __func__, flags);
+        return -err;
+    }
+    return 0;
+}
 
 static void drm_unmap_frame(AVHWFramesContext *hwfc,
                             HWMapDescriptor *hwmap)
@@ -102,8 +123,10 @@ static void drm_unmap_frame(AVHWFramesContext *hwfc,
     DRMMapping *map = hwmap->priv;
     int i;
 
-    for (i = 0; i < map->nb_regions; i++)
+    for (i = 0; i < map->nb_regions; i++) {
         munmap(map->address[i], map->length[i]);
+        dmasync(map->fds[i], DMA_BUF_SYNC_END | map->dmaflags);
+    }
 
     av_free(map);
 }
@@ -121,18 +144,28 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
     if (!map)
         return AVERROR(ENOMEM);
 
+    for (i = 0; i < AV_DRM_MAX_PLANES; i++)
+        map->fds[i] = -1;
+
     mmap_prot = 0;
-    if (flags & AV_HWFRAME_MAP_READ)
+    if (flags & AV_HWFRAME_MAP_READ) {
+        map->dmaflags |= DMA_BUF_SYNC_READ;
         mmap_prot |= PROT_READ;
-    if (flags & AV_HWFRAME_MAP_WRITE)
+    }
+    if (flags & AV_HWFRAME_MAP_WRITE) {
+        map->dmaflags |= DMA_BUF_SYNC_WRITE;
         mmap_prot |= PROT_WRITE;
+    }
 
     if (dst->format == AV_PIX_FMT_NONE)
         dst->format = hwfc->sw_format;
 
     av_assert0(desc->nb_objects <= AV_DRM_MAX_PLANES);
     for (i = 0; i < desc->nb_objects; i++) {
-        addr = mmap(NULL, desc->objects[i].size, mmap_prot, MAP_SHARED,
+        dmasync(desc->objects[i].fd, DMA_BUF_SYNC_START | map->dmaflags);
+        map->fds[i] = desc->objects[i].fd;
+
+        addr = mmap(NULL, desc->objects[i].size, mmap_prot, MAP_SHARED | MAP_POPULATE,
                     desc->objects[i].fd, 0);
         if (addr == MAP_FAILED) {
             err = AVERROR(errno);
@@ -187,7 +220,9 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
     return 0;
 
 fail:
-    for (i = 0; i < desc->nb_objects; i++) {
+    for (i = 0; i < AV_DRM_MAX_PLANES; i++) {
+        if (map->fds[i] != -1)
+            dmasync(map->fds[i], DMA_BUF_SYNC_END | map->dmaflags);
         if (map->address[i])
             munmap(map->address[i], map->length[i]);
     }
