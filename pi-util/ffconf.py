@@ -9,14 +9,12 @@ import sys
 import csv
 from stat import *
 
-ffmpeg_exec = "./ffmpeg"
-
 CODEC_HEVC_RPI  = 1
 HWACCEL_RPI     = 2
 HWACCEL_DRM     = 3
 HWACCEL_VAAPI   = 4
 
-def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec):
+def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_exec):
     hwaccel = ""
     if dectype == HWACCEL_RPI:
         hwaccel = "rpi"
@@ -123,7 +121,7 @@ def runtest(name, tests):
             return True
     return False
 
-def doconf(csva, tests, test_root, vcodec, dectype):
+def doconf(csva, tests, test_root, vcodec, dectype, ffmpeg_exec):
     unx_failures = []
     unx_success = []
     failures = 0
@@ -135,7 +133,7 @@ def doconf(csva, tests, test_root, vcodec, dectype):
             print "==== ", name,
             sys.stdout.flush()
 
-            rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec)
+            rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, ffmpeg_exec=ffmpeg_exec)
             if (rv == 0):
                 successes += 1
             else:
@@ -190,6 +188,7 @@ if __name__ == '__main__':
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
     argp.add_argument("--csv", default="pi-util/conf_h265.2016.csv", help="CSV filename")
     argp.add_argument("--vcodec", default="hevc_rpi", help="vcodec name to use")
+    argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name")
     args = argp.parse_args()
 
     if args.csvgen:
@@ -212,5 +211,5 @@ if __name__ == '__main__':
     elif args.vaapi:
         dectype = HWACCEL_VAAPI
 
-    doconf(csva, args.tests, args.test_root, args.vcodec, dectype)
+    doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args.ffmpeg)
 
