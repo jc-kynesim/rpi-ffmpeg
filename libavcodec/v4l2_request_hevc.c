@@ -56,6 +56,8 @@
 #endif
 
 
+// Attached to buf[0] in frame
+// Pooled in hwcontext so generally create once - 1/frame
 typedef struct V4L2MediaReqDescriptor {
     AVDRMFrameDescriptor drm;
 
@@ -64,6 +66,7 @@ typedef struct V4L2MediaReqDescriptor {
     struct qent_dst * qe_dst;
 } V4L2MediaReqDescriptor;
 
+// Attached to frame - has no constructor/destructor so state only
 typedef struct V4L2RequestControlsHEVC {
     struct v4l2_ctrl_hevc_sps sps;
     struct v4l2_ctrl_hevc_pps pps;
@@ -73,6 +76,7 @@ typedef struct V4L2RequestControlsHEVC {
     int num_slices; //TODO: this should be in control
 } V4L2RequestControlsHEVC;
 
+// 1 per decoder
 typedef struct V4L2RequestContextHEVC {
 //    V4L2RequestContext base;
     unsigned int timestamp;  // ?? maybe uint64_t
@@ -91,6 +95,8 @@ typedef struct V4L2RequestContextHEVC {
     struct mediabufs_ctl *mbufs;
 } V4L2RequestContextHEVC;
 
+// Attached to frame - has a free function - my have a shorter lifespan than the frame
+// I haven't really sussed it
 typedef struct V4L2ReqFrameDataPrivHEVC {
     int not_first_slice;
     struct mediabufs_ctl *mbufs;
@@ -973,7 +979,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
 
     fill_sps(&sps, h);
 
-    if (mediabufs_src_fmt_set(ctx->mbufs, src_pix_fmt, avctx->width, avctx->height)) {
+    if (mediabufs_src_fmt_set(ctx->mbufs, decdev_src_type(decdev), src_pix_fmt, avctx->width, avctx->height)) {
         char tbuf1[5];
         av_log(avctx, AV_LOG_ERROR, "Failed to set source format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), avctx->width, avctx->height);
         goto fail4;

@@ -15,6 +15,7 @@
 #include "v4l2_req_utils.h"
 
 struct decdev {
+    enum v4l2_buf_type src_type;
     uint32_t src_fmt_v4l2;
     const char * vname;
     const char * mname;
@@ -86,9 +87,10 @@ static int v4l2_query_capabilities(int video_fd, unsigned int *capabilities)
 }
 
 static int devscan_add(struct devscan *const scan,
-                uint32_t src_fmt_v4l2,
-                const char * vname,
-                const char * mname)
+                       enum v4l2_buf_type src_type,
+                       uint32_t src_fmt_v4l2,
+                       const char * vname,
+                       const char * mname)
 {
     struct decdev *d;
 
@@ -102,6 +104,8 @@ static int devscan_add(struct devscan *const scan,
     }
 
     d = scan->devs + scan->dev_count;
+    d->src_type = src_type;
+    d->src_fmt_v4l2 = src_fmt_v4l2;
     d->vname = strdup(vname);
     if (!d->vname)
         return -ENOMEM;
@@ -110,7 +114,6 @@ static int devscan_add(struct devscan *const scan,
         free((char *)d->vname);
         return -ENOMEM;
     }
-    d->src_fmt_v4l2 = src_fmt_v4l2;
     ++scan->dev_count;
     return 0;
 }
@@ -156,14 +159,18 @@ static void probe_formats(void * const dc,
             .memory = V4L2_MEMORY_MMAP
         };
         while (ioctl(fd, VIDIOC_ENUM_FMT, &fmtdesc)) {
-            if (errno != EINTR)
+            if (errno != EINTR) {
+                request_log("Enum[%d] failed for type=%d\n", i, type_v4l2);
                 return;
+            }
         }
         if (!video_src_pixfmt_supported(fmtdesc.pixelformat))
             continue;
 
-        if (v4l2_set_format(fd, type_v4l2, fmtdesc.pixelformat, 720, 480))
+        if (v4l2_set_format(fd, type_v4l2, fmtdesc.pixelformat, 720, 480)) {
+            request_log("Set failed for type=%d, pf=%.4s\n", type_v4l2, (char*)&fmtdesc.pixelformat);
             continue;
+        }
 
         while (ioctl(fd, VIDIOC_REQBUFS, &rbufs)) {
             if (errno != EINTR) {
@@ -179,7 +186,7 @@ static void probe_formats(void * const dc,
 
         request_info(dc, "Adding: %s,%s pix=%#x, type=%d\n",
                  mpath, vpath, fmtdesc.pixelformat, type_v4l2);
-        devscan_add(scan, fmtdesc.pixelformat, vpath, mpath);
+        devscan_add(scan, type_v4l2, fmtdesc.pixelformat, vpath, mpath);
     }
 }
 
@@ -343,6 +350,17 @@ const char *decdev_video_path(const struct decdev *const dev)
 {
     return !dev ? NULL : dev->vname;
 }
+
+enum v4l2_buf_type decdev_src_type(const struct decdev *const dev)
+{
+    return !dev ? 0 : dev->src_type;
+}
+
+uint32_t decdev_src_pixelformat(const struct decdev *const dev)
+{
+    return !dev ? 0 : dev->src_fmt_v4l2;
+}
+
 
 const struct decdev *devscan_find(struct devscan *const scan,
                   const uint32_t src_fmt_v4l2)

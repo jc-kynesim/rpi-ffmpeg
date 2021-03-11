@@ -117,8 +117,9 @@ MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
 int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl ctrls[], unsigned int n);
 
 MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
-                   const uint32_t pixfmt,
-                   const uint32_t width, const uint32_t height);
+                                      enum v4l2_buf_type buf_type,
+                                      const uint32_t pixfmt,
+                                      const uint32_t width, const uint32_t height);
 MediaBufsStatus mediabufs_src_pool_create(struct mediabufs_ctl *const rw,
                   struct dmabufs_ctl * const dbsc,
                   unsigned int n);

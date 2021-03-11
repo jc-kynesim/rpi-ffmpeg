@@ -659,8 +659,7 @@ static void queue_delete(struct buf_pool *const bp)
     free(bp);
 }
 
-static struct buf_pool* queue_new(const int vfd, struct pollqueue * pq,
-                  enum v4l2_buf_type buftype)
+static struct buf_pool* queue_new(const int vfd, struct pollqueue * pq)
 {
     struct buf_pool *bp = calloc(1, sizeof(*bp));
     if (!bp)
@@ -747,25 +746,27 @@ static int qe_v4l2_queue(struct qent_base *const be,
 
 static struct qent_base * qe_dequeue(struct buf_pool *const bp,
                      const int vfd,
-                     const enum v4l2_buf_type buftype)
+                     const struct v4l2_format * const f)
 {
     int fd;
     struct qent_base *be;
     int rc;
-    const bool mp = V4L2_TYPE_IS_MULTIPLANAR(buftype);
+    const bool mp = V4L2_TYPE_IS_MULTIPLANAR(f->type);
     struct v4l2_plane planes[VIDEO_MAX_PLANES] = {{0}};
     struct v4l2_buffer buffer = {
-        .type =  buftype,
+        .type =  f->type,
         .memory = V4L2_MEMORY_DMABUF
     };
-    if (mp)
+    if (mp) {
+        buffer.length = f->fmt.pix_mp.num_planes;
         buffer.m.planes = planes;
+    }
 
     while ((rc = ioctl(vfd, VIDIOC_DQBUF, &buffer)) != 0 &&
            errno == EINTR)
         /* Loop */;
     if (rc) {
-        request_log("Error DQing buffer\n");
+        request_log("Error DQing buffer type %d: %s\n", f->type, strerror(errno));
         return NULL;
     }
 
@@ -818,9 +819,9 @@ static void mediabufs_poll_cb(void * v, short revents)
     mbc->polling = false;
 
     if ((revents & POLLOUT) != 0)
-        src_be = base_to_src(qe_dequeue(mbc->src, mbc->vfd, mbc->src_fmt.type));
+        src_be = base_to_src(qe_dequeue(mbc->src, mbc->vfd, &mbc->src_fmt));
     if ((revents & POLLIN) != 0)
-        dst_be = base_to_dst(qe_dequeue(mbc->dst, mbc->vfd, mbc->dst_fmt.type));
+        dst_be = base_to_dst(qe_dequeue(mbc->dst, mbc->vfd, &mbc->dst_fmt));
 
     /* Reschedule */
     if (mediabufs_wants_poll(mbc)) {
@@ -1392,22 +1393,15 @@ MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
 }
 
 MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
+                                      enum v4l2_buf_type buf_type,
                    const uint32_t pixfmt,
                    const uint32_t width, const uint32_t height)
 {
-    mbc->src_fmt.fmt.pix = (struct v4l2_pix_format){
-        .width = width,
-        .height = height,
-        .pixelformat = pixfmt
-    };
+    MediaBufsStatus rv = fmt_set(&mbc->src_fmt, mbc->vfd, buf_type, pixfmt, width, height);
+    if (rv != MEDIABUFS_STATUS_SUCCESS)
+        request_err(mbc->dc, "Failed to set src buftype %d, format %#x %dx%d\n", buf_type, pixfmt, width, height);
 
-    while (ioctl(mbc->vfd, VIDIOC_S_FMT, &mbc->src_fmt))
-        if (errno != EINTR) {
-            request_log("Failed to set format %#x %dx%d\n", pixfmt, width, height);
-            return MEDIABUFS_ERROR_OPERATION_FAILED;
-        }
-
-    return MEDIABUFS_STATUS_SUCCESS;
+    return rv;
 }
 
 int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl ctrls[], unsigned int n)
@@ -1482,6 +1476,7 @@ struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, st
         return NULL;
 
     mbc->dc = dc;
+    // Default mono planar
     mbc->src_fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     mbc->dst_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     mbc->pq = pq;
@@ -1491,17 +1486,19 @@ struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, st
     if (vpath == NULL)
         vpath = "/dev/media0";
 
-    mbc->vfd = open(vpath, O_RDWR);
-    if (mbc->vfd == -1) {
-        request_err(dc, "Failed to open video dev '%s': %s\n", vpath, strerror(errno));
-        goto fail0;
+    while ((mbc->vfd = open(vpath, O_RDWR)) == -1)
+    {
+        const int err = errno;
+        if (err != EINTR) {
+            request_err(dc, "Failed to open video dev '%s': %s\n", vpath, strerror(err));
+            goto fail0;
+        }
     }
 
-    mbc->src = queue_new(mbc->vfd, pq, mbc->src_fmt.type);
+    mbc->src = queue_new(mbc->vfd, pq);
     if (!mbc->src)
         goto fail1;
-    /* Default cap type to mono-planar */
-    mbc->dst = queue_new(mbc->vfd, pq, mbc->dst_fmt.type);
+    mbc->dst = queue_new(mbc->vfd, pq);
     if (!mbc->dst)
         goto fail2;
     mbc->pt = polltask_new(mbc->vfd, POLLIN | POLLOUT, mediabufs_poll_cb, mbc);
