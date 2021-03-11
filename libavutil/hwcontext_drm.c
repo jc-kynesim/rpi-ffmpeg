@@ -276,7 +276,7 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
 
 #if 0
     av_log(hwfc, AV_LOG_INFO, "%s: src fmt=%d (%d), dst fmt=%d (%d) s=%dx%d l=%d/%d/%d/%d, d=%dx%d l=%d/%d/%d\n", __func__,
-           hwfc->sw_format, AV_PIX_FMT_RPI4_8, dst->format, AV_PIX_FMT_YUV420P10LE,
+           map->hwfc_format, AV_PIX_FMT_RPI4_8, dst->format, AV_PIX_FMT_YUV420P10LE,
            map->width, map->height,
            map->linesize[0],
            map->linesize[1],
