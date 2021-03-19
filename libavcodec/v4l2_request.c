@@ -243,7 +243,23 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
 {
     AVDRMFrameDescriptor *desc = &req->drm;
     AVDRMLayerDescriptor *layer = &desc->layers[0];
-    uint32_t pixelformat = V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.pixelformat : format->fmt.pix.pixelformat;
+    unsigned int width;
+    unsigned int height;
+    unsigned int bpl;
+    uint32_t pixelformat;
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
+        width       = format->fmt.pix_mp.width;
+        height      = format->fmt.pix_mp.height;
+        pixelformat = format->fmt.pix_mp.pixelformat;
+        bpl         = format->fmt.pix_mp.plane_fmt[0].bytesperline;
+    }
+    else {
+        width       = format->fmt.pix.width;
+        height      = format->fmt.pix.height;
+        pixelformat = format->fmt.pix.pixelformat;
+        bpl         = format->fmt.pix.bytesperline;
+    }
 
     switch (pixelformat) {
     case V4L2_PIX_FMT_NV12:
@@ -253,11 +269,11 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
         layer->format = DRM_FORMAT_NV12;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
         break;
     case V4L2_PIX_FMT_NV12_10_COL128:
         layer->format = DRM_FORMAT_P030;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(format->fmt.pix.bytesperline);
+        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
         break;
 #endif
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
@@ -295,25 +311,25 @@ static int v4l2_request_set_drm_descriptor(V4L2RequestDescriptor *req, struct v4
 
     layer->planes[0].object_index = 0;
     layer->planes[0].offset = 0;
-    layer->planes[0].pitch = V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.plane_fmt[0].bytesperline : format->fmt.pix.bytesperline;
+    layer->planes[0].pitch = bpl;
 #if CONFIG_SAND
     if (pixelformat == V4L2_PIX_FMT_NV12_COL128) {
         layer->planes[1].object_index = 0;
-        layer->planes[1].offset = format->fmt.pix.height * 128;
-        layer->planes[0].pitch = format->fmt.pix.width;
-        layer->planes[1].pitch = format->fmt.pix.width;
+        layer->planes[1].offset = height * 128;
+        layer->planes[0].pitch = width;
+        layer->planes[1].pitch = width;
     }
     else if (pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
         layer->planes[1].object_index = 0;
-        layer->planes[1].offset = format->fmt.pix.height * 128;
-        layer->planes[0].pitch = format->fmt.pix.width * 2; // Lies but it keeps DRM import happy
-        layer->planes[1].pitch = format->fmt.pix.width * 2;
+        layer->planes[1].offset = height * 128;
+        layer->planes[0].pitch = width * 2; // Lies but it keeps DRM import happy
+        layer->planes[1].pitch = width * 2;
     }
     else
 #endif
     {
         layer->planes[1].object_index = 0;
-        layer->planes[1].offset = layer->planes[0].pitch * (V4L2_TYPE_IS_MULTIPLANAR(format->type) ? format->fmt.pix_mp.height : format->fmt.pix.height);
+        layer->planes[1].offset = layer->planes[0].pitch * height;
         layer->planes[1].pitch = layer->planes[0].pitch;
     }
 
@@ -1056,6 +1072,14 @@ int ff_v4l2_request_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_c
     if (V4L2_TYPE_IS_MULTIPLANAR(ctx->format.type)) {
         hwfc->width = ctx->format.fmt.pix_mp.width;
         hwfc->height = ctx->format.fmt.pix_mp.height;
+#if CONFIG_SAND
+        if (ctx->format.fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12_COL128) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_8;
+        }
+        else if (ctx->format.fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+            hwfc->sw_format = AV_PIX_FMT_RPI4_10;
+        }
+#endif
     } else {
         hwfc->width = ctx->format.fmt.pix.width;
         hwfc->height = ctx->format.fmt.pix.height;
