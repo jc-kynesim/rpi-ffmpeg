@@ -841,25 +841,42 @@ int qent_src_params_set(struct qent_src *const be_src, const struct timeval * ti
     return 0;
 }
 
-int qent_src_data_copy(struct qent_src *const be_src, const void *const src, const size_t len, struct dmabufs_ctl * dbsc)
+static int qent_base_realloc(struct qent_base *const be, const size_t len, struct dmabufs_ctl * dbsc)
 {
-    void * dst;
-    struct qent_base *const be = &be_src->base;
-
     if (!be->dh[0] || len > dmabuf_size(be->dh[0])) {
         size_t newsize = round_up_size(len);
         request_log("%s: Overrun %d > %d; trying %d\n", __func__, len, dmabuf_size(be->dh[0]), newsize);
-        if (dbsc &&
+        if (!dbsc ||
             (be->dh[0] = dmabuf_realloc(dbsc, be->dh[0], newsize)) == NULL) {
             request_log("%s: Realloc %d failed\n", __func__, newsize);
             return -ENOMEM;
         }
     }
+    return 0;
+}
+
+int qent_src_alloc(struct qent_src *const be_src, const size_t len, struct dmabufs_ctl * dbsc)
+{
+    struct qent_base *const be = &be_src->base;
+    return qent_base_realloc(be, len, dbsc);
+}
+
+
+int qent_src_data_copy(struct qent_src *const be_src, const size_t offset, const void *const src, const size_t len, struct dmabufs_ctl * dbsc)
+{
+    void * dst;
+    struct qent_base *const be = &be_src->base;
+    int rv;
+
+    // Realloc doesn't copy so don't alloc if offset != 0
+    if ((rv = qent_base_realloc(be, offset + len, offset ? NULL : dbsc)) != 0)
+        return rv;
+
     dmabuf_write_start(be->dh[0]);
     dst = dmabuf_map(be->dh[0]);
     if (!dst)
         return -1;
-    memcpy(dst, src, len);
+    memcpy((char*)dst + offset, src, len);
     dmabuf_len_set(be->dh[0], len);
     dmabuf_write_end(be->dh[0]);
     return 0;

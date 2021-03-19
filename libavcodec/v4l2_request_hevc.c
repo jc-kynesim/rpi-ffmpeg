@@ -956,7 +956,7 @@ static int send_slice(AVCodecContext * const avctx,
         return AVERROR(ENOMEM);
     }
 
-    if (set_req_ctls(ctx, req, controls, i, 1)) {
+    if (set_req_ctls(ctx, req, controls, i, 2)) {
         av_log(avctx, AV_LOG_ERROR, "%s: Failed to set req ctls\n", __func__);
         goto fail1;
     }
@@ -966,7 +966,7 @@ static int send_slice(AVCodecContext * const avctx,
         goto fail1;
     }
 
-    if (qent_src_data_copy(src, si->ptr, si->len, ctx->dbufs) != 0) {
+    if (qent_src_data_copy(src, 0, si->ptr, si->len, ctx->dbufs) != 0) {
         av_log(avctx, AV_LOG_ERROR, "%s: Failed data copy\n", __func__);
         goto fail2;
     }
@@ -1000,11 +1000,8 @@ fail1:
 static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 {
     const HEVCContext * const h = avctx->priv_data;
-//    FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
     V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
-//    V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
-//    MediaBufsStatus stat;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
 //    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
     unsigned int i;
