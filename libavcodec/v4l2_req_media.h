@@ -60,7 +60,7 @@ int media_request_start(struct media_request * const req);
 
 // Return an *unstarted* media_request to the pool
 // May later be upgraded to allow for aborting a started req
-int media_request_abort(struct media_request * const req);
+int media_request_abort(struct media_request ** const preq);
 
 
 struct mediabufs_ctl;

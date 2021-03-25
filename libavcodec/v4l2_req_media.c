@@ -321,10 +321,13 @@ static void media_request_done(void *v, short revents)
     sem_post(&mp->sem);
 }
 
-int media_request_abort(struct media_request * const req)
+int media_request_abort(struct media_request ** const preq)
 {
+    struct media_request * const req = *preq;
+
     if (req == NULL)
         return 0;
+    *preq = NULL;
 
     media_request_done(req, 0);
     return 0;
@@ -898,7 +901,7 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
                 struct qent_dst *const dst_be,
                 const bool is_final)
 {
-    struct media_request *const mreq = *pmreq;
+    struct media_request * mreq = *pmreq;
     struct qent_src *const src_be = *psrc_be;
 
     // Req & src are always both "consumed"
@@ -934,7 +937,7 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
     return MEDIABUFS_STATUS_SUCCESS;
 
 fail1:
-    media_request_abort(mreq);
+    media_request_abort(&mreq);
     queue_put_free(mbc->src, &src_be->base);
 
     if (dst_be)
