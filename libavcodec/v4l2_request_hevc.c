@@ -106,16 +106,16 @@ typedef struct V4L2ReqFrameDataPrivHEVC {
 
 static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
-static inline uint64_t frame_capture_timestamp(const AVFrame * const frame)
+static inline uint64_t frame_capture_dpb(const AVFrame * const frame)
 {
     const V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)frame->data[0];
     return rd->timestamp;
 }
 
-static inline void frame_set_capture_timestamp(AVFrame * const frame, const uint64_t timestamp)
+static inline void frame_set_capture_dpb(AVFrame * const frame, const uint64_t dpb_stamp)
 {
     V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)frame->data[0];
-    rd->timestamp = timestamp;
+    rd->timestamp = dpb_stamp;
 }
 
 static void fill_pred_table(const HEVCContext *h, struct v4l2_hevc_pred_weight_table *table)
@@ -165,19 +165,19 @@ static int find_frame_rps_type(const HEVCContext *h, uint64_t timestamp)
 
     for (i = 0; i < h->rps[ST_CURR_BEF].nb_refs; i++) {
         frame = h->rps[ST_CURR_BEF].ref[i];
-        if (frame && timestamp == frame_capture_timestamp(frame->frame))
+        if (frame && timestamp == frame_capture_dpb(frame->frame))
             return V4L2_HEVC_DPB_ENTRY_RPS_ST_CURR_BEFORE;
     }
 
     for (i = 0; i < h->rps[ST_CURR_AFT].nb_refs; i++) {
         frame = h->rps[ST_CURR_AFT].ref[i];
-        if (frame && timestamp == frame_capture_timestamp(frame->frame))
+        if (frame && timestamp == frame_capture_dpb(frame->frame))
             return V4L2_HEVC_DPB_ENTRY_RPS_ST_CURR_AFTER;
     }
 
     for (i = 0; i < h->rps[LT_CURR].nb_refs; i++) {
         frame = h->rps[LT_CURR].ref[i];
-        if (frame && timestamp == frame_capture_timestamp(frame->frame))
+        if (frame && timestamp == frame_capture_dpb(frame->frame))
             return V4L2_HEVC_DPB_ENTRY_RPS_LT_CURR;
     }
 
@@ -192,7 +192,7 @@ static uint8_t get_ref_pic_index(const HEVCContext *h, const HEVCFrame *frame,
     if (!frame)
         return 0;
 
-    timestamp = frame_capture_timestamp(frame->frame);
+    timestamp = frame_capture_dpb(frame->frame);
 
     for (uint8_t i = 0; i < slice_params->num_active_dpb_entries; i++) {
         struct v4l2_hevc_dpb_entry *entry = &slice_params->dpb[i];
@@ -298,7 +298,7 @@ static void fill_slice_params(const HEVCContext *h,
         if (frame != pic && (frame->flags & (HEVC_FRAME_FLAG_LONG_REF | HEVC_FRAME_FLAG_SHORT_REF))) {
             struct v4l2_hevc_dpb_entry *entry = &slice_params->dpb[entries++];
 
-            entry->timestamp = frame_capture_timestamp(frame->frame);
+            entry->timestamp = frame_capture_dpb(frame->frame);
             entry->rps = find_frame_rps_type(h, entry->timestamp);
             entry->field_pic = frame->frame->interlaced_frame;
 
@@ -531,6 +531,19 @@ static void v4l2_req_frame_data_priv_free(void * priv)
     free(rfdp);
 }
 
+static inline struct timeval cvt_timestamp_to_tv(const unsigned int t)
+{
+    return (struct timeval){
+        .tv_usec = t % 1000000,
+        .tv_sec = t / 1000000
+    };
+}
+
+static inline uint64_t cvt_timestamp_to_dpb(const unsigned int t)
+{
+    return (uint64_t)t * 1000;
+}
+
 static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
                                          av_unused const uint8_t *buffer,
                                          av_unused uint32_t size)
@@ -747,7 +760,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
 
         // Dispatch previous slice
 //        stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, req->qe_dst, 0);
-        stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src,
+        stat = mediabufs_start_request(rfdp->mbufs, &rfdp->req, &rfdp->qe_src,
                                        controls->first_slice ? req->qe_dst : NULL, 0);
         rfdp->req = NULL;
         rfdp->qe_src = NULL;
@@ -786,17 +799,15 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         return AVERROR(ENOMEM);
     }
 
-    if (qent_src_data_copy(rfdp->qe_src, buffer, size, ctx->dbufs) != 0) {
+    if (qent_src_data_copy(rfdp->qe_src, 0, buffer, size, ctx->dbufs) != 0) {
         av_log(avctx, AV_LOG_ERROR, "%s: Failed data copy\n", __func__);
         return AVERROR(ENOMEM);
     }
 
     {
-        struct timeval ts = {
-            .tv_usec = ctx->timestamp,
-        };
-        frame_set_capture_timestamp(h->ref->frame, ctx->timestamp * 1000); // dpb timestamps are in ns
-        qent_src_params_set(rfdp->qe_src, &ts);
+        struct timeval tv = cvt_timestamp_to_tv(ctx->timestamp);
+        frame_set_capture_dpb(h->ref->frame, cvt_timestamp_to_dpb(ctx->timestamp));
+        qent_src_params_set(rfdp->qe_src, &tv);
     }
 
     fill_slice_params(h, &controls->slice_params[slice]);
@@ -840,7 +851,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 //    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
 
     // Dispatch previous slice
-    stat = mediabufs_start_request(rfdp->mbufs, rfdp->req, rfdp->qe_src, controls->first_slice ? rd->qe_dst : NULL, 1);
+    stat = mediabufs_start_request(rfdp->mbufs, &rfdp->req, &rfdp->qe_src, controls->first_slice ? rd->qe_dst : NULL, 1);
     rfdp->req = NULL;
     rfdp->qe_src = NULL;
 

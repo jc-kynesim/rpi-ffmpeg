@@ -77,14 +77,6 @@ static size_t round_up_size(const size_t x)
     return x >= (3 << n) ? 4 << n : (3 << n);
 }
 
-static size_t next_size(const size_t x)
-{
-    return round_up_size(x + 1);
-}
-
-
-
-
 struct weak_link_master {
     atomic_int ref_count;    /* 0 is single ref for easier atomics */
     pthread_rwlock_t lock;
@@ -847,26 +839,42 @@ int qent_src_params_set(struct qent_src *const be_src, const struct timeval * ti
     return 0;
 }
 
-int qent_src_data_copy(struct qent_src *const be_src, const void *const src, const size_t len, struct dmabufs_ctl * dbsc)
+static int qent_base_realloc(struct qent_base *const be, const size_t len, struct dmabufs_ctl * dbsc)
 {
-    void * dst;
-    struct qent_base *const be = &be_src->base;
-
     if (!be->dh[0] || len > dmabuf_size(be->dh[0])) {
         size_t newsize = round_up_size(len);
-        int rv;
         request_log("%s: Overrun %d > %d; trying %d\n", __func__, len, dmabuf_size(be->dh[0]), newsize);
-        if (dbsc &&
+        if (!dbsc ||
             (be->dh[0] = dmabuf_realloc(dbsc, be->dh[0], newsize)) == NULL) {
             request_log("%s: Realloc %d failed\n", __func__, newsize);
             return -ENOMEM;
         }
     }
+    return 0;
+}
+
+int qent_src_alloc(struct qent_src *const be_src, const size_t len, struct dmabufs_ctl * dbsc)
+{
+    struct qent_base *const be = &be_src->base;
+    return qent_base_realloc(be, len, dbsc);
+}
+
+
+int qent_src_data_copy(struct qent_src *const be_src, const size_t offset, const void *const src, const size_t len, struct dmabufs_ctl * dbsc)
+{
+    void * dst;
+    struct qent_base *const be = &be_src->base;
+    int rv;
+
+    // Realloc doesn't copy so don't alloc if offset != 0
+    if ((rv = qent_base_realloc(be, offset + len, offset ? NULL : dbsc)) != 0)
+        return rv;
+
     dmabuf_write_start(be->dh[0]);
     dst = dmabuf_map(be->dh[0]);
     if (!dst)
         return -1;
-    memcpy(dst, src, len);
+    memcpy((char*)dst + offset, src, len);
     dmabuf_len_set(be->dh[0], len);
     dmabuf_write_end(be->dh[0]);
     return 0;
@@ -885,11 +893,18 @@ int qent_dst_dup_fd(const struct qent_dst *const be_dst, unsigned int plane)
 }
 
 MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
-                struct media_request *const mreq,
-                struct qent_src *const src_be,
+                struct media_request **const pmreq,
+                struct qent_src **const psrc_be,
                 struct qent_dst *const dst_be,
                 const bool is_final)
 {
+    struct media_request *const mreq = *pmreq;
+    struct qent_src *const src_be = *psrc_be;
+
+    // Req & src are always both "consumed"
+    *pmreq = NULL;
+    *psrc_be = NULL;
+
     pthread_mutex_lock(&mbc->lock);
 
     if (dst_be) {
@@ -919,6 +934,9 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
     return MEDIABUFS_STATUS_SUCCESS;
 
 fail1:
+    media_request_abort(mreq);
+    queue_put_free(mbc->src, &src_be->base);
+
     if (dst_be)
         qe_dst_done(dst_be);
     pthread_mutex_unlock(&mbc->lock);
@@ -948,9 +966,6 @@ static int qe_alloc_from_fmt(struct qent_base *const be,
     else {
 //      be->dh[0] = dmabuf_alloc(dbsc, fmt->fmt.pix.sizeimage);
         size_t size = fmt->fmt.pix.sizeimage;
-#warning Fixed bitbuf size
-        if (size < 0x100000)
-            size = 0x100000;
         be->dh[0] = dmabuf_realloc(dbsc, be->dh[0], size);
         if (!be->dh[0])
             return -1;
@@ -1249,6 +1264,15 @@ struct qent_src *mediabufs_src_qent_get(struct mediabufs_ctl *const mbc)
 {
     struct qent_base * buf = queue_get_free(mbc->src);
     return base_to_src(buf);
+}
+
+void mediabufs_src_qent_abort(struct mediabufs_ctl *const mbc, struct qent_src **const pqe_src)
+{
+    struct qent_src *const qe_src = *pqe_src;
+    if (!qe_src)
+        return;
+    *pqe_src = NULL;
+    queue_put_free(mbc->src, &qe_src->base);
 }
 
 /* src format must have been set up before this */

@@ -70,8 +70,10 @@ struct dmabuf_h;
 struct dmabufs_ctl;
 
 int qent_src_params_set(struct qent_src *const be, const struct timeval * timestamp);
+// prealloc
+int qent_src_alloc(struct qent_src *const be_src, const size_t len, struct dmabufs_ctl * dbsc);
 // dbsc may be NULL if realloc not required
-int qent_src_data_copy(struct qent_src *const be_src, const void *const src, const size_t len, struct dmabufs_ctl * dbsc);
+int qent_src_data_copy(struct qent_src *const be_src, const size_t offset, const void *const src, const size_t len, struct dmabufs_ctl * dbsc);
 const struct dmabuf_h * qent_dst_dmabuf(const struct qent_dst *const be, unsigned int plane);
 int qent_dst_dup_fd(const struct qent_dst *const be, unsigned int plane);
 MediaBufsStatus qent_dst_wait(struct qent_dst *const be);
@@ -88,8 +90,8 @@ MediaBufsStatus qent_dst_import_fd(struct qent_dst *const be_dst,
                 int fd, size_t size);
 
 MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
-                struct media_request *const mreq,
-                struct qent_src *const src_be,
+                struct media_request **const pmreq,
+                struct qent_src **const psrc_be,
                 struct qent_dst *const dst_be,
                 const bool is_final);
 // Get / alloc a dst buffer & associate with a slot
@@ -107,6 +109,7 @@ MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
                const unsigned int width,
                const unsigned int height);
 struct qent_src *mediabufs_src_qent_get(struct mediabufs_ctl *const mbc);
+void mediabufs_src_qent_abort(struct mediabufs_ctl *const mbc, struct qent_src **const pqe_src);
 
 int mediabufs_ctl_set_ext_ctrls(struct mediabufs_ctl * mbc, struct media_request * const mreq,
                                 struct v4l2_ext_control control_array[], unsigned int n);
