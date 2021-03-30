@@ -332,6 +332,19 @@ static void export_stream_params(HEVCContext *s, const HEVCSPS *sps)
 
     ff_set_sar(avctx, sps->vui.sar);
 
+    if (sps->chroma_format_idc == 1) {
+        avctx->chroma_sample_location = sps->vui.chroma_loc_info_present_flag ?
+            sps->vui.chroma_sample_loc_type_top_field + 1 :
+            AVCHROMA_LOC_LEFT;
+    }
+    else if (sps->chroma_format_idc == 2 ||
+             sps->chroma_format_idc == 3) {
+        avctx->chroma_sample_location = AVCHROMA_LOC_TOPLEFT;;
+    }
+    else {
+        avctx->chroma_sample_location = AVCHROMA_LOC_UNSPECIFIED;
+    }
+
     if (sps->vui.video_signal_type_present_flag)
         avctx->color_range = sps->vui.video_full_range_flag ? AVCOL_RANGE_JPEG
                                                             : AVCOL_RANGE_MPEG;
