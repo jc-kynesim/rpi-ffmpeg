@@ -29,6 +29,7 @@ e.h
 #include <stdint.h>
 
 struct v4l2_format;
+struct v4l2_fmtdesc;
 struct v4l2_query_ext_ctrl;
 
 struct pollqueue;
@@ -104,10 +105,14 @@ MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, unsi
 MediaBufsStatus mediabufs_stream_on(struct mediabufs_ctl *const mbc);
 MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc);
 const struct v4l2_format *mediabufs_dst_fmt(struct mediabufs_ctl *const mbc);
+
+typedef int mediabufs_dst_fmt_accept_fn(void * v, const struct v4l2_fmtdesc *fmtdesc);
+
 MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
-               const unsigned int rtfmt,
                const unsigned int width,
-               const unsigned int height);
+               const unsigned int height,
+               mediabufs_dst_fmt_accept_fn *const accept_fn,
+               void *const accept_v);
 struct qent_src *mediabufs_src_qent_get(struct mediabufs_ctl *const mbc);
 void mediabufs_src_qent_abort(struct mediabufs_ctl *const mbc, struct qent_src **const pqe_src);
 
@@ -122,7 +127,9 @@ int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_
 MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
                                       enum v4l2_buf_type buf_type,
                                       const uint32_t pixfmt,
-                                      const uint32_t width, const uint32_t height);
+                                      const uint32_t width, const uint32_t height,
+                                      const size_t bufsize);
+
 MediaBufsStatus mediabufs_src_pool_create(struct mediabufs_ctl *const rw,
                   struct dmabufs_ctl * const dbsc,
                   unsigned int n);

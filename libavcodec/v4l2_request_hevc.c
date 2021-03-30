@@ -104,6 +104,25 @@ typedef struct V4L2ReqFrameDataPrivHEVC {
 
 static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
+static size_t bit_buf_size(unsigned int w, unsigned int h, unsigned int bits_minus8)
+{
+	const size_t wxh = w * h;
+	size_t bits_alloc;
+
+	/* Annex A gives a min compression of 2 @ lvl 3.1
+	 * (wxh <= 983040) and min 4 thereafter but avoid
+	 * the odity of 983041 having a lower limit than
+	 * 983040.
+	 * Multiply by 3/2 for 4:2:0
+	 */
+	bits_alloc = wxh < 983040 ? wxh * 3 / 4 :
+		wxh < 983040 * 2 ? 983040 * 3 / 4 :
+		wxh * 3 / 8;
+	/* Allow for bit depth */
+	bits_alloc += (bits_alloc * bits_minus8) / 8;
+    return bits_alloc;
+}
+
 static inline uint64_t frame_capture_dpb(const AVFrame * const frame)
 {
     const V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)frame->data[0];
@@ -911,6 +930,25 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     return 0;
 }
 
+static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
+{
+    AVCodecContext *const avctx = v;
+    const HEVCContext *const h = avctx->priv_data;
+
+    if (h->ps.sps->bit_depth == 8) {
+        if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128 ||
+            fmtdesc->pixelformat == V4L2_PIX_FMT_NV12) {
+            return 1;
+        }
+    }
+    else if (h->ps.sps->bit_depth == 10) {
+        if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int v4l2_request_hevc_init(AVCodecContext *avctx)
 {
     const HEVCContext *h = avctx->priv_data;
@@ -919,9 +957,6 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     int ret;
     const struct decdev * decdev;
     uint32_t src_pix_fmt = V4L2_PIX_FMT_HEVC_SLICE;
-
-//    if ((ctx->pctrl = ff_v4l2_phase_control_new(2)) == NULL)
-//        return AVERROR(ENOMEM);
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
@@ -957,7 +992,11 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
 
     fill_sps(&sps, h);
 
-    if (mediabufs_src_fmt_set(ctx->mbufs, decdev_src_type(decdev), src_pix_fmt, avctx->width, avctx->height)) {
+    // Ask for an initial bitbuf size of max size / 4
+    // We will realloc if we need more
+    if (mediabufs_src_fmt_set(ctx->mbufs, decdev_src_type(decdev), src_pix_fmt,
+                              avctx->width, avctx->height,
+                              bit_buf_size(avctx->width, avctx->height, h->ps.sps->bit_depth - 8) / 4)) {
         char tbuf1[5];
         av_log(avctx, AV_LOG_ERROR, "Failed to set source format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), avctx->width, avctx->height);
         goto fail4;
@@ -968,7 +1007,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    if (mediabufs_dst_fmt_set(ctx->mbufs, 0 /** rt fmt **/, avctx->width, avctx->height)) {
+    if (mediabufs_dst_fmt_set(ctx->mbufs, avctx->width, avctx->height, dst_fmt_accept_cb, avctx)) {
         char tbuf1[5];
         av_log(avctx, AV_LOG_ERROR, "Failed to set destination format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), avctx->width, avctx->height);
         goto fail4;
@@ -1047,31 +1086,6 @@ static AVBufferRef *v4l2_req_frame_alloc(void *opaque, int size)
         av_freep(&data);
         return NULL;
     }
-#if 0
-    req = (V4L2MediaReqDescriptor*)data;
-    req->request_fd = -1;
-    req->output.fd = -1;
-    req->capture.fd = -1;
-    ret = v4l2_request_buffer_alloc(avctx, &req->output, ctx->output_type);
-    if (ret < 0) {
-        av_buffer_unref(&ref);
-        return NULL;
-    }
-
-    ret = v4l2_request_buffer_alloc(avctx, &req->capture, ctx->format.type);
-    if (ret < 0) {
-        av_buffer_unref(&ref);
-        return NULL;
-    }
-
-    ret = ioctl(ctx->media_fd, MEDIA_IOC_REQUEST_ALLOC, &req->request_fd);
-    if (ret < 0) {
-        av_log(avctx, AV_LOG_ERROR, "%s: request alloc failed, %s (%d)\n", __func__, strerror(errno), errno);
-        av_buffer_unref(&ref);
-        return NULL;
-    }
-    av_log(avctx, AV_LOG_INFO, "%s: avctx=%p size=%d data=%p request_fd=%d\n", __func__, avctx, size, data, req->request_fd);
-#endif
     return ref;
 }
 

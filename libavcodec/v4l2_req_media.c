@@ -216,12 +216,6 @@ static inline int do_wait(sem_t *const sem)
     return 0;
 }
 
-static MediaBufsStatus video_fmt_supported(uint32_t pixelformat, enum v4l2_buf_type buf_type, unsigned int rtfmt)
-{
-#warning Dummy
-    return 0;
-}
-
 static int request_buffers(int video_fd, unsigned int type,
                            enum v4l2_memory memory, unsigned int buffers_count)
 {
@@ -979,7 +973,8 @@ static int qe_alloc_from_fmt(struct qent_base *const be,
 static MediaBufsStatus fmt_set(struct v4l2_format *const fmt, const int fd,
             const enum v4l2_buf_type buftype,
             uint32_t pixfmt,
-            const unsigned int width, const unsigned int height)
+            const unsigned int width, const unsigned int height,
+                               const size_t bufsize)
 {
     *fmt = (struct v4l2_format){.type = buftype};
 
@@ -987,6 +982,10 @@ static MediaBufsStatus fmt_set(struct v4l2_format *const fmt, const int fd,
         fmt->fmt.pix_mp.width = width;
         fmt->fmt.pix_mp.height = height;
         fmt->fmt.pix_mp.pixelformat = pixfmt;
+        if (bufsize) {
+            fmt->fmt.pix_mp.num_planes = 1;
+            fmt->fmt.pix_mp.plane_fmt[0].sizeimage = bufsize;
+        }
     }
     else {
         fmt->fmt.pix.width = width;
@@ -1002,15 +1001,16 @@ static MediaBufsStatus fmt_set(struct v4l2_format *const fmt, const int fd,
 }
 
 static MediaBufsStatus find_fmt_flags(struct v4l2_format *const fmt,
-                   const int fd, const unsigned int rtfmt,
+                   const int fd,
                    const unsigned int type_v4l2,
                    const uint32_t flags_must,
                    const uint32_t flags_not,
                    const unsigned int width,
-                   const unsigned int height)
+                   const unsigned int height,
+                   mediabufs_dst_fmt_accept_fn *const accept_fn,
+                   void *const accept_v)
 {
     unsigned int i;
-    MediaBufsStatus status;
 
     for (i = 0;; ++i) {
         struct v4l2_fmtdesc fmtdesc = {
@@ -1024,15 +1024,11 @@ static MediaBufsStatus find_fmt_flags(struct v4l2_format *const fmt,
         if ((fmtdesc.flags & flags_must) != flags_must ||
             (fmtdesc.flags & flags_not))
             continue;
-        status = video_fmt_supported(fmtdesc.pixelformat,
-                         fmtdesc.type, rtfmt);
-        if (status == MEDIABUFS_ERROR_UNSUPPORTED_RT_FORMAT)
-            return status;
-        if (status != MEDIABUFS_STATUS_SUCCESS)
+        if (!accept_fn(accept_v, &fmtdesc))
             continue;
 
         if (fmt_set(fmt, fd, fmtdesc.type, fmtdesc.pixelformat,
-                width, height) == MEDIABUFS_STATUS_SUCCESS)
+                width, height, 0) == MEDIABUFS_STATUS_SUCCESS)
             return MEDIABUFS_STATUS_SUCCESS;
     }
     return 0;
@@ -1201,9 +1197,10 @@ const struct v4l2_format *mediabufs_dst_fmt(struct mediabufs_ctl *const mbc)
 }
 
 MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
-               const unsigned int rtfmt,
                const unsigned int width,
-               const unsigned int height)
+               const unsigned int height,
+               mediabufs_dst_fmt_accept_fn *const accept_fn,
+               void *const accept_v)
 {
     MediaBufsStatus status;
     unsigned int i;
@@ -1222,11 +1219,11 @@ MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
             V4L2_FMT_FLAG_EMULATED, 0}
     };
     for (i = 0; i != sizeof(trys)/sizeof(trys[0]); ++i) {
-        status = find_fmt_flags(&mbc->dst_fmt, mbc->vfd, rtfmt,
-                        trys[i].type_v4l2,
-                        trys[i].flags_must,
-                        trys[i].flags_not,
-                    width, height);
+        status = find_fmt_flags(&mbc->dst_fmt, mbc->vfd,
+                                trys[i].type_v4l2,
+                                trys[i].flags_must,
+                                trys[i].flags_not,
+                                width, height, accept_fn, accept_v);
         if (status != MEDIABUFS_ERROR_UNSUPPORTED_BUFFERTYPE)
             return status;
     }
@@ -1422,9 +1419,10 @@ MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
 MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
                                       enum v4l2_buf_type buf_type,
                    const uint32_t pixfmt,
-                   const uint32_t width, const uint32_t height)
+                   const uint32_t width, const uint32_t height,
+                                      const size_t bufsize)
 {
-    MediaBufsStatus rv = fmt_set(&mbc->src_fmt, mbc->vfd, buf_type, pixfmt, width, height);
+    MediaBufsStatus rv = fmt_set(&mbc->src_fmt, mbc->vfd, buf_type, pixfmt, width, height, bufsize);
     if (rv != MEDIABUFS_STATUS_SUCCESS)
         request_err(mbc->dc, "Failed to set src buftype %d, format %#x %dx%d\n", buf_type, pixfmt, width, height);
 
