@@ -84,6 +84,8 @@ typedef struct egl_display_env_s
     struct egl_setup setup;
     enum AVPixelFormat avfmt;
 
+    int show_all;
+
     egl_aux_t aux[32];
 
     pthread_t q_thread;
@@ -670,6 +672,10 @@ static int egl_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
         return AVERROR(EINVAL);
     }
 
+    // Really hacky sync
+    while (de->show_all && de->q_next) {
+       usleep(3000);
+    }
 
     pthread_mutex_lock(&de->q_lock);
     {
@@ -766,6 +772,7 @@ static void egl_vout_deinit(struct AVFormatContext * s)
 
 #define OFFSET(x) offsetof(egl_display_env_t, x)
 static const AVOption options[] = {
+   { "show_all", "show all frames", OFFSET(show_all), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
 #if 0
     { "display_name", "set display name",       OFFSET(display_name), AV_OPT_TYPE_STRING, {.str = NULL }, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
     { "window_id",    "set existing window id", OFFSET(window_id),    AV_OPT_TYPE_INT64,  {.i64 = 0 }, 0, INT64_MAX, AV_OPT_FLAG_ENCODING_PARAM },
