@@ -997,6 +997,22 @@ static MediaBufsStatus fmt_set(struct v4l2_format *const fmt, const int fd,
         if (errno != EINTR)
             return MEDIABUFS_ERROR_OPERATION_FAILED;
 
+    // Treat anything where we don't get at least what we asked for as a fail
+    if (V4L2_TYPE_IS_MULTIPLANAR(buftype)) {
+        if (fmt->fmt.pix_mp.width < width ||
+            fmt->fmt.pix_mp.height < height ||
+            fmt->fmt.pix_mp.pixelformat != pixfmt) {
+            return MEDIABUFS_ERROR_UNSUPPORTED_BUFFERTYPE;
+        }
+    }
+    else {
+        if (fmt->fmt.pix.width < width ||
+            fmt->fmt.pix.height < height ||
+            fmt->fmt.pix.pixelformat != pixfmt) {
+            return MEDIABUFS_ERROR_UNSUPPORTED_BUFFERTYPE;
+        }
+    }
+
     return MEDIABUFS_STATUS_SUCCESS;
 }
 
