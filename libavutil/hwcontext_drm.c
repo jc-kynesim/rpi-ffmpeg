@@ -21,7 +21,7 @@
 #include <unistd.h>
 
 #include <drm.h>
-#include <drm/drm_fourcc.h>
+#include <libdrm/drm_fourcc.h>
 #include <xf86drm.h>
 
 #include "avassert.h"
