@@ -85,6 +85,9 @@ typedef struct egl_display_env_s
     enum AVPixelFormat avfmt;
 
     int show_all;
+    int window_width, window_height;
+    int window_x, window_y;
+    int fullscreen;
 
     egl_aux_t aux[32];
 
@@ -151,8 +154,8 @@ no_border( Display *dpy, Window w)
  */
 static int
 make_window(struct AVFormatContext * const s,
+            egl_display_env_t * const de,
             Display *dpy, EGLDisplay egl_dpy, const char *name,
-            int x, int y, int width, int height,
             Window *winRet, EGLContext *ctxRet, EGLSurface *surfRet)
 {
    int scrnum = DefaultScreen( dpy );
@@ -161,8 +164,13 @@ make_window(struct AVFormatContext * const s,
    Window root = RootWindow( dpy, scrnum );
    Window win;
    EGLContext ctx;
-   bool fullscreen = false; /* Hook this up to a command line arg */
+   const int fullscreen = de->fullscreen;
    EGLConfig config;
+   int x = de->window_x;
+   int y = de->window_y;
+   int width = de->window_width ? de->window_width : 1280;
+   int height = de->window_height ? de->window_height : 720;
+
 
    if (fullscreen) {
       int scrnum = DefaultScreen(dpy);
@@ -590,8 +598,12 @@ static void * display_thread(void * v)
        }
     }
 
-    if (make_window(s, de->setup.dpy, de->setup.egl_dpy, "ffmpeg-vout",
-                0, 0, 1280, 720, &de->setup.win, &de->setup.ctx, &de->setup.surf)) {
+    if (!de->window_width || !de->window_height) {
+       de->window_width = 1280;
+       de->window_height = 720;
+    }
+    if (make_window(s, de, de->setup.dpy, de->setup.egl_dpy, "ffmpeg-vout",
+                    &de->setup.win, &de->setup.ctx, &de->setup.surf)) {
        av_log(s, AV_LOG_ERROR, "%s: make_window failed\n", __func__);
        goto fail;
     }
@@ -773,14 +785,10 @@ static void egl_vout_deinit(struct AVFormatContext * s)
 #define OFFSET(x) offsetof(egl_display_env_t, x)
 static const AVOption options[] = {
    { "show_all", "show all frames", OFFSET(show_all), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
-#if 0
-    { "display_name", "set display name",       OFFSET(display_name), AV_OPT_TYPE_STRING, {.str = NULL }, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_id",    "set existing window id", OFFSET(window_id),    AV_OPT_TYPE_INT64,  {.i64 = 0 }, 0, INT64_MAX, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_size",  "set window forced size", OFFSET(window_width), AV_OPT_TYPE_IMAGE_SIZE, {.str = NULL}, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_title", "set window title",       OFFSET(window_title), AV_OPT_TYPE_STRING, {.str = NULL }, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_x",     "set window x offset",    OFFSET(window_x),     AV_OPT_TYPE_INT,    {.i64 = 0 }, -INT_MAX, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_y",     "set window y offset",    OFFSET(window_y),     AV_OPT_TYPE_INT,    {.i64 = 0 }, -INT_MAX, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
-#endif
+   { "window_size",  "set window forced size", OFFSET(window_width), AV_OPT_TYPE_IMAGE_SIZE, {.str = NULL}, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
+   { "window_x",     "set window x offset",    OFFSET(window_x),     AV_OPT_TYPE_INT,    {.i64 = 0 }, -INT_MAX, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
+   { "window_y",     "set window y offset",    OFFSET(window_y),     AV_OPT_TYPE_INT,    {.i64 = 0 }, -INT_MAX, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
+   { "fullscreen",   "set fullscreen display", OFFSET(fullscreen),   AV_OPT_TYPE_BOOL,   {.i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { NULL }
 
 };
