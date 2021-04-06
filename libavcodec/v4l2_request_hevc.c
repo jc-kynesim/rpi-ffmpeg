@@ -953,7 +953,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
 {
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    struct v4l2_ctrl_hevc_sps sps;
+    const HEVCSPS * const sps = h->ps.sps;
+    struct v4l2_ctrl_hevc_sps ctrl_sps;
     int ret;
     const struct decdev * decdev;
     uint32_t src_pix_fmt = V4L2_PIX_FMT_HEVC_SLICE;
@@ -990,26 +991,27 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail3;
     }
 
-    fill_sps(&sps, h);
+    fill_sps(&ctrl_sps, h);
 
     // Ask for an initial bitbuf size of max size / 4
     // We will realloc if we need more
+    // Must use sps->h/w as avctx contains cropped size
     if (mediabufs_src_fmt_set(ctx->mbufs, decdev_src_type(decdev), src_pix_fmt,
-                              avctx->width, avctx->height,
-                              bit_buf_size(avctx->width, avctx->height, h->ps.sps->bit_depth - 8) / 4)) {
+                              sps->width, sps->height,
+                              bit_buf_size(sps->width, sps->height, sps->bit_depth - 8) / 4)) {
         char tbuf1[5];
-        av_log(avctx, AV_LOG_ERROR, "Failed to set source format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), avctx->width, avctx->height);
+        av_log(avctx, AV_LOG_ERROR, "Failed to set source format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), sps->width, sps->height);
         goto fail4;
     }
 
-    if (mediabufs_set_ext_ctrl(ctx->mbufs, NULL, V4L2_CID_MPEG_VIDEO_HEVC_SPS, &sps, sizeof(sps))) {
+    if (mediabufs_set_ext_ctrl(ctx->mbufs, NULL, V4L2_CID_MPEG_VIDEO_HEVC_SPS, &ctrl_sps, sizeof(ctrl_sps))) {
         av_log(avctx, AV_LOG_ERROR, "Failed to set initial SPS\n");
         goto fail4;
     }
 
-    if (mediabufs_dst_fmt_set(ctx->mbufs, avctx->width, avctx->height, dst_fmt_accept_cb, avctx)) {
+    if (mediabufs_dst_fmt_set(ctx->mbufs, sps->width, sps->height, dst_fmt_accept_cb, avctx)) {
         char tbuf1[5];
-        av_log(avctx, AV_LOG_ERROR, "Failed to set destination format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), avctx->width, avctx->height);
+        av_log(avctx, AV_LOG_ERROR, "Failed to set destination format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), sps->width, sps->height);
         goto fail4;
     }
 
