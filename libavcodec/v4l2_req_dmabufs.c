@@ -61,11 +61,9 @@ struct dmabuf_h * dmabuf_realloc(struct dmabufs_ctl * dbsc, struct dmabuf_h * ol
         .fd_flags = O_RDWR,
         .heap_flags = 0
     };
-    int i = 0;
 
     if (old != NULL) {
         if (old->size == data.len) {
-            request_log("Alloc reuse fd=%d\n", dh->fd);
             return old;
         }
         dmabuf_free(old);
@@ -74,7 +72,7 @@ struct dmabuf_h * dmabuf_realloc(struct dmabufs_ctl * dbsc, struct dmabuf_h * ol
     if (size == 0 ||
         (dh = malloc(sizeof(*dh))) == NULL)
         return NULL;
-retry:
+
     while (ioctl(dbsc->fd, DMA_HEAP_IOCTL_ALLOC, &data)) {
         int err = errno;
         request_log("Failed to alloc %" PRIu64 " from dma-heap(fd=%d): %d (%s)\n",
@@ -92,11 +90,6 @@ retry:
         .size = (size_t)data.len,
         .mapptr = MAP_FAILED
     };
-
-    request_log("Alloc fd=%d, size=%#zx\n", data.fd, dh->size);
-
-    if (data.fd == 0 && ++i < 5)
-        goto retry;
 
     return dh;
 
@@ -190,8 +183,6 @@ void dmabuf_len_set(struct dmabuf_h * const dh, const size_t len)
 
 void dmabuf_free(struct dmabuf_h * dh)
 {
-    request_log("%s\n", __func__);
-
     if (!dh)
         return;
 

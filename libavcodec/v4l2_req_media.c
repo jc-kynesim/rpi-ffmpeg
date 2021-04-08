@@ -230,7 +230,7 @@ static int request_buffers(int video_fd, unsigned int type,
     rc = ioctl(video_fd, VIDIOC_REQBUFS, &buffers);
     if (rc < 0) {
         rc = -errno;
-        request_log("Unable to request buffers: %s\n", strerror(-rc));
+        request_log("Unable to request %d type %d buffers: %s\n", buffers_count, type, strerror(-rc));
         return rc;
     }
 
@@ -1390,6 +1390,7 @@ MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc)
         status = MEDIABUFS_ERROR_OPERATION_FAILED;
     }
 
+    mbc->stream_on = false;
     return status;
 }
 
@@ -1475,9 +1476,9 @@ static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
 
     mediabufs_stream_off(mbc);
 
-    /* Empty v4l2 buffer stash */
-    request_buffers(mbc->vfd, V4L2_MEMORY_MMAP, mbc->src_fmt.type, 0);
-    request_buffers(mbc->vfd, V4L2_MEMORY_MMAP, mbc->dst_fmt.type, 0);
+    // Empty v4l2 buffer stash
+    request_buffers(mbc->vfd, mbc->src_fmt.type, V4L2_MEMORY_MMAP, 0);
+    request_buffers(mbc->vfd, mbc->dst_fmt.type, V4L2_MEMORY_MMAP, 0);
 
     queue_delete(mbc->dst);
     queue_delete(mbc->src);
