@@ -300,7 +300,9 @@ static void v4l2_free_buffer(void *opaque, uint8_t *data)
     V4L2m2mContext *s = buf_to_m2mctx(avbuf);
 
     if (atomic_fetch_sub(&avbuf->context_refcount, 1) == 1) {
-        atomic_fetch_sub_explicit(&s->refcount, 1, memory_order_acq_rel);
+        unsigned int refs = atomic_fetch_sub_explicit(&s->refcount, 1, memory_order_acq_rel);
+
+//        av_log(logger(avbuf), AV_LOG_INFO, "%s: refs=%u, avbuf=%p\n", __func__, refs, avbuf);
 
         if (s->reinit) {
             if (!atomic_load(&s->refcount))
@@ -359,6 +361,7 @@ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
 static int v4l2_buf_increase_ref(V4L2Buffer *in)
 {
     V4L2m2mContext *s = buf_to_m2mctx(in);
+    unsigned int refs;
 
     if (in->context_ref)
         atomic_fetch_add(&in->context_refcount, 1);
@@ -371,7 +374,9 @@ static int v4l2_buf_increase_ref(V4L2Buffer *in)
     }
 
     in->status = V4L2BUF_RET_USER;
-    atomic_fetch_add_explicit(&s->refcount, 1, memory_order_relaxed);
+    refs = atomic_fetch_add_explicit(&s->refcount, 1, memory_order_relaxed);
+
+//    av_log(logger(in), AV_LOG_INFO, "%s: refs=%d\n", __func__, refs);
 
     return 0;
 }
@@ -438,6 +443,7 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
     frame->format = avbuf->context->av_pix_fmt;
 
     if (buf_to_m2mctx(avbuf)->output_drm) {
+//        av_log(logger(avbuf), AV_LOG_INFO, "%s (drm): avbuf=%p\n", __func__, avbuf);
         /* 1. get references to the actual data */
         ret = v4l2_buf_to_bufref_drm(avbuf, &frame->buf[0]);
         if (ret)
@@ -449,6 +455,7 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
     } else {
         /* 1. get references to the actual data */
         for (i = 0; i < avbuf->num_planes; i++) {
+//            av_log(logger(avbuf), AV_LOG_INFO, "%s (bufref)\n", __func__);
             ret = v4l2_buf_to_bufref(avbuf, i, &frame->buf[i]);
             if (ret)
                 return ret;
@@ -627,6 +634,8 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
 {
     int ret;
 
+    av_log(logger(avbuf), AV_LOG_INFO, "%s\n", __func__);
+
     av_packet_unref(pkt);
     ret = v4l2_buf_to_bufref(avbuf, 0, &pkt->buf);
     if (ret)
@@ -676,14 +685,51 @@ int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
     return ff_v4l2_buffer_avpkt_to_buf_ext(pkt, out, NULL, 0, 0);
 }
 
-int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
-{
-    V4L2Context *ctx = avbuf->context;
-    int ret, i;
 
+static void v4l2_buffer_buffer_free(void *opaque, uint8_t *data)
+{
+    V4L2Buffer * const avbuf = (V4L2Buffer *)data;
+    int i;
+
+    for (i = 0; i != FF_ARRAY_ELEMS(avbuf->plane_info); ++i) {
+        struct V4L2Plane_info *p = avbuf->plane_info + i;
+        if (p->mm_addr != NULL)
+            munmap(p->mm_addr, p->length);
+    }
+
+    for (i = 0; i != FF_ARRAY_ELEMS(avbuf->drm_frame.objects); ++i) {
+        if (avbuf->drm_frame.objects[i].fd != -1)
+            close(avbuf->drm_frame.objects[i].fd);
+    }
+
+    av_free(avbuf);
+}
+
+
+int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ctx)
+{
+    int ret, i;
+    V4L2Buffer * const avbuf = av_mallocz(sizeof(*avbuf));
+    AVBufferRef * bufref;
+
+    *pbufref = NULL;
+    if (avbuf == NULL)
+        return AVERROR(ENOMEM);
+
+    bufref = av_buffer_create((uint8_t*)avbuf, sizeof(*avbuf), v4l2_buffer_buffer_free, NULL, 0);
+    if (bufref == NULL) {
+        av_free(avbuf);
+        return AVERROR(ENOMEM);
+    }
+
+    avbuf->context = ctx;
     avbuf->buf.memory = V4L2_MEMORY_MMAP;
     avbuf->buf.type = ctx->type;
     avbuf->buf.index = index;
+
+    for (i = 0; i != FF_ARRAY_ELEMS(avbuf->drm_frame.objects); ++i) {
+        avbuf->drm_frame.objects[i].fd = -1;
+    }
 
     if (buf_to_m2mctx(avbuf)->output_drm) {
         AVHWFramesContext *hwframes;
@@ -693,7 +739,7 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
         ctx->frames_ref = av_hwframe_ctx_alloc(buf_to_m2mctx(avbuf)->device_ref);
         if (!ctx->frames_ref) {
             ret = AVERROR(ENOMEM);
-            return ret;
+            goto fail;
         }
 
         hwframes = (AVHWFramesContext*)ctx->frames_ref->data;
@@ -703,7 +749,7 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
         hwframes->height = ctx->height;
         ret = av_hwframe_ctx_init(ctx->frames_ref);
         if (ret < 0)
-            return ret;
+            goto fail;
     }
 
     if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
@@ -713,7 +759,7 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
 
     ret = ioctl(buf_to_m2mctx(avbuf)->fd, VIDIOC_QUERYBUF, &avbuf->buf);
     if (ret < 0)
-        return AVERROR(errno);
+        goto fail;
 
     if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
         avbuf->num_planes = 0;
@@ -751,8 +797,11 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
             }
         }
 
-        if (avbuf->plane_info[i].mm_addr == MAP_FAILED)
-            return AVERROR(ENOMEM);
+        if (avbuf->plane_info[i].mm_addr == MAP_FAILED) {
+            avbuf->plane_info[i].mm_addr = NULL;
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
     }
 
     avbuf->status = V4L2BUF_AVAILABLE;
@@ -766,16 +815,23 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
         avbuf->buf.length    = avbuf->planes[0].length;
     }
 
-    if (V4L2_TYPE_IS_OUTPUT(ctx->type))
-        return 0;
+    if (!V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+        if (buf_to_m2mctx(avbuf)->output_drm) {
+            ret = v4l2_buffer_export_drm(avbuf);
+            if (ret)
+                    goto fail;
+        }
 
-    if (buf_to_m2mctx(avbuf)->output_drm) {
-        ret = v4l2_buffer_export_drm(avbuf);
-        if (ret)
-                return ret;
+        if ((ret = ff_v4l2_buffer_enqueue(avbuf)) != 0)
+            goto fail;
     }
 
-    return ff_v4l2_buffer_enqueue(avbuf);
+    *pbufref = bufref;
+    return 0;
+
+fail:
+    av_buffer_unref(&bufref);
+    return ret;
 }
 
 int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)

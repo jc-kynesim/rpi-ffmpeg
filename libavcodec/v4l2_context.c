@@ -172,6 +172,8 @@ static int v4l2_handle_event(V4L2Context *ctx)
         return 0;
     }
 
+    av_log(logger(ctx), AV_LOG_INFO, "Dq event %d\n", evt.type);
+
     if (evt.type == V4L2_EVENT_EOS) {
 //        ctx->done = 1;
         av_log(logger(ctx), AV_LOG_TRACE, "%s VIDIOC_EVENT_EOS\n", ctx->name);
@@ -206,6 +208,7 @@ static int v4l2_handle_event(V4L2Context *ctx)
         s->capture.width = v4l2_get_width(&cap_fmt);
     }
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
+//    reinit = 1; // If we have source change event then decode should be stuck in drain
 
     if (full_reinit || reinit)
         s->reinit = 1;
@@ -286,11 +289,12 @@ static int count_in_driver(const V4L2Context * const ctx)
     int i;
     int n = 0;
 
-    if (!ctx->buffers)
+    if (!ctx->bufrefs)
         return -1;
 
     for (i = 0; i < ctx->num_buffers; ++i) {
-        if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
+        V4L2Buffer *const avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
+        if (avbuf->status == V4L2BUF_IN_DRIVER)
             ++n;
     }
     return n;
@@ -307,9 +311,10 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
     };
     int i, ret;
 
-    if (!V4L2_TYPE_IS_OUTPUT(ctx->type) && ctx->buffers) {
+    if (!V4L2_TYPE_IS_OUTPUT(ctx->type) && ctx->bufrefs) {
         for (i = 0; i < ctx->num_buffers; i++) {
-            if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
+            avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
+            if (avbuf->status == V4L2BUF_IN_DRIVER)
                 break;
         }
 #if 1
@@ -327,10 +332,11 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
             /* capture buffer initialization happens during decode hence
              * detection happens at runtime
              */
-            if (!ctx->buffers)
+            if (!ctx->bufrefs)
                 break;
 
-            if (ctx->buffers[i].status == V4L2BUF_IN_DRIVER)
+            avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
+            if (avbuf->status == V4L2BUF_IN_DRIVER)
                 goto start;
         }
         ctx->done = 1;
@@ -366,7 +372,8 @@ start:
            no need to raise a warning */
         if (timeout == 0) {
             for (i = 0; i < ctx->num_buffers; i++) {
-                if (ctx->buffers[i].status != V4L2BUF_AVAILABLE)
+                avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
+                if (avbuf->status != V4L2BUF_AVAILABLE)
                     av_log(logger(ctx), AV_LOG_WARNING, "%s POLLERR\n", ctx->name);
             }
         }
@@ -461,7 +468,7 @@ dequeue:
 #endif
         }
 
-        avbuf = &ctx->buffers[buf.index];
+        avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
         avbuf->status = V4L2BUF_AVAILABLE;
         avbuf->buf = buf;
         if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
@@ -486,8 +493,9 @@ static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
     }
 
     for (i = 0; i < ctx->num_buffers; i++) {
-        if (ctx->buffers[i].status == V4L2BUF_AVAILABLE)
-            return &ctx->buffers[i];
+        V4L2Buffer * const avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
+        if (avbuf->status == V4L2BUF_AVAILABLE)
+            return avbuf;
     }
 
     return NULL;
@@ -495,39 +503,14 @@ static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 
 static int v4l2_release_buffers(V4L2Context* ctx)
 {
-    int i, j;
+    int i;
     int ret = 0;
     const int fd = ctx_to_m2mctx(ctx)->fd;
 
-    for (i = 0; i < ctx->num_buffers; i++) {
-        V4L2Buffer *buffer = &ctx->buffers[i];
+#warning Want to break link between bufrefs & ctx here too
 
-        for (j = 0; j < buffer->num_planes; j++) {
-            struct V4L2Plane_info *p = &buffer->plane_info[j];
-
-            if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
-                /* output buffers are not EXPORTED */
-                goto unmap;
-            }
-
-            if (ctx_to_m2mctx(ctx)->output_drm) {
-                /* use the DRM frame to close */
-                if (buffer->drm_frame.objects[j].fd >= 0) {
-                    if (close(buffer->drm_frame.objects[j].fd) < 0) {
-                        av_log(logger(ctx), AV_LOG_ERROR, "%s close drm fd "
-                            "[buffer=%2d, plane=%d, fd=%2d] - %s \n",
-                            ctx->name, i, j, buffer->drm_frame.objects[j].fd,
-                            av_err2str(AVERROR(errno)));
-                    }
-                }
-            }
-unmap:
-            if (p->mm_addr && p->length)
-                if (munmap(p->mm_addr, p->length) < 0)
-                    av_log(logger(ctx), AV_LOG_ERROR, "%s unmap plane (%s))\n",
-                        ctx->name, av_err2str(AVERROR(errno)));
-        }
-    }
+    for (i = 0; i < ctx->num_buffers; i++)
+        av_buffer_unref(ctx->bufrefs + i);
 
     if (fd != -1) {
         struct v4l2_requestbuffers req = {
@@ -806,14 +789,14 @@ void ff_v4l2_context_release(V4L2Context* ctx)
 {
     int ret;
 
-    if (!ctx->buffers)
+    if (!ctx->bufrefs)
         return;
 
     ret = v4l2_release_buffers(ctx);
     if (ret)
         av_log(logger(ctx), AV_LOG_WARNING, "V4L2 failed to unmap the %s buffers\n", ctx->name);
 
-    av_freep(&ctx->buffers);
+    av_freep(&ctx->bufrefs);
 }
 
 int ff_v4l2_context_init(V4L2Context* ctx)
@@ -842,16 +825,15 @@ int ff_v4l2_context_init(V4L2Context* ctx)
     }
 
     ctx->num_buffers = req.count;
-    ctx->buffers = av_mallocz(ctx->num_buffers * sizeof(V4L2Buffer));
-    if (!ctx->buffers) {
+    ctx->bufrefs = av_mallocz(ctx->num_buffers * sizeof(*ctx->bufrefs));
+    if (!ctx->bufrefs) {
         av_log(logger(ctx), AV_LOG_ERROR, "%s malloc enomem\n", ctx->name);
         return AVERROR(ENOMEM);
     }
 
     for (i = 0; i < req.count; i++) {
-        ctx->buffers[i].context = ctx;
-        ret = ff_v4l2_buffer_initialize(&ctx->buffers[i], i);
-        if (ret < 0) {
+        ret = ff_v4l2_buffer_initialize(&ctx->bufrefs[i], i, ctx);
+        if (ret) {
             av_log(logger(ctx), AV_LOG_ERROR, "%s buffer[%d] initialization (%s)\n", ctx->name, i, av_err2str(ret));
             goto error;
         }
@@ -870,7 +852,7 @@ int ff_v4l2_context_init(V4L2Context* ctx)
 error:
     v4l2_release_buffers(ctx);
 
-    av_freep(&ctx->buffers);
+    av_freep(&ctx->bufrefs);
 
     return ret;
 }

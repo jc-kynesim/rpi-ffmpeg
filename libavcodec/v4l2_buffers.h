@@ -39,6 +39,8 @@ enum V4L2Buffer_status {
 /**
  * V4L2Buffer (wrapper for v4l2_buffer management)
  */
+struct V4L2Context;
+
 typedef struct V4L2Buffer {
     /* each buffer needs to have a reference to its context */
     struct V4L2Context *context;
@@ -124,7 +126,7 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out);
  *
  * @returns 0 in case of success, a negative AVERROR code otherwise
  */
-int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index);
+int ff_v4l2_buffer_initialize(AVBufferRef **avbuf, int index, struct V4L2Context *ctx);
 
 /**
  * Enqueues a V4L2Buffer

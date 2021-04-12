@@ -72,9 +72,10 @@ typedef struct V4L2Context {
     AVRational sample_aspect_ratio;
 
     /**
-     * Indexed array of V4L2Buffers
+     * Indexed array of pointers to V4L2Buffers
      */
-    V4L2Buffer *buffers;
+    AVBufferRef **bufrefs;
+//    V4L2Buffer **buffers;
 
     /**
      * Readonly after init.

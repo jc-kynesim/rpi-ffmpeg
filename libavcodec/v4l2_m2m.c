@@ -175,6 +175,8 @@ static int v4l2_configure_contexts(V4L2m2mContext *s)
         goto error;
     }
 
+    av_log(log_ctx, AV_LOG_INFO, "%s: avctx:%p decoder:%d\n", __func__, s->avctx, !s->avctx ? 0 : av_codec_is_decoder(s->avctx->codec));
+
     /* decoder's buffers need to be updated at a later stage */
     if (s->avctx && !av_codec_is_decoder(s->avctx->codec)) {
         ret = ff_v4l2_context_init(&s->capture);
