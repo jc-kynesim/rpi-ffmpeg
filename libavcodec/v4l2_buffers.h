@@ -40,10 +40,12 @@ enum V4L2Buffer_status {
  * V4L2Buffer (wrapper for v4l2_buffer management)
  */
 struct V4L2Context;
+struct weak_link_client;
 
 typedef struct V4L2Buffer {
     /* each buffer needs to have a reference to its context */
     struct V4L2Context *context;
+    struct weak_link_client *context_wl;
 
     /* DRM descriptor */
     AVDRMFrameDescriptor drm_frame;

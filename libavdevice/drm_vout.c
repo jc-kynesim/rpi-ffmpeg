@@ -44,7 +44,7 @@
 
 #include "libavutil/rpi_sand_fns.h"
 
-#define TRACE_ALL 0
+#define TRACE_ALL 1
 
 #define NUM_BUFFERS 4
 #define RPI_DISPLAY_ALL 0
@@ -127,7 +127,7 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
     unsigned int i;
 
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "<<< %s\n", __func__);
+    av_log(s, AV_LOG_INFO, "<<< %s: fd=%d\n", __func__, desc->objects[0].fd);
 #endif
 
     for (i = 0; i != 32; ++i) {
@@ -169,7 +169,7 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
             }
         }
 
-#if 0
+#if 1 && TRACE_ALL
         av_log(s, AV_LOG_INFO, "%dx%d, fmt: %x, boh=%d,%d,%d,%d, pitch=%d,%d,%d,%d,"
                " offset=%d,%d,%d,%d, mod=%llx,%llx,%llx,%llx\n",
                av_frame_cropped_width(frame),

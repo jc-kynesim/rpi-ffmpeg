@@ -32,6 +32,7 @@
 #include "v4l2_buffers.h"
 #include "v4l2_fmt.h"
 #include "v4l2_m2m.h"
+#include "v4l2_req_weak_link.h"
 
 struct v4l2_format_update {
     uint32_t v4l2_fmt;
@@ -507,7 +508,7 @@ static int v4l2_release_buffers(V4L2Context* ctx)
     int ret = 0;
     const int fd = ctx_to_m2mctx(ctx)->fd;
 
-#warning Want to break link between bufrefs & ctx here too
+    weak_link_break(&ctx->wl_master);
 
     for (i = 0; i < ctx->num_buffers; i++)
         av_buffer_unref(ctx->bufrefs + i);
@@ -830,6 +831,8 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         av_log(logger(ctx), AV_LOG_ERROR, "%s malloc enomem\n", ctx->name);
         return AVERROR(ENOMEM);
     }
+
+    ctx->wl_master = weak_link_new(ctx);
 
     for (i = 0; i < req.count; i++) {
         ret = ff_v4l2_buffer_initialize(&ctx->bufrefs[i], i, ctx);

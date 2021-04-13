@@ -43,6 +43,7 @@
 #include "v4l2_req_media.h"
 #include "v4l2_req_pollqueue.h"
 #include "v4l2_req_utils.h"
+#include "v4l2_req_weak_link.h"
 
 
 /* floor(log2(x)) */
@@ -75,109 +76,6 @@ static size_t round_up_size(const size_t x)
     const unsigned int n = x < 256 ? 8 : log2_size(x) - 1;
 
     return x >= (3 << n) ? 4 << n : (3 << n);
-}
-
-struct weak_link_master {
-    atomic_int ref_count;    /* 0 is single ref for easier atomics */
-    pthread_rwlock_t lock;
-    void * ptr;
-};
-
-// Dummy struct (always coerced) for client links
-struct weak_link_client;
-
-static inline struct weak_link_master * weak_link_x(struct weak_link_client * c)
-{
-    return (struct weak_link_master *)c;
-}
-
-static struct weak_link_master * weak_link_new(void * p)
-{
-    struct weak_link_master * w = malloc(sizeof(*w));
-    if (!w)
-        return NULL;
-    w->ptr = p;
-    if (pthread_rwlock_init(&w->lock, NULL)) {
-        free(w);
-        return NULL;
-    }
-    return w;
-}
-
-static void weak_link_do_unref(struct weak_link_master * const w)
-{
-    int n = atomic_fetch_sub(&w->ref_count, 1);
-    if (n)
-        return;
-
-    pthread_rwlock_destroy(&w->lock);
-    free(w);
-}
-
-// Unref & break link
-static void weak_link_break(struct weak_link_master ** ppLink)
-{
-    struct weak_link_master * const w = *ppLink;
-    if (!w)
-        return;
-
-    *ppLink = NULL;
-    pthread_rwlock_wrlock(&w->lock);
-    w->ptr = NULL;
-    pthread_rwlock_unlock(&w->lock);
-
-    weak_link_do_unref(w);
-}
-
-static struct weak_link_client* weak_link_ref(struct weak_link_master * w)
-{
-    atomic_fetch_add(&w->ref_count, 1);
-    return (struct weak_link_client*)w;
-}
-
-static void weak_link_unref(struct weak_link_client ** ppLink)
-{
-    struct weak_link_master * const w = weak_link_x(*ppLink);
-    if (!w)
-        return;
-
-    *ppLink = NULL;
-    weak_link_do_unref(w);
-}
-
-// Returns NULL if link broken - in this case it will also zap
-//   *ppLink and unref the weak_link.
-// Returns NULL if *ppLink is NULL (so a link once broken stays broken)
-//
-// The above does mean that there is a race if this is called simultainiously
-// by two threads using the same weak_link_client (so don't do that)
-static void * weak_link_lock(struct weak_link_client ** ppLink)
-{
-    struct weak_link_master * const w = weak_link_x(*ppLink);
-
-    if (!w)
-        return NULL;
-
-    if (pthread_rwlock_rdlock(&w->lock))
-        goto broken;
-
-    if (w->ptr)
-        return w->ptr;
-
-    pthread_rwlock_unlock(&w->lock);
-
-broken:
-    *ppLink = NULL;
-    weak_link_do_unref(w);
-    return NULL;
-}
-
-// Ignores a NULL c (so can be on the return path of both broken & live links)
-static void weak_link_unlock(struct weak_link_client * c)
-{
-    struct weak_link_master * const w = weak_link_x(c);
-    if (w)
-        pthread_rwlock_unlock(&w->lock);
 }
 
 struct media_request;

@@ -35,6 +35,7 @@
 #include "v4l2_context.h"
 #include "v4l2_buffers.h"
 #include "v4l2_m2m.h"
+#include "v4l2_req_weak_link.h"
 
 #define USEC_PER_SEC 1000000
 static const AVRational v4l2_timebase = { 1, USEC_PER_SEC };
@@ -294,6 +295,7 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
     return (uint8_t *) drm_desc;
 }
 
+#if 0
 static void v4l2_free_buffer(void *opaque, uint8_t *data)
 {
     V4L2Buffer* avbuf = opaque;
@@ -324,6 +326,40 @@ static void v4l2_free_buffer(void *opaque, uint8_t *data)
 
         av_buffer_unref(&avbuf->context_ref);
     }
+}
+#endif
+
+static void v4l2_free_bufref(void *opaque, uint8_t *data)
+{
+    AVBufferRef * bufref = (AVBufferRef *)data;
+    V4L2Buffer *avbuf = (V4L2Buffer *)bufref->data;
+    struct V4L2Context *ctx = weak_link_lock(&avbuf->context_wl);
+
+    if (ctx != NULL) {
+        // Buffer still attached to context
+        V4L2m2mContext *s = buf_to_m2mctx(avbuf);
+#warning revisit this
+        if (s->reinit) {
+            if (!atomic_load(&s->refcount))
+                sem_post(&s->refsync);
+        } else {
+            if (s->draining && V4L2_TYPE_IS_OUTPUT(avbuf->context->type)) {
+                /* no need to queue more buffers to the driver */
+                avbuf->status = V4L2BUF_AVAILABLE;
+            }
+            else if (avbuf->context->streamon) {
+                avbuf->buf.timestamp.tv_sec = 0;
+                avbuf->buf.timestamp.tv_usec = 0;
+                ff_v4l2_buffer_enqueue(avbuf);
+            }
+            else {
+                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer freed but streamoff\n", avbuf->context->name);
+            }
+        }
+    }
+
+    weak_link_unlock(avbuf->context_wl);
+    av_buffer_unref(&bufref);
 }
 
 static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
@@ -381,6 +417,7 @@ static int v4l2_buf_increase_ref(V4L2Buffer *in)
     return 0;
 }
 
+#if 0
 static int v4l2_buf_to_bufref_drm(V4L2Buffer *in, AVBufferRef **buf)
 {
     int ret;
@@ -418,6 +455,7 @@ static int v4l2_buf_to_bufref(V4L2Buffer *in, int plane, AVBufferRef **buf)
 
     return ret;
 }
+#endif
 
 static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, int size, int offset)
 {
@@ -439,30 +477,40 @@ static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, i
 static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 {
     int i, ret;
+    AVBufferRef * bufref = av_buffer_ref(avbuf->context->bufrefs[avbuf->buf.index]);
+
+    if (!bufref)
+        return AVERROR(ENOMEM);
 
     frame->format = avbuf->context->av_pix_fmt;
+
+    frame->buf[0] = av_buffer_create((uint8_t *)bufref, sizeof(*bufref), v4l2_free_bufref, NULL, 0);
+    if (frame->buf[0] == NULL)
+        return AVERROR(ENOMEM);
 
     if (buf_to_m2mctx(avbuf)->output_drm) {
 //        av_log(logger(avbuf), AV_LOG_INFO, "%s (drm): avbuf=%p\n", __func__, avbuf);
         /* 1. get references to the actual data */
-        ret = v4l2_buf_to_bufref_drm(avbuf, &frame->buf[0]);
-        if (ret)
-            return ret;
+//        ret = v4l2_buf_to_bufref_drm(avbuf, &frame->buf[0]);
+//        if (ret)
+//            return ret;
 
         frame->data[0] = (uint8_t *) v4l2_get_drm_frame(avbuf);
         frame->format = AV_PIX_FMT_DRM_PRIME;
         frame->hw_frames_ctx = av_buffer_ref(avbuf->context->frames_ref);
-    } else {
-        /* 1. get references to the actual data */
-        for (i = 0; i < avbuf->num_planes; i++) {
-//            av_log(logger(avbuf), AV_LOG_INFO, "%s (bufref)\n", __func__);
-            ret = v4l2_buf_to_bufref(avbuf, i, &frame->buf[i]);
-            if (ret)
-                return ret;
+        return 0;
+    }
 
-            frame->linesize[i] = avbuf->plane_info[i].bytesperline;
-            frame->data[i] = frame->buf[i]->data;
-        }
+
+    /* 1. get references to the actual data */
+    for (i = 0; i < avbuf->num_planes; i++) {
+//            av_log(logger(avbuf), AV_LOG_INFO, "%s (bufref)\n", __func__);
+//            ret = v4l2_buf_to_bufref(avbuf, i, &frame->buf[i]);
+//            if (ret)
+//                return ret;
+
+        frame->data[i] = (uint8_t *)avbuf->plane_info[i].mm_addr + avbuf->planes[i].data_offset;
+        frame->linesize[i] = avbuf->plane_info[i].bytesperline;
     }
 
     /* fixup special cases */
@@ -702,6 +750,8 @@ static void v4l2_buffer_buffer_free(void *opaque, uint8_t *data)
             close(avbuf->drm_frame.objects[i].fd);
     }
 
+    weak_link_unref(&avbuf->context_wl);
+
     av_free(avbuf);
 }
 
@@ -730,6 +780,8 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
     for (i = 0; i != FF_ARRAY_ELEMS(avbuf->drm_frame.objects); ++i) {
         avbuf->drm_frame.objects[i].fd = -1;
     }
+
+    avbuf->context_wl = weak_link_ref(ctx->wl_master);
 
     if (buf_to_m2mctx(avbuf)->output_drm) {
         AVHWFramesContext *hwframes;
