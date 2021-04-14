@@ -343,17 +343,19 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
             if (!atomic_load(&s->refcount))
                 sem_post(&s->refsync);
         } else {
-            if (s->draining && V4L2_TYPE_IS_OUTPUT(avbuf->context->type)) {
+            if (s->draining && V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer avail\n", ctx->name);
                 /* no need to queue more buffers to the driver */
                 avbuf->status = V4L2BUF_AVAILABLE;
             }
-            else if (avbuf->context->streamon) {
+            else if (ctx->streamon) {
+                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer requeue\n", ctx->name);
                 avbuf->buf.timestamp.tv_sec = 0;
                 avbuf->buf.timestamp.tv_usec = 0;
                 ff_v4l2_buffer_enqueue(avbuf);
             }
             else {
-                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer freed but streamoff\n", avbuf->context->name);
+                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer freed but streamoff\n", ctx->name);
             }
         }
     }
@@ -394,6 +396,7 @@ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
     return 0;
 }
 
+#if 0
 static int v4l2_buf_increase_ref(V4L2Buffer *in)
 {
     V4L2m2mContext *s = buf_to_m2mctx(in);
@@ -417,7 +420,6 @@ static int v4l2_buf_increase_ref(V4L2Buffer *in)
     return 0;
 }
 
-#if 0
 static int v4l2_buf_to_bufref_drm(V4L2Buffer *in, AVBufferRef **buf)
 {
     int ret;
@@ -474,17 +476,28 @@ static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, i
     return 0;
 }
 
+static AVBufferRef * wrap_avbuf(V4L2Buffer * const avbuf)
+{
+    AVBufferRef * bufref = av_buffer_ref(avbuf->context->bufrefs[avbuf->buf.index]);
+    AVBufferRef * newbuf;
+
+    if (!bufref)
+        return NULL;
+
+    newbuf = av_buffer_create((uint8_t *)bufref, sizeof(*bufref), v4l2_free_bufref, NULL, 0);
+    if (newbuf == NULL)
+        av_buffer_unref(&bufref);
+
+    return newbuf;
+}
+
 static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 {
     int i, ret;
-    AVBufferRef * bufref = av_buffer_ref(avbuf->context->bufrefs[avbuf->buf.index]);
-
-    if (!bufref)
-        return AVERROR(ENOMEM);
 
     frame->format = avbuf->context->av_pix_fmt;
 
-    frame->buf[0] = av_buffer_create((uint8_t *)bufref, sizeof(*bufref), v4l2_free_bufref, NULL, 0);
+    frame->buf[0] = wrap_avbuf(avbuf);
     if (frame->buf[0] == NULL)
         return AVERROR(ENOMEM);
 
@@ -685,12 +698,13 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
     av_log(logger(avbuf), AV_LOG_INFO, "%s\n", __func__);
 
     av_packet_unref(pkt);
-    ret = v4l2_buf_to_bufref(avbuf, 0, &pkt->buf);
-    if (ret)
-        return ret;
+
+    pkt->buf = wrap_avbuf(avbuf);
+    if (pkt->buf == NULL)
+        return AVERROR(ENOMEM);
 
     pkt->size = V4L2_TYPE_IS_MULTIPLANAR(avbuf->buf.type) ? avbuf->buf.m.planes[0].bytesused : avbuf->buf.bytesused;
-    pkt->data = pkt->buf->data;
+    pkt->data = avbuf->plane_info[0].mm_addr + avbuf->planes[0].data_offset;
 
     if (avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME)
         pkt->flags |= AV_PKT_FLAG_KEY;

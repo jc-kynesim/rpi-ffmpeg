@@ -65,6 +65,7 @@ typedef struct V4L2m2mContext {
     sem_t refsync;
     atomic_uint refcount;
     int reinit;
+    int resize_pending;
 
     /* null frame/packet received */
     int draining;

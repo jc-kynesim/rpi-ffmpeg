@@ -220,9 +220,9 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
      *    we must wait for all references to be released before being allowed
      *    to queue new buffers.
      */
-    av_log(log_ctx, AV_LOG_DEBUG, "waiting for user to release AVBufferRefs\n");
-    if (atomic_load(&s->refcount))
-        while(sem_wait(&s->refsync) == -1 && errno == EINTR);
+//    av_log(log_ctx, AV_LOG_DEBUG, "waiting for user to release AVBufferRefs\n");
+//    if (atomic_load(&s->refcount))
+//        while(sem_wait(&s->refsync) == -1 && errno == EINTR);
 
     ff_v4l2_context_release(&s->capture);
 

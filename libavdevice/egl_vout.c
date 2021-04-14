@@ -559,6 +559,10 @@ static int do_display(AVFormatContext * const s, egl_display_env_t * const de, A
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
     eglSwapBuffers(de->setup.egl_dpy, de->setup.surf);
 
+    glDeleteTextures(1, &da->texture);
+    da->texture = 0;
+    da->fd = -1;
+
     return 0;
 }
 

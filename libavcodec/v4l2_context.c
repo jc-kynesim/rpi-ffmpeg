@@ -154,6 +154,80 @@ static inline void v4l2_save_to_context(V4L2Context* ctx, struct v4l2_format_upd
     }
 }
 
+static int do_source_change(V4L2m2mContext * const s)
+{
+    AVCodecContext *const avctx = s->avctx;
+
+    int ret;
+    int reinit;
+    int full_reinit;
+    struct v4l2_format cap_fmt = s->capture.format;
+    struct v4l2_format out_fmt = s->output.format;
+
+    s->resize_pending = 0;
+
+    ret = ioctl(s->fd, VIDIOC_G_FMT, &out_fmt);
+    if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "%s VIDIOC_G_FMT\n", s->output.name);
+        return 0;
+    }
+
+    ret = ioctl(s->fd, VIDIOC_G_FMT, &cap_fmt);
+    if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "%s VIDIOC_G_FMT\n", s->capture.name);
+        return 0;
+    }
+
+    full_reinit = v4l2_resolution_changed(&s->output, &out_fmt);
+    if (full_reinit) {
+        s->output.height = v4l2_get_height(&out_fmt);
+        s->output.width = v4l2_get_width(&out_fmt);
+    }
+    s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
+
+    reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
+    if (reinit) {
+        s->capture.height = v4l2_get_height(&cap_fmt);
+        s->capture.width = v4l2_get_width(&cap_fmt);
+    }
+    s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
+    reinit = 1; // If we have source change event then decode should be stuck in drain
+
+    if (full_reinit || reinit)
+        s->reinit = 1;
+
+    if (full_reinit) {
+        ret = ff_v4l2_m2m_codec_full_reinit(s);
+        if (ret) {
+            av_log(avctx, AV_LOG_ERROR, "v4l2_m2m_codec_full_reinit\n");
+            return AVERROR(EINVAL);
+        }
+        goto reinit_run;
+    }
+
+    if (reinit) {
+        if (avctx)
+            ret = ff_set_dimensions(s->avctx, s->capture.width, s->capture.height);
+        if (ret < 0)
+            av_log(avctx, AV_LOG_WARNING, "update avcodec height and width\n");
+
+        ret = ff_v4l2_m2m_codec_reinit(s);
+        if (ret) {
+            av_log(avctx, AV_LOG_ERROR, "v4l2_m2m_codec_reinit\n");
+            return AVERROR(EINVAL);
+        }
+        goto reinit_run;
+    }
+
+    /* dummy event received */
+    return 0;
+
+    /* reinit executed */
+reinit_run:
+    return 1;
+}
+
+
 /**
  * handle resolution change event and end of stream event
  * returns 1 if reinit was successful, negative if it failed
@@ -162,10 +236,8 @@ static inline void v4l2_save_to_context(V4L2Context* ctx, struct v4l2_format_upd
 static int v4l2_handle_event(V4L2Context *ctx)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
-    struct v4l2_format cap_fmt = s->capture.format;
-    struct v4l2_format out_fmt = s->output.format;
     struct v4l2_event evt = { 0 };
-    int full_reinit, reinit, ret;
+    int ret;
 
     ret = ioctl(s->fd, VIDIOC_DQEVENT, &evt);
     if (ret < 0) {
@@ -184,65 +256,11 @@ static int v4l2_handle_event(V4L2Context *ctx)
     if (evt.type != V4L2_EVENT_SOURCE_CHANGE)
         return 0;
 
-    ret = ioctl(s->fd, VIDIOC_G_FMT, &out_fmt);
-    if (ret) {
-        av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT\n", s->output.name);
-        return 0;
-    }
+    s->resize_pending = 1;
+//    if (!ctx->done)
+//        return 0;
 
-    ret = ioctl(s->fd, VIDIOC_G_FMT, &cap_fmt);
-    if (ret) {
-        av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT\n", s->capture.name);
-        return 0;
-    }
-
-    full_reinit = v4l2_resolution_changed(&s->output, &out_fmt);
-    if (full_reinit) {
-        s->output.height = v4l2_get_height(&out_fmt);
-        s->output.width = v4l2_get_width(&out_fmt);
-    }
-    s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
-
-    reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
-    if (reinit) {
-        s->capture.height = v4l2_get_height(&cap_fmt);
-        s->capture.width = v4l2_get_width(&cap_fmt);
-    }
-    s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
-//    reinit = 1; // If we have source change event then decode should be stuck in drain
-
-    if (full_reinit || reinit)
-        s->reinit = 1;
-
-    if (full_reinit) {
-        ret = ff_v4l2_m2m_codec_full_reinit(s);
-        if (ret) {
-            av_log(logger(ctx), AV_LOG_ERROR, "v4l2_m2m_codec_full_reinit\n");
-            return AVERROR(EINVAL);
-        }
-        goto reinit_run;
-    }
-
-    if (reinit) {
-        if (s->avctx)
-            ret = ff_set_dimensions(s->avctx, s->capture.width, s->capture.height);
-        if (ret < 0)
-            av_log(logger(ctx), AV_LOG_WARNING, "update avcodec height and width\n");
-
-        ret = ff_v4l2_m2m_codec_reinit(s);
-        if (ret) {
-            av_log(logger(ctx), AV_LOG_ERROR, "v4l2_m2m_codec_reinit\n");
-            return AVERROR(EINVAL);
-        }
-        goto reinit_run;
-    }
-
-    /* dummy event received */
-    return 0;
-
-    /* reinit executed */
-reinit_run:
-    return 1;
+    return do_source_change(s);
 }
 
 static int v4l2_stop_decode(V4L2Context *ctx)
@@ -463,8 +481,14 @@ dequeue:
             }
 #ifdef V4L2_BUF_FLAG_LAST
             if (buf.flags & V4L2_BUF_FLAG_LAST){
+                V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+
                 av_log(logger(ctx), AV_LOG_TRACE, "FLAG_LAST set\n");
                 ctx->done = 1;
+
+                if (s->resize_pending) {
+                    do_source_change(s);
+                }
             }
 #endif
         }

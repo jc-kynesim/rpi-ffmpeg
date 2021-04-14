@@ -102,11 +102,19 @@ static int v4l2_try_start(AVCodecContext *avctx)
         avctx->pix_fmt = capture->av_pix_fmt;
 
     /* 3. set the crop parameters */
+#if 1
+    selection.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    selection.target = V4L2_SEL_TGT_CROP_DEFAULT;
+    ret = ioctl(s->fd, VIDIOC_G_SELECTION, &selection);
+    av_log(avctx, AV_LOG_INFO, "Post G selection ret=%d, err=%d %dx%d\n", ret, errno, selection.r.width, selection.r.height);
+#else
     selection.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     selection.r.height = avctx->coded_height;
     selection.r.width = avctx->coded_width;
+    av_log(avctx, AV_LOG_INFO, "Try selection %dx%d\n", avctx->coded_width, avctx->coded_height);
     ret = ioctl(s->fd, VIDIOC_S_SELECTION, &selection);
-    if (!ret) {
+    av_log(avctx, AV_LOG_INFO, "Post S selection ret=%d, err=%d %dx%d\n", ret, errno, selection.r.width, selection.r.height);
+    if (1) {
         ret = ioctl(s->fd, VIDIOC_G_SELECTION, &selection);
         if (ret) {
             av_log(avctx, AV_LOG_WARNING, "VIDIOC_G_SELECTION ioctl\n");
@@ -117,6 +125,7 @@ static int v4l2_try_start(AVCodecContext *avctx)
             capture->width  = selection.r.width;
         }
     }
+#endif
 
     /* 4. init the capture context now that we have the capture format */
     if (!capture->bufrefs) {
