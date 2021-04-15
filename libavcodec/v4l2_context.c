@@ -154,6 +154,26 @@ static inline void v4l2_save_to_context(V4L2Context* ctx, struct v4l2_format_upd
     }
 }
 
+static int get_default_selection(V4L2Context * const ctx,
+                                 unsigned int * pwidth, unsigned int * pheight)
+{
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+    struct v4l2_selection selection = {
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+//        .target = V4L2_SEL_TGT_CROP_DEFAULT,
+        .target = V4L2_SEL_TGT_COMPOSE
+    };
+
+    *pwidth = 0;
+    *pheight = 0;
+    if (ioctl(s->fd, VIDIOC_G_SELECTION, &selection))
+        return AVERROR(errno);
+
+    *pwidth = selection.r.width;
+    *pheight = selection.r.height;
+    return 0;
+}
+
 static int do_source_change(V4L2m2mContext * const s)
 {
     AVCodecContext *const avctx = s->avctx;
@@ -163,8 +183,11 @@ static int do_source_change(V4L2m2mContext * const s)
     int full_reinit;
     struct v4l2_format cap_fmt = s->capture.format;
     struct v4l2_format out_fmt = s->output.format;
+    unsigned int crop_width;
+    unsigned int crop_height;
 
     s->resize_pending = 0;
+    s->capture.done = 0;
 
     ret = ioctl(s->fd, VIDIOC_G_FMT, &out_fmt);
     if (ret) {
@@ -185,12 +208,19 @@ static int do_source_change(V4L2m2mContext * const s)
     }
     s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
 
+    get_default_selection(&s->capture, &crop_width, &crop_height);
+
     reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
     if (reinit) {
         s->capture.height = v4l2_get_height(&cap_fmt);
         s->capture.width = v4l2_get_width(&cap_fmt);
     }
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
+
+    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, crop %dx%d\n",
+           s->capture.sample_aspect_ratio.num, s->capture.sample_aspect_ratio.den,
+           crop_width, crop_height);
+
     reinit = 1; // If we have source change event then decode should be stuck in drain
 
     if (full_reinit || reinit)
@@ -227,6 +257,18 @@ reinit_run:
     return 1;
 }
 
+static int ctx_done(V4L2Context * const ctx)
+{
+    int rv = 0;
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+
+    ctx->done = 1;
+
+    if (s->resize_pending && !V4L2_TYPE_IS_OUTPUT(ctx->type))
+        rv = do_source_change(s);
+
+    return rv;
+}
 
 /**
  * handle resolution change event and end of stream event
@@ -235,7 +277,7 @@ reinit_run:
  */
 static int v4l2_handle_event(V4L2Context *ctx)
 {
-    V4L2m2mContext *s = ctx_to_m2mctx(ctx);
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     struct v4l2_event evt = { 0 };
     int ret;
 
@@ -257,8 +299,8 @@ static int v4l2_handle_event(V4L2Context *ctx)
         return 0;
 
     s->resize_pending = 1;
-//    if (!ctx->done)
-//        return 0;
+    if (!ctx->done)
+        return 0;
 
     return do_source_change(s);
 }
@@ -321,6 +363,7 @@ static int count_in_driver(const V4L2Context * const ctx)
 
 static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 {
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     struct v4l2_plane planes[VIDEO_MAX_PLANES];
     struct v4l2_buffer buf = { 0 };
     V4L2Buffer *avbuf;
@@ -372,16 +415,36 @@ start:
     }
 
     for (;;) {
-        int t2 = timeout < 0 ? 3000 : timeout;
-        int e = pfd.events;
+        // If we have a resize pending then all buffers should be Qed
+        // With a resize pending we should be in drain but evidence suggests
+        // that not all decoders do this so poll to clear
+        int timeout_is_done = s->resize_pending && !V4L2_TYPE_IS_OUTPUT(ctx->type);
+        int t2 = timeout_is_done ? 0 : timeout < 0 ? 3000 : timeout;
+        const int e = pfd.events;
+
         ret = poll(&pfd, 1, t2);
+
         if (ret > 0)
             break;
-        if (errno == EINTR)
-            continue;
-        if (timeout == -1) {
-            av_log(logger(ctx), AV_LOG_ERROR, "=== poll unexpected TIMEOUT: events=%#x, cap buffers=%d\n", e, count_in_driver(ctx));;
+
+        if (ret < 0) {
+            int err = errno;
+            if (err == EINTR)
+                continue;
+            av_log(logger(ctx), AV_LOG_ERROR, "=== poll error %d (%s): events=%#x, cap buffers=%d\n",
+                   err, strerror(err),
+                   e, count_in_driver(ctx));
+            return NULL;
         }
+
+        // ret == 0 (timeout)
+        if (timeout_is_done) {
+            av_log(logger(ctx), AV_LOG_DEBUG, "Ctx done on timeout\n");
+            ctx_done(ctx);
+            continue;
+        }
+        if (timeout == -1)
+            av_log(logger(ctx), AV_LOG_ERROR, "=== poll unexpected TIMEOUT: events=%#x, cap buffers=%d\n", e, count_in_driver(ctx));;
         return NULL;
     }
 
@@ -445,11 +508,13 @@ dequeue:
 
         ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_DQBUF, &buf);
         if (ret) {
-            if (errno != EAGAIN) {
-                ctx->done = 1;
-//                if (errno != EPIPE)
+            int err = errno;
+            if (err != EAGAIN) {
+                // EPIPE on CAPTURE can be used instead of BUF_FLAG_LAST
+                if (err != EPIPE || V4L2_TYPE_IS_OUTPUT(ctx->type))
                     av_log(logger(ctx), AV_LOG_DEBUG, "%s VIDIOC_DQBUF, errno (%s)\n",
-                        ctx->name, av_err2str(AVERROR(errno)));
+                        ctx->name, av_err2str(AVERROR(err)));
+                ctx_done(ctx);
             }
             return NULL;
         }
@@ -465,6 +530,8 @@ dequeue:
                 av_log(logger(ctx), AV_LOG_TRACE, "Buffer empty - reQ\n");
 
                 // Must reQ so we don't leak
+                // May not matter if the next thing we do is release all the
+                // buffers but better to be tidy.
                 ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_QBUF, &buf);
                 if (ret) {
                     av_log(logger(ctx), AV_LOG_WARNING, "%s VIDIOC_QBUF, errno (%s): reQ empty buf failed\n",
@@ -476,19 +543,13 @@ dequeue:
                            ctx->name, buf.index, ctx->q_count);
                 }
 
-                ctx->done = 1;
+                ctx_done(ctx);
                 return NULL;
             }
 #ifdef V4L2_BUF_FLAG_LAST
             if (buf.flags & V4L2_BUF_FLAG_LAST){
-                V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
-
                 av_log(logger(ctx), AV_LOG_TRACE, "FLAG_LAST set\n");
-                ctx->done = 1;
-
-                if (s->resize_pending) {
-                    do_source_change(s);
-                }
+                ctx_done(ctx);
             }
 #endif
         }
