@@ -44,17 +44,17 @@ struct V4L2Context;
 struct ff_weak_link_client;
 
 typedef struct V4L2Buffer {
-    /* each buffer needs to have a reference to its context */
+    /* each buffer needs to have a reference to its context
+     * The pointer is good enough for most operation but once the buffer has
+     * been passed to the user the buffer may become orphaned so for free ops
+     * the weak link must be used to ensure that the context is actually
+     * there
+     */
     struct V4L2Context *context;
     struct ff_weak_link_client *context_wl;
 
     /* DRM descriptor */
     AVDRMFrameDescriptor drm_frame;
-
-    /* This object is refcounted per-plane, so we need to keep track
-     * of how many context-refs we are holding. */
-    AVBufferRef *context_ref;
-    atomic_uint context_refcount;
 
     /* keep track of the mmap address and mmap length */
     struct V4L2Plane_info {

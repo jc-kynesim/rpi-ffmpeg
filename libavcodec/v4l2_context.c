@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include "libavutil/avassert.h"
 #include "libavcodec/avcodec.h"
 #include "libavcodec/internal.h"
 #include "v4l2_buffers.h"
@@ -609,10 +610,13 @@ static int v4l2_release_buffers(V4L2Context* ctx)
     int ret = 0;
     const int fd = ctx_to_m2mctx(ctx)->fd;
 
+    // Orphan any buffers in the wild
     ff_weak_link_break(&ctx->wl_master);
 
-    for (i = 0; i < ctx->num_buffers; i++)
-        av_buffer_unref(ctx->bufrefs + i);
+    if (ctx->bufrefs) {
+        for (i = 0; i < ctx->num_buffers; i++)
+            av_buffer_unref(ctx->bufrefs + i);
+    }
 
     if (fd != -1) {
         struct v4l2_requestbuffers req = {
@@ -621,19 +625,24 @@ static int v4l2_release_buffers(V4L2Context* ctx)
             .count = 0, /* 0 -> unmap all buffers from the driver */
         };
 
-        ret = ioctl(fd, VIDIOC_REQBUFS, &req);
-        if (ret < 0) {
-                av_log(logger(ctx), AV_LOG_ERROR, "release all %s buffers (%s)\n",
-                    ctx->name, av_err2str(AVERROR(errno)));
+        while ((ret = ioctl(fd, VIDIOC_REQBUFS, &req)) == -1) {
+            if (errno == EINTR)
+                continue;
 
-                if (ctx_to_m2mctx(ctx)->output_drm)
-                    av_log(logger(ctx), AV_LOG_ERROR,
-                        "Make sure the DRM client releases all FB/GEM objects before closing the codec (ie):\n"
-                        "for all buffers: \n"
-                        "  1. drmModeRmFB(..)\n"
-                        "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
+            ret = AVERROR(errno);
+
+            av_log(logger(ctx), AV_LOG_ERROR, "release all %s buffers (%s)\n",
+                ctx->name, av_err2str(AVERROR(errno)));
+
+            if (ctx_to_m2mctx(ctx)->output_drm)
+                av_log(logger(ctx), AV_LOG_ERROR,
+                    "Make sure the DRM client releases all FB/GEM objects before closing the codec (ie):\n"
+                    "for all buffers: \n"
+                    "  1. drmModeRmFB(..)\n"
+                    "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
         }
     }
+    ctx->q_count = 0;
 
     return ret;
 }
@@ -948,51 +957,49 @@ void ff_v4l2_context_release(V4L2Context* ctx)
         av_log(logger(ctx), AV_LOG_WARNING, "V4L2 failed to unmap the %s buffers\n", ctx->name);
 
     av_freep(&ctx->bufrefs);
+    av_buffer_unref(&ctx->frames_ref);
 
     ff_mutex_destroy(&ctx->lock);
 }
 
-int ff_v4l2_context_init(V4L2Context* ctx)
+
+static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers)
 {
-    V4L2m2mContext *s = ctx_to_m2mctx(ctx);
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     struct v4l2_requestbuffers req;
-    int ret, i;
-
-    if (!v4l2_type_supported(ctx)) {
-        av_log(logger(ctx), AV_LOG_ERROR, "type %i not supported\n", ctx->type);
-        return AVERROR_PATCHWELCOME;
-    }
-
-    ff_mutex_init(&ctx->lock, NULL);
-
-    ret = ioctl(s->fd, VIDIOC_G_FMT, &ctx->format);
-    if (ret)
-        av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT failed\n", ctx->name);
+    int ret;
+    int i;
 
     memset(&req, 0, sizeof(req));
-    req.count = ctx->num_buffers;
+    req.count = req_buffers;
     req.memory = V4L2_MEMORY_MMAP;
     req.type = ctx->type;
-    ret = ioctl(s->fd, VIDIOC_REQBUFS, &req);
-    if (ret < 0) {
-        av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_REQBUFS failed: %s\n", ctx->name, strerror(errno));
-        return AVERROR(errno);
+    while ((ret = ioctl(s->fd, VIDIOC_REQBUFS, &req)) == -1) {
+        if (errno != EINTR) {
+            ret = AVERROR(errno);
+            av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_REQBUFS failed: %s\n", ctx->name, av_err2str(ret));
+            return ret;
+        }
     }
 
     ctx->num_buffers = req.count;
     ctx->bufrefs = av_mallocz(ctx->num_buffers * sizeof(*ctx->bufrefs));
     if (!ctx->bufrefs) {
         av_log(logger(ctx), AV_LOG_ERROR, "%s malloc enomem\n", ctx->name);
-        return AVERROR(ENOMEM);
+        goto fail_release;
     }
 
     ctx->wl_master = ff_weak_link_new(ctx);
+    if (!ctx->wl_master) {
+        ret = AVERROR(ENOMEM);
+        goto fail_release;
+    }
 
-    for (i = 0; i < req.count; i++) {
+    for (i = 0; i < ctx->num_buffers; i++) {
         ret = ff_v4l2_buffer_initialize(&ctx->bufrefs[i], i, ctx);
         if (ret) {
             av_log(logger(ctx), AV_LOG_ERROR, "%s buffer[%d] initialization (%s)\n", ctx->name, i, av_err2str(ret));
-            goto error;
+            goto fail_release;
         }
     }
 
@@ -1006,10 +1013,62 @@ int ff_v4l2_context_init(V4L2Context* ctx)
 
     return 0;
 
-error:
+fail_release:
     v4l2_release_buffers(ctx);
-
     av_freep(&ctx->bufrefs);
+    return ret;
+}
 
+int ff_v4l2_context_init(V4L2Context* ctx)
+{
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+    int ret;
+
+    // It is not valid to reinit a context without a previous release
+    av_assert0(ctx->bufrefs == NULL);
+
+    if (!v4l2_type_supported(ctx)) {
+        av_log(logger(ctx), AV_LOG_ERROR, "type %i not supported\n", ctx->type);
+        return AVERROR_PATCHWELCOME;
+    }
+
+    ff_mutex_init(&ctx->lock, NULL);
+
+    if (s->output_drm) {
+        AVHWFramesContext *hwframes;
+
+        ctx->frames_ref = av_hwframe_ctx_alloc(s->device_ref);
+        if (!ctx->frames_ref) {
+            ret = AVERROR(ENOMEM);
+            goto fail_unlock;
+        }
+
+        hwframes = (AVHWFramesContext*)ctx->frames_ref->data;
+        hwframes->format = AV_PIX_FMT_DRM_PRIME;
+        hwframes->sw_format = ctx->av_pix_fmt;
+        hwframes->width = ctx->width;
+        hwframes->height = ctx->height;
+        ret = av_hwframe_ctx_init(ctx->frames_ref);
+        if (ret < 0)
+            goto fail_unref_hwframes;
+    }
+
+    ret = ioctl(s->fd, VIDIOC_G_FMT, &ctx->format);
+    if (ret) {
+        ret = AVERROR(errno);
+        av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT failed: %s\n", ctx->name, av_err2str(ret));
+        goto fail_unref_hwframes;
+    }
+
+    ret = create_buffers(ctx, ctx->num_buffers);
+    if (ret < 0)
+        goto fail_unref_hwframes;
+
+    return 0;
+
+fail_unref_hwframes:
+    av_buffer_unref(&ctx->frames_ref);
+fail_unlock:
+    ff_mutex_destroy(&ctx->lock);
     return ret;
 }

@@ -796,27 +796,6 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
 
     avbuf->context_wl = ff_weak_link_ref(ctx->wl_master);
 
-    if (buf_to_m2mctx(avbuf)->output_drm) {
-        AVHWFramesContext *hwframes;
-
-        av_buffer_unref(&ctx->frames_ref);
-
-        ctx->frames_ref = av_hwframe_ctx_alloc(buf_to_m2mctx(avbuf)->device_ref);
-        if (!ctx->frames_ref) {
-            ret = AVERROR(ENOMEM);
-            goto fail;
-        }
-
-        hwframes = (AVHWFramesContext*)ctx->frames_ref->data;
-        hwframes->format = AV_PIX_FMT_DRM_PRIME;
-        hwframes->sw_format = ctx->av_pix_fmt;
-        hwframes->width = ctx->width;
-        hwframes->height = ctx->height;
-        ret = av_hwframe_ctx_init(ctx->frames_ref);
-        if (ret < 0)
-            goto fail;
-    }
-
     if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
         avbuf->buf.length = VIDEO_MAX_PLANES;
         avbuf->buf.m.planes = avbuf->planes;
