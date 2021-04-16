@@ -33,6 +33,7 @@
 enum V4L2Buffer_status {
     V4L2BUF_AVAILABLE,
     V4L2BUF_IN_DRIVER,
+    V4L2BUF_IN_USE,
     V4L2BUF_RET_USER,
 };
 

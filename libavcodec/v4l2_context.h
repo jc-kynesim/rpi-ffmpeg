@@ -31,6 +31,7 @@
 #include "libavutil/pixfmt.h"
 #include "libavutil/frame.h"
 #include "libavutil/buffer.h"
+#include "libavutil/thread.h"
 #include "v4l2_buffers.h"
 
 typedef struct V4L2Context {
@@ -75,7 +76,6 @@ typedef struct V4L2Context {
      * Indexed array of pointers to V4L2Buffers
      */
     AVBufferRef **bufrefs;
-//    V4L2Buffer **buffers;
 
     /**
      * Readonly after init.
@@ -96,6 +96,8 @@ typedef struct V4L2Context {
     AVBufferRef *frames_ref;
     int q_count;
     struct weak_link_master *wl_master;
+
+    AVMutex lock;
 } V4L2Context;
 
 /**

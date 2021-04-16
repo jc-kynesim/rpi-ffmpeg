@@ -338,26 +338,26 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
     if (ctx != NULL) {
         // Buffer still attached to context
         V4L2m2mContext *s = buf_to_m2mctx(avbuf);
-#warning revisit this
-        if (s->reinit) {
-            if (!atomic_load(&s->refcount))
-                sem_post(&s->refsync);
-        } else {
-            if (s->draining && V4L2_TYPE_IS_OUTPUT(ctx->type)) {
-                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer avail\n", ctx->name);
-                /* no need to queue more buffers to the driver */
-                avbuf->status = V4L2BUF_AVAILABLE;
-            }
-            else if (ctx->streamon) {
-                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer requeue\n", ctx->name);
-                avbuf->buf.timestamp.tv_sec = 0;
-                avbuf->buf.timestamp.tv_usec = 0;
-                ff_v4l2_buffer_enqueue(avbuf);
-            }
-            else {
-                av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer freed but streamoff\n", ctx->name);
-            }
+
+        ff_mutex_lock(&ctx->lock);
+
+        avbuf->status = V4L2BUF_AVAILABLE;
+
+        if (s->draining && V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+            av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer avail\n", ctx->name);
+            /* no need to queue more buffers to the driver */
         }
+        else if (ctx->streamon) {
+            av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer requeue\n", ctx->name);
+            avbuf->buf.timestamp.tv_sec = 0;
+            avbuf->buf.timestamp.tv_usec = 0;
+            ff_v4l2_buffer_enqueue(avbuf);  // will set to IN_DRIVER
+        }
+        else {
+            av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer freed but streamoff\n", ctx->name);
+        }
+
+        ff_mutex_unlock(&ctx->lock);
     }
 
     weak_link_unlock(avbuf->context_wl);
@@ -488,12 +488,13 @@ static AVBufferRef * wrap_avbuf(V4L2Buffer * const avbuf)
     if (newbuf == NULL)
         av_buffer_unref(&bufref);
 
+    avbuf->status = V4L2BUF_RET_USER;
     return newbuf;
 }
 
 static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 {
-    int i, ret;
+    int i;
 
     frame->format = avbuf->context->av_pix_fmt;
 
@@ -693,8 +694,6 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf, int no_resc
 
 int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
 {
-    int ret;
-
     av_log(logger(avbuf), AV_LOG_INFO, "%s\n", __func__);
 
     av_packet_unref(pkt);
@@ -704,7 +703,7 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
         return AVERROR(ENOMEM);
 
     pkt->size = V4L2_TYPE_IS_MULTIPLANAR(avbuf->buf.type) ? avbuf->buf.m.planes[0].bytesused : avbuf->buf.bytesused;
-    pkt->data = avbuf->plane_info[0].mm_addr + avbuf->planes[0].data_offset;
+    pkt->data = (uint8_t*)avbuf->plane_info[0].mm_addr + avbuf->planes[0].data_offset;
 
     if (avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME)
         pkt->flags |= AV_PKT_FLAG_KEY;
@@ -887,9 +886,6 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
             if (ret)
                     goto fail;
         }
-
-        if ((ret = ff_v4l2_buffer_enqueue(avbuf)) != 0)
-            goto fail;
     }
 
     *pbufref = bufref;
@@ -907,8 +903,13 @@ int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
     avbuf->buf.flags = avbuf->flags;
 
     ret = ioctl(buf_to_m2mctx(avbuf)->fd, VIDIOC_QBUF, &avbuf->buf);
-    if (ret < 0)
-        return AVERROR(errno);
+    if (ret < 0) {
+        int err = errno;
+        av_log(logger(avbuf), AV_LOG_ERROR, "--- %s VIDIOC_QBUF: index %d FAIL err %d (%s)\n",
+               avbuf->context->name, avbuf->buf.index,
+               err, strerror(err));
+        return AVERROR(err);
+    }
 
     ++avbuf->context->q_count;
     av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s VIDIOC_QBUF: index %d, count=%d\n", avbuf->context->name, avbuf->buf.index, avbuf->context->q_count);

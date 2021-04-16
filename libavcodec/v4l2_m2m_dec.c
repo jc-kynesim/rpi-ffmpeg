@@ -127,15 +127,6 @@ static int v4l2_try_start(AVCodecContext *avctx)
     }
 #endif
 
-    /* 4. init the capture context now that we have the capture format */
-    if (!capture->bufrefs) {
-        ret = ff_v4l2_context_init(capture);
-        if (ret) {
-            av_log(avctx, AV_LOG_ERROR, "can't request capture buffers\n");
-            return AVERROR(ENOMEM);
-        }
-    }
-
     /* 5. start the capture process */
     ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
     if (ret) {
@@ -560,12 +551,6 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", output->name, ret);
-
-    for (i = 0; i < output->num_buffers; i++) {
-        V4L2Buffer * const avbuf = (V4L2Buffer *)output->bufrefs[i]->data;
-        if (avbuf->status == V4L2BUF_IN_DRIVER)
-            avbuf->status = V4L2BUF_AVAILABLE;
-    }
 
     // V4L2 makes no guarantees about whether decoded frames are flushed or not
     // so mark all frames we are tracking to be discarded if they appear
