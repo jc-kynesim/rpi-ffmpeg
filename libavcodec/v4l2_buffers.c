@@ -881,6 +881,13 @@ int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
 
     avbuf->buf.flags = avbuf->flags;
 
+    if (avbuf->buf.timestamp.tv_sec || avbuf->buf.timestamp.tv_usec) {
+        av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s pre VIDIOC_QBUF: index %d, ts=%ld.%06ld count=%d\n",
+               avbuf->context->name, avbuf->buf.index,
+               avbuf->buf.timestamp.tv_sec, avbuf->buf.timestamp.tv_usec,
+               avbuf->context->q_count);
+    }
+
     ret = ioctl(buf_to_m2mctx(avbuf)->fd, VIDIOC_QBUF, &avbuf->buf);
     if (ret < 0) {
         int err = errno;
@@ -891,7 +898,10 @@ int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
     }
 
     ++avbuf->context->q_count;
-    av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s VIDIOC_QBUF: index %d, count=%d\n", avbuf->context->name, avbuf->buf.index, avbuf->context->q_count);
+    av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s VIDIOC_QBUF: index %d, ts=%ld.%06ld count=%d\n",
+           avbuf->context->name, avbuf->buf.index,
+           avbuf->buf.timestamp.tv_sec, avbuf->buf.timestamp.tv_usec,
+           avbuf->context->q_count);
 
     avbuf->status = V4L2BUF_IN_DRIVER;
 

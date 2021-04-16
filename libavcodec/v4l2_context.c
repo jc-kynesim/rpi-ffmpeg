@@ -222,9 +222,6 @@ static int do_source_change(V4L2m2mContext * const s)
            s->capture.sample_aspect_ratio.num, s->capture.sample_aspect_ratio.den,
            crop_width, crop_height);
 
-#warning Fix so we don't dealloc if not needed
-//    reinit = 1;
-
     if (full_reinit || reinit)
         s->reinit = 1;
 
@@ -372,6 +369,7 @@ static int count_in_driver(const V4L2Context * const ctx)
 static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 {
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+    const int is_capture = !V4L2_TYPE_IS_OUTPUT(ctx->type);
     struct v4l2_plane planes[VIDEO_MAX_PLANES];
     struct v4l2_buffer buf = { 0 };
     V4L2Buffer *avbuf;
@@ -382,7 +380,7 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
     int i, ret;
     int no_rx_means_done = 0;
 
-    if (!V4L2_TYPE_IS_OUTPUT(ctx->type) && ctx->bufrefs) {
+    if (is_capture && ctx->bufrefs) {
         for (i = 0; i < ctx->num_buffers; i++) {
             avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
             if (avbuf->status == V4L2BUF_IN_DRIVER)
@@ -399,7 +397,7 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 
 #warning I think this is bollocks
     /* if we are draining and there are no more capture buffers queued in the driver we are done */
-    if (!V4L2_TYPE_IS_OUTPUT(ctx->type) && ctx_to_m2mctx(ctx)->draining) {
+    if (is_capture && ctx_to_m2mctx(ctx)->draining) {
         for (i = 0; i < ctx->num_buffers; i++) {
             /* capture buffer initialization happens during decode hence
              * detection happens at runtime
@@ -416,14 +414,14 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
     }
 
 start:
-    if (V4L2_TYPE_IS_OUTPUT(ctx->type))
-        pfd.events =  POLLOUT | POLLWRNORM;
-    else {
+    if (is_capture) {
         /* no need to listen to requests for more input while draining */
         if (ctx_to_m2mctx(ctx)->draining)
             pfd.events =  POLLIN | POLLRDNORM | POLLPRI;
+    } else {
+        pfd.events =  POLLOUT | POLLWRNORM;
     }
-    no_rx_means_done = s->resize_pending && !V4L2_TYPE_IS_OUTPUT(ctx->type);
+    no_rx_means_done = s->resize_pending && is_capture;
 
     for (;;) {
         // If we have a resize pending then all buffers should be Qed
@@ -491,7 +489,7 @@ start:
     /* 2. dequeue the buffer */
     if (pfd.revents & (POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM)) {
 
-        if (!V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+        if (is_capture) {
             /* there is a capture buffer ready */
             if (pfd.revents & (POLLIN | POLLRDNORM))
                 goto dequeue;
@@ -520,12 +518,13 @@ dequeue:
             buf.m.planes = planes;
         }
 
-        ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_DQBUF, &buf);
-        if (ret) {
-            int err = errno;
+        while ((ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_DQBUF, &buf)) == -1) {
+            const int err = errno;
+            if (err == EINTR)
+                continue;
             if (err != EAGAIN) {
                 // EPIPE on CAPTURE can be used instead of BUF_FLAG_LAST
-                if (err != EPIPE || V4L2_TYPE_IS_OUTPUT(ctx->type))
+                if (err != EPIPE || !is_capture)
                     av_log(logger(ctx), AV_LOG_DEBUG, "%s VIDIOC_DQBUF, errno (%s)\n",
                         ctx->name, av_err2str(AVERROR(err)));
                 if (ctx_done(ctx) > 0)
@@ -534,30 +533,29 @@ dequeue:
             return NULL;
         }
         --ctx->q_count;
-        av_log(logger(ctx), AV_LOG_TRACE, "--- %s VIDIOC_DQBUF OK: index=%d, count=%d\n",
-               ctx->name, buf.index, ctx->q_count);
+        av_log(logger(ctx), AV_LOG_DEBUG, "--- %s VIDIOC_DQBUF OK: index=%d, ts=%ld.%06ld, count=%d, dq=%d\n",
+               ctx->name, buf.index,
+               buf.timestamp.tv_sec, buf.timestamp.tv_usec,
+               ctx->q_count, ++ctx->dq_count);
 
         avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
+        avbuf->status = V4L2BUF_AVAILABLE;
+        avbuf->buf = buf;
+        if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
+            memcpy(avbuf->planes, planes, sizeof(planes));
+            avbuf->buf.m.planes = avbuf->planes;
+        }
 
-        if (ctx_to_m2mctx(ctx)->draining && !V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+        if (ctx_to_m2mctx(ctx)->draining && is_capture) {
             int bytesused = V4L2_TYPE_IS_MULTIPLANAR(buf.type) ?
                             buf.m.planes[0].bytesused : buf.bytesused;
             if (bytesused == 0) {
-                av_log(logger(ctx), AV_LOG_TRACE, "Buffer empty - reQ\n");
+                av_log(logger(ctx), AV_LOG_DEBUG, "Buffer empty - reQ\n");
 
                 // Must reQ so we don't leak
                 // May not matter if the next thing we do is release all the
                 // buffers but better to be tidy.
-                ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_QBUF, &buf);
-                if (ret) {
-                    av_log(logger(ctx), AV_LOG_WARNING, "%s VIDIOC_QBUF, errno (%s): reQ empty buf failed\n",
-                        ctx->name, av_err2str(AVERROR(errno)));
-                }
-                else {
-                    ++ctx->q_count;
-                    av_log(logger(ctx), AV_LOG_TRACE, "--- %s VIDIOC_QBUF OK: index=%d, count=%d\n",
-                           ctx->name, buf.index, ctx->q_count);
-                }
+                ff_v4l2_buffer_enqueue(avbuf);
 
                 if (ctx_done(ctx) > 0)
                     goto start;
@@ -572,12 +570,6 @@ dequeue:
 #endif
         }
 
-        avbuf->status = V4L2BUF_AVAILABLE;
-        avbuf->buf = buf;
-        if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
-            memcpy(avbuf->planes, planes, sizeof(planes));
-            avbuf->buf.m.planes = avbuf->planes;
-        }
         return avbuf;
     }
 
