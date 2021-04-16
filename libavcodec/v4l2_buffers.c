@@ -35,7 +35,7 @@
 #include "v4l2_context.h"
 #include "v4l2_buffers.h"
 #include "v4l2_m2m.h"
-#include "v4l2_req_weak_link.h"
+#include "weak_link.h"
 
 #define USEC_PER_SEC 1000000
 static const AVRational v4l2_timebase = { 1, USEC_PER_SEC };
@@ -333,7 +333,7 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
 {
     AVBufferRef * bufref = (AVBufferRef *)data;
     V4L2Buffer *avbuf = (V4L2Buffer *)bufref->data;
-    struct V4L2Context *ctx = weak_link_lock(&avbuf->context_wl);
+    struct V4L2Context *ctx = ff_weak_link_lock(&avbuf->context_wl);
 
     if (ctx != NULL) {
         // Buffer still attached to context
@@ -360,7 +360,7 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
         ff_mutex_unlock(&ctx->lock);
     }
 
-    weak_link_unlock(avbuf->context_wl);
+    ff_weak_link_unlock(avbuf->context_wl);
     av_buffer_unref(&bufref);
 }
 
@@ -763,7 +763,7 @@ static void v4l2_buffer_buffer_free(void *opaque, uint8_t *data)
             close(avbuf->drm_frame.objects[i].fd);
     }
 
-    weak_link_unref(&avbuf->context_wl);
+    ff_weak_link_unref(&avbuf->context_wl);
 
     av_free(avbuf);
 }
@@ -794,7 +794,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
         avbuf->drm_frame.objects[i].fd = -1;
     }
 
-    avbuf->context_wl = weak_link_ref(ctx->wl_master);
+    avbuf->context_wl = ff_weak_link_ref(ctx->wl_master);
 
     if (buf_to_m2mctx(avbuf)->output_drm) {
         AVHWFramesContext *hwframes;

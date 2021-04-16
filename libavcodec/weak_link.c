@@ -1,22 +1,22 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include "v4l2_req_weak_link.h"
+#include "weak_link.h"
 
-struct weak_link_master {
+struct ff_weak_link_master {
     atomic_int ref_count;    /* 0 is single ref for easier atomics */
     pthread_rwlock_t lock;
     void * ptr;
 };
 
-static inline struct weak_link_master * weak_link_x(struct weak_link_client * c)
+static inline struct ff_weak_link_master * weak_link_x(struct ff_weak_link_client * c)
 {
-    return (struct weak_link_master *)c;
+    return (struct ff_weak_link_master *)c;
 }
 
-struct weak_link_master * weak_link_new(void * p)
+struct ff_weak_link_master * ff_weak_link_new(void * p)
 {
-    struct weak_link_master * w = malloc(sizeof(*w));
+    struct ff_weak_link_master * w = malloc(sizeof(*w));
     if (!w)
         return NULL;
     w->ptr = p;
@@ -27,7 +27,7 @@ struct weak_link_master * weak_link_new(void * p)
     return w;
 }
 
-static void weak_link_do_unref(struct weak_link_master * const w)
+static void weak_link_do_unref(struct ff_weak_link_master * const w)
 {
     int n = atomic_fetch_sub(&w->ref_count, 1);
     if (n)
@@ -38,9 +38,9 @@ static void weak_link_do_unref(struct weak_link_master * const w)
 }
 
 // Unref & break link
-void weak_link_break(struct weak_link_master ** ppLink)
+void ff_weak_link_break(struct ff_weak_link_master ** ppLink)
 {
-    struct weak_link_master * const w = *ppLink;
+    struct ff_weak_link_master * const w = *ppLink;
     if (!w)
         return;
 
@@ -52,15 +52,15 @@ void weak_link_break(struct weak_link_master ** ppLink)
     weak_link_do_unref(w);
 }
 
-struct weak_link_client* weak_link_ref(struct weak_link_master * w)
+struct ff_weak_link_client* ff_weak_link_ref(struct ff_weak_link_master * w)
 {
     atomic_fetch_add(&w->ref_count, 1);
-    return (struct weak_link_client*)w;
+    return (struct ff_weak_link_client*)w;
 }
 
-void weak_link_unref(struct weak_link_client ** ppLink)
+void ff_weak_link_unref(struct ff_weak_link_client ** ppLink)
 {
-    struct weak_link_master * const w = weak_link_x(*ppLink);
+    struct ff_weak_link_master * const w = weak_link_x(*ppLink);
     if (!w)
         return;
 
@@ -68,9 +68,9 @@ void weak_link_unref(struct weak_link_client ** ppLink)
     weak_link_do_unref(w);
 }
 
-void * weak_link_lock(struct weak_link_client ** ppLink)
+void * ff_weak_link_lock(struct ff_weak_link_client ** ppLink)
 {
-    struct weak_link_master * const w = weak_link_x(*ppLink);
+    struct ff_weak_link_master * const w = weak_link_x(*ppLink);
 
     if (!w)
         return NULL;
@@ -90,9 +90,9 @@ broken:
 }
 
 // Ignores a NULL c (so can be on the return path of both broken & live links)
-void weak_link_unlock(struct weak_link_client * c)
+void ff_weak_link_unlock(struct ff_weak_link_client * c)
 {
-    struct weak_link_master * const w = weak_link_x(c);
+    struct ff_weak_link_master * const w = weak_link_x(c);
     if (w)
         pthread_rwlock_unlock(&w->lock);
 }

@@ -95,7 +95,7 @@ typedef struct V4L2Context {
 
     AVBufferRef *frames_ref;
     int q_count;
-    struct weak_link_master *wl_master;
+    struct ff_weak_link_master *wl_master;
 
     AVMutex lock;
 } V4L2Context;

@@ -43,7 +43,7 @@
 #include "v4l2_req_media.h"
 #include "v4l2_req_pollqueue.h"
 #include "v4l2_req_utils.h"
-#include "v4l2_req_weak_link.h"
+#include "weak_link.h"
 
 
 /* floor(log2(x)) */
@@ -337,7 +337,7 @@ struct qent_dst {
     bool waiting;
     pthread_mutex_t lock;
     pthread_cond_t cond;
-    struct weak_link_client * mbc_wl;
+    struct ff_weak_link_client * mbc_wl;
 };
 
 
@@ -568,7 +568,7 @@ struct mediabufs_ctl {
     struct buf_pool * dst;
     struct polltask * pt;
     struct pollqueue * pq;
-    struct weak_link_master * this_wlm;
+    struct ff_weak_link_master * this_wlm;
 
     struct v4l2_format src_fmt;
     struct v4l2_format dst_fmt;
@@ -1006,7 +1006,7 @@ void qent_dst_delete(struct qent_dst *const be_dst)
     if (!be_dst)
         return;
 
-    weak_link_unref(&be_dst->mbc_wl);
+    ff_weak_link_unref(&be_dst->mbc_wl);
     pthread_cond_destroy(&be_dst->cond);
     pthread_mutex_destroy(&be_dst->lock);
     qe_base_uninit(&be_dst->base);
@@ -1021,9 +1021,9 @@ void qent_dst_free(struct qent_dst ** const pbe_dst)
         return;
 
     *pbe_dst = NULL;
-    if ((mbc = weak_link_lock(&be_dst->mbc_wl)) != NULL) {
+    if ((mbc = ff_weak_link_lock(&be_dst->mbc_wl)) != NULL) {
         queue_put_free(mbc->dst, &be_dst->base);
-        weak_link_unlock(be_dst->mbc_wl);
+        ff_weak_link_unlock(be_dst->mbc_wl);
     }
     else {
         qent_dst_delete(be_dst);
@@ -1085,7 +1085,7 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struc
         if (!be_dst)
             return NULL;
 
-        if ((be_dst->mbc_wl = weak_link_ref(mbc->this_wlm)) == NULL ||
+        if ((be_dst->mbc_wl = ff_weak_link_ref(mbc->this_wlm)) == NULL ||
             (index = create_dst_buf(mbc)) < 0) {
             qent_dst_delete(be_dst);
             return NULL;
@@ -1368,7 +1368,7 @@ static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
         return;
 
     // Break the weak link first
-    weak_link_break(&mbc->this_wlm);
+    ff_weak_link_break(&mbc->this_wlm);
 
     polltask_delete(&mbc->pt);
 
@@ -1444,7 +1444,7 @@ struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, st
     mbc->pt = polltask_new(mbc->vfd, POLLIN | POLLOUT, mediabufs_poll_cb, mbc);
     if (!mbc->pt)
         goto fail3;
-    mbc->this_wlm = weak_link_new(mbc);
+    mbc->this_wlm = ff_weak_link_new(mbc);
     if (!mbc->this_wlm)
         goto fail4;
 
