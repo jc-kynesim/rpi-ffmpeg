@@ -958,6 +958,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     int ret;
     const struct decdev * decdev;
     uint32_t src_pix_fmt = V4L2_PIX_FMT_HEVC_SLICE;
+    size_t src_size;
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
@@ -996,9 +997,11 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     // Ask for an initial bitbuf size of max size / 4
     // We will realloc if we need more
     // Must use sps->h/w as avctx contains cropped size
+    src_size = bit_buf_size(sps->width, sps->height, sps->bit_depth - 8);
+    if (mediabufs_src_resizable(ctx->mbufs))
+        src_size /= 4;
     if (mediabufs_src_fmt_set(ctx->mbufs, decdev_src_type(decdev), src_pix_fmt,
-                              sps->width, sps->height,
-                              bit_buf_size(sps->width, sps->height, sps->bit_depth - 8) / 4)) {
+                              sps->width, sps->height, src_size)) {
         char tbuf1[5];
         av_log(avctx, AV_LOG_ERROR, "Failed to set source format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), sps->width, sps->height);
         goto fail4;
@@ -1031,7 +1034,6 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     }
 
     ret = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_DRM);
-//    ret = ff_v4l2_request_init(avctx, V4L2_PIX_FMT_HEVC_SLICE, 4 * 1024 * 1024, control, FF_ARRAY_ELEMS(control));
     if (ret)
         return ret;
 

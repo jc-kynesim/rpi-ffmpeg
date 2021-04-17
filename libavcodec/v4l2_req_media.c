@@ -329,6 +329,7 @@ struct qent_base {
 
 struct qent_src {
     struct qent_base base;
+    int fixed_size;
 };
 
 struct qent_dst {
@@ -762,7 +763,8 @@ int qent_src_data_copy(struct qent_src *const be_src, const size_t offset, const
     int rv;
 
     // Realloc doesn't copy so don't alloc if offset != 0
-    if ((rv = qent_base_realloc(be, offset + len, offset ? NULL : dbsc)) != 0)
+    if ((rv = qent_base_realloc(be, offset + len,
+                                be_src->fixed_size || offset ? NULL : dbsc)) != 0)
         return rv;
 
     dmabuf_write_start(be->dh[0]);
@@ -832,6 +834,7 @@ fail1:
     media_request_abort(&mreq);
     queue_put_free(mbc->src, &src_be->base);
 
+#warning If src Q fails this doesnt unwind properly - separate dst Q from src Q
     if (dst_be)
         qe_dst_done(dst_be);
     pthread_mutex_unlock(&mbc->lock);
@@ -889,6 +892,7 @@ static MediaBufsStatus fmt_set(struct v4l2_format *const fmt, const int fd,
         fmt->fmt.pix.width = width;
         fmt->fmt.pix.height = height;
         fmt->fmt.pix.pixelformat = pixfmt;
+        fmt->fmt.pix.sizeimage = bufsize;
     }
 
     while (ioctl(fd, VIDIOC_S_FMT, fmt))
@@ -1118,23 +1122,17 @@ MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
 {
     MediaBufsStatus status;
     unsigned int i;
+    const enum v4l2_buf_type buf_type = mbc->dst_fmt.type;
     static const struct {
-        unsigned int type_v4l2;
         unsigned int flags_must;
         unsigned int flags_not;
     } trys[] = {
-        {V4L2_BUF_TYPE_VIDEO_CAPTURE,
-            0, V4L2_FMT_FLAG_EMULATED},
-        {V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
-            0, V4L2_FMT_FLAG_EMULATED},
-        {V4L2_BUF_TYPE_VIDEO_CAPTURE,
-            V4L2_FMT_FLAG_EMULATED, 0},
-        {V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
-            V4L2_FMT_FLAG_EMULATED, 0}
+        {0, V4L2_FMT_FLAG_EMULATED},
+        {V4L2_FMT_FLAG_EMULATED, 0},
     };
     for (i = 0; i != sizeof(trys)/sizeof(trys[0]); ++i) {
         status = find_fmt_flags(&mbc->dst_fmt, mbc->vfd,
-                                trys[i].type_v4l2,
+                                buf_type,
                                 trys[i].flags_must,
                                 trys[i].flags_not,
                                 width, height, accept_fn, accept_v);
@@ -1225,6 +1223,7 @@ MediaBufsStatus mediabufs_src_pool_create(struct mediabufs_ctl *const mbc,
             goto fail;
         }
         be_src->base.index = i;
+        be_src->fixed_size = !mediabufs_src_resizable(mbc);
 
         queue_put_free(mbc->src, &be_src->base);
     }
@@ -1362,6 +1361,13 @@ int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_
     return rv;
 }
 
+int mediabufs_src_resizable(const struct mediabufs_ctl *const mbc)
+{
+    // Single planar OUTPUT can only take exact size buffers
+    // Multiplanar will take larger than negotiated
+    return V4L2_TYPE_IS_MULTIPLANAR(mbc->src_fmt.type);
+}
+
 static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
 {
     if (!mbc)
@@ -1406,6 +1412,36 @@ void mediabufs_ctl_unref(struct mediabufs_ctl **const pmbc)
     mediabufs_ctl_delete(mbc);
 }
 
+static int set_capabilities(struct mediabufs_ctl *const mbc)
+{
+    struct v4l2_capability capability = { 0 };
+    uint32_t caps;
+
+    if (ioctl(mbc->vfd, VIDIOC_QUERYCAP, &capability)) {
+        int err = errno;
+        request_err(mbc->dc, "Failed to get capabilities: %s\n", strerror(err));
+        return -err;
+    }
+
+    caps = (capability.capabilities & V4L2_CAP_DEVICE_CAPS) != 0 ?
+            capability.device_caps :
+            capability.capabilities;
+
+    if ((caps & V4L2_CAP_VIDEO_M2M_MPLANE) != 0) {
+        mbc->src_fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+        mbc->dst_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+    }
+    else if ((caps & V4L2_CAP_VIDEO_M2M) != 0) {
+        mbc->src_fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+        mbc->dst_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    }
+    else {
+        request_err(mbc->dc, "No M2M capabilities (%#x)\n", caps);
+        return -EINVAL;
+    }
+
+    return 0;
+}
 
 /* One of these per context */
 struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, struct pollqueue *const pq)
@@ -1417,8 +1453,6 @@ struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, st
 
     mbc->dc = dc;
     // Default mono planar
-    mbc->src_fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    mbc->dst_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     mbc->pq = pq;
     pthread_mutex_init(&mbc->lock, NULL);
 
@@ -1433,6 +1467,11 @@ struct mediabufs_ctl * mediabufs_ctl_new(void * const dc, const char * vpath, st
             request_err(dc, "Failed to open video dev '%s': %s\n", vpath, strerror(err));
             goto fail0;
         }
+    }
+
+    if (set_capabilities(mbc)) {
+        request_err(dc, "Bad capabilities for video dev '%s'\n", vpath);
+        goto fail1;
     }
 
     mbc->src = queue_new(mbc->vfd, pq);

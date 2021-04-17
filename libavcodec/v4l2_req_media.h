@@ -124,6 +124,8 @@ MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
                 unsigned int size);
 int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl ctrls[], unsigned int n);
 
+int mediabufs_src_resizable(const struct mediabufs_ctl *const mbc);
+
 MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
                                       enum v4l2_buf_type buf_type,
                                       const uint32_t pixfmt,
