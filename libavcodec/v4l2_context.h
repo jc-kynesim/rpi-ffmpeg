@@ -71,6 +71,7 @@ typedef struct V4L2Context {
      */
     int width, height;
     AVRational sample_aspect_ratio;
+    struct v4l2_rect selection;
 
     /**
      * Indexed array of pointers to V4L2Buffers

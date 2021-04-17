@@ -661,6 +661,7 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf, int no_rescale_pts)
 {
     int ret;
+    V4L2Context * const ctx = avbuf->context;
 
     av_frame_unref(frame);
 
@@ -679,9 +680,18 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf, int no_resc
     frame->pkt_dts = AV_NOPTS_VALUE;
 
     /* these values are updated also during re-init in v4l2_process_driver_event */
-    frame->height = avbuf->context->height;
-    frame->width = avbuf->context->width;
-    frame->sample_aspect_ratio = avbuf->context->sample_aspect_ratio;
+    frame->height = ctx->height;
+    frame->width = ctx->width;
+    frame->sample_aspect_ratio = ctx->sample_aspect_ratio;
+
+    if (ctx->selection.height && ctx->selection.width) {
+        frame->crop_left = ctx->selection.left < frame->width ? ctx->selection.left : 0;
+        frame->crop_top  = ctx->selection.top < frame->height ? ctx->selection.top  : 0;
+        frame->crop_right = ctx->selection.left + ctx->selection.width < frame->width ?
+            frame->width - (ctx->selection.left + ctx->selection.width) : 0;
+        frame->crop_bottom = ctx->selection.top + ctx->selection.height < frame->height ?
+            frame->width - (ctx->selection.top + ctx->selection.height) : 0;
+    }
 
     /* 3. report errors upstream */
     if (avbuf->buf.flags & V4L2_BUF_FLAG_ERROR) {

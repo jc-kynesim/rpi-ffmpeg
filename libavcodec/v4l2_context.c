@@ -155,23 +155,19 @@ static inline void v4l2_save_to_context(V4L2Context* ctx, struct v4l2_format_upd
     }
 }
 
-static int get_default_selection(V4L2Context * const ctx,
-                                 unsigned int * pwidth, unsigned int * pheight)
+static int get_default_selection(V4L2Context * const ctx, struct v4l2_rect *r)
 {
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     struct v4l2_selection selection = {
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-//        .target = V4L2_SEL_TGT_CROP_DEFAULT,
         .target = V4L2_SEL_TGT_COMPOSE
     };
 
-    *pwidth = 0;
-    *pheight = 0;
+    memset(r, 0, sizeof(*r));
     if (ioctl(s->fd, VIDIOC_G_SELECTION, &selection))
         return AVERROR(errno);
 
-    *pwidth = selection.r.width;
-    *pheight = selection.r.height;
+    *r = selection.r;
     return 0;
 }
 
@@ -184,8 +180,6 @@ static int do_source_change(V4L2m2mContext * const s)
     int full_reinit;
     struct v4l2_format cap_fmt = s->capture.format;
     struct v4l2_format out_fmt = s->output.format;
-    unsigned int crop_width;
-    unsigned int crop_height;
 
     s->resize_pending = 0;
     s->capture.done = 0;
@@ -209,7 +203,7 @@ static int do_source_change(V4L2m2mContext * const s)
     }
     s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
 
-    get_default_selection(&s->capture, &crop_width, &crop_height);
+    get_default_selection(&s->capture, &s->capture.selection);
 
     reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
     if (reinit) {
@@ -218,9 +212,10 @@ static int do_source_change(V4L2m2mContext * const s)
     }
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
 
-    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, crop %dx%d\n",
+    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, crop %dx%d @ %d,%d\n",
            s->capture.sample_aspect_ratio.num, s->capture.sample_aspect_ratio.den,
-           crop_width, crop_height);
+           s->capture.selection.width, s->capture.selection.height,
+           s->capture.selection.left, s->capture.selection.top);
 
     if (full_reinit || reinit)
         s->reinit = 1;
