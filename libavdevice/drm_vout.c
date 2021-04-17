@@ -44,7 +44,7 @@
 
 #include "libavutil/rpi_sand_fns.h"
 
-#define TRACE_ALL 1
+#define TRACE_ALL 0
 
 #define NUM_BUFFERS 4
 #define RPI_DISPLAY_ALL 0
@@ -219,6 +219,8 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
     if (ret != 0) {
         av_log(s, AV_LOG_WARNING, "drmModeSetPlane failed: %s\n", ERRSTR);
     }
+
+    // drmModeRmFB to kill id
 
     return ret;
 }
