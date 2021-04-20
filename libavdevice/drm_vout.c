@@ -187,7 +187,6 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
             return -1;
         }
         de->setup.out_fourcc = format;
-        av_log(s, AV_LOG_WARNING, "Format: %#x\n", format);
     }
 
     {
