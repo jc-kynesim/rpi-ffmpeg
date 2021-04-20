@@ -31,9 +31,6 @@
 #include "pthread.h"
 #include <semaphore.h>
 
-//#include "drm_fourcc.h"
-#include <drm.h>
-//#include <drm_mode.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
@@ -59,7 +56,9 @@ typedef struct drm_aux_s {
     AVFrame * frame;
 } drm_aux_t;
 
-#define AUX_SIZE 2
+// Aux size should only need to be 2, but on a few streams (Hobbit) under FKMS
+// we get initial flicker probably due to dodgy drm timing
+#define AUX_SIZE 3
 typedef struct drm_display_env_s
 {
     AVClass *class;
@@ -108,6 +107,58 @@ static int drm_vout_write_header(AVFormatContext *s)
     return 0;
 }
 
+static int find_plane(struct AVFormatContext * const avctx,
+                      const int drmfd, const int crtcidx, const uint32_t format,
+                      uint32_t * const pplane_id)
+{
+   drmModePlaneResPtr planes;
+   drmModePlanePtr plane;
+   unsigned int i;
+   unsigned int j;
+   int ret = 0;
+
+   planes = drmModeGetPlaneResources(drmfd);
+   if (!planes)
+   {
+       av_log(avctx, AV_LOG_WARNING, "drmModeGetPlaneResources failed: %s\n", ERRSTR);
+       return -1;
+   }
+
+   for (i = 0; i < planes->count_planes; ++i) {
+      plane = drmModeGetPlane(drmfd, planes->planes[i]);
+      if (!planes)
+      {
+          av_log(avctx, AV_LOG_WARNING, "drmModeGetPlane failed: %s\n", ERRSTR);
+          break;
+      }
+
+      if (!(plane->possible_crtcs & (1 << crtcidx))) {
+         drmModeFreePlane(plane);
+         continue;
+      }
+
+      for (j = 0; j < plane->count_formats; ++j) {
+         if (plane->formats[j] == format)
+            break;
+      }
+
+      if (j == plane->count_formats) {
+         drmModeFreePlane(plane);
+         continue;
+      }
+
+      *pplane_id = plane->plane_id;
+      drmModeFreePlane(plane);
+      break;
+   }
+
+   if (i == planes->count_planes)
+      ret = -1;
+
+   drmModeFreePlaneResources(planes);
+   return ret;
+}
+
 static void da_uninit(drm_display_env_t * const de, drm_aux_t * da)
 {
     if (da->fb_handle != 0) {
@@ -118,16 +169,26 @@ static void da_uninit(drm_display_env_t * const de, drm_aux_t * da)
     av_frame_free(&da->frame);
 }
 
-static int do_display(AVFormatContext * const s, drm_display_env_t * const de, AVFrame * const frame)
+static int do_display(AVFormatContext * const s, drm_display_env_t * const de, AVFrame * frame)
 {
-    int ret = 0;
-
     const AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor*)frame->data[0];
     drm_aux_t * da = de->aux + de->ano;
+    const uint32_t format = desc->layers[0].format;
+    int ret = 0;
 
 #if TRACE_ALL
     av_log(s, AV_LOG_DEBUG, "<<< %s: fd=%d\n", __func__, desc->objects[0].fd);
 #endif
+
+    if (de->setup.out_fourcc != format) {
+        if (find_plane(s, de->drm_fd, de->setup.crtcIdx, format, &de->setup.planeId)) {
+            av_frame_free(&frame);
+            av_log(s, AV_LOG_WARNING, "No plane for format: %#x\n", format);
+            return -1;
+        }
+        de->setup.out_fourcc = format;
+        av_log(s, AV_LOG_WARNING, "Format: %#x\n", format);
+    }
 
     {
         drmVBlank vbl = {
@@ -464,56 +525,6 @@ fail_res:
    return ret;
 }
 
-static int find_plane(struct AVFormatContext * const avctx, int drmfd, struct drm_setup *s)
-{
-   drmModePlaneResPtr planes;
-   drmModePlanePtr plane;
-   unsigned int i;
-   unsigned int j;
-   int ret = 0;
-
-   planes = drmModeGetPlaneResources(drmfd);
-   if (!planes)
-   {
-       av_log(avctx, AV_LOG_WARNING, "drmModeGetPlaneResources failed: %s\n", ERRSTR);
-       return -1;
-   }
-
-   for (i = 0; i < planes->count_planes; ++i) {
-      plane = drmModeGetPlane(drmfd, planes->planes[i]);
-      if (!planes)
-      {
-          av_log(avctx, AV_LOG_WARNING, "drmModeGetPlane failed: %s\n", ERRSTR);
-          break;
-      }
-
-      if (!(plane->possible_crtcs & (1 << s->crtcIdx))) {
-         drmModeFreePlane(plane);
-         continue;
-      }
-
-      for (j = 0; j < plane->count_formats; ++j) {
-         if (plane->formats[j] == s->out_fourcc)
-            break;
-      }
-
-      if (j == plane->count_formats) {
-         drmModeFreePlane(plane);
-         continue;
-      }
-
-      s->planeId = plane->plane_id;
-      drmModeFreePlane(plane);
-      break;
-   }
-
-   if (i == planes->count_planes)
-      ret = -1;
-
-   drmModeFreePlaneResources(planes);
-   return ret;
-}
-
 // deinit is called if init fails so no need to clean up explicity here
 static int drm_vout_init(struct AVFormatContext * s)
 {
@@ -526,8 +537,7 @@ static int drm_vout_init(struct AVFormatContext * s)
     de->drm_fd = -1;
     de->con_id = 0;
     de->setup = (struct drm_setup){0};
-
-    de->setup.out_fourcc = DRM_FORMAT_NV12; // **** Need some sort of select
+    de->q_terminate = 0;
 
     if ((de->drm_fd = drmOpen(drm_module, NULL)) < 0)
     {
@@ -543,14 +553,6 @@ static int drm_vout_init(struct AVFormatContext * s)
         goto fail_close;
     }
 
-    if (find_plane(s, de->drm_fd, &de->setup) != 0)
-    {
-        av_log(s, AV_LOG_ERROR, "failed to find compatible plane\n");
-        rv = AVERROR(EINVAL);
-        goto fail_close;
-    }
-
-    de->q_terminate = 0;
     sem_init(&de->q_sem_in, 0, 0);
     sem_init(&de->q_sem_out, 0, 0);
     if (pthread_create(&de->q_thread, NULL, display_thread, s)) {
