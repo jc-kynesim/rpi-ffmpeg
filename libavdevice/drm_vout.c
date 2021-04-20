@@ -196,9 +196,13 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
                 .sequence = 0
             }
         };
-        ret = drmWaitVBlank(de->drm_fd, &vbl);
-        if (ret != 0)
-            av_log(s, AV_LOG_WARNING, "drmWaitVBlank failed: %s\n", ERRSTR);
+
+        while (drmWaitVBlank(de->drm_fd, &vbl)) {
+            if (errno != EINTR) {
+                av_log(s, AV_LOG_WARNING, "drmWaitVBlank failed: %s\n", ERRSTR);
+                break;
+            }
+        }
     }
 
     da_uninit(de, da);
