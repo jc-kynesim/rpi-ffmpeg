@@ -53,7 +53,7 @@
 
 #define TRACE_ALL 0
 
-#define RPI_DISPLAY_ALL 0
+#define RPI_DISPLAY_ALL 1
 #define DISPLAY_PORT_DEPTH 4
 
 typedef struct rpi_display_env_s

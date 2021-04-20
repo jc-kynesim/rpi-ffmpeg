@@ -21,33 +21,23 @@
 
 // *** This module is a work in progress and its utility is strictly
 //     limited to testing.
-//     Amongst other issues it doesn't wait for the pic to be displayed before
-//     returning the buffer so flikering does occur.
 
 #include "libavutil/opt.h"
-#include "libavutil/avassert.h"
 #include "libavutil/pixdesc.h"
-#include "libavutil/imgutils.h"
 #include "libavutil/hwcontext_drm.h"
 #include "libavformat/internal.h"
 #include "avdevice.h"
 
 #include "pthread.h"
 #include <semaphore.h>
-#include <stdatomic.h>
 
-#include "drm_fourcc.h"
+//#include "drm_fourcc.h"
 #include <drm.h>
-#include <drm_mode.h>
+//#include <drm_mode.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
-#include "libavutil/rpi_sand_fns.h"
-
 #define TRACE_ALL 0
-
-#define NUM_BUFFERS 4
-#define RPI_DISPLAY_ALL 0
 
 #define DRM_MODULE "vc4"
 
@@ -65,11 +55,11 @@ struct drm_setup {
 };
 
 typedef struct drm_aux_s {
-    int fd;
-    uint32_t bo_handles[4];
     unsigned int fb_handle;
+    AVFrame * frame;
 } drm_aux_t;
 
+#define AUX_SIZE 2
 typedef struct drm_display_env_s
 {
     AVClass *class;
@@ -78,14 +68,15 @@ typedef struct drm_display_env_s
     uint32_t con_id;
     struct drm_setup setup;
     enum AVPixelFormat avfmt;
+    int show_all;
 
-    drm_aux_t aux[32];
+    unsigned int ano;
+    drm_aux_t aux[AUX_SIZE];
 
     pthread_t q_thread;
-    pthread_mutex_t q_lock;
-    sem_t q_sem;
+    sem_t q_sem_in;
+    sem_t q_sem_out;
     int q_terminate;
-    AVFrame * q_this;
     AVFrame * q_next;
 
 } drm_display_env_t;
@@ -94,7 +85,7 @@ typedef struct drm_display_env_s
 static int drm_vout_write_trailer(AVFormatContext *s)
 {
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "%s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "%s\n", __func__);
 #endif
 
     return 0;
@@ -105,7 +96,7 @@ static int drm_vout_write_header(AVFormatContext *s)
     const AVCodecParameters * const par = s->streams[0]->codecpar;
 
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "%s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "%s\n", __func__);
 #endif
     if (   s->nb_streams > 1
         || par->codec_type != AVMEDIA_TYPE_VIDEO
@@ -117,40 +108,53 @@ static int drm_vout_write_header(AVFormatContext *s)
     return 0;
 }
 
+static void da_uninit(drm_display_env_t * const de, drm_aux_t * da)
+{
+    if (da->fb_handle != 0) {
+        drmModeRmFB(de->drm_fd, da->fb_handle);
+        da->fb_handle = 0;
+    }
+
+    av_frame_free(&da->frame);
+}
 
 static int do_display(AVFormatContext * const s, drm_display_env_t * const de, AVFrame * const frame)
 {
     int ret = 0;
 
     const AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor*)frame->data[0];
-    drm_aux_t * da = NULL;
-    unsigned int i;
+    drm_aux_t * da = de->aux + de->ano;
 
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "<<< %s: fd=%d\n", __func__, desc->objects[0].fd);
+    av_log(s, AV_LOG_DEBUG, "<<< %s: fd=%d\n", __func__, desc->objects[0].fd);
 #endif
 
-    for (i = 0; i != 32; ++i) {
-        if (de->aux[i].fd == -1 || de->aux[i].fd == desc->objects[0].fd) {
-            da = de->aux + i;
-            break;
-        }
+    {
+        drmVBlank vbl = {
+            .request = {
+                .type = DRM_VBLANK_RELATIVE,
+                .sequence = 0
+            }
+        };
+        ret = drmWaitVBlank(de->drm_fd, &vbl);
+        if (ret != 0)
+            av_log(s, AV_LOG_WARNING, "drmWaitVBlank failed: %s\n", ERRSTR);
     }
 
-    if (da == NULL) {
-        av_log(s, AV_LOG_INFO, "%s: Out of handles\n", __func__);
-        return AVERROR(EINVAL);
-    }
+    da_uninit(de, da);
 
-    if (da->fd == -1) {
+    {
         uint32_t pitches[4] = {0};
         uint32_t offsets[4] = {0};
         uint64_t modifiers[4] = {0};
-        uint32_t bo_plane_handles[4] = {0};
+        uint32_t bo_object_handles[4] = {0};
+        uint32_t bo_handles[4] = {0};
         int i, j, n;
 
+        da->frame = frame;
+
         for (i = 0; i < desc->nb_objects; ++i) {
-            if (drmPrimeFDToHandle(de->drm_fd, desc->objects[i].fd, da->bo_handles + i) != 0) {
+            if (drmPrimeFDToHandle(de->drm_fd, desc->objects[i].fd, bo_object_handles + i) != 0) {
                 av_log(s, AV_LOG_WARNING, "drmPrimeFDToHandle[%d](%d) failed: %s\n", i, desc->objects[i].fd, ERRSTR);
                 return -1;
             }
@@ -164,21 +168,21 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
                 pitches[n] = p->pitch;
                 offsets[n] = p->offset;
                 modifiers[n] = obj->format_modifier;
-                bo_plane_handles[n] = da->bo_handles[p->object_index];
+                bo_handles[n] = bo_object_handles[p->object_index];
                 ++n;
             }
         }
 
 #if 1 && TRACE_ALL
-        av_log(s, AV_LOG_INFO, "%dx%d, fmt: %x, boh=%d,%d,%d,%d, pitch=%d,%d,%d,%d,"
+        av_log(s, AV_LOG_DEBUG, "%dx%d, fmt: %x, boh=%d,%d,%d,%d, pitch=%d,%d,%d,%d,"
                " offset=%d,%d,%d,%d, mod=%llx,%llx,%llx,%llx\n",
                av_frame_cropped_width(frame),
                av_frame_cropped_height(frame),
                desc->layers[0].format,
-               bo_plane_handles[0],
-               bo_plane_handles[1],
-               bo_plane_handles[2],
-               bo_plane_handles[3],
+               bo_handles[0],
+               bo_handles[1],
+               bo_handles[2],
+               bo_handles[3],
                pitches[0],
                pitches[1],
                pitches[2],
@@ -197,14 +201,12 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
         if (drmModeAddFB2WithModifiers(de->drm_fd,
                                          av_frame_cropped_width(frame),
                                          av_frame_cropped_height(frame),
-                                         desc->layers[0].format, bo_plane_handles,
+                                         desc->layers[0].format, bo_handles,
                                          pitches, offsets, modifiers,
                                          &da->fb_handle, DRM_MODE_FB_MODIFIERS /** 0 if no mods */) != 0) {
             av_log(s, AV_LOG_WARNING, "drmModeAddFB2WithModifiers failed: %s\n", ERRSTR);
             return -1;
         }
-
-        da->fd = desc->objects[0].fd;
     }
 
     ret = drmModeSetPlane(de->drm_fd, de->setup.planeId, de->setup.crtcId,
@@ -220,44 +222,55 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
         av_log(s, AV_LOG_WARNING, "drmModeSetPlane failed: %s\n", ERRSTR);
     }
 
-    // drmModeRmFB to kill id
+    de->ano = de->ano + 1 >= AUX_SIZE ? 0 : de->ano + 1;
 
     return ret;
+}
+
+static int do_sem_wait(sem_t * const sem, const int nowait)
+{
+    while (nowait ? sem_trywait(sem) : sem_wait(sem)) {
+        if (errno != EINTR)
+            return -errno;
+    }
+    return 0;
 }
 
 static void * display_thread(void * v)
 {
     AVFormatContext * const s = v;
     drm_display_env_t * const de = s->priv_data;
+    int i;
 
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "<<< %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "<<< %s\n", __func__);
 #endif
+
+    sem_post(&de->q_sem_out);
 
     for (;;) {
         AVFrame * frame;
 
-        while (sem_wait(&de->q_sem) != 0) {
-            av_assert0(errno == EINTR);
-        }
+        do_sem_wait(&de->q_sem_in, 0);
 
         if (de->q_terminate)
             break;
 
-        pthread_mutex_lock(&de->q_lock);
         frame = de->q_next;
         de->q_next = NULL;
-        pthread_mutex_unlock(&de->q_lock);
+        sem_post(&de->q_sem_out);
 
         do_display(s, de, frame);
-
-        av_frame_free(&de->q_this);
-        de->q_this = frame;
     }
 
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, ">>> %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, ">>> %s\n", __func__);
 #endif
+
+    for (i = 0; i != AUX_SIZE; ++i)
+        da_uninit(de, de->aux + i);
+
+    av_frame_free(&de->q_next);
 
     return NULL;
 }
@@ -267,9 +280,10 @@ static int drm_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
     const AVFrame * const src_frame = (AVFrame *)pkt->data;
     AVFrame * frame;
     drm_display_env_t * const de = s->priv_data;
+    int ret;
 
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "%s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "%s\n", __func__);
 #endif
 
     if ((src_frame->flags & AV_FRAME_FLAG_CORRUPT) != 0) {
@@ -296,19 +310,14 @@ static int drm_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
         return AVERROR(EINVAL);
     }
 
-
-    pthread_mutex_lock(&de->q_lock);
-    {
-        AVFrame * const t = de->q_next;
-        de->q_next = frame;
-        frame = t;
-    }
-    pthread_mutex_unlock(&de->q_lock);
-
-    if (frame == NULL)
-        sem_post(&de->q_sem);
-    else
+    ret = do_sem_wait(&de->q_sem_out, !de->show_all);
+    if (ret) {
         av_frame_free(&frame);
+    }
+    else {
+        de->q_next = frame;
+        sem_post(&de->q_sem_in);
+    }
 
     return 0;
 }
@@ -317,7 +326,7 @@ static int drm_vout_write_frame(AVFormatContext *s, int stream_index, AVFrame **
                           unsigned flags)
 {
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "%s: idx=%d, flags=%#x\n", __func__, stream_index, flags);
+    av_log(s, AV_LOG_DEBUG, "%s: idx=%d, flags=%#x\n", __func__, stream_index, flags);
 #endif
 
     /* drm_vout_write_header() should have accepted only supported formats */
@@ -330,7 +339,7 @@ static int drm_vout_write_frame(AVFormatContext *s, int stream_index, AVFrame **
 static int drm_vout_control_message(AVFormatContext *s, int type, void *data, size_t data_size)
 {
 #if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "%s: %d\n", __func__, type);
+    av_log(s, AV_LOG_DEBUG, "%s: %d\n", __func__, type);
 #endif
     switch(type) {
     case AV_APP_TO_DEV_WINDOW_REPAINT:
@@ -382,7 +391,7 @@ static int find_crtc(struct AVFormatContext * const avctx, int drmfd, struct drm
             s->crtcId = crtc->crtc_id;
          }
 
-         av_log(avctx, AV_LOG_INFO, "Connector %d (crtc %d): type %d, %dx%d%s\n",
+         av_log(avctx, AV_LOG_DEBUG, "Connector %d (crtc %d): type %d, %dx%d%s\n",
                 con->connector_id,
                 crtc ? crtc->crtc_id : 0,
                 con->connector_type,
@@ -509,9 +518,10 @@ static int find_plane(struct AVFormatContext * const avctx, int drmfd, struct dr
 static int drm_vout_init(struct AVFormatContext * s)
 {
     drm_display_env_t * const de = s->priv_data;
-    unsigned int i;
+    int rv;
+    const char * drm_module = DRM_MODULE;
 
-    av_log(s, AV_LOG_INFO, "<<< %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
     de->drm_fd = -1;
     de->con_id = 0;
@@ -519,74 +529,75 @@ static int drm_vout_init(struct AVFormatContext * s)
 
     de->setup.out_fourcc = DRM_FORMAT_NV12; // **** Need some sort of select
 
-    for (i = 0; i != 32; ++i) {
-        de->aux[i].fd = -1;
-    }
-
-    if ((de->drm_fd = drmOpen(DRM_MODULE, NULL)) < 0)
+    if ((de->drm_fd = drmOpen(drm_module, NULL)) < 0)
     {
-        av_log(s, AV_LOG_ERROR, "Failed to drmOpen %s\n", DRM_MODULE);
-        return -1;
+        rv = AVERROR(errno);
+        av_log(s, AV_LOG_ERROR, "Failed to drmOpen %s: %s\n", drm_module, av_err2str(rv));
+        return rv;
     }
 
     if (find_crtc(s, de->drm_fd, &de->setup, &de->con_id) != 0)
     {
         av_log(s, AV_LOG_ERROR, "failed to find valid mode\n");
-        return -1;
+        rv = AVERROR(EINVAL);
+        goto fail_close;
     }
 
     if (find_plane(s, de->drm_fd, &de->setup) != 0)
     {
         av_log(s, AV_LOG_ERROR, "failed to find compatible plane\n");
-        return -1;
+        rv = AVERROR(EINVAL);
+        goto fail_close;
     }
 
     de->q_terminate = 0;
-    pthread_mutex_init(&de->q_lock, NULL);
-    sem_init(&de->q_sem, 0, 0);
-    av_assert0(pthread_create(&de->q_thread, NULL, display_thread, s) == 0);
+    sem_init(&de->q_sem_in, 0, 0);
+    sem_init(&de->q_sem_out, 0, 0);
+    if (pthread_create(&de->q_thread, NULL, display_thread, s)) {
+        rv = AVERROR(errno);
+        av_log(s, AV_LOG_ERROR, "Failed to creatye display thread: %s\n", av_err2str(rv));
+        goto fail_close;
+    }
 
-    av_log(s, AV_LOG_INFO, ">>> %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, ">>> %s\n", __func__);
 
     return 0;
+
+fail_close:
+    close(de->drm_fd);
+    de->drm_fd = -1;
+    av_log(s, AV_LOG_DEBUG, ">>> %s: FAIL\n", __func__);
+
+    return rv;
 }
 
 static void drm_vout_deinit(struct AVFormatContext * s)
 {
     drm_display_env_t * const de = s->priv_data;
 
-    av_log(s, AV_LOG_INFO, "<<< %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
     de->q_terminate = 1;
-    sem_post(&de->q_sem);
+    sem_post(&de->q_sem_in);
     pthread_join(de->q_thread, NULL);
-    sem_destroy(&de->q_sem);
-    pthread_mutex_destroy(&de->q_lock);
+    sem_destroy(&de->q_sem_in);
+    sem_destroy(&de->q_sem_out);
 
     av_frame_free(&de->q_next);
-    av_frame_free(&de->q_this);
 
     if (de->drm_fd >= 0) {
         close(de->drm_fd);
         de->drm_fd = -1;
     }
 
-    av_log(s, AV_LOG_INFO, ">>> %s\n", __func__);
+    av_log(s, AV_LOG_DEBUG, ">>> %s\n", __func__);
 }
 
 
 #define OFFSET(x) offsetof(drm_display_env_t, x)
 static const AVOption options[] = {
-#if 0
-    { "display_name", "set display name",       OFFSET(display_name), AV_OPT_TYPE_STRING, {.str = NULL }, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_id",    "set existing window id", OFFSET(window_id),    AV_OPT_TYPE_INT64,  {.i64 = 0 }, 0, INT64_MAX, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_size",  "set window forced size", OFFSET(window_width), AV_OPT_TYPE_IMAGE_SIZE, {.str = NULL}, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_title", "set window title",       OFFSET(window_title), AV_OPT_TYPE_STRING, {.str = NULL }, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_x",     "set window x offset",    OFFSET(window_x),     AV_OPT_TYPE_INT,    {.i64 = 0 }, -INT_MAX, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
-    { "window_y",     "set window y offset",    OFFSET(window_y),     AV_OPT_TYPE_INT,    {.i64 = 0 }, -INT_MAX, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM },
-#endif
+    { "show_all", "show all frames", OFFSET(show_all), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { NULL }
-
 };
 
 static const AVClass drm_vout_class = {
@@ -613,3 +624,4 @@ AVOutputFormat ff_vout_drm_muxer = {
     .init           = drm_vout_init,
     .deinit         = drm_vout_deinit,
 };
+
