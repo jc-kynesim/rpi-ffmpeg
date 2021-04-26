@@ -1,0 +1,82 @@
+# Setup & Build instructions for testing Argon30 mesa support (on Pi4)
+
+# These assume that the drm_mmal test for Sand8 has been built on this Pi
+# as build relies on many of the same files
+
+# 1st get everything required to build ffmpeg
+# If sources aren't already enabled on your Pi then enable them
+sudo su
+sed "s/#deb-src/deb-src/" /etc/apt/sources.list > /tmp/sources.list
+sed "s/#deb-src/deb-src/" /etc/apt/sources.list.d/raspi.list > /tmp/raspi.list
+mv /tmp/sources.list /etc/apt/
+mv /tmp/raspi.list /etc/apt/sources.list.d/
+apt update
+
+# Get dependancies
+sudo apt build-dep ffmpeg
+
+sudo apt install meson libepoxy-dev libxcb-dri3-dev libxcb1-dev libx11-dev libx11-xcb-dev libdrm-dev
+
+# Enable H265 V4L2 request decoder
+sudo su
+echo dtoverlay=rpivid-v4l2 >> /boot/config.txt
+# You may also want to add more CMA if you are going to try 4k videos
+# Change the dtoverlay=vc4-fkms-v3d line in config.txt to read
+# dtoverlay=vc4-fkms-v3d,cma-512
+reboot
+# Check it has turned up
+ls -la /dev/video*
+# This should include video19
+# crw-rw----+ 1 root video 81, 7 Aug  4 17:25 /dev/video19
+
+# Currently on the Pi the linux headers from the debian distro don't match
+# the kernel that we ship and we need to update them - hopefully this step
+# will be unneeded in the future
+sudo apt install git bc bison flex libssl-dev make
+git clone --depth=1 https://github.com/raspberrypi/linux --branch rpi-5.10.y
+cd linux
+KERNEL=kernel7l
+make bcm2711_defconfig
+make headers_install
+sudo cp -r usr/include/linux /usr/include
+cd ..
+
+# Config - this builds a staticly linked ffmpeg which is easier for testing
+pi-util/conf_native.sh --noshared
+
+# Build (this is a bit dull)
+# If you want to poke the source the libavdevice/egl_vout.c contains the
+# output code -
+cd out/armv7-static-rel
+
+# Check that you have actually configured V4L2 request
+grep HEVC_V4L2REQUEST config.h
+# You are hoping for
+# #define CONFIG_HEVC_V4L2REQUEST_HWACCEL 1
+# if you get 0 then the config has failed
+
+make -j6
+
+# Grab test streams
+wget http://www.jell.yfish.us/media/jellyfish-3-mbps-hd-h264.mkv
+wget http://www.jell.yfish.us/media/jellyfish-3-mbps-hd-hevc.mkv
+wget http://www.jell.yfish.us/media/jellyfish-3-mbps-hd-hevc-10bit.mkv
+
+# Test i420 output (works currently)
+./ffmpeg -no_cvt_hw -vcodec h264_v4l2m2m -i jellyfish-3-mbps-hd-h264.mkv -f vout_egl -
+
+# Test Sand8 output - doesn't currently work but should once you have
+# Sand8 working in drm_mmal. I can't guarantee that this will work as
+# I can't test this path with a known working format, but the debug looks
+# good.  If this doesn't work & drm_mmal does with sand8 then come back to me
+# The "show_all 1" forces vout to display every frame otherwise it drops any
+# frame that would cause it to block
+./ffmpeg -no_cvt_hw -hwaccel drm -vcodec hevc -i jellyfish-3-mbps-hd-hevc.mkv -show_all 1 -f vout_egl -
+
+# Test Sand30 - doesn't currently work
+# (Beware that when FFmpeg errors out it often leaves your teminal window
+# in a state where you need to reset it)
+./ffmpeg -no_cvt_hw -hwaccel drm -vcodec hevc -i jellyfish-3-mbps-hd-hevc-10bit.mkv -f vout_egl -
+
+
+
