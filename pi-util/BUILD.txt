@@ -1,0 +1,29 @@
+Building Pi FFmpeg
+==================
+
+Configuration:
+=============
+
+These instructions work for cross compiles from Ubuntu 16.04 & Ubuntu
+18.04. I would expect most other linux environments to work but I haven't
+tried them.
+
+pi-util/conf_pi2.sh
+
+contains suitable options to build the code for Pi2/3.  It expects to find
+git clones of
+
+https://github.com/raspberrypi/tools
+https://github.com/raspberrypi/firmware
+
+in the parent of the FFmpeg directory.  I recommend using --depth 1 to avoid a
+lot of history you don't want.
+
+If you have a copy of qasm.py in ../local/bin then the .qasm sources will be
+rebuilt.  Otherwise the prebuilt .c & .h files will be used.
+Likewise ../local/bin/vasmvidcore_std will enable VPU code rebuild
+
+pi-util/conf_p1.sh should configure for Pi1.  Beware that as of this time
+H265 QPU acceleration is broken on Pi1 and so it is disabled.
+
+
