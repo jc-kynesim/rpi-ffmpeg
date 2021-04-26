@@ -1,0 +1,59 @@
+Building Pi FFmpeg
+==================
+
+Current only building on a Pi is supported.
+This builds ffmpeg the way I've tested it
+
+Get all dependencies - the current package dependencies are good enough
+
+$ sudo apt-get build-dep ffmpeg
+
+Configure using the pi-util/conf_native.sh script
+-------------------------------------------------
+
+This sets the normal release options and creates an ouutput dir to build into
+The directory name will depend on system and options but will be under out/
+
+There are a few choices here
+ --mmal  build including the legacy mmal-based decoders and zero-copy code
+         this requires appropriate libraries which currently will exist for
+         armv7 but not arm64
+ --noshared
+         Build a static image rather than a shared library one.  Static is
+         easier for testing as there is no need to worry about library
+         paths being confused and therefore running the wrong code,  Shared
+         is what is needed, in most cases, when building for use by other
+         programs.
+
+So for a static build
+---------------------
+
+$ pi-util/conf_native.sh --noshared
+
+$ make -j8 -C out/<wherever the script said it was building to>
+
+You can now run ffmpeg directly from where it was built
+
+For a shared build
+------------------
+
+$ pi-util/conf_native.sh
+
+You will normally want an install target if shared. Note that the script has
+set this up to be generated in out/<builddir>/install, you don't have to worry
+about overwriting your system libs.
+
+$ make -j8 -C out/<builddir> install
+
+You can now set LD_LIBRARY_PATH appropriately and run ffmpeg from where it was
+built or install the image on the system - you have to be careful to get rid
+of all other ffmpeg libs or confusion may result.  There is a little script
+that wipes all other versions - obviously use with care!
+
+$ sudo pi-util/clean_usr_libs.sh
+
+Then simply copying from the install to /usr works
+
+$ sudo cp -r out/<builddir>/install/* /usr
+
+
