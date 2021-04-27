@@ -2368,8 +2368,8 @@ int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_reference)
                        av_channel_layout_compare(&ifp->ch_layout, &frame->ch_layout);
         break;
     case AVMEDIA_TYPE_VIDEO:
-        need_reinit |= ifp->width  != frame->width ||
-                       ifp->height != frame->height;
+        need_reinit |= ifp->width  != av_frame_cropped_width(frame) ||
+                       ifp->height != av_frame_cropped_height(frame);
         break;
     }
 
