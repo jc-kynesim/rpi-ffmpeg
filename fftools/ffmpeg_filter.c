@@ -2804,6 +2804,9 @@ static int send_frame(FilterGraph *fg, FilterGraphThread *fgt,
         (ifp->hw_frames_ctx && ifp->hw_frames_ctx->data != frame->hw_frames_ctx->data))
         need_reinit |= HWACCEL_CHANGED;
 
+    if (no_cvt_hw && fgt->graph)
+        need_reinit = 0;
+
     if (need_reinit) {
         ret = ifilter_parameters_from_frame(ifilter, frame);
         if (ret < 0)
