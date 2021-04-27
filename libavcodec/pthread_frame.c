@@ -209,7 +209,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         /* if the previous thread uses hwaccel then we take the lock to ensure
          * the threads don't run concurrently */
-        if (avctx->hwaccel) {
+        if (avctx->hwaccel &&
+            !(avctx->hwaccel->caps_internal & HWACCEL_CAP_MT_SAFE)) {
             pthread_mutex_lock(&p->parent->hwaccel_mutex);
             p->hwaccel_serializing = 1;
         }
@@ -636,7 +637,9 @@ void ff_thread_finish_setup(AVCodecContext *avctx) {
 
     if (!(avctx->active_thread_type&FF_THREAD_FRAME)) return;
 
-    if (avctx->hwaccel && !p->hwaccel_serializing) {
+    if (avctx->hwaccel &&
+        !(avctx->hwaccel->caps_internal & HWACCEL_CAP_MT_SAFE) &&
+        !p->hwaccel_serializing) {
         pthread_mutex_lock(&p->parent->hwaccel_mutex);
         p->hwaccel_serializing = 1;
     }
