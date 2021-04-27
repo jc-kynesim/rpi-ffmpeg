@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config.h"
+
 #include "channel_layout.h"
 #include "avassert.h"
 #include "buffer.h"
@@ -27,6 +29,9 @@
 #include "mem.h"
 #include "samplefmt.h"
 #include "hwcontext.h"
+#if CONFIG_SAND
+#include "rpi_sand_fns.h"
+#endif
 
 #if FF_API_OLD_CHANNEL_LAYOUT
 #define CHECK_CHANNELS_CONSISTENCY(frame) \
@@ -873,6 +878,12 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
         (frame->crop_left + frame->crop_right) >= frame->width ||
         (frame->crop_top + frame->crop_bottom) >= frame->height)
         return AVERROR(ERANGE);
+
+#if CONFIG_SAND
+    // Sand cannot be cropped - do not try
+    if (av_rpi_is_sand_format(frame->format))
+        return 0;
+#endif
 
     desc = av_pix_fmt_desc_get(frame->format);
     if (!desc)
