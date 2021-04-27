@@ -2387,6 +2387,9 @@ int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_reference)
     } else if (ifp->displaymatrix_present)
         need_reinit = 1;
 
+    if (no_cvt_hw && fg->graph)
+        need_reinit = 0;
+
     if (need_reinit) {
         ret = ifilter_parameters_from_frame(ifilter, frame);
         if (ret < 0)

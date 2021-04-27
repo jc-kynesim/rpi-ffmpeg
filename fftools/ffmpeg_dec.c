@@ -332,7 +332,7 @@ static int video_frame_process(InputStream *ist, AVFrame *frame)
     }
 #endif
 
-    if (frame->format == d->hwaccel_pix_fmt) {
+    if (!no_cvt_hw && frame->format == d->hwaccel_pix_fmt) {
         int err = hwaccel_retrieve_data(ist->dec_ctx, frame);
         if (err < 0)
             return err;
@@ -901,12 +901,15 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
             break;
 
         if (ist->hwaccel_id == HWACCEL_GENERIC ||
-            ist->hwaccel_id == HWACCEL_AUTO) {
+            ist->hwaccel_id == HWACCEL_AUTO ||
+            no_cvt_hw) {
             for (i = 0;; i++) {
                 config = avcodec_get_hw_config(s->codec, i);
                 if (!config)
                     break;
-                if (!(config->methods &
+                if (no_cvt_hw && (config->methods & AV_CODEC_HW_CONFIG_METHOD_INTERNAL))
+                    av_log(s, AV_LOG_DEBUG, "no_cvt_hw so trying pix_fmt %d with codec internal hwaccel\n", *p);
+                else if (!(config->methods &
                       AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX))
                     continue;
                 if (config->pix_fmt == *p)
