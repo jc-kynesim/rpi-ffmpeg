@@ -353,6 +353,7 @@ External library support:
   --enable-libvpl          enable Intel oneVPL code via libvpl if libmfx is not used [no]
   --enable-libnpp          enable Nvidia Performance Primitives-based code [no]
   --enable-mmal            enable Broadcom Multi-Media Abstraction Layer (Raspberry Pi) via MMAL [no]
+  --enable-sand            enable sand video formats [rpi]
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
   --enable-omx             enable OpenMAX IL code [no]
@@ -2042,6 +2043,7 @@ FEATURE_LIST="
     omx_rpi
     runtime_cpudetect
     safe_bitstream_reader
+    sand
     shared
     small
     static
@@ -2621,6 +2623,7 @@ CONFIG_EXTRA="
     rtpdec
     rtpenc_chain
     rv34dsp
+    sand
     scene_sad
     sinewin
     snappy
