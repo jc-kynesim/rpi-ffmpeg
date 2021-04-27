@@ -160,6 +160,7 @@ extern const FFCodec ff_hap_decoder;
 extern const FFCodec ff_hevc_decoder;
 extern const FFCodec ff_hevc_qsv_decoder;
 extern const FFCodec ff_hevc_rkmpp_decoder;
+extern const FFCodec ff_hevc_rpi_decoder;
 extern const FFCodec ff_hevc_v4l2m2m_decoder;
 extern const FFCodec ff_hnm4_video_decoder;
 extern const FFCodec ff_hq_hqa_decoder;
