@@ -6,3 +6,4 @@ VFP-OBJS += arm/float_dsp_init_vfp.o                                    \
 
 NEON-OBJS += arm/float_dsp_init_neon.o                                  \
              arm/float_dsp_neon.o                                       \
+             arm/rpi_sand_neon.o                                        \
