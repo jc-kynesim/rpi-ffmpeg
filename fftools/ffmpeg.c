@@ -2130,6 +2130,9 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame)
         (ifilter->hw_frames_ctx && ifilter->hw_frames_ctx->data != frame->hw_frames_ctx->data))
         need_reinit = 1;
 
+    if (no_cvt_hw && fg->graph)
+        need_reinit = 0;
+
     if (need_reinit) {
         ret = ifilter_parameters_from_frame(ifilter, frame);
         if (ret < 0)
@@ -2400,8 +2403,7 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
         decoded_frame->top_field_first = ist->top_field_first;
 
     ist->frames_decoded++;
-
-    if (ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
+    if (!no_cvt_hw && ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
         err = ist->hwaccel_retrieve_data(ist->dec_ctx, decoded_frame);
         if (err < 0)
             goto fail;
