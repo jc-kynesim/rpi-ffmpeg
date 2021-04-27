@@ -2874,8 +2874,8 @@ static int send_frame(FilterGraph *fg, FilterGraphThread *fgt,
         break;
     case AVMEDIA_TYPE_VIDEO:
         if (ifp->format != frame->format ||
-            ifp->width  != frame->width ||
-            ifp->height != frame->height ||
+            ifp->width  != av_frame_cropped_width(frame) ||
+            ifp->height != av_frame_cropped_height(frame) ||
             ifp->color_space != frame->colorspace ||
             ifp->color_range != frame->color_range)
             need_reinit |= VIDEO_CHANGED;
