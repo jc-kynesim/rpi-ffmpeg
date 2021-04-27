@@ -366,6 +366,19 @@ static void export_stream_params(HEVCContext *s, const HEVCSPS *sps)
     else
         avctx->color_range = AVCOL_RANGE_MPEG;
 
+    if (sps->chroma_format_idc == 1) {
+        avctx->chroma_sample_location = sps->vui.common.chroma_loc_info_present_flag ?
+            sps->vui.common.chroma_sample_loc_type_top_field + 1 :
+            AVCHROMA_LOC_LEFT;
+    }
+    else if (sps->chroma_format_idc == 2 ||
+             sps->chroma_format_idc == 3) {
+        avctx->chroma_sample_location = AVCHROMA_LOC_TOPLEFT;;
+    }
+    else {
+        avctx->chroma_sample_location = AVCHROMA_LOC_UNSPECIFIED;
+    }
+
     if (sps->vui.common.colour_description_present_flag) {
         avctx->color_primaries = sps->vui.common.colour_primaries;
         avctx->color_trc       = sps->vui.common.transfer_characteristics;
