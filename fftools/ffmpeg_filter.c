@@ -1281,8 +1281,8 @@ int ifilter_parameters_from_frame(InputFilter *ifilter, const AVFrame *frame)
 
     ifilter->format = frame->format;
 
-    ifilter->width               = frame->width;
-    ifilter->height              = frame->height;
+    ifilter->width               = av_frame_cropped_width(frame);
+    ifilter->height              = av_frame_cropped_height(frame);
     ifilter->sample_aspect_ratio = frame->sample_aspect_ratio;
 
     ifilter->sample_rate         = frame->sample_rate;
