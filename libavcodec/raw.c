@@ -295,6 +295,12 @@ static const PixelFormatTag raw_pix_fmt_tags[] = {
     { AV_PIX_FMT_RGB565LE,MKTAG( 3 ,  0 ,  0 ,  0 ) }, /* flipped RGB565LE */
     { AV_PIX_FMT_YUV444P, MKTAG('Y', 'V', '2', '4') }, /* YUV444P, swapped UV */
 
+    /* RPI (Might as well define for everything) */
+    { AV_PIX_FMT_SAND128,     MKTAG('S', 'A', 'N', 'D') },
+    { AV_PIX_FMT_RPI4_8,      MKTAG('S', 'A', 'N', 'D') },
+    { AV_PIX_FMT_SAND64_10,   MKTAG('S', 'N', 'D', 'A') },
+    { AV_PIX_FMT_RPI4_10,     MKTAG('S', 'N', 'D', 'B') },
+
     { AV_PIX_FMT_NONE, 0 },
 };
 
