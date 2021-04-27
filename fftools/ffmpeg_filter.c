@@ -1752,8 +1752,8 @@ int ifilter_parameters_from_dec(InputFilter *ifilter, const AVCodecContext *dec)
 
     if (dec->codec_type == AVMEDIA_TYPE_VIDEO) {
         ifp->fallback.format                 = dec->pix_fmt;
-        ifp->fallback.width                  = dec->width;
-        ifp->fallback.height                 = dec->height;
+        ifp->fallback.width                  = av_frame_cropped_width(dec);
+        ifp->fallback.height                 = av_frame_cropped_height(dec);
         ifp->fallback.sample_aspect_ratio    = dec->sample_aspect_ratio;
     } else if (dec->codec_type == AVMEDIA_TYPE_AUDIO) {
         int ret;
