@@ -350,6 +350,17 @@ const AVCodec *av_codec_iterate(void **opaque);
 AVCodec *avcodec_find_decoder(enum AVCodecID id);
 
 /**
+ * Find a registered decoder with a matching codec ID and pix_fmt.
+ * A decoder will pix_fmt set to NULL will match any fmt.
+ * A fmt of AV_PIX_FMT_NONE will only match a decoder will px_fmt NULL.
+ *
+ * @param id AVCodecID of the requested decoder
+ * @param fmt AVPixelForma that msut be supported by decoder
+ * @return A decoder if one was found, NULL otherwise.
+ */
+AVCodec *avcodec_find_decoder_by_id_and_fmt(enum AVCodecID id, enum AVPixelFormat fmt);
+
+/**
  * Find a registered decoder with the specified name.
  *
  * @param name name of the requested decoder
