@@ -147,28 +147,6 @@ static const char *const opt_name_bits_per_raw_sample[]       = {"bits_per_raw_s
     }\
 }
 
-<<<<<<< HEAD
-=======
-#if CONFIG_RPI
-static int rpi_init(AVCodecContext *avctx) {
-    return 0;
-}
-#endif
-
-const HWAccel hwaccels[] = {
-#if CONFIG_VIDEOTOOLBOX
-    { "videotoolbox", videotoolbox_init, HWACCEL_VIDEOTOOLBOX, AV_PIX_FMT_VIDEOTOOLBOX },
-#endif
-#if CONFIG_LIBMFX
-    { "qsv",   qsv_init,   HWACCEL_QSV,   AV_PIX_FMT_QSV },
-#endif
-#if CONFIG_RPI
-    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_8 },
-    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_10 },
-#endif
-    { 0 },
-};
->>>>>>> 9aff9e0abd (Add rpivid H265 decoder)
 HWDevice *filter_hw_device;
 
 char *vstats_filename;
