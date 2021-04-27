@@ -130,12 +130,22 @@ static const char *opt_name_enc_time_bases[]            = {"enc_time_base", NULL
     }\
 }
 
+#if CONFIG_RPI
+static int rpi_init(AVCodecContext *avctx) {
+    return 0;
+}
+#endif
+
 const HWAccel hwaccels[] = {
 #if CONFIG_VIDEOTOOLBOX
     { "videotoolbox", videotoolbox_init, HWACCEL_VIDEOTOOLBOX, AV_PIX_FMT_VIDEOTOOLBOX },
 #endif
 #if CONFIG_LIBMFX
     { "qsv",   qsv_init,   HWACCEL_QSV,   AV_PIX_FMT_QSV },
+#endif
+#if CONFIG_RPI
+    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_8 },
+    {  "rpi", rpi_init, HWACCEL_RPI, AV_PIX_FMT_RPI4_10 },
 #endif
     { 0 },
 };

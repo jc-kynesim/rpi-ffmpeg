@@ -1864,6 +1864,8 @@ HWACCEL_LIBRARY_LIST="
     omx
     opencl
     vulkan
+    rpi4_8
+    rpi4_10
 "
 
 DOCUMENT_LIST="
@@ -2943,6 +2945,10 @@ hevc_dxva2_hwaccel_deps="dxva2 DXVA_PicParams_HEVC"
 hevc_dxva2_hwaccel_select="hevc_decoder"
 hevc_nvdec_hwaccel_deps="nvdec"
 hevc_nvdec_hwaccel_select="hevc_decoder"
+hevc_rpi4_10_hwaccel_deps="rpi"
+hevc_rpi4_10_hwaccel_select="hevc_decoder"
+hevc_rpi4_8_hwaccel_deps="rpi"
+hevc_rpi4_8_hwaccel_select="hevc_decoder"
 hevc_vaapi_hwaccel_deps="vaapi VAPictureParameterBufferHEVC"
 hevc_vaapi_hwaccel_select="hevc_decoder"
 hevc_vdpau_hwaccel_deps="vdpau VdpPictureInfoHEVC"
