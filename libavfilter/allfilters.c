@@ -507,6 +507,7 @@ extern const AVFilter ff_vf_trim;
 extern const AVFilter ff_vf_unpremultiply;
 extern const AVFilter ff_vf_unsharp;
 extern const AVFilter ff_vf_unsharp_opencl;
+extern const AVFilter ff_vf_unsand;
 extern const AVFilter ff_vf_untile;
 extern const AVFilter ff_vf_uspp;
 extern const AVFilter ff_vf_v360;
