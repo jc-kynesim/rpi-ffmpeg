@@ -201,7 +201,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         switch (ctx->outputs[0]->type) {
         case AVMEDIA_TYPE_VIDEO:
-            CHECK_VIDEO_PARAM_CHANGE(ctx, s, frame->width, frame->height,
+            CHECK_VIDEO_PARAM_CHANGE(ctx, s, av_frame_cropped_width(frame), av_frame_cropped_height(frame),
                                      frame->format, frame->pts);
             break;
         case AVMEDIA_TYPE_AUDIO:
