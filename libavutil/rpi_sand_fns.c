@@ -37,6 +37,9 @@ Authors: John Cox
 #if ARCH_ARM && HAVE_NEON
 #include "arm/rpi_sand_neon.h"
 #define HAVE_SAND_ASM 1
+#elif ARCH_AARCH64 && HAVE_NEON
+#include "aarch64/rpi_sand_neon.h"
+#define HAVE_SAND_ASM 1
 #else
 #define HAVE_SAND_ASM 0
 #endif
