@@ -24,6 +24,7 @@
  * Raw Video Encoder
  */
 
+#include "config.h"
 #include "avcodec.h"
 #include "raw.h"
 #include "internal.h"
@@ -31,6 +32,10 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
+#include "libavutil/avassert.h"
+#if CONFIG_SAND
+#include "libavutil/rpi_sand_fns.h"
+#endif
 
 static av_cold int raw_encode_init(AVCodecContext *avctx)
 {
@@ -49,12 +54,95 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
+#if CONFIG_SAND
+static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
+                      const AVFrame *frame)
+{
+    const int width = av_frame_cropped_width(frame);
+    const int height = av_frame_cropped_height(frame);
+    const int x0 = frame->crop_left;
+    const int y0 = frame->crop_top;
+    const int size = width * height * 3 / 2;
+    uint8_t * dst;
+    int ret;
+
+    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+        return ret;
+
+    dst = pkt->data;
+
+    av_rpi_sand_to_planar_y8(dst, width, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
+    dst += width * height;
+    av_rpi_sand_to_planar_c8(dst, width / 2, dst + width * height / 4, width / 2,
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0 / 2, y0 / 2, width / 2, height / 2);
+    return 0;
+}
+
+static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
+                      const AVFrame *frame)
+{
+    const int width = av_frame_cropped_width(frame);
+    const int height = av_frame_cropped_height(frame);
+    const int x0 = frame->crop_left;
+    const int y0 = frame->crop_top;
+    const int size = width * height * 3;
+    uint8_t * dst;
+    int ret;
+
+    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+        return ret;
+
+    dst = pkt->data;
+
+    av_rpi_sand_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0 * 2, y0, width * 2, height);
+    dst += width * height * 2;
+    av_rpi_sand_to_planar_c16(dst, width, dst + width * height / 2, width,
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0, y0 / 2, width, height / 2);
+    return 0;
+}
+
+static int raw_sand30_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
+                      const AVFrame *frame)
+{
+    const int width = av_frame_cropped_width(frame);
+    const int height = av_frame_cropped_height(frame);
+    const int x0 = frame->crop_left;
+    const int y0 = frame->crop_top;
+    const int size = width * height * 3;
+    uint8_t * dst;
+    int ret;
+
+    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+        return ret;
+
+    dst = pkt->data;
+
+    av_rpi_sand30_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
+    dst += width * height * 2;
+    av_rpi_sand30_to_planar_c16(dst, width, dst + width * height / 2, width,
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0/2, y0 / 2, width/2, height / 2);
+    return 0;
+}
+#endif
+
+
 static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
                       const AVFrame *frame, int *got_packet)
 {
-    int ret = av_image_get_buffer_size(frame->format,
-                                       frame->width, frame->height, 1);
+    int ret;
 
+#if CONFIG_SAND
+    if (av_rpi_is_sand_frame(frame)) {
+        ret = av_rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) :
+            av_rpi_is_sand16_frame(frame) ? raw_sand16_as_yuv420(avctx, pkt, frame) :
+            av_rpi_is_sand30_frame(frame) ? raw_sand30_as_yuv420(avctx, pkt, frame) : -1;
+        *got_packet = (ret == 0);
+        return ret;
+    }
+#endif
+
+    ret = av_image_get_buffer_size(frame->format,
+                                       frame->width, frame->height, 1);
     if (ret < 0)
         return ret;
 
