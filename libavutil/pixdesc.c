@@ -2717,6 +2717,50 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_FLOAT |
                  AV_PIX_FMT_FLAG_ALPHA,
     },
+    [AV_PIX_FMT_SAND128] = {
+        .name = "sand128",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 0, 0, 8 },        /* Y */
+            { 1, 2, 0, 0, 8 },        /* U */
+            { 1, 2, 1, 0, 8 },        /* V */
+        },
+        .flags = 0,
+    },
+    [AV_PIX_FMT_SAND64_10] = {
+        .name = "sand64_10",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 2, 0, 0, 10 },        /* Y */
+            { 1, 4, 0, 0, 10 },        /* U */
+            { 1, 4, 2, 0, 10 },        /* V */
+        },
+        .flags = 0,
+    },
+    [AV_PIX_FMT_SAND64_16] = {
+        .name = "sand64_16",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 2, 0, 0, 16 },        /* Y */
+            { 1, 4, 0, 0, 16 },        /* U */
+            { 1, 4, 2, 0, 16 },        /* V */
+        },
+        .flags = 0,
+    },
+    [AV_PIX_FMT_RPI4_8] = {
+        .name = "rpi4_8",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
+    [AV_PIX_FMT_RPI4_10] = {
+        .name = "rpi4_10",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
 };
 
 static const char * const color_range_names[] = {
