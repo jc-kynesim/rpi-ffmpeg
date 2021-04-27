@@ -71,6 +71,7 @@ enum VideoSyncMethod video_sync_method = VSYNC_AUTO;
 float frame_drop_threshold = 0;
 int do_benchmark      = 0;
 int do_benchmark_all  = 0;
+int no_cvt_hw         = 0;
 int do_hex_dump       = 0;
 int do_pkt_dump       = 0;
 int copy_ts           = 0;
@@ -1427,6 +1428,8 @@ const OptionDef options[] = {
         "add timings for benchmarking" },
     { "benchmark_all",  OPT_BOOL | OPT_EXPERT,                       { &do_benchmark_all },
       "add timings for each task" },
+    { "no_cvt_hw",      OPT_BOOL | OPT_EXPERT,                       { &no_cvt_hw },
+      "do not auto-convert hw frames to sw" },
     { "progress",       HAS_ARG | OPT_EXPERT,                        { .func_arg = opt_progress },
       "write program-readable progress information", "url" },
     { "stdin",          OPT_BOOL | OPT_EXPERT,                       { &stdin_interaction },
