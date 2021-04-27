@@ -2913,6 +2913,15 @@ static int init_input_stream(int ist_index, char *error, int error_len)
             return ret;
         }
 
+#if CONFIG_HEVC_RPI_DECODER
+        ret = -1;
+        if (strcmp(codec->name, "hevc_rpi") == 0 &&
+            (ret = avcodec_open2(ist->dec_ctx, codec, &ist->decoder_opts)) < 0) {
+            ist->dec = codec = avcodec_find_decoder_by_name("hevc");
+            av_log(NULL, AV_LOG_INFO, "Failed to open hevc_rpi - trying hevc\n");
+        }
+        if (ret < 0)
+#endif
         if ((ret = avcodec_open2(ist->dec_ctx, codec, &ist->decoder_opts)) < 0) {
             if (ret == AVERROR_EXPERIMENTAL)
                 abort_codec_experimental(codec, 0);
