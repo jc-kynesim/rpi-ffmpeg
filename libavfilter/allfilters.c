@@ -514,6 +514,7 @@ extern const FFFilter ff_vf_transpose_vt;
 extern const FFFilter ff_vf_transpose_vulkan;
 extern const FFFilter ff_vf_trim;
 extern const FFFilter ff_vf_unpremultiply;
+extern const FFFilter ff_vf_unsand;
 extern const FFFilter ff_vf_unsharp;
 extern const FFFilter ff_vf_unsharp_opencl;
 extern const FFFilter ff_vf_untile;
