@@ -3595,6 +3595,12 @@ AVCodec ff_hevc_decoder = {
 #if CONFIG_HEVC_NVDEC_HWACCEL
                                HWACCEL_NVDEC(hevc),
 #endif
+#if CONFIG_HEVC_RPI4_8_HWACCEL
+                               HWACCEL_RPI4_8(hevc),
+#endif
+#if CONFIG_HEVC_RPI4_10_HWACCEL
+                               HWACCEL_RPI4_10(hevc),
+#endif
 #if CONFIG_HEVC_VAAPI_HWACCEL
                                HWACCEL_VAAPI(hevc),
 #endif
@@ -3603,15 +3609,6 @@ AVCodec ff_hevc_decoder = {
 #endif
 #if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
                                HWACCEL_VIDEOTOOLBOX(hevc),
-#endif
-#if CONFIG_HEVC_RPI4_8_HWACCEL
-                               HWACCEL_RPI4_8(hevc),
-#endif
-#if CONFIG_HEVC_RPI4_10_HWACCEL
-                               HWACCEL_RPI4_10(hevc),
-#endif
-#if CONFIG_HEVC_V4L2REQUEST_HWACCEL
-                               HWACCEL_V4L2REQUEST(hevc),
 #endif
                                NULL
                            },

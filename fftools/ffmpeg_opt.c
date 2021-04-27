@@ -131,7 +131,7 @@ static const char *opt_name_enc_time_bases[]            = {"enc_time_base", NULL
 }
 
 #if CONFIG_RPI
-int rpi_init(AVCodecContext *avctx) {
+static int rpi_init(AVCodecContext *avctx) {
     return 0;
 }
 #endif
