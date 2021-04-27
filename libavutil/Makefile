@@ -81,6 +81,7 @@ HEADERS = adler32.h                                                     \
           refstruct.h                                                   \
           replaygain.h                                                  \
           ripemd.h                                                      \
+	  rpi_sand_fns.h                                                \
           samplefmt.h                                                   \
           sha.h                                                         \
           sha512.h                                                      \
@@ -214,6 +215,7 @@ OBJS-$(CONFIG_MEDIACODEC)               += hwcontext_mediacodec.o
 OBJS-$(CONFIG_OHCODEC)                  += hwcontext_oh.o
 OBJS-$(CONFIG_OPENCL)                   += hwcontext_opencl.o
 OBJS-$(CONFIG_QSV)                      += hwcontext_qsv.o
+OBJS-$(CONFIG_SAND)                     += rpi_sand_fns.o
 OBJS-$(CONFIG_VAAPI)                    += hwcontext_vaapi.o
 OBJS-$(CONFIG_VIDEOTOOLBOX)             += hwcontext_videotoolbox.o
 OBJS-$(CONFIG_VDPAU)                    += hwcontext_vdpau.o
@@ -244,6 +246,7 @@ SKIPHEADERS-$(CONFIG_AMF)              += hwcontext_amf.h               \
                                           hwcontext_amf_internal.h
 SKIPHEADERS-$(CONFIG_QSV)              += hwcontext_qsv.h
 SKIPHEADERS-$(CONFIG_OPENCL)           += hwcontext_opencl.h
+SKIPHEADERS-$(CONFIG-RPI)              += rpi_sand_fn_pw.h
 SKIPHEADERS-$(CONFIG_VAAPI)            += hwcontext_vaapi.h
 SKIPHEADERS-$(CONFIG_VIDEOTOOLBOX)     += hwcontext_videotoolbox.h
 SKIPHEADERS-$(CONFIG_VDPAU)            += hwcontext_vdpau.h
