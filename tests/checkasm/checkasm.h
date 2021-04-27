@@ -94,11 +94,8 @@ void checkasm_check_pixblockdsp(void);
 void checkasm_check_pixelutils(void);
 void checkasm_check_png(void);
 void checkasm_check_qpeldsp(void);
-<<<<<<< HEAD
-void checkasm_check_sbcdsp(void);
-=======
 void checkasm_check_rpi_sand(void);
->>>>>>> 5953675053 (checkasm: Add tests for rpi_sand sand30 fns)
+void checkasm_check_sbcdsp(void);
 void checkasm_check_sbrdsp(void);
 void checkasm_check_rv34dsp(void);
 void checkasm_check_rv40dsp(void);
