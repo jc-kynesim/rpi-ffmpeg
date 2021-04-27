@@ -62,6 +62,12 @@ enum HWAccelID {
     HWACCEL_NONE = 0,
     HWACCEL_AUTO,
     HWACCEL_GENERIC,
+<<<<<<< HEAD
+=======
+    HWACCEL_VIDEOTOOLBOX,
+    HWACCEL_QSV,
+    HWACCEL_RPI,
+>>>>>>> 9aff9e0abd (Add rpivid H265 decoder)
 };
 
 typedef struct HWDevice {
