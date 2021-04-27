@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <drm.h>
+#include <libdrm/drm_fourcc.h>
 #include <xf86drm.h>
 
 #include "avassert.h"
@@ -28,6 +29,11 @@
 #include "hwcontext_drm.h"
 #include "hwcontext_internal.h"
 #include "imgutils.h"
+#include "libavutil/rpi_sand_fns.h"
+
+#include <linux/mman.h>
+#include <linux/dma-buf.h>
+#include <linux/dma-heap.h>
 
 
 static void drm_device_free(AVHWDeviceContext *hwdev)
@@ -42,6 +48,11 @@ static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
 {
     AVDRMDeviceContext *hwctx = hwdev->hwctx;
     drmVersionPtr version;
+
+    if (device == NULL) {
+      hwctx->fd = -1;
+      return 0;
+    }
 
     hwctx->fd = open(device, O_RDWR);
     if (hwctx->fd < 0)
@@ -85,9 +96,26 @@ static int drm_get_buffer(AVHWFramesContext *hwfc, AVFrame *frame)
 typedef struct DRMMapping {
     // Address and length of each mmap()ed region.
     int nb_regions;
+    unsigned int dmaflags;
     void *address[AV_DRM_MAX_PLANES];
     size_t length[AV_DRM_MAX_PLANES];
+    int fds[AV_DRM_MAX_PLANES];
 } DRMMapping;
+
+static int dmasync(const int fd, const unsigned int flags)
+{
+    struct dma_buf_sync sync = {
+        .flags = flags
+    };
+    while (ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == -1) {
+        const int err = errno;
+        if (errno == EINTR)
+            continue;
+        av_log(NULL, AV_LOG_WARNING, "%s: ioctl failed: flags=%#x\n", __func__, flags);
+        return -err;
+    }
+    return 0;
+}
 
 static void drm_unmap_frame(AVHWFramesContext *hwfc,
                             HWMapDescriptor *hwmap)
@@ -95,8 +123,10 @@ static void drm_unmap_frame(AVHWFramesContext *hwfc,
     DRMMapping *map = hwmap->priv;
     int i;
 
-    for (i = 0; i < map->nb_regions; i++)
+    for (i = 0; i < map->nb_regions; i++) {
         munmap(map->address[i], map->length[i]);
+        dmasync(map->fds[i], DMA_BUF_SYNC_END | map->dmaflags);
+    }
 
     av_free(map);
 }
@@ -114,15 +144,28 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
     if (!map)
         return AVERROR(ENOMEM);
 
+    for (i = 0; i < AV_DRM_MAX_PLANES; i++)
+        map->fds[i] = -1;
+
     mmap_prot = 0;
-    if (flags & AV_HWFRAME_MAP_READ)
+    if (flags & AV_HWFRAME_MAP_READ) {
+        map->dmaflags |= DMA_BUF_SYNC_READ;
         mmap_prot |= PROT_READ;
-    if (flags & AV_HWFRAME_MAP_WRITE)
+    }
+    if (flags & AV_HWFRAME_MAP_WRITE) {
+        map->dmaflags |= DMA_BUF_SYNC_WRITE;
         mmap_prot |= PROT_WRITE;
+    }
+
+    if (dst->format == AV_PIX_FMT_NONE)
+        dst->format = hwfc->sw_format;
 
     av_assert0(desc->nb_objects <= AV_DRM_MAX_PLANES);
     for (i = 0; i < desc->nb_objects; i++) {
-        addr = mmap(NULL, desc->objects[i].size, mmap_prot, MAP_SHARED,
+        dmasync(desc->objects[i].fd, DMA_BUF_SYNC_START | map->dmaflags);
+        map->fds[i] = desc->objects[i].fd;
+
+        addr = mmap(NULL, desc->objects[i].size, mmap_prot, MAP_SHARED | MAP_POPULATE,
                     desc->objects[i].fd, 0);
         if (addr == MAP_FAILED) {
             err = AVERROR(errno);
@@ -151,6 +194,23 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
 
     dst->width  = src->width;
     dst->height = src->height;
+    dst->crop_top    = src->crop_top;
+    dst->crop_bottom = src->crop_bottom;
+    dst->crop_left   = src->crop_left;
+    dst->crop_right  = src->crop_right;
+
+#if CONFIG_SAND
+    // Rework for sand frames
+    if (av_rpi_is_sand_frame(dst)) {
+        // As it stands the sand formats hold stride2 in linesize[3]
+        // linesize[0] & [1] contain stride1 which is always 128 for everything we do
+        // * Arguably this should be reworked s.t. stride2 is in linesize[0] & [1]
+        dst->linesize[3] = fourcc_mod_broadcom_param(desc->objects[0].format_modifier);
+        dst->linesize[0] = 128;
+        dst->linesize[1] = 128;
+        // *** Are we sure src->height is actually what we want ???
+    }
+#endif
 
     err = ff_hwframe_map_create(src->hw_frames_ctx, dst, src,
                                 &drm_unmap_frame, map);
@@ -160,7 +220,9 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
     return 0;
 
 fail:
-    for (i = 0; i < desc->nb_objects; i++) {
+    for (i = 0; i < AV_DRM_MAX_PLANES; i++) {
+        if (map->fds[i] != -1)
+            dmasync(map->fds[i], DMA_BUF_SYNC_END | map->dmaflags);
         if (map->address[i])
             munmap(map->address[i], map->length[i]);
     }
@@ -178,7 +240,15 @@ static int drm_transfer_get_formats(AVHWFramesContext *ctx,
     if (!pix_fmts)
         return AVERROR(ENOMEM);
 
-    pix_fmts[0] = ctx->sw_format;
+    // **** Offer native sand too ????
+    pix_fmts[0] =
+#if CONFIG_SAND
+        ctx->sw_format == AV_PIX_FMT_RPI4_8 || ctx->sw_format == AV_PIX_FMT_SAND128 ?
+            AV_PIX_FMT_YUV420P :
+        ctx->sw_format == AV_PIX_FMT_RPI4_10 ?
+            AV_PIX_FMT_YUV420P10LE :
+#endif
+            ctx->sw_format;
     pix_fmts[1] = AV_PIX_FMT_NONE;
 
     *formats = pix_fmts;
@@ -197,18 +267,82 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
     map = av_frame_alloc();
     if (!map)
         return AVERROR(ENOMEM);
-    map->format = dst->format;
 
+    // Map to default
+    map->format = AV_PIX_FMT_NONE;
     err = drm_map_frame(hwfc, map, src, AV_HWFRAME_MAP_READ);
     if (err)
         goto fail;
 
-    map->width  = dst->width;
-    map->height = dst->height;
+#if 0
+    av_log(hwfc, AV_LOG_INFO, "%s: src fmt=%d (%d), dst fmt=%d (%d) s=%dx%d l=%d/%d/%d/%d, d=%dx%d l=%d/%d/%d\n", __func__,
+           map->hwfc_format, AV_PIX_FMT_RPI4_8, dst->format, AV_PIX_FMT_YUV420P10LE,
+           map->width, map->height,
+           map->linesize[0],
+           map->linesize[1],
+           map->linesize[2],
+           map->linesize[3],
+           dst->width, dst->height,
+           dst->linesize[0],
+           dst->linesize[1],
+           dst->linesize[2]);
+#endif
+#if CONFIG_SAND
+    if (av_rpi_is_sand_frame(map)) {
+        unsigned int stride2 = map->linesize[3];
+        const unsigned int w = FFMIN(dst->width, av_frame_cropped_width(map));
+        const unsigned int h = FFMIN(dst->height, av_frame_cropped_height(map));
 
-    err = av_frame_copy(dst, map);
+        if (map->format == AV_PIX_FMT_RPI4_8 && dst->format == AV_PIX_FMT_YUV420P) {
+            av_rpi_sand_to_planar_y8(dst->data[0], dst->linesize[0],
+                                     map->data[0],
+                                     128, stride2,
+                                     map->crop_left, map->crop_top,
+                                     w, h);
+            av_rpi_sand_to_planar_c8(dst->data[1], dst->linesize[1],
+                                     dst->data[2], dst->linesize[2],
+                                     map->data[1],
+                                     128, stride2,
+                                     map->crop_left / 2, map->crop_top / 2,
+                                     w / 2, h / 2);
+        }
+        else if (map->format == AV_PIX_FMT_RPI4_10 && dst->format == AV_PIX_FMT_YUV420P10LE) {
+            av_rpi_sand30_to_planar_y16(dst->data[0], dst->linesize[0],
+                                     map->data[0],
+                                     128, stride2,
+                                     map->crop_left, map->crop_top,
+                                     w, h);  // *** ??? crop
+            av_rpi_sand30_to_planar_c16(dst->data[1], dst->linesize[1],
+                                     dst->data[2], dst->linesize[2],
+                                     map->data[1],
+                                     128, stride2,
+                                     map->crop_left / 2, map->crop_top / 2,
+                                     w / 2, h / 2);
+        }
+        else
+        {
+            av_log(hwfc, AV_LOG_ERROR, "%s: Incompatible output pixfmt for sand\n", __func__);
+            err = AVERROR(EINVAL);
+            goto fail;
+        }
+
+        dst->width = w;
+        dst->height = h;
+    }
+    else
+#endif
+    {
+        // Kludge mapped h/w s.t. frame_copy works
+        map->width  = dst->width;
+        map->height = dst->height;
+        err = av_frame_copy(dst, map);
+    }
+
     if (err)
+    {
+        av_log(hwfc, AV_LOG_ERROR, "%s: Copy fail\n", __func__);
         goto fail;
+    }
 
     err = 0;
 fail:
@@ -223,7 +357,10 @@ static int drm_transfer_data_to(AVHWFramesContext *hwfc,
     int err;
 
     if (src->width > hwfc->width || src->height > hwfc->height)
+    {
+        av_log(hwfc, AV_LOG_ERROR, "%s: H/w mismatch: %d/%d, %d/%d\n", __func__, dst->width, hwfc->width, dst->height, hwfc->height);
         return AVERROR(EINVAL);
+    }
 
     map = av_frame_alloc();
     if (!map)
