@@ -93,6 +93,19 @@ static int hevc_parse_slice_header(AVCodecParserContext *s, H2645NAL *nal,
     avctx->profile  = sps->ptl.general_ptl.profile_idc;
     avctx->level    = sps->ptl.general_ptl.level_idc;
 
+    if (sps->chroma_format_idc == 1) {
+        avctx->chroma_sample_location = sps->vui.common.chroma_loc_info_present_flag ?
+            sps->vui.common.chroma_sample_loc_type_top_field + 1 :
+            AVCHROMA_LOC_LEFT;
+    }
+    else if (sps->chroma_format_idc == 2 ||
+             sps->chroma_format_idc == 3) {
+        avctx->chroma_sample_location = AVCHROMA_LOC_TOPLEFT;;
+    }
+    else {
+        avctx->chroma_sample_location = AVCHROMA_LOC_UNSPECIFIED;
+    }
+
     if (sps->vps->vps_timing_info_present_flag) {
         num = sps->vps->vps_num_units_in_tick;
         den = sps->vps->vps_time_scale;
