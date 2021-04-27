@@ -287,6 +287,7 @@ External library support:
   --enable-libtorch        enable Torch as one DNN backend [no]
   --enable-libtwolame      enable MP2 encoding via libtwolame [no]
   --enable-libuavs3d       enable AVS3 decoding via libuavs3d [no]
+  --disable-libudev        disable libudev [autodetect]
   --enable-libv4l2         enable libv4l2/v4l-utils [no]
   --enable-libvidstab      enable video stabilization using vid.stab [no]
   --enable-libvmaf         enable vmaf filter via libvmaf [no]
@@ -360,6 +361,7 @@ External library support:
   --enable-omx-rpi         enable OpenMAX IL code for Raspberry Pi [no]
   --enable-rkmpp           enable Rockchip Media Process Platform code [no]
   --disable-v4l2-m2m       disable V4L2 mem2mem code [autodetect]
+  --enable-v4l2-request    enable V4L2 request API code [no]
   --disable-vaapi          disable Video Acceleration API (mainly Unix/Intel) code [autodetect]
   --disable-vdpau          disable Nvidia Video Decode and Presentation API for Unix code [autodetect]
   --disable-videotoolbox   disable VideoToolbox code [autodetect]
@@ -1844,6 +1846,7 @@ EXTERNAL_AUTODETECT_LIBRARY_LIST="
     bzlib
     coreimage
     iconv
+    libudev
     libxcb
     libxcb_shm
     libxcb_shape
@@ -2026,6 +2029,7 @@ HWACCEL_LIBRARY_LIST="
     mmal
     omx
     opencl
+    v4l2_request
 "
 
 DOCUMENT_LIST="
@@ -2048,6 +2052,7 @@ FEATURE_LIST="
     small
     static
     swscale_alpha
+    v4l2_req_hevc_vx
 "
 
 # this list should be kept in linking order
@@ -3149,6 +3154,7 @@ dxva2_deps="dxva2api_h DXVA2_ConfigPictureDecode ole32 user32"
 ffnvcodec_deps_any="libdl LoadLibrary"
 mediacodec_deps="android mediandk"
 nvdec_deps="ffnvcodec"
+v4l2_request_deps="linux_videodev2_h linux_media_h v4l2_timeval_to_ns libdrm libudev"
 vaapi_x11_deps="xlib_x11"
 videotoolbox_hwaccel_deps="videotoolbox pthreads"
 videotoolbox_hwaccel_extralibs="-framework QuartzCore"
@@ -3203,6 +3209,8 @@ hevc_dxva2_hwaccel_deps="dxva2 DXVA_PicParams_HEVC"
 hevc_dxva2_hwaccel_select="hevc_decoder"
 hevc_nvdec_hwaccel_deps="nvdec"
 hevc_nvdec_hwaccel_select="hevc_decoder"
+hevc_v4l2request_hwaccel_deps="v4l2_request"
+hevc_v4l2request_hwaccel_select="hevc_decoder"
 hevc_vaapi_hwaccel_deps="vaapi VAPictureParameterBufferHEVC"
 hevc_vaapi_hwaccel_select="hevc_decoder"
 hevc_vdpau_hwaccel_deps="vdpau VdpPictureInfoHEVC"
@@ -6627,6 +6635,9 @@ if enabled xlib; then
         disable xlib
 fi
 
+enabled libudev &&
+    check_pkg_config libudev libudev libudev.h udev_new
+
 check_headers direct.h
 check_headers dirent.h
 check_headers dxgidebug.h
@@ -7117,6 +7128,10 @@ enabled rkmpp             && { require_pkg_config rkmpp rockchip_mpp  rockchip/r
                                { enabled libdrm ||
                                  die "ERROR: rkmpp requires --enable-libdrm"; }
                              }
+enabled v4l2_request      && { enabled libdrm ||
+                               die "ERROR: v4l2-request requires --enable-libdrm"; } &&
+                             { enabled libudev ||
+                               die "ERROR: v4l2-request requires libudev"; }
 enabled vapoursynth       && require_headers "vapoursynth/VSScript4.h vapoursynth/VapourSynth4.h"
 
 
@@ -7200,6 +7215,10 @@ if enabled v4l2_m2m; then
     check_cc vp8_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP8;"
     check_cc vp9_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP9;"
 fi
+
+check_func_headers "linux/media.h linux/videodev2.h" v4l2_timeval_to_ns
+check_cc hevc_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_HEVC_SLICE;"
+disable v4l2_req_hevc_vx
 
 check_headers sys/videoio.h
 test_code cc sys/videoio.h "struct v4l2_frmsizeenum vfse; vfse.discrete.width = 0;" && enable_sanitized struct_v4l2_frmivalenum_discrete
@@ -7712,6 +7731,9 @@ enabled threads || warn \
     "This means that not only is this build not multi-threaded, but also"    \
     "that the libraries from this build MUST NOT be used in a multi-threaded"\
     "environment."
+
+# Sub-feature of hevc_v4l2request_hwaccel - can only be set once deps are done
+enabled hevc_v4l2request_hwaccel && disabled hevc_v4l2_request && enable v4l2_req_hevc_vx
 
 case $target_os in
 haiku)
