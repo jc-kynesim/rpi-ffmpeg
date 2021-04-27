@@ -71,6 +71,12 @@ typedef struct AVCodecHWConfigInternal {
     HW_CONFIG_HWACCEL(1, 1, 0, D3D11,        D3D11VA,      ff_ ## codec ## _d3d11va2_hwaccel)
 #define HWACCEL_NVDEC(codec) \
     HW_CONFIG_HWACCEL(1, 1, 0, CUDA,         CUDA,         ff_ ## codec ## _nvdec_hwaccel)
+#define HWACCEL_RPI4_8(codec) \
+    HW_CONFIG_HWACCEL(0, 0, 1, RPI4_8,       NONE,         ff_ ## codec ## _rpi4_8_hwaccel)
+#define HWACCEL_RPI4_10(codec) \
+    HW_CONFIG_HWACCEL(0, 0, 1, RPI4_10,      NONE,         ff_ ## codec ## _rpi4_10_hwaccel)
+#define HWACCEL_V4L2REQUEST(codec) \
+    HW_CONFIG_HWACCEL(1, 0, 0, DRM_PRIME,    DRM,          ff_ ## codec ## _v4l2request_hwaccel)
 #define HWACCEL_VAAPI(codec) \
     HW_CONFIG_HWACCEL(1, 1, 1, VAAPI,        VAAPI,        ff_ ## codec ## _vaapi_hwaccel)
 #define HWACCEL_VDPAU(codec) \
@@ -81,9 +87,5 @@ typedef struct AVCodecHWConfigInternal {
     HW_CONFIG_HWACCEL(0, 0, 1, D3D11VA_VLD,  NONE,         ff_ ## codec ## _d3d11va_hwaccel)
 #define HWACCEL_XVMC(codec) \
     HW_CONFIG_HWACCEL(0, 0, 1, XVMC,         NONE,         ff_ ## codec ## _xvmc_hwaccel)
-#define HWACCEL_RPI4_8(codec) \
-    HW_CONFIG_HWACCEL(0, 0, 1, RPI4_8,       NONE,         ff_ ## codec ## _rpi4_8_hwaccel)
-#define HWACCEL_RPI4_10(codec) \
-    HW_CONFIG_HWACCEL(0, 0, 1, RPI4_10,      NONE,         ff_ ## codec ## _rpi4_10_hwaccel)
 
 #endif /* AVCODEC_HWACCEL_H */
