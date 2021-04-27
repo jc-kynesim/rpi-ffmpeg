@@ -2005,6 +2005,9 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_ref
         (ifilter->hw_frames_ctx && ifilter->hw_frames_ctx->data != frame->hw_frames_ctx->data))
         need_reinit = 1;
 
+    if (no_cvt_hw && fg->graph)
+        need_reinit = 0;
+
     if (sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DISPLAYMATRIX)) {
         if (!ifilter->displaymatrix || memcmp(sd->data, ifilter->displaymatrix, sizeof(int32_t) * 9))
             need_reinit = 1;
@@ -2274,8 +2277,7 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
         decoded_frame->top_field_first = ist->top_field_first;
 
     ist->frames_decoded++;
-
-    if (ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
+    if (!no_cvt_hw && ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
         err = ist->hwaccel_retrieve_data(ist->dec_ctx, decoded_frame);
         if (err < 0)
             goto fail;
