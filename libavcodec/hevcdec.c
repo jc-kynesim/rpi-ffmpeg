@@ -374,12 +374,17 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
                      CONFIG_HEVC_NVDEC_HWACCEL + \
                      CONFIG_HEVC_VAAPI_HWACCEL + \
                      CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL + \
+                     CONFIG_HEVC_RPI4_8_HWACCEL + \
+                     CONFIG_HEVC_RPI4_10_HWACCEL + \
                      CONFIG_HEVC_VDPAU_HWACCEL)
     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmt = pix_fmts;
 
     switch (sps->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
+#if CONFIG_HEVC_RPI4_8_HWACCEL
+        *fmt++ = AV_PIX_FMT_RPI4_8;
+#endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
 #endif
@@ -401,6 +406,9 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #endif
         break;
     case AV_PIX_FMT_YUV420P10:
+#if CONFIG_HEVC_RPI4_10_HWACCEL
+        *fmt++ = AV_PIX_FMT_RPI4_10;
+#endif
 #if CONFIG_HEVC_DXVA2_HWACCEL
         *fmt++ = AV_PIX_FMT_DXVA2_VLD;
 #endif
@@ -3225,7 +3233,14 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
     s->ref = NULL;
     ret    = decode_nal_units(s, avpkt->data, avpkt->size);
     if (ret < 0)
+    {
+        // Ensure that hwaccel knows this frame is over
+        if (s->avctx->hwaccel && s->avctx->hwaccel->abort_frame) {
+            s->avctx->hwaccel->abort_frame(s->avctx);
+        }
+
         return ret;
+    }
 
     if (avctx->hwaccel) {
         if (s->ref && (ret = avctx->hwaccel->end_frame(avctx)) < 0) {
@@ -3588,6 +3603,15 @@ AVCodec ff_hevc_decoder = {
 #endif
 #if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
                                HWACCEL_VIDEOTOOLBOX(hevc),
+#endif
+#if CONFIG_HEVC_RPI4_8_HWACCEL
+                               HWACCEL_RPI4_8(hevc),
+#endif
+#if CONFIG_HEVC_RPI4_10_HWACCEL
+                               HWACCEL_RPI4_10(hevc),
+#endif
+#if CONFIG_HEVC_V4L2REQUEST_HWACCEL
+                               HWACCEL_V4L2REQUEST(hevc),
 #endif
                                NULL
                            },
