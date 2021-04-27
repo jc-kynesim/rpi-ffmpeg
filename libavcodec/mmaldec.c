@@ -24,6 +24,9 @@
  * MMAL Video Decoder
  */
 
+#pragma GCC diagnostic push
+// Many many redundant decls in the header files
+#pragma GCC diagnostic ignored "-Wredundant-decls"
 #include <bcm_host.h>
 #include <interface/mmal/mmal.h>
 #include <interface/mmal/mmal_parameters_video.h>
@@ -31,6 +34,7 @@
 #include <interface/mmal/util/mmal_util_params.h>
 #include <interface/mmal/util/mmal_default_components.h>
 #include <interface/mmal/vc/mmal_vc_api.h>
+#pragma GCC diagnostic pop
 #include <stdatomic.h>
 
 #include "avcodec.h"
