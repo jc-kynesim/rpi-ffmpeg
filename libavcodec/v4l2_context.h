@@ -32,6 +32,8 @@
 #include "libavutil/rational.h"
 #include "codec_id.h"
 #include "packet.h"
+#include "libavutil/buffer.h"
+#include "libavutil/thread.h"
 #include "v4l2_buffers.h"
 
 typedef struct V4L2Context {
@@ -71,11 +73,18 @@ typedef struct V4L2Context {
      */
     int width, height;
     AVRational sample_aspect_ratio;
+    struct v4l2_rect selection;
 
     /**
-     * Indexed array of V4L2Buffers
+     * If the default size of buffer is less than this then try to
+     * set to this.
      */
-    V4L2Buffer *buffers;
+    uint32_t min_buf_size;
+
+    /**
+     * Indexed array of pointers to V4L2Buffers
+     */
+    AVBufferRef **bufrefs;
 
     /**
      * Readonly after init.
@@ -83,9 +92,17 @@ typedef struct V4L2Context {
     int num_buffers;
 
     /**
+     * Buffer memory type V4L2_MEMORY_MMAP or V4L2_MEMORY_DMABUF
+     */
+    enum v4l2_memory buf_mem;
+
+    /**
      * Whether the stream has been started (VIDIOC_STREAMON has been sent).
      */
     int streamon;
+
+    /* 1st buffer after stream on */
+    int first_buf;
 
     /**
      *  Either no more buffers available or an unrecoverable error was notified
@@ -93,6 +110,20 @@ typedef struct V4L2Context {
      */
     int done;
 
+    int flag_last;
+
+    /**
+     * If NZ then when Qing frame/pkt use this rather than the
+     * "real" PTS
+     */
+    uint64_t track_ts;
+
+    AVBufferRef *frames_ref;
+    atomic_int q_count;
+    struct ff_weak_link_master *wl_master;
+
+    AVMutex lock;
+    pthread_cond_t cond;
 } V4L2Context;
 
 /**
@@ -102,6 +133,14 @@ typedef struct V4L2Context {
  * @return 0 in case of success, a negative value representing the error otherwise.
  */
 int ff_v4l2_context_init(V4L2Context* ctx);
+
+/**
+ * (re)set the hwframecontext from the current v4l2 context
+ *
+ * @param[in] ctx A pointer to a V4L2Context. See V4L2Context description for required variables.
+ * @return 0 in case of success, a negative value representing the error otherwise.
+ */
+int ff_v4l2_context_frames_set(V4L2Context *const ctx);
 
 /**
  * Sets the V4L2Context format in the v4l2 driver.
@@ -119,6 +158,19 @@ int ff_v4l2_context_set_format(V4L2Context* ctx);
  * @return 0 in case of success, a negative value representing the error otherwise.
  */
 int ff_v4l2_context_get_format(V4L2Context* ctx, int probe);
+
+/**
+ * Get the list of drm fourcc pixel formats for this context
+ *
+ * @param[in] ctx A pointer to a V4L2Context. See V4L2Context
+ *       description for required variables.
+ * @param[in] pN A pointer to receive the number of formats
+ *       found. May be NULL if not wanted.
+ * @return Pointer to malloced list of zero terminated formats,
+ *         NULL if none or error. As list is malloced it must be
+ *         freed.
+ */
+uint32_t * ff_v4l2_context_enum_drm_formats(V4L2Context *ctx, unsigned int *pN);
 
 /**
  * Releases a V4L2Context.
@@ -148,7 +200,7 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd);
  * @param[inout] pkt The AVPacket to dequeue to.
  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
  */
-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
+int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout);
 
 /**
  * Dequeues a buffer from a V4L2Context to an AVFrame.
@@ -157,7 +209,10 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
  * @param[in] ctx The V4L2Context to dequeue from.
  * @param[inout] f The AVFrame to dequeue to.
  * @param[in] timeout The timeout for dequeue (-1 to block, 0 to return immediately, or milliseconds)
+ *
  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
+ *                AVERROR(ENOSPC) if no buffer availible to put
+ *                the frame in
  */
 int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout);
 
@@ -171,7 +226,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout);
  * @param[in] pkt A pointer to an AVPacket.
  * @return 0 in case of success, a negative error otherwise.
  */
-int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt);
+int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const void * ext_data, size_t ext_size);
 
 /**
  * Enqueues a buffer to a V4L2Context from an AVFrame
@@ -183,5 +238,29 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt);
  * @return 0 in case of success, a negative error otherwise.
  */
 int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* f);
+
+/**
+ * Dequeue all buffers on this queue
+ *
+ * Used to recycle output buffers
+ *
+ * @param[in] ctx The V4L2Context to dequeue from.
+ * @param[in] timeout1 A timeout on dequeuing the 1st buffer, 
+ *       all others have a timeout of zero
+ * @return AVERROR(EAGAIN) if timeout1 non-zero then the return
+ *         of the first dequeue operation, 0 otherwise.
+ */
+int ff_v4l2_dq_all(V4L2Context *const ctx, int timeout1);
+
+/**
+ * Returns the number of buffers currently queued
+ *
+ * @param[in] ctx The V4L2Context to evaluate
+ */
+static inline int
+ff_v4l2_context_q_count(const V4L2Context* const ctx)
+{
+    return atomic_load(&ctx->q_count);
+}
 
 #endif // AVCODEC_V4L2_CONTEXT_H

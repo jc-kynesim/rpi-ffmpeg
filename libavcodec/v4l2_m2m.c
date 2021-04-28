@@ -36,6 +36,15 @@
 #include "v4l2_context.h"
 #include "v4l2_fmt.h"
 #include "v4l2_m2m.h"
+#include "v4l2_req_dmabufs.h"
+
+static void
+xlat_init(xlat_track_t * const x)
+{
+    memset(x, 0, sizeof(*x));
+    x->last_pts = AV_NOPTS_VALUE;
+}
+
 
 static inline int v4l2_splane_video(struct v4l2_capability *cap)
 {
@@ -69,7 +78,9 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
 
     s->capture.done = s->output.done = 0;
     s->capture.name = "capture";
+    s->capture.buf_mem = s->db_ctl != NULL ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     s->output.name = "output";
+    s->output.buf_mem = s->input_drm ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     atomic_init(&s->refcount, 0);
     sem_init(&s->refsync, 0, 0);
 
@@ -86,16 +97,56 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
     if (v4l2_mplane_video(&cap)) {
         s->capture.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
         s->output.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+        s->output.format.type = s->output.type;
         return 0;
     }
 
     if (v4l2_splane_video(&cap)) {
         s->capture.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         s->output.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+        s->output.format.type = s->output.type;
         return 0;
     }
 
     return AVERROR(EINVAL);
+}
+
+static int check_size(AVCodecContext * const avctx, V4L2m2mContext * const s)
+{
+    struct v4l2_format fmt = {.type = s->output.type};
+    int rv;
+    uint32_t pixfmt = ff_v4l2_format_avfmt_to_v4l2(avctx->pix_fmt);
+    unsigned int w;
+    unsigned int h;
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(fmt.type)) {
+        fmt.fmt.pix_mp.pixelformat = pixfmt;
+        fmt.fmt.pix_mp.width = avctx->width;
+        fmt.fmt.pix_mp.height = avctx->height;
+    }
+    else {
+        fmt.fmt.pix.pixelformat = pixfmt;
+        fmt.fmt.pix.width = avctx->width;
+        fmt.fmt.pix.height = avctx->height;
+    }
+
+    rv = ioctl(s->fd, VIDIOC_TRY_FMT, &fmt);
+
+    if (rv != 0) {
+        rv = AVERROR(errno);
+        av_log(avctx, AV_LOG_ERROR, "%s: Tryfmt failed: %s\n", __func__, av_err2str(rv));
+        return rv;
+    }
+
+    w = ff_v4l2_get_format_width(&fmt);
+    h = ff_v4l2_get_format_height(&fmt);
+
+    if (w < avctx->width || h < avctx->height) {
+        av_log(avctx, AV_LOG_WARNING, "%s: Size check failed: asked for %dx%d, got: %dx%d\n", __func__, avctx->width, avctx->height, w, h);
+        return AVERROR(EINVAL);
+    }
+
+    return 0;
 }
 
 static int v4l2_probe_driver(V4L2m2mContext *s)
@@ -116,6 +167,11 @@ static int v4l2_probe_driver(V4L2m2mContext *s)
         av_log(log_ctx, AV_LOG_DEBUG, "v4l2 output format not supported\n");
         goto done;
     }
+
+    // If being given frames (encode) check that V4L2 can cope with the size
+    if (s->output.av_codec_id == AV_CODEC_ID_RAWVIDEO &&
+        (ret = check_size(s->avctx, s)) != 0)
+        goto done;
 
     ret = ff_v4l2_context_get_format(&s->capture, 1);
     if (ret) {
@@ -218,13 +274,7 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
         av_log(log_ctx, AV_LOG_ERROR, "capture VIDIOC_STREAMOFF\n");
 
     /* 2. unmap the capture buffers (v4l2 and ffmpeg):
-     *    we must wait for all references to be released before being allowed
-     *    to queue new buffers.
      */
-    av_log(log_ctx, AV_LOG_DEBUG, "waiting for user to release AVBufferRefs\n");
-    if (atomic_load(&s->refcount))
-        while(sem_wait(&s->refsync) == -1 && errno == EINTR);
-
     ff_v4l2_context_release(&s->capture);
 
     /* 3. get the new capture format */
@@ -243,7 +293,6 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
 
     /* 5. complete reinit */
     s->draining = 0;
-    s->reinit = 0;
 
     return 0;
 }
@@ -259,6 +308,9 @@ static void v4l2_m2m_destroy_context(FFRefStructOpaque unused, void *context)
         close(s->fd);
     av_frame_free(&s->frame);
     av_packet_unref(&s->buf_pkt);
+    av_freep(&s->extdata_data);
+
+    av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Context destroyed\n");
 }
 
 int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
@@ -268,6 +320,11 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
 
     if (!s)
         return 0;
+
+    av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Codec end\n");
+
+    if (s->avctx && av_codec_is_decoder(s->avctx->codec))
+        av_packet_unref(&s->buf_pkt);
 
     if (s->fd >= 0) {
         ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMOFF);
@@ -280,6 +337,14 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
     }
 
     ff_v4l2_context_release(&s->output);
+    av_buffer_unref(&s->device_ref);
+
+    dmabufs_ctl_unref(&s->db_ctl);
+
+    if (s->fd != -1) {
+        close(s->fd);
+        s->fd = -1;
+    }
 
     s->self_ref = NULL;
     ff_refstruct_unref(&priv->context);
@@ -341,6 +406,7 @@ int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **s)
     priv->context->output.num_buffers  = priv->num_output_buffers;
     priv->context->self_ref = priv->context;
     priv->context->fd = -1;
+    xlat_init(&priv->context->xlat);
 
     priv->context->frame = av_frame_alloc();
     if (!priv->context->frame) {
