@@ -54,6 +54,7 @@ extern const FFOutputFormat ff_v4l2_muxer;
 extern const AVInputFormat  ff_vfwcap_demuxer;
 extern const FFOutputFormat ff_vout_drm_muxer;
 extern const AVInputFormat  ff_xcbgrab_demuxer;
+extern const FFOutputFormat ff_vout_egl_muxer;
 extern const FFOutputFormat ff_xv_muxer;
 
 /* external libraries */
