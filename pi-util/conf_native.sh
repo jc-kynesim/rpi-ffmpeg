@@ -39,6 +39,7 @@ $FFSRC/configure \
  --enable-v4l2-request\
  --enable-libdrm\
  --enable-libudev\
+ --enable-vout-drm\
  $SHARED_LIBS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
  --extra-cxxflags="$RPI_DEFINES $RPI_INCLUDES"\
