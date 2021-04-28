@@ -28,27 +28,37 @@
 #include <stddef.h>
 #include <linux/videodev2.h>
 
+#include "avcodec.h"
 #include "libavutil/buffer.h"
 #include "libavutil/frame.h"
+#include "libavutil/hwcontext_drm.h"
 #include "packet.h"
 
 enum V4L2Buffer_status {
     V4L2BUF_AVAILABLE,
     V4L2BUF_IN_DRIVER,
+    V4L2BUF_IN_USE,
     V4L2BUF_RET_USER,
 };
 
 /**
  * V4L2Buffer (wrapper for v4l2_buffer management)
  */
-typedef struct V4L2Buffer {
-    /* each buffer needs to have a reference to its context */
-    struct V4L2Context *context;
+struct V4L2Context;
+struct ff_weak_link_client;
 
-    /* This object is refcounted per-plane, so we need to keep track
-     * of how many context-refs we are holding. */
-    AVBufferRef *context_ref;
-    atomic_uint context_refcount;
+typedef struct V4L2Buffer {
+    /* each buffer needs to have a reference to its context
+     * The pointer is good enough for most operation but once the buffer has
+     * been passed to the user the buffer may become orphaned so for free ops
+     * the weak link must be used to ensure that the context is actually
+     * there
+     */
+    struct V4L2Context *context;
+    struct ff_weak_link_client *context_wl;
+
+    /* DRM descriptor */
+    AVDRMFrameDescriptor drm_frame;
 
     /* keep track of the mmap address and mmap length */
     struct V4L2Plane_info {
@@ -73,11 +83,12 @@ typedef struct V4L2Buffer {
  *
  * @param[in] frame The AVFRame to push the information to
  * @param[in] buf The V4L2Buffer to get the information from
+ * @param[in] no_rescale_pts If non-zero do not rescale PTS
  *
  * @returns 0 in case of success, AVERROR(EINVAL) if the number of planes is incorrect,
  * AVERROR(ENOMEM) if the AVBufferRef can't be created.
  */
-int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *buf);
+int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *buf, int no_rescale_pts);
 
 /**
  * Extracts the data from a V4L2Buffer to an AVPacket
@@ -101,6 +112,9 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *buf);
  */
 int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out);
 
+int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
+                                    const void *extdata, size_t extlen, int no_rescale_pts);
+
 /**
  * Extracts the data from an AVFrame to a V4L2Buffer
  *
@@ -119,7 +133,7 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out);
  *
  * @returns 0 in case of success, a negative AVERROR code otherwise
  */
-int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index);
+int ff_v4l2_buffer_initialize(AVBufferRef **avbuf, int index, struct V4L2Context *ctx);
 
 /**
  * Enqueues a V4L2Buffer
