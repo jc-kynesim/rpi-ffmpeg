@@ -30,6 +30,7 @@
 #include <linux/videodev2.h>
 
 #include "libavcodec/avcodec.h"
+#include "libavutil/pixfmt.h"
 #include "v4l2_context.h"
 
 #define container_of(ptr, type, member) ({ \
@@ -39,6 +40,17 @@
 #define V4L_M2M_DEFAULT_OPTS \
     { "num_output_buffers", "Number of buffers in the output context",\
         OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 16 }, 2, INT_MAX, FLAGS }
+
+#define FF_V4L2_M2M_TRACK_SIZE 128
+typedef struct V4L2m2mTrackEl {
+    int     discard;   // If we see this buffer its been flushed, so discard
+    int     pkt_size;
+    int64_t pts;
+    int64_t reordered_opaque;
+    int64_t pkt_pos;
+    int64_t pkt_duration;
+    int64_t track_pts;
+} V4L2m2mTrackEl;
 
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
@@ -53,6 +65,7 @@ typedef struct V4L2m2mContext {
     sem_t refsync;
     atomic_uint refcount;
     int reinit;
+    int resize_pending;
 
     /* null frame/packet received */
     int draining;
@@ -66,6 +79,23 @@ typedef struct V4L2m2mContext {
 
     /* reference back to V4L2m2mPriv */
     void *priv;
+
+    AVBufferRef *device_ref;
+
+    /* generate DRM frames */
+    int output_drm;
+
+    /* Frame tracking */
+    int64_t last_pkt_dts;
+    int64_t last_opaque;
+    unsigned int track_no;
+    V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
+
+    /* req pkt */
+    int req_pkt;
+
+    /* Ext data sent */
+    int extdata_sent;
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv {
@@ -76,6 +106,7 @@ typedef struct V4L2m2mPriv {
 
     int num_output_buffers;
     int num_capture_buffers;
+    enum AVPixelFormat pix_fmt;
 } V4L2m2mPriv;
 
 /**
