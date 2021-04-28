@@ -31,6 +31,7 @@
 #include "libavutil/pixfmt.h"
 #include "libavutil/frame.h"
 #include "libavutil/buffer.h"
+#include "libavutil/thread.h"
 #include "v4l2_buffers.h"
 
 typedef struct V4L2Context {
@@ -70,11 +71,12 @@ typedef struct V4L2Context {
      */
     int width, height;
     AVRational sample_aspect_ratio;
+    struct v4l2_rect selection;
 
     /**
-     * Indexed array of V4L2Buffers
+     * Indexed array of pointers to V4L2Buffers
      */
-    V4L2Buffer *buffers;
+    AVBufferRef **bufrefs;
 
     /**
      * Readonly after init.
@@ -92,6 +94,12 @@ typedef struct V4L2Context {
      */
     int done;
 
+    AVBufferRef *frames_ref;
+    int q_count;
+    int dq_count;
+    struct ff_weak_link_master *wl_master;
+
+    AVMutex lock;
 } V4L2Context;
 
 /**
@@ -156,9 +164,12 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
  * @param[in] ctx The V4L2Context to dequeue from.
  * @param[inout] f The AVFrame to dequeue to.
  * @param[in] timeout The timeout for dequeue (-1 to block, 0 to return immediately, or milliseconds)
+ * @param[in] no_rescale_pts (0 rescale pts, 1 use pts as
+ *       timestamp directly)
+ *
  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
  */
-int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout);
+int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout, int no_rescale_pts);
 
 /**
  * Enqueues a buffer to a V4L2Context from an AVPacket
@@ -170,7 +181,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout);
  * @param[in] pkt A pointer to an AVPacket.
  * @return 0 in case of success, a negative error otherwise.
  */
-int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt);
+int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const void * ext_data, size_t ext_size, int no_rescale_pts);
 
 /**
  * Enqueues a buffer to a V4L2Context from an AVFrame
