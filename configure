@@ -202,6 +202,7 @@ External library support:
   --disable-bzlib          disable bzlib [autodetect]
   --disable-coreimage      disable Apple CoreImage framework [autodetect]
   --enable-chromaprint     enable audio fingerprinting with chromaprint [no]
+  --disable-epoxy          disable epoxy [autodetect]
   --enable-frei0r          enable frei0r video filtering [no]
   --enable-gcrypt          enable gcrypt, needed for rtmp(t)e support
                            if openssl, librtmp or gmp is not used [no]
@@ -356,6 +357,7 @@ External library support:
   --enable-mmal            enable Broadcom Multi-Media Abstraction Layer (Raspberry Pi) via MMAL [no]
   --enable-sand            enable sand video formats [rpi]
   --enable-vout-drm        enable the vout_drm module - for internal testing only [no]
+  --enable-vout-egl        enable the vout_egl module - for internal testing only [no]
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
   --enable-omx             enable OpenMAX IL code [no]
@@ -1846,6 +1848,7 @@ EXTERNAL_AUTODETECT_LIBRARY_LIST="
     avfoundation
     bzlib
     coreimage
+    epoxy
     iconv
     libudev
     libxcb
@@ -1921,6 +1924,7 @@ EXTERNAL_LIBRARY_LIST="
     libcodec2
     libdav1d
     libdc1394
+    libdrm
     libflite
     libfontconfig
     libfreetype
@@ -2055,6 +2059,7 @@ FEATURE_LIST="
     swscale_alpha
     v4l2_req_hevc_vx
     vout_drm
+    vout_egl
 "
 
 # this list should be kept in linking order
@@ -3763,8 +3768,7 @@ v4l2_outdev_deps="libdrm"
 v4l2_outdev_deps_any="linux_videodev2_h sys_videoio_h"
 v4l2_outdev_suggest="libv4l2"
 vout_drm_outdev_deps="libdrm"
-vout_egl_outdev_deps="xlib"
-vout_egl_outdev_select="epoxy"
+vout_egl_outdev_deps="xlib epoxy"
 vfwcap_indev_deps="vfw32 vfwcap_defines"
 xcbgrab_indev_deps="libxcb"
 xcbgrab_indev_suggest="libxcb_shm libxcb_shape libxcb_xfixes"
@@ -6644,6 +6648,9 @@ fi
 enabled libudev &&
     check_pkg_config libudev libudev libudev.h udev_new
 
+enabled epoxy &&
+    check_pkg_config epoxy epoxy epoxy/egl.h epoxy_egl_version
+
 check_headers direct.h
 check_headers dirent.h
 check_headers dxgidebug.h
@@ -7142,6 +7149,8 @@ enabled vapoursynth       && require_headers "vapoursynth/VSScript4.h vapoursynt
 
 enabled vout_drm && { enabled libdrm || die "ERROR: vout_drm requires --enable-libdrm"; }
 
+enabled vout_egl && { enabled epoxy || die "ERROR: vout_egl requires epoxy"; } &&
+                    { enabled xlib  || die "ERROR: vout_egl requires xlib"; }
 
 if enabled gcrypt; then
     GCRYPT_CONFIG="${cross_prefix}libgcrypt-config"
