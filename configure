@@ -347,6 +347,7 @@ External library support:
   --enable-mmal            enable Broadcom Multi-Media Abstraction Layer (Raspberry Pi) via MMAL [no]
   --enable-sand            enable sand video formats [rpi]
   --enable-vout-drm        enable the vout_drm module - for internal testing only [no]
+  --enable-vout-egl        enable the vout_egl module - for internal testing only [no]
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
   --enable-omx             enable OpenMAX IL code [no]
@@ -1818,6 +1819,7 @@ EXTERNAL_LIBRARY_LIST="
     libdav1d
     libdc1394
     libdrm
+    epoxy
     libflite
     libfontconfig
     libfreetype
@@ -1942,6 +1944,7 @@ FEATURE_LIST="
     static
     swscale_alpha
     vout_drm
+    vout_egl
 "
 
 # this list should be kept in linking order
@@ -3565,6 +3568,8 @@ v4l2_outdev_deps="libdrm"
 v4l2_outdev_deps_any="linux_videodev2_h sys_videoio_h"
 v4l2_outdev_suggest="libv4l2"
 vout_drm_outdev_deps="libdrm vout_drm"
+vout_egl_outdev_deps="xlib"
+vout_egl_outdev_select="epoxy"
 vfwcap_indev_deps="vfw32 vfwcap_defines"
 xcbgrab_indev_deps="libxcb"
 xcbgrab_indev_suggest="libxcb_shm libxcb_shape libxcb_xfixes"
@@ -6596,6 +6601,7 @@ enabled libdav1d          && require_pkg_config libdav1d "dav1d >= 0.5.0" "dav1d
 enabled libdavs2          && require_pkg_config libdavs2 "davs2 >= 1.6.0" davs2.h davs2_decoder_open
 enabled libdc1394         && require_pkg_config libdc1394 libdc1394-2 dc1394/dc1394.h dc1394_new
 enabled libdrm            && require_pkg_config libdrm libdrm xf86drm.h drmGetVersion
+enabled epoxy             && require_pkg_config epoxy epoxy epoxy/egl.h epoxy_egl_version
 enabled libfdk_aac        && { check_pkg_config libfdk_aac fdk-aac "fdk-aac/aacenc_lib.h" aacEncOpen ||
                                { require libfdk_aac fdk-aac/aacenc_lib.h aacEncOpen -lfdk-aac &&
                                  warn "using libfdk without pkg-config"; } }
