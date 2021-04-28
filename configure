@@ -346,6 +346,7 @@ External library support:
   --enable-libnpp          enable Nvidia Performance Primitives-based code [no]
   --enable-mmal            enable Broadcom Multi-Media Abstraction Layer (Raspberry Pi) via MMAL [no]
   --enable-sand            enable sand video formats [rpi]
+  --enable-vout-drm        enable the vout_drm module - for internal testing only [no]
   --disable-nvdec          disable Nvidia video decoding acceleration (via hwaccel) [autodetect]
   --disable-nvenc          disable Nvidia video encoding code [autodetect]
   --enable-omx             enable OpenMAX IL code [no]
@@ -1940,6 +1941,7 @@ FEATURE_LIST="
     small
     static
     swscale_alpha
+    vout_drm
 "
 
 # this list should be kept in linking order
@@ -3559,8 +3561,10 @@ sndio_indev_deps="sndio"
 sndio_outdev_deps="sndio"
 v4l2_indev_deps_any="linux_videodev2_h sys_videoio_h"
 v4l2_indev_suggest="libv4l2"
+v4l2_outdev_deps="libdrm"
 v4l2_outdev_deps_any="linux_videodev2_h sys_videoio_h"
 v4l2_outdev_suggest="libv4l2"
+vout_drm_outdev_deps="libdrm vout_drm"
 vfwcap_indev_deps="vfw32 vfwcap_defines"
 xcbgrab_indev_deps="libxcb"
 xcbgrab_indev_suggest="libxcb_shm libxcb_shape libxcb_xfixes"
