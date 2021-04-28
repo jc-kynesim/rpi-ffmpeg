@@ -215,13 +215,7 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
         av_log(log_ctx, AV_LOG_ERROR, "capture VIDIOC_STREAMOFF\n");
 
     /* 2. unmap the capture buffers (v4l2 and ffmpeg):
-     *    we must wait for all references to be released before being allowed
-     *    to queue new buffers.
      */
-    av_log(log_ctx, AV_LOG_DEBUG, "waiting for user to release AVBufferRefs\n");
-    if (atomic_load(&s->refcount))
-        while(sem_wait(&s->refsync) == -1 && errno == EINTR);
-
     ff_v4l2_context_release(&s->capture);
 
     /* 3. get the new capture format */
@@ -328,7 +322,10 @@ static void v4l2_m2m_destroy_context(void *opaque, uint8_t *context)
     ff_v4l2_context_release(&s->capture);
     sem_destroy(&s->refsync);
 
-    close(s->fd);
+    if (s->fd != -1)
+        close(s->fd);
+
+    av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Context destroyed\n");
 
     av_free(s);
 }
@@ -338,17 +335,34 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
     V4L2m2mContext *s = priv->context;
     int ret;
 
-    ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMOFF);
-    if (ret)
-        av_log(s->avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s\n", s->output.name);
+    if (!s)
+        return 0;
 
-    ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMOFF);
-    if (ret)
-        av_log(s->avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s\n", s->capture.name);
+    av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Codec end\n");
+
+    if (av_codec_is_decoder(s->avctx->codec))
+        av_packet_unref(&s->buf_pkt);
+
+    if (s->fd >= 0) {
+        ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMOFF);
+        if (ret)
+            av_log(s->avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s\n", s->output.name);
+
+        ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMOFF);
+        if (ret)
+            av_log(s->avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s\n", s->capture.name);
+    }
 
     ff_v4l2_context_release(&s->output);
 
+    close(s->fd);
+    s->fd = -1;
+
     s->self_ref = NULL;
+    // This is only called on avctx close so after this point we don't have that
+    // Crash sooner if we find we are using it (can still log with avctx = NULL)
+    s->avctx = NULL;
+    priv->context = NULL;
     av_buffer_unref(&priv->context_ref);
 
     return 0;
