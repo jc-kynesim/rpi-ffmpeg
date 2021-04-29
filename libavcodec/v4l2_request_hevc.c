@@ -23,13 +23,16 @@
 #include "hevc-ctrls.h"
 #include "libavutil/hwcontext_drm.h"
 
+#include <semaphore.h>
+#include <pthread.h>
+
 #include "v4l2_req_devscan.h"
 #include "v4l2_req_dmabufs.h"
 #include "v4l2_req_pollqueue.h"
 #include "v4l2_req_media.h"
 #include "v4l2_req_utils.h"
 
-#define MAX_SLICES 16
+#define MAX_SLICES 128
 
 #include <drm_fourcc.h>
 
@@ -61,6 +64,10 @@
 typedef struct V4L2MediaReqDescriptor {
     AVDRMFrameDescriptor drm;
 
+    struct V4L2MediaReqDescriptor * next;
+    struct V4L2MediaReqDescriptor * prev;
+    int in_q;
+
     // Media
     uint64_t timestamp;
     struct qent_dst * qe_dst;
@@ -70,15 +77,28 @@ typedef struct V4L2MediaReqDescriptor {
     struct qent_src *qe_src;
 } V4L2MediaReqDescriptor;
 
+struct slice_info {
+    const uint8_t * ptr;
+    size_t len; // bytes
+};
+
 // Attached to frame - has no constructor/destructor so state only
 typedef struct V4L2RequestControlsHEVC {
+    int num_slices;
+    size_t cur_offset;  // bytes
+    struct timeval tv;
+
     struct v4l2_ctrl_hevc_sps sps;
     struct v4l2_ctrl_hevc_pps pps;
     struct v4l2_ctrl_hevc_scaling_matrix scaling_matrix;
+    // slice_params can't live in slice_info as it is passed as an array to
+    // V4L2 for multi-slice
     struct v4l2_ctrl_hevc_slice_params slice_params[MAX_SLICES];
+
     int first_slice;
     int dst_qed;
-    int num_slices; //TODO: this should be in control
+
+    struct slice_info slices[MAX_SLICES];
 } V4L2RequestControlsHEVC;
 
 // 1 per decoder
@@ -86,9 +106,15 @@ typedef struct V4L2RequestContextHEVC {
 //    V4L2RequestContext base;
     unsigned int timestamp;  // ?? maybe uint64_t
 
+    int multi_slice;
     int decode_mode;
     int start_code;
     int max_slices;
+
+    pthread_mutex_t q_lock;
+    pthread_cond_t q_cond;
+    V4L2MediaReqDescriptor * decode_q_head;
+    V4L2MediaReqDescriptor * decode_q_tail;
 
     struct devscan *devscan;
     struct dmabufs_ctl *dbufs;
@@ -102,7 +128,70 @@ typedef struct V4L2RequestContextHEVC {
 typedef struct V4L2ReqFrameDataPrivHEVC {
 } V4L2ReqFrameDataPrivHEVC;
 
-static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
+//static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
+
+static void decode_q_add(V4L2RequestContextHEVC * const rc, V4L2MediaReqDescriptor * const d)
+{
+    pthread_mutex_lock(&rc->q_lock);
+    if (!rc->decode_q_head) {
+        rc->decode_q_head = d;
+        rc->decode_q_tail = d;
+        d->prev = NULL;
+    }
+    else {
+        rc->decode_q_tail->next = d;
+        d->prev = rc->decode_q_tail;
+        rc->decode_q_tail = d;
+    }
+    d->next = NULL;
+    d->in_q = 1;
+    pthread_mutex_unlock(&rc->q_lock);
+}
+
+// Remove entry from Q - if head wake-up anything that was waiting
+static void decode_q_remove(V4L2RequestContextHEVC * const rc, V4L2MediaReqDescriptor * const d)
+{
+    int try_signal = false;
+
+    if (!d->in_q)
+        return;
+
+    pthread_mutex_lock(&rc->q_lock);
+    if (d->prev)
+        d->prev->next = d->next;
+    else {
+        try_signal = true;  // Only need to signal if we were head
+        rc->decode_q_head = d->next;
+    }
+
+    if (d->next)
+        d->next->prev = d->prev;
+    else {
+        try_signal = false; // If we were a singleton then no point signalling
+        rc->decode_q_tail = d->prev;
+    }
+
+    // Not strictly needed but makes debug easier
+    d->next = NULL;
+    d->prev = NULL;
+    d->in_q = 0;
+    pthread_mutex_unlock(&rc->q_lock);
+
+    if (try_signal)
+        pthread_cond_broadcast(&rc->q_cond);
+}
+
+static void decode_q_wait(V4L2RequestContextHEVC * const rc, V4L2MediaReqDescriptor * const d)
+{
+    pthread_mutex_lock(&rc->q_lock);
+
+    while (rc->decode_q_head != d)
+        pthread_cond_wait(&rc->q_cond, &rc->q_lock);
+
+    pthread_mutex_unlock(&rc->q_lock);
+}
+
+
 
 static size_t bit_buf_size(unsigned int w, unsigned int h, unsigned int bits_minus8)
 {
@@ -239,7 +328,8 @@ static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
 }
 
 static void fill_slice_params(const HEVCContext *h,
-                                                struct v4l2_ctrl_hevc_slice_params *slice_params)
+                              struct v4l2_ctrl_hevc_slice_params *slice_params,
+                              uint32_t bit_size, uint32_t bit_offset)
 {
     const HEVCFrame *pic = h->ref;
     const SliceHeader *sh = &h->sh;
@@ -247,8 +337,8 @@ static void fill_slice_params(const HEVCContext *h,
     RefPicList *rpl;
 
     *slice_params = (struct v4l2_ctrl_hevc_slice_params) {
-        .bit_size = 0, // Set later
-        .data_bit_offset = 0, // Set later
+        .bit_size = bit_size,
+        .data_bit_offset = bit_offset,
 
         /* ISO/IEC 23008-2, ITU-T Rec. H.265: General slice segment header */
         .slice_segment_addr = sh->slice_segment_addr,
@@ -566,6 +656,8 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
 
 //    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+    decode_q_add(ctx, rd);
+
     fill_sps(&controls->sps, h);
 
     if (sl)
@@ -577,6 +669,8 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     controls->dst_qed = 0;
     controls->num_slices = 0;
     ctx->timestamp++;
+    controls->tv = cvt_timestamp_to_tv(ctx->timestamp);
+    rd->timestamp = cvt_timestamp_to_dpb(ctx->timestamp);
 
 //    if ((rv = ff_v4l2_request_reset_frame(avctx, h->ref->frame)) != 0)
 //        return rv;
@@ -597,7 +691,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
 
 //    ff_v4l2_request_start_phase_control(h->ref->frame, ctx->pctrl);
 
-//    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
 
     return 0;
 }
@@ -699,11 +793,9 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     return 0;
 }
 
-static int set_req_ctls(AVCodecContext *avctx, struct media_request * const mreq)
+static int set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
+                        V4L2RequestControlsHEVC *controls, unsigned int slice_no, unsigned int slice_count)
 {
-    const HEVCContext *h = avctx->priv_data;
-    V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
-    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
     int rv;
 
     struct v4l2_ext_control control[] = {
@@ -719,8 +811,8 @@ static int set_req_ctls(AVCodecContext *avctx, struct media_request * const mreq
         },
         {
             .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS,
-            .ptr = &controls->slice_params,
-            .size = sizeof(controls->slice_params[0]) * FFMAX(FFMIN(controls->num_slices, MAX_SLICES), ctx->max_slices),
+            .ptr = controls->slice_params + slice_no,
+            .size = sizeof(controls->slice_params[0]) * slice_count,
         },
         // *** Make optional
         {
@@ -741,11 +833,29 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    V4L2MediaReqDescriptor * const rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
+//    V4L2MediaReqDescriptor * const rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
     int slice = FFMIN(controls->num_slices, MAX_SLICES - 1);
     int bcount = get_bits_count(&h->HEVClc->gb);
     uint32_t boff = (ptr_from_index(buffer, bcount/8 + 1) - (buffer + bcount/8 + 1)) * 8 + bcount;
 
+#if 1
+    struct slice_info *const si = controls->slices + slice;
+    si->ptr = buffer;
+    si->len = size;
+
+    if (ctx->multi_slice && controls->num_slices != 0) {
+        struct slice_info *const si0 = controls->slices;
+        const size_t offset = (buffer - si0->ptr);
+        boff += offset * 8;
+        size += offset;
+        si0->len = si->len + offset;
+    }
+
+    fill_slice_params(h, controls->slice_params + slice, size * 8, boff);
+    ++controls->num_slices;
+    return 0;
+
+#else
     if (!controls->first_slice) {
         MediaBufsStatus stat;
 
@@ -801,6 +911,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
         av_log(avctx, AV_LOG_ERROR, "%s: NIF\n", __func__);
     }
     return 0;
+#endif
 }
 
 static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx)
@@ -811,10 +922,115 @@ static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx)
 
     media_request_abort(&rd->req);
     mediabufs_src_qent_abort(ctx->mbufs, &rd->qe_src);
+
+    decode_q_remove(ctx, rd);
 }
+
+#if 1
+static int send_slice(AVCodecContext * const avctx,
+                      V4L2RequestControlsHEVC *const controls,
+                      const unsigned int i, const unsigned int j)
+{
+    const HEVCContext * const h = avctx->priv_data;
+    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
+    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
+
+    struct slice_info *const si = controls->slices + i;
+    struct media_request * req = NULL;
+    struct qent_src * src = NULL;
+    MediaBufsStatus stat;
+    if ((req = media_request_get(ctx->mpool)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to alloc media request\n", __func__);
+        return AVERROR(ENOMEM);
+    }
+
+    if (set_req_ctls(ctx, req, controls, i, j - i)) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to set req ctls\n", __func__);
+        goto fail1;
+    }
+
+    if ((src = mediabufs_src_qent_get(ctx->mbufs)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to get src buffer\n", __func__);
+        goto fail1;
+    }
+
+    if (qent_src_data_copy(src, 0, si->ptr, si->len, ctx->dbufs) != 0) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed data copy\n", __func__);
+        goto fail2;
+    }
+
+    if (qent_src_params_set(src, &controls->tv)) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed src param set\n", __func__);
+        goto fail2;
+    }
+
+#warning ANNEX_B start code
+//        if (ctx->start_code == V4L2_MPEG_VIDEO_HEVC_START_CODE_ANNEX_B) {
+//        }
+
+    stat = mediabufs_start_request(ctx->mbufs, &req, &src,
+                                   i == 0 ? rd->qe_dst : NULL,
+                                   j == controls->num_slices);
+
+    if (stat != MEDIABUFS_STATUS_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "%s: Failed to start request\n", __func__);
+        return AVERROR_UNKNOWN;
+    }
+    return 0;
+
+fail2:
+    mediabufs_src_qent_abort(ctx->mbufs, &src);
+fail1:
+    media_request_abort(&req);
+    return AVERROR_UNKNOWN;
+}
+#endif
 
 static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 {
+#if 1
+    const HEVCContext * const h = avctx->priv_data;
+//    FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
+    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
+//    V4L2ReqFrameDataPrivHEVC *const rfdp = fdd->hwaccel_priv;
+    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
+//    MediaBufsStatus stat;
+    V4L2RequestControlsHEVC *controls = h->ref->hwaccel_picture_private;
+//    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
+    unsigned int i;
+    int rv;
+
+    decode_q_wait(ctx, rd);
+
+    // qe_dst needs to be bound to the data buffer and only returned when that is
+    // Alloc almost certainly wants to be serialised if there is any chance of blocking
+    // so we get the next frame to be free in the thread that needs it for decode first.
+    //
+    // In our current world this probably isn't a concern but put it here anyway
+    if (!rd->qe_dst)
+    {
+        if ((rd->qe_dst = mediabufs_dst_qent_alloc(ctx->mbufs, ctx->dbufs)) == NULL) {
+            av_log(avctx, AV_LOG_ERROR, "%s: Failed to get dst buffer\n", __func__);
+            return AVERROR(ENOMEM);
+        }
+    }
+
+    // Send as slices
+    if (ctx->multi_slice)
+    {
+        if ((rv = send_slice(avctx, controls, 0, controls->num_slices)) != 0)
+            return rv;
+    }
+    else
+    {
+        for (i = 0; i != controls->num_slices; ++i) {
+            if ((rv = send_slice(avctx, controls, i, i + 1)) != 0)
+                return rv;
+        }
+    }
+
+    decode_q_remove(ctx, rd);
+#else
     const HEVCContext * const h = avctx->priv_data;
     V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
@@ -831,6 +1047,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     }
 
     ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+#endif
 
     // Set the drm_prime desriptor
     drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
@@ -922,7 +1139,8 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     dmabufs_ctl_delete(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
 
-//    ff_v4l2_phase_control_deletez(&ctx->pctrl);
+    pthread_mutex_destroy(&ctx->q_lock);
+    pthread_cond_destroy(&ctx->q_cond);
 
 //    if (avctx->hw_frames_ctx) {
 //        AVHWFramesContext *hwfc = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
@@ -960,6 +1178,12 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const struct decdev * decdev;
     uint32_t src_pix_fmt = V4L2_PIX_FMT_HEVC_SLICE;
     size_t src_size;
+
+    pthread_mutex_init(&ctx->q_lock, NULL);
+    pthread_cond_init(&ctx->q_cond, NULL);
+
+#warning Select multi-slice based on caps
+    ctx->multi_slice = 1;
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
@@ -1050,6 +1274,9 @@ fail1:
     dmabufs_ctl_delete(&ctx->dbufs);
 fail0:
     devscan_delete(&ctx->devscan);
+
+    pthread_mutex_destroy(&ctx->q_lock);
+    pthread_cond_destroy(&ctx->q_cond);
     return AVERROR(ENOMEM);
 }
 
