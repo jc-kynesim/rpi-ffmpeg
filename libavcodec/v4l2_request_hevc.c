@@ -212,6 +212,8 @@ static size_t bit_buf_size(unsigned int w, unsigned int h, unsigned int bits_min
         wxh * 3 / 8;
     /* Allow for bit depth */
     bits_alloc += (bits_alloc * bits_minus8) / 8;
+    /* Add a few bytes (16k) for overhead */
+    bits_alloc += 0x4000;
     return bits_alloc;
 }
 
@@ -1003,7 +1005,8 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     {
         if ((rd->qe_dst = mediabufs_dst_qent_alloc(ctx->mbufs, ctx->dbufs)) == NULL) {
             av_log(avctx, AV_LOG_ERROR, "%s: Failed to get dst buffer\n", __func__);
-            return AVERROR(ENOMEM);
+            rv = AVERROR(ENOMEM);
+            goto fail;
         }
     }
 
@@ -1011,13 +1014,13 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     if (ctx->multi_slice)
     {
         if ((rv = send_slice(avctx, &rc, 0, rd->num_slices)) != 0)
-            return rv;
+            goto fail;
     }
     else
     {
         for (i = 0; i != rd->num_slices; ++i) {
             if ((rv = send_slice(avctx, &rc, i, i + 1)) != 0)
-                return rv;
+                goto fail;
         }
     }
 
@@ -1029,6 +1032,10 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     rd->drm.objects[0].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, 0));
 
     return 0;
+
+fail:
+    decode_q_remove(ctx, rd);
+    return rv;
 }
 
 static int set_controls(AVCodecContext *avctx)
@@ -1170,6 +1177,10 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     src_size = bit_buf_size(sps->width, sps->height, sps->bit_depth - 8);
     if (mediabufs_src_resizable(ctx->mbufs))
         src_size /= 4;
+    // Kludge for conformance tests which break Annex A limits
+    else if (src_size < 0x40000)
+        src_size = 0x40000;
+
     if (mediabufs_src_fmt_set(ctx->mbufs, decdev_src_type(decdev), src_pix_fmt,
                               sps->width, sps->height, src_size)) {
         char tbuf1[5];
