@@ -459,6 +459,15 @@ static void axi_dump(const dec_env_t * const de, uint64_t addr, uint32_t size) {
 }
 #endif
 
+//////////////////////////////////////////////////////////////////////////////
+
+static inline size_t round_up_size(const size_t x)
+{
+    /* Admit no size < 256 */
+    const unsigned int n = x < 256 ? 8 : av_log2(x) - 1;
+
+    return x >= (3 << n) ? 4 << n : (3 << n);
+}
 
 //////////////////////////////////////////////////////////////////////////////
 // Scaling factors
@@ -1425,6 +1434,7 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
     coeffbuf_sem_claimed = 1;
     tstart_phase(rpi, 1);
 
+    status = 0;
     for (;;)
     {
         // (Re-)allocate PU/COEFF stream space
@@ -1435,9 +1445,19 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
         pu_stride = rnd64(rpi->max_pu_msgs * 2 * de->PicWidthInCtbsY);
         pu_size = pu_stride * de->PicHeightInCtbsY;
 
-        if (pu_size > total_size) {
-            status = -1;
-            break;
+        if (pu_size >= total_size || status == -1) {
+            GPU_MEM_PTR_T newbuf;
+
+            if (gpu_malloc_uncached(round_up_size(total_size + 1), &newbuf) != 0)
+            {
+                av_log(avctx, AV_LOG_ERROR, "Failed to reallocate coeffbuf\n");
+                status = -1;
+                break;
+            }
+            gpu_free(rpi->gcoeffbufs + rpi->coeffbuf_no);
+            rpi->gcoeffbufs[rpi->coeffbuf_no] = newbuf;
+            status = 0;
+            continue;
         }
 
         // Allocate all remaining space to coeff
@@ -1462,7 +1482,9 @@ static int rpi_hevc_end_frame(AVCodecContext * const avctx) {
 
         status = check_status(rpi, de);
 
-        if (status != 1)
+        if (status == -1)
+            continue;
+        else if (status != 1)
             break;
 
         // Status 1 means out of PU space so try again with more
