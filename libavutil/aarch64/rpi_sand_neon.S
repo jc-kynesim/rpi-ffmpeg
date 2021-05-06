@@ -77,6 +77,10 @@ row_loop:
 
     // w14 = 0, processed block count
     eor w14, w14, w14
+
+    cmp w8, #0
+    beq no_main_y8
+
 block_loop:
     // copy 128 bytes (a full block) into the vector registers v0-v7 and increase the src address by 128
     // fortunately these aren't callee saved ones, meaning we don't need to backup them
@@ -98,6 +102,7 @@ block_loop:
 
     // handle the last block at the end of each row
     // at most 127 byte values copied from src to dst
+no_main_y8:
     eor w5, w5, w5 // i = 0
 incomplete_block_loop_y8:
     cmp w5, w9
@@ -145,6 +150,7 @@ function ff_rpi_sand8_lines_to_planar_c8, export=1
     ldr w7, [sp, #8]
 
     // w15 contains the number of rows we need to process
+    // counts down
     ldr w15, [sp, #16]
 
     // number of full blocks, w8 = _w / (stride1 >> 1) == _w / 64 == _w >> 6
@@ -156,6 +162,9 @@ function ff_rpi_sand8_lines_to_planar_c8, export=1
     lsl w9, w8, #6
     sub w9, w7, w9
 
+    // Skip at the end of the line to account for stride
+    sub w12, w1, w7
+
     // address delta to the beginning of the next block
     // w10 = (stride2 * stride1 - stride1) = stride2 * 128 - 128
     lsl w10, w6, #7
@@ -164,8 +173,6 @@ function ff_rpi_sand8_lines_to_planar_c8, export=1
     // w11 = row address start offset = 0
     eor w11, w11, w11
 
-    // w12 = 0, row counter
-    eor w12, w12, w12 
 row_loop_c8:
     // start of the first block within the current row
     // x13 = row offset + src
@@ -174,6 +181,10 @@ row_loop_c8:
 
     // w14 = 0, processed block count
     eor w14, w14, w14
+
+    cmp w8, #0
+    beq no_main_c8
+
 block_loop_c8:
     // load the full block -> 128 bytes, the block contains 64 interleaved U and V values 
     ld2 { v0.16b,  v1.16b }, [x13], #32
@@ -203,6 +214,7 @@ block_loop_c8:
     cmp w8, w14
     bgt block_loop_c8
 
+no_main_c8:
     // handle incomplete block at the end of every row
     eor w5, w5, w5 // point counter, this might be 
 incomplete_block_loop_c8:
@@ -224,13 +236,13 @@ incomplete_block_loop_c8:
     b incomplete_block_loop_c8
 incomplete_block_loop_end_c8:
 
-
     // increase row_offset by stride1
     add w11, w11, #128
-    add w12, w12, #1
+    add x0, x0, w12, sxtw
+    add x2, x2, w12, sxtw
 
     // jump to row_Loop_c8 iff the row count is small than the height
-    cmp w15, w12
+    subs w15, w15, #1
     bgt row_loop_c8
 
     ret
@@ -248,14 +260,12 @@ endfunc
 //  unsigned int h);            // [sp, #0]
 
 function ff_rpi_sand30_lines_to_planar_y16, export=1
-    str x19, [sp, #-8]
-    str x20, [sp, #-16]
-    str x21, [sp, #-24]
-    str x22, [sp, #-32]
-    str x23, [sp, #-40]
-    
+    stp x19, x20, [sp, #-48]!
+    stp x21, x22, [sp, #16]
+    stp x23, x24, [sp, #32]
+
     // w6 = argument h
-    ldr w6, [sp, #0]
+    ldr w6, [sp, #48]
 
     // slice_inc = ((stride2 - 1) * stride1)
     mov w5, w4
@@ -293,18 +303,10 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
 
     // store the number of bytes in w20 which we copy too much for every row
     // when the width of the frame is not a multiple of 96 (128bytes storing 96 10bit values)
-    mov w20, #3
-    mul w21, w10, w20
-    mov w20, #96
-    sub w20, w20, w21 // w20 = 96 - #integers*3
-    sub w20, w20, w11 // w20 = 96 - #integers*3 - rem. points
-    cmp w20, #96
-    cset w21, eq
-    mov w23, #96
-    mul w23, w23, w21 // 0 or 1 * 96
-    sub w20, w20, w23 // = w20 mod 96
-    lsl w20, w20, #1  // convert to bytes (*2 since we store 16bits per value)
-    
+    mov w20, #96*2
+    mul w20, w20, w9
+    sub w20, w1, w20
+
     mov w23, #0 // flag to check whether the last line had already been processed
     
     // bitmask to clear the uppper 6bits of the result values
@@ -410,7 +412,7 @@ block_loop_y16_fin:
 
 
     add x2, x2, #128          // src += stride1 (start of the next row)
-    sub x0, x0, x20           // subtract the bytes we copied too much from dst
+    add x0, x0, w20, sxtw     // subtract the bytes we copied too much from dst
     add w12, w12, #1
     b row_loop_y16
 row_loop_y16_fin:
@@ -428,7 +430,7 @@ row_loop_y16_fin:
     b row_loop_y16
 row_loop_y16_fin2:
 
-    add x0, x0, x20 // with the last row we didn't actually move the dst ptr to far ahead, therefore readd the diference
+    sub x0, x0, w20, sxtw // with the last row we didn't actually move the dst ptr to far ahead, therefore readd the diference
 
     // now we've got to handle the last block in the last row
     eor w12, w12, w12 // w12 = 0 = counter
@@ -462,12 +464,9 @@ final_values_y16:
     strh w15, [x0], #2
 final_values_y16_fin:
 
-    ldr x23, [sp, #-40]
-    ldr x22, [sp, #-32]
-    ldr x21, [sp, #-24]
-    ldr x20, [sp, #-16]
-    ldr x19, [sp, #-8]
-
+    ldp x23, x24, [sp, #32]
+    ldp x21, x22, [sp, #16]
+    ldp x19, x20, [sp], #48
     ret
 endfunc
 
@@ -520,14 +519,12 @@ endfunc
 .endm
 
 function ff_rpi_sand30_lines_to_planar_c16, export=1
-    str x19, [sp, #-8]
-    str x20, [sp, #-16]
-    str x21, [sp, #-24]
-    str x22, [sp, #-32]
-    str x23, [sp, #-40]
+    stp x19, x20, [sp, #-48]!
+    stp x21, x22, [sp, #16]
+    stp x23, x24, [sp, #32]
 
-    ldr w3, [sp, #8]    // w3 = width
-    ldr w7, [sp, #16]   // w7 = height
+    ldr w3, [sp, #48+8]    // w3 = width
+    ldr w7, [sp, #48+16]   // w7 = height
 
     // reserve space on the stack for intermediate results
     sub sp, sp, #256
@@ -554,10 +551,9 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
     add w8, w8, w19
 
     // bytes we have to move dst back by at the end of every row
-    mov w21, #48
-    mul w21, w21, w19 
-    sub w21, w21, w9
-    lsl w21, w21, #1    // w21 = (#48 * w19 - rem_pix) * 2
+    mov w21, #48*2
+    mul w21, w21, w8
+    sub w21, w1, w21
 
     mov w20, #0     // w20 = flag, last row processed
 
@@ -614,8 +610,8 @@ block_loop_c16_fin:
 
     add w10, w10, #128
     add w12, w12, #1
-    sub x0, x0, x21  // move dst pointers back by x21
-    sub x2, x2, x21
+    add x0, x0, w21, sxtw  // move dst pointers back by x21
+    add x2, x2, w21, sxtw
     b row_loop_c16
 row_loop_c16_fin:
 
@@ -627,8 +623,8 @@ row_loop_c16_fin:
     b row_loop_c16
 
 row_loop_c16_fin2:
-    add x0, x0, x21 // readd x21 in case of the last row
-    add x2, x2, x21 // so that we can write out the few remaining pixels
+    sub x0, x0, w21, sxtw // readd x21 in case of the last row
+    sub x2, x2, w21, sxtw // so that we can write out the few remaining pixels
 
     // last incomplete block to be finished
     // read operations are fine, stride2 is more than large enough even if rem_pix is 0
@@ -658,11 +654,10 @@ rem_pix_c16_loop:
 rem_pix_c16_fin:
 
     add sp, sp, #256
-    ldr x23, [sp, #-40]
-    ldr x22, [sp, #-32]
-    ldr x21, [sp, #-24]
-    ldr x20, [sp, #-16]
-    ldr x19, [sp, #-8]
+
+    ldp x23, x24, [sp, #32]
+    ldp x21, x22, [sp, #16]
+    ldp x19, x20, [sp], #48
     ret
 endfunc
 
