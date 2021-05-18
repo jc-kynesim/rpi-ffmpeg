@@ -55,6 +55,15 @@
 #define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
 #endif
 
+// V4L2_PIX_FMT_NV12_10_COL128 and V4L2_PIX_FMT_NV12_COL128 should be defined
+// in drm_fourcc.h hopefully will be sometime in the future but until then...
+#ifndef V4L2_PIX_FMT_NV12_10_COL128
+#define V4L2_PIX_FMT_NV12_10_COL128 v4l2_fourcc('N', 'C', '3', '0')
+#endif
+
+#ifndef V4L2_PIX_FMT_NV12_COL128
+#define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+#endif
 
 // Attached to buf[0] in frame
 // Pooled in hwcontext so generally create once - 1/frame
