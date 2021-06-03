@@ -28,15 +28,16 @@ else
   RPI_EXTRALIBS="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm -Wl,--end-group"
   RPIOPTS="--enable-mmal --enable-rpi"
 fi
+C=`lsb_release -sc`
 
 SHARED_LIBS="--enable-shared"
 if [ "$1" == "--noshared" ]; then
   SHARED_LIBS="--disable-shared"
-  OUT=out/$B-static-rel
+  OUT=out/$B-$C-static-rel
   echo Static libs
 else
   echo Shared libs
-  OUT=out/$B-shared-rel
+  OUT=out/$B-$C-shared-rel
 fi
 
 USR_PREFIX=$FFSRC/$OUT/install
