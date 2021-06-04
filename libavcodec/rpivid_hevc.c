@@ -1674,7 +1674,7 @@ static void dump_data(const uint8_t * p, size_t len)
 }
 #endif
 
-
+#if OPT_EMU
 static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
 {
     unsigned int z = 0;
@@ -1692,6 +1692,7 @@ static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
     }
     return b;
 }
+#endif
 
 static void WriteBitstream(dec_env_t * const de, const HEVCContext * const s) {
     const int rpi_use_emu = OPT_EMU; // FFmpeg removes emulation prevention bytes
