@@ -301,6 +301,14 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer* out)
     return 0;
 }
 
+static inline size_t fmt_height(const struct v4l2_format * const format)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
+            format->fmt.pix_mp.height :
+            format->fmt.pix.height;
+
+}
+
 int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
 {
     V4L2m2mContext *s = buf_to_m2mctx(avbuf);
@@ -320,11 +328,19 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
 
     /* 1.1 fixup special cases */
     switch (avbuf->context->av_pix_fmt) {
+    case AV_PIX_FMT_YUV420P:
+        if (avbuf->num_planes > 1)
+            break;
+        frame->linesize[1] = frame->linesize[0] / 2;
+        frame->data[1] = frame->data[0] + frame->linesize[0] * fmt_height(&avbuf->context->format);
+        frame->linesize[2] = frame->linesize[1];
+        frame->data[2] = frame->data[1] + frame->linesize[1] * fmt_height(&avbuf->context->format) / 2;
+        break;
     case AV_PIX_FMT_NV12:
         if (avbuf->num_planes > 1)
             break;
         frame->linesize[1] = avbuf->plane_info[0].bytesperline;
-        frame->data[1] = frame->buf[0]->data + avbuf->plane_info[0].bytesperline * avbuf->context->format.fmt.pix_mp.height;
+        frame->data[1] = frame->data[0] + frame->linesize[0] * fmt_height(&avbuf->context->format);
         break;
     default:
         break;
