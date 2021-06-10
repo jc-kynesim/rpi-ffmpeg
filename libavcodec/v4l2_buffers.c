@@ -425,17 +425,17 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
     case AV_PIX_FMT_NV21:
         if (avbuf->num_planes > 1)
             break;
-        frame->linesize[1] = avbuf->plane_info[0].bytesperline;
-        frame->data[1] = frame->buf[0]->data + avbuf->plane_info[0].bytesperline * avbuf->context->format.fmt.pix_mp.height;
+        frame->linesize[1] = frame->linesize[0];
+        frame->data[1] = frame->data[0] + frame->linesize[0] * ff_v4l2_get_format_height(&avbuf->context->format);
         break;
 
     case AV_PIX_FMT_YUV420P:
         if (avbuf->num_planes > 1)
             break;
-        frame->linesize[1] = avbuf->plane_info[0].bytesperline >> 1;
-        frame->linesize[2] = avbuf->plane_info[0].bytesperline >> 1;
-        frame->data[1] = frame->buf[0]->data + avbuf->plane_info[0].bytesperline * avbuf->context->format.fmt.pix_mp.height;
-        frame->data[2] = frame->data[1] + ((avbuf->plane_info[0].bytesperline * avbuf->context->format.fmt.pix_mp.height) >> 2);
+        frame->linesize[1] = frame->linesize[0] / 2;
+        frame->linesize[2] = frame->linesize[1];
+        frame->data[1] = frame->data[0] + frame->linesize[0] * ff_v4l2_get_format_height(&avbuf->context->format);
+        frame->data[2] = frame->data[1] + frame->linesize[1] * ff_v4l2_get_format_height(&avbuf->context->format) / 2;
         break;
 
     default:
