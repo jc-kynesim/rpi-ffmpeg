@@ -2821,6 +2821,16 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
         } else {
             const HWAccel *hwaccel = NULL;
             int i;
+
+            if (no_cvt_hw) {
+                config = avcodec_get_hw_config(s->codec, 0);
+                if (config->device_type == AV_HWDEVICE_TYPE_NONE) {
+                    av_log(s, AV_LOG_DEBUG, "no_cvt_hw so accepting pix_fmt %d with codec internal hwaccel\n", *p);
+                    ist->hwaccel_pix_fmt = *p;
+                    break;
+                }
+            }
+
             for (i = 0; hwaccels[i].name; i++) {
                 if (hwaccels[i].pix_fmt == *p) {
                     hwaccel = &hwaccels[i];
