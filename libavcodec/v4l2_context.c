@@ -55,16 +55,6 @@ static inline AVCodecContext *logger(V4L2Context *ctx)
     return ctx_to_m2mctx(ctx)->avctx;
 }
 
-static inline unsigned int v4l2_get_width(struct v4l2_format *fmt)
-{
-    return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.width : fmt->fmt.pix.width;
-}
-
-static inline unsigned int v4l2_get_height(struct v4l2_format *fmt)
-{
-    return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.height : fmt->fmt.pix.height;
-}
-
 static AVRational v4l2_get_sar(V4L2Context *ctx)
 {
     struct AVRational sar = { 0, 1 };
@@ -96,8 +86,8 @@ static inline unsigned int v4l2_resolution_changed(V4L2Context *ctx, struct v4l2
     if (ret)
         av_log(logger(ctx), AV_LOG_DEBUG, "%s changed (%dx%d) -> (%dx%d)\n",
             ctx->name,
-            v4l2_get_width(fmt1), v4l2_get_height(fmt1),
-            v4l2_get_width(fmt2), v4l2_get_height(fmt2));
+            ff_v4l2_get_format_width(fmt1), ff_v4l2_get_format_height(fmt1),
+            ff_v4l2_get_format_width(fmt2), ff_v4l2_get_format_height(fmt2));
 
     return ret;
 }
@@ -195,8 +185,8 @@ static int do_source_change(V4L2m2mContext * const s)
 
     reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
     if (reinit) {
-        s->capture.height = v4l2_get_height(&cap_fmt);
-        s->capture.width = v4l2_get_width(&cap_fmt);
+        s->capture.height = ff_v4l2_get_format_height(&cap_fmt);
+        s->capture.width = ff_v4l2_get_format_width(&cap_fmt);
     }
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
 
@@ -973,8 +963,8 @@ static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers
     av_log(logger(ctx), AV_LOG_DEBUG, "%s: %s %02d buffers initialized: %04ux%04u, sizeimage %08u, bytesperline %08u\n", ctx->name,
         V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ? av_fourcc2str(ctx->format.fmt.pix_mp.pixelformat) : av_fourcc2str(ctx->format.fmt.pix.pixelformat),
         req.count,
-        v4l2_get_width(&ctx->format),
-        v4l2_get_height(&ctx->format),
+        ff_v4l2_get_format_width(&ctx->format),
+        ff_v4l2_get_format_height(&ctx->format),
         V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ? ctx->format.fmt.pix_mp.plane_fmt[0].sizeimage : ctx->format.fmt.pix.sizeimage,
         V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ? ctx->format.fmt.pix_mp.plane_fmt[0].bytesperline : ctx->format.fmt.pix.bytesperline);
 
