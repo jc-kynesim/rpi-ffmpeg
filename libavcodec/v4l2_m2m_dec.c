@@ -455,10 +455,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     V4L2Context *capture, *output;
     V4L2m2mContext *s;
     V4L2m2mPriv *priv = avctx->priv_data;
+    int gf_pix_fmt;
     int ret;
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
-    avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
 
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
@@ -486,10 +486,15 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      *   - the DRM frame format is passed in the DRM frame descriptor layer.
      *       check the v4l2_get_drm_frame function.
      */
-    switch (ff_get_format(avctx, avctx->codec->pix_fmts)) {
-    default:
+
+    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s); get_format requested=%d (%s)\n",
+           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt), gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
+
+    s->output_drm = 0;
+    if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
+        avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
         s->output_drm = 1;
-        break;
     }
 
     s->device_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
@@ -607,6 +612,7 @@ static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
         .p.wrapper_name = "v4l2m2m", \
         .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
                                                          AV_PIX_FMT_NV12, \
+                                                         AV_PIX_FMT_YUV420P, \
                                                          AV_PIX_FMT_NONE}, \
         .hw_configs     = v4l2_m2m_hw_configs, \
     }
