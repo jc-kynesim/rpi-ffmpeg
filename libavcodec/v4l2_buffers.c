@@ -364,6 +364,7 @@ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
 static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, int size, int offset)
 {
     unsigned int bytesused, length;
+    int rv = 0;
 
     if (plane >= out->num_planes)
         return AVERROR(EINVAL);
@@ -371,11 +372,16 @@ static int v4l2_bufref_to_buf(V4L2Buffer *out, int plane, const uint8_t* data, i
     length = out->plane_info[plane].length;
     bytesused = FFMIN(size+offset, length);
 
-    memcpy((uint8_t*)out->plane_info[plane].mm_addr+offset, data, FFMIN(size, length-offset));
+    if (size > length - offset) {
+        size = length - offset;
+        rv = AVERROR(ENOMEM);
+    }
+
+    memcpy((uint8_t*)out->plane_info[plane].mm_addr+offset, data, size);
 
     set_buf_length(out, plane, bytesused, length);
 
-    return 0;
+    return rv;
 }
 
 static AVBufferRef * wrap_avbuf(V4L2Buffer * const avbuf)
@@ -630,7 +636,7 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
     }
 
     ret = v4l2_bufref_to_buf(out, 0, pkt->data, pkt->size, extlen);
-    if (ret)
+    if (ret && ret != AVERROR(ENOMEM))
         return ret;
 
     v4l2_set_pts(out, pkt->pts, no_rescale_pts);
@@ -638,7 +644,7 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
     if (pkt->flags & AV_PKT_FLAG_KEY)
         out->flags = V4L2_BUF_FLAG_KEYFRAME;
 
-    return 0;
+    return ret;
 }
 
 int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
