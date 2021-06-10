@@ -75,6 +75,8 @@ static char *hw_device_default_name(enum AVHWDeviceType type)
     char *name;
     size_t index_pos;
     int index, index_limit = 1000;
+    if (!type_name)
+        return NULL;
     index_pos = strlen(type_name);
     name = av_malloc(index_pos + 4);
     if (!name)
