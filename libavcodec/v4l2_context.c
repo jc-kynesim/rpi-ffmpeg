@@ -824,7 +824,10 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
         return AVERROR(EAGAIN);
 
     ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen, no_rescale_pts);
-    if (ret)
+    if (ret == AVERROR(ENOMEM))
+        av_log(logger(ctx), AV_LOG_ERROR, "Buffer overflow in %s: pkt->size=%d > buf->length=%d\n",
+               __func__, pkt->size, avbuf->planes[0].length);
+    else if (ret)
         return ret;
 
     return ff_v4l2_buffer_enqueue(avbuf);
