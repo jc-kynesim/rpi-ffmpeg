@@ -76,6 +76,12 @@ typedef struct V4L2Context {
     struct v4l2_rect selection;
 
     /**
+     * If the default size of buffer is less than this then try to
+     * set to this.
+     */
+    uint32_t min_buf_size;
+
+    /**
      * Indexed array of pointers to V4L2Buffers
      */
     AVBufferRef **bufrefs;
