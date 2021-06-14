@@ -902,7 +902,29 @@ int ff_v4l2_context_get_format(V4L2Context* ctx, int probe)
 
 int ff_v4l2_context_set_format(V4L2Context* ctx)
 {
-    return ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_S_FMT, &ctx->format);
+    int ret;
+
+    ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_S_FMT, &ctx->format);
+    if (ret != 0)
+        return ret;
+
+    // Check returned size against min size and if smaller have another go
+    // Only worry about plane[0] as this is meant to enforce limits for
+    // encoded streams where we might know a bit more about the shape
+    // than the driver
+    if (V4L2_TYPE_IS_MULTIPLANAR(ctx->format.type)) {
+        if (ctx->min_buf_size <= ctx->format.fmt.pix_mp.plane_fmt[0].sizeimage)
+            return 0;
+        ctx->format.fmt.pix_mp.plane_fmt[0].sizeimage = ctx->min_buf_size;
+    }
+    else {
+        if (ctx->min_buf_size <= ctx->format.fmt.pix.sizeimage)
+            return 0;
+        ctx->format.fmt.pix.sizeimage = ctx->min_buf_size;
+    }
+
+    ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_S_FMT, &ctx->format);
+    return ret;
 }
 
 void ff_v4l2_context_release(V4L2Context* ctx)
