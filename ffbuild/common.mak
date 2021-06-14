@@ -79,7 +79,7 @@ COMPILE_NVCC = $(call COMPILE,NVCC)
 
 %.o: %.asm
 	$(COMPILE_X86ASM)
-	-$(if $(ASMSTRIPFLAGS), $(STRIP) $(ASMSTRIPFLAGS) $@)
+	$(if $(STRIP), $(if $(ASMSTRIPFLAGS), $(STRIP) $(ASMSTRIPFLAGS) $@))
 
 %.o: %.rc
 	$(WINDRES) $(IFLAGS) --preprocessor "$(DEPWINDRES) -E -xc-header -DRC_INVOKED $(CC_DEPFLAGS)" -o $@ $<
