@@ -450,6 +450,27 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 }
 #endif
 
+static uint32_t max_coded_size(const AVCodecContext * const avctx)
+{
+    uint32_t wxh = avctx->coded_width * avctx->coded_height;
+    uint32_t size;
+
+    // Currently the only thing we try to set our own limits for is H264
+    if (avctx->codec_id != AV_CODEC_ID_H264)
+        return 0;
+
+    size = wxh * 3 / 2;
+    // H.264 Annex A table A-1 gives minCR which is either 2 or 4
+    // unfortunately that doesn't yield an actually useful limit
+    // and it should be noted that frame 0 is special cased to allow
+    // a bigger number which really isn't helpful for us. So just pick
+    // frame_size / 2
+    size /= 2;
+    // Add 64k to allow for any overheads and/or encoder hopefulness
+    // with small WxH
+    return size + (1 << 16);
+}
+
 static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 {
     V4L2Context *capture, *output;
@@ -460,6 +481,7 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
 
+    av_log(avctx, AV_LOG_INFO, "level=%d\n", avctx->level);
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
@@ -476,9 +498,11 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     output->av_codec_id = avctx->codec_id;
     output->av_pix_fmt  = AV_PIX_FMT_NONE;
+    output->min_buf_size = max_coded_size(avctx);
 
     capture->av_codec_id = AV_CODEC_ID_RAWVIDEO;
     capture->av_pix_fmt = avctx->pix_fmt;
+    capture->min_buf_size = 0;
 
     /* the client requests the codec to generate DRM frames:
      *   - data[0] will therefore point to the returned AVDRMFrameDescriptor
