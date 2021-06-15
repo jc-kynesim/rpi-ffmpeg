@@ -25,7 +25,7 @@ else
   RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
   RPI_LIBDIRS="-L$RPI_OPT_VC/lib"
   RPI_DEFINES="-D__VCCOREVER__=0x4000000 -mfpu=neon-vfpv4"
-  RPI_EXTRALIBS="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm"
+  RPI_EXTRALIBS="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm -Wl,--end-group"
   RPIOPTS="--enable-mmal --enable-rpi"
 fi
 C=`lsb_release -sc`
