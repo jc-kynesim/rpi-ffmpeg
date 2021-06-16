@@ -926,10 +926,7 @@ int ff_v4l2_context_set_format(V4L2Context* ctx)
 {
     int ret;
 
-    av_log(logger(ctx), AV_LOG_INFO, "Try with %d\n", ctx->format.fmt.pix_mp.plane_fmt[0].sizeimage);
-
     ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_S_FMT, &ctx->format);
-    av_log(logger(ctx), AV_LOG_INFO, "Got %d\n", ctx->format.fmt.pix_mp.plane_fmt[0].sizeimage);
     if (ret != 0)
         return ret;
 
@@ -948,10 +945,7 @@ int ff_v4l2_context_set_format(V4L2Context* ctx)
         ctx->format.fmt.pix.sizeimage = ctx->min_buf_size;
     }
 
-    av_log(logger(ctx), AV_LOG_INFO, "Retry with %d\n", ctx->format.fmt.pix_mp.plane_fmt[0].sizeimage);
-
     ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_S_FMT, &ctx->format);
-    av_log(logger(ctx), AV_LOG_INFO, "Got %d\n", ctx->format.fmt.pix_mp.plane_fmt[0].sizeimage);
     return ret;
 }
 
