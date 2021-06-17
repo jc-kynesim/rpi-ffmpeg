@@ -804,6 +804,9 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
 
     pthread_mutex_lock(&mbc->lock);
 
+    if (!src_be)
+        goto fail1;
+
     if (dst_be) {
         if (qe_dst_waiting(dst_be)) {
             request_info(mbc->dc, "Request buffer already waiting on start\n");
@@ -832,9 +835,10 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
 
 fail1:
     media_request_abort(&mreq);
-    queue_put_free(mbc->src, &src_be->base);
+    if (src_be)
+        queue_put_free(mbc->src, &src_be->base);
 
-#warning If src Q fails this doesnt unwind properly - separate dst Q from src Q
+// *** TODO: If src Q fails this doesnt unwind properly - separate dst Q from src Q
     if (dst_be)
         qe_dst_done(dst_be);
     pthread_mutex_unlock(&mbc->lock);
