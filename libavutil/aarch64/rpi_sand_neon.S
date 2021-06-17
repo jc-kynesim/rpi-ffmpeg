@@ -430,7 +430,7 @@ row_loop_y16_fin:
     b row_loop_y16
 row_loop_y16_fin2:
 
-    sub x0, x0, x20, sxtw // with the last row we didn't actually move the dst ptr to far ahead, therefore readd the diference
+    sub x0, x0, w20, sxtw // with the last row we didn't actually move the dst ptr to far ahead, therefore readd the diference
 
     // now we've got to handle the last block in the last row
     eor w12, w12, w12 // w12 = 0 = counter
