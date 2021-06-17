@@ -76,7 +76,7 @@ struct dmabuf_h * dmabuf_realloc(struct dmabufs_ctl * dbsc, struct dmabuf_h * ol
     while (ioctl(dbsc->fd, DMA_HEAP_IOCTL_ALLOC, &data)) {
         int err = errno;
         request_log("Failed to alloc %" PRIu64 " from dma-heap(fd=%d): %d (%s)\n",
-                data.len,
+                (uint64_t)data.len,
                 dbsc->fd,
                 err,
                 strerror(err));
