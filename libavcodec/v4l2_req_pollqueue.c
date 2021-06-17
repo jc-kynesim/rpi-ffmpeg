@@ -151,7 +151,7 @@ static void *poll_thread(void *v)
                 asize = asize ? asize * 2 : 4;
                 a = realloc(a, asize * sizeof(*a));
                 if (!a) {
-                    request_log("Failed to realloc poll array to %d\n", asize);
+                    request_log("Failed to realloc poll array to %zd\n", asize);
                     goto fail_locked;
                 }
             }
