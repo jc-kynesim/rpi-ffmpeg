@@ -111,24 +111,24 @@ typedef struct V4L2RequestContextHEVC {
 typedef struct V4L2ReqFrameDataPrivHEVC {
 } V4L2ReqFrameDataPrivHEVC;
 
-static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
+// static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
 static size_t bit_buf_size(unsigned int w, unsigned int h, unsigned int bits_minus8)
 {
-	const size_t wxh = w * h;
-	size_t bits_alloc;
+    const size_t wxh = w * h;
+    size_t bits_alloc;
 
-	/* Annex A gives a min compression of 2 @ lvl 3.1
-	 * (wxh <= 983040) and min 4 thereafter but avoid
-	 * the odity of 983041 having a lower limit than
-	 * 983040.
-	 * Multiply by 3/2 for 4:2:0
-	 */
-	bits_alloc = wxh < 983040 ? wxh * 3 / 4 :
-		wxh < 983040 * 2 ? 983040 * 3 / 4 :
-		wxh * 3 / 8;
-	/* Allow for bit depth */
-	bits_alloc += (bits_alloc * bits_minus8) / 8;
+    /* Annex A gives a min compression of 2 @ lvl 3.1
+     * (wxh <= 983040) and min 4 thereafter but avoid
+     * the odity of 983041 having a lower limit than
+     * 983040.
+     * Multiply by 3/2 for 4:2:0
+     */
+    bits_alloc = wxh < 983040 ? wxh * 3 / 4 :
+        wxh < 983040 * 2 ? 983040 * 3 / 4 :
+        wxh * 3 / 8;
+    /* Allow for bit depth */
+    bits_alloc += (bits_alloc * bits_minus8) / 8;
     return bits_alloc;
 }
 
