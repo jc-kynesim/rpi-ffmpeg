@@ -71,6 +71,8 @@ struct dmabuf_h;
 struct dmabufs_ctl;
 
 int qent_src_params_set(struct qent_src *const be, const struct timeval * timestamp);
+struct timeval qent_dst_timestamp_get(const struct qent_dst *const be_dst);
+
 // prealloc
 int qent_src_alloc(struct qent_src *const be_src, const size_t len, struct dmabufs_ctl * dbsc);
 // dbsc may be NULL if realloc not required
