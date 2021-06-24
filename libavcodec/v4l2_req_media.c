@@ -665,6 +665,7 @@ static struct qent_base * qe_dequeue(struct buf_pool *const bp,
         return NULL;
     }
 
+    be->timestamp = buffer.timestamp;
     be->status = (buffer.flags & V4L2_BUF_FLAG_ERROR) ? QENT_ERROR : QENT_DONE;
     return be;
 }
@@ -733,6 +734,11 @@ int qent_src_params_set(struct qent_src *const be_src, const struct timeval * ti
 
     be->timestamp = *timestamp;
     return 0;
+}
+
+struct timeval qent_dst_timestamp_get(const struct qent_dst *const be_dst)
+{
+    return be_dst->base.timestamp;
 }
 
 static int qent_base_realloc(struct qent_base *const be, const size_t len, struct dmabufs_ctl * dbsc)
@@ -812,6 +818,7 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
             request_info(mbc->dc, "Request buffer already waiting on start\n");
             goto fail1;
         }
+        dst_be->base.timestamp = (struct timeval){0,0};
         if (qe_v4l2_queue(&dst_be->base, mbc->vfd, NULL, &mbc->dst_fmt, true, false))
             goto fail1;
         queue_put_inuse(mbc->dst, &dst_be->base);
