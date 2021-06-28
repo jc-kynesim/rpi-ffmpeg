@@ -124,32 +124,41 @@ static int raw_sand30_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 
 
 static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
-                      const AVFrame *frame, int *got_packet)
+                      const AVFrame *src_frame, int *got_packet)
 {
     int ret;
+    AVFrame * frame = NULL;
 
 #if CONFIG_SAND
-    if (av_rpi_is_sand_frame(frame)) {
-        ret = av_rpi_is_sand8_frame(frame) ? raw_sand8_as_yuv420(avctx, pkt, frame) :
-            av_rpi_is_sand16_frame(frame) ? raw_sand16_as_yuv420(avctx, pkt, frame) :
-            av_rpi_is_sand30_frame(frame) ? raw_sand30_as_yuv420(avctx, pkt, frame) : -1;
+    if (av_rpi_is_sand_frame(src_frame)) {
+        ret = av_rpi_is_sand8_frame(src_frame) ? raw_sand8_as_yuv420(avctx, pkt, src_frame) :
+            av_rpi_is_sand16_frame(src_frame) ? raw_sand16_as_yuv420(avctx, pkt, src_frame) :
+            av_rpi_is_sand30_frame(src_frame) ? raw_sand30_as_yuv420(avctx, pkt, src_frame) : -1;
         *got_packet = (ret == 0);
         return ret;
     }
 #endif
 
+    if ((frame = av_frame_clone(src_frame)) == NULL) {
+        ret = AVERROR(ENOMEM);
+        goto fail;
+    }
+
+    if ((ret = av_frame_apply_cropping(frame, AV_FRAME_CROP_UNALIGNED)) < 0)
+        goto fail;
+
     ret = av_image_get_buffer_size(frame->format,
                                        frame->width, frame->height, 1);
     if (ret < 0)
-        return ret;
+        goto fail;
 
     if ((ret = ff_get_encode_buffer(avctx, pkt, ret, 0)) < 0)
-        return ret;
+        goto fail;
     if ((ret = av_image_copy_to_buffer(pkt->data, pkt->size,
                                        (const uint8_t **)frame->data, frame->linesize,
                                        frame->format,
                                        frame->width, frame->height, 1)) < 0)
-        return ret;
+        goto fail;
 
     if(avctx->codec_tag == AV_RL32("yuv2") && ret > 0 &&
        frame->format   == AV_PIX_FMT_YUYV422) {
@@ -165,8 +174,15 @@ static int raw_encode(AVCodecContext *avctx, AVPacket *pkt,
             AV_WB64(&pkt->data[8 * x], v << 48 | v >> 16);
         }
     }
+    pkt->flags |= AV_PKT_FLAG_KEY;
+    av_frame_free(&frame);
     *got_packet = 1;
     return 0;
+
+fail:
+    av_frame_free(&frame);
+    *got_packet = 0;
+    return ret;
 }
 
 const FFCodec ff_rawvideo_encoder = {
