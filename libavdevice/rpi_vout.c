@@ -34,6 +34,7 @@
 #include "avdevice.h"
 
 #include <stdatomic.h>
+#include <unistd.h>
 
 #pragma GCC diagnostic push
 // Many many redundant decls in the header files

@@ -38,6 +38,7 @@
 #include "pthread.h"
 #include <semaphore.h>
 #include <stdatomic.h>
+#include <unistd.h>
 
 #include "drm_fourcc.h"
 #include <drm.h>
