@@ -30,6 +30,7 @@
 
 #include "pthread.h"
 #include <semaphore.h>
+#include <unistd.h>
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
