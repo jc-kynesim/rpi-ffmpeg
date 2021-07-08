@@ -611,6 +611,27 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     return 0;
 }
 
+// Get an FFmpeg format from the v4l2 format
+static enum AVPixelFormat pixel_format_from_format(const struct v4l2_format *const format)
+{
+    switch (V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
+            format->fmt.pix_mp.pixelformat : format->fmt.pix.pixelformat) {
+    case V4L2_PIX_FMT_YUV420:
+        return AV_PIX_FMT_YUV420P;
+    case V4L2_PIX_FMT_NV12:
+        return AV_PIX_FMT_NV12;
+#if CONFIG_SAND
+    case V4L2_PIX_FMT_NV12_COL128:
+        return AV_PIX_FMT_RPI4_8;
+    case V4L2_PIX_FMT_NV12_10_COL128:
+        return AV_PIX_FMT_RPI4_10;
+#endif
+    default:
+        break;
+    }
+    return AV_PIX_FMT_NONE;
+}
+
 // Object fd & size will be zapped by this & need setting later
 static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_format * const format)
 {
@@ -974,9 +995,12 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
         return (AVERROR(-ret));
     }
+    ret = AVERROR(ENOMEM);  // Assume mem fail by default for these
+
     if ((decdev = devscan_find(ctx->devscan, src_pix_fmt)) == NULL)
     {
         av_log(avctx, AV_LOG_ERROR, "Failed to find a V4L2 device for H265\n");
+        ret = AVERROR(ENODEV);
         goto fail0;
     }
     av_log(avctx, AV_LOG_INFO, "Trying V4L2 devices: %s,%s\n",
@@ -1043,12 +1067,22 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    ret = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_DRM);
-    if (ret)
-        return ret;
+    if ((ret = ff_decode_get_hw_frames_ctx(avctx, AV_HWDEVICE_TYPE_DRM)) != 0) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to create frame ctx\n");
+        goto fail4;
+    }
 
-    return set_controls(avctx);
+    if ((ret = set_controls(avctx)) != 0) {
+        av_log(avctx, AV_LOG_ERROR, "Failed set controls\n");
+        goto fail5;
+    }
 
+    // Set our s/w format
+    avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
+    return 0;
+
+fail5:
+    av_buffer_unref(&avctx->hw_frames_ctx);
 fail4:
     mediabufs_ctl_unref(&ctx->mbufs);
 fail3:
@@ -1059,7 +1093,7 @@ fail1:
     dmabufs_ctl_delete(&ctx->dbufs);
 fail0:
     devscan_delete(&ctx->devscan);
-    return AVERROR(ENOMEM);
+    return ret;
 }
 
 
@@ -1122,29 +1156,13 @@ static int v4l2_req_hevc_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fra
     const struct v4l2_format *vfmt = mediabufs_dst_fmt(ctx->mbufs);
 
     hwfc->format = AV_PIX_FMT_DRM_PRIME;
-    hwfc->sw_format = AV_PIX_FMT_NV12;
+    hwfc->sw_format = pixel_format_from_format(vfmt);
     if (V4L2_TYPE_IS_MULTIPLANAR(vfmt->type)) {
         hwfc->width = vfmt->fmt.pix_mp.width;
         hwfc->height = vfmt->fmt.pix_mp.height;
-#if CONFIG_SAND
-        if (vfmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12_COL128) {
-            hwfc->sw_format = AV_PIX_FMT_RPI4_8;
-        }
-        else if (vfmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
-            hwfc->sw_format = AV_PIX_FMT_RPI4_10;
-        }
-#endif
     } else {
         hwfc->width = vfmt->fmt.pix.width;
         hwfc->height = vfmt->fmt.pix.height;
-#if CONFIG_SAND
-        if (vfmt->fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_COL128) {
-            hwfc->sw_format = AV_PIX_FMT_RPI4_8;
-        }
-        else if (vfmt->fmt.pix.pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
-            hwfc->sw_format = AV_PIX_FMT_RPI4_10;
-        }
-#endif
     }
 
     hwfc->pool = av_buffer_pool_init2(sizeof(V4L2MediaReqDescriptor), avctx, v4l2_req_frame_alloc, v4l2_req_pool_free);
