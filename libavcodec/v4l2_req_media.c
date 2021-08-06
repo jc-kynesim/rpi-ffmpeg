@@ -1364,7 +1364,8 @@ int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_
         while (ioctl(mbc->vfd, VIDIOC_QUERY_EXT_CTRL, ctrls)) {
             const int err = errno;
             if (err != EINTR) {
-                request_err(mbc->dc, "Failed to query ext id=%#x, err=%d\n", ctrls->id, err);
+                // Often used for probing - errors are to be expected
+                request_debug(mbc->dc, "Failed to query ext id=%#x, err=%d\n", ctrls->id, err);
                 ctrls->type = 0; // 0 is invalid
                 rv = -err;
                 break;
