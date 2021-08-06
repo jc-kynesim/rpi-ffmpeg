@@ -90,6 +90,10 @@
 #define V4L2_CTRL_FLAG_DYNAMIC_ARRAY	0x0800
 #endif
 
+#define VCAT(name, version) name##_v##version
+#define V2(n,v) VCAT(n, v)
+#define V(n) V2(n, HEVC_CTRLS_VERSION)
+
 typedef struct req_decode_ent {
     struct req_decode_ent * next;
     struct req_decode_ent * prev;
@@ -143,9 +147,19 @@ struct req_controls {
     struct v4l2_ctrl_hevc_scaling_matrix scaling_matrix;
 };
 
+typedef struct v4l2_req_decode_fns {
+    size_t frame_data_size;
+    int (*start_frame)(AVCodecContext *avctx, const uint8_t *buf, uint32_t buf_size);
+    int (*decode_slice)(AVCodecContext *avctx, const uint8_t *buf, uint32_t buf_size);
+    int (*end_frame)(AVCodecContext *avctx);
+    void (*abort_frame)(AVCodecContext *avctx);
+} v4l2_req_decode_fns;
+
 // 1 per decoder
 typedef struct V4L2RequestContextHEVC {
 //    V4L2RequestContext base;
+    const v4l2_req_decode_fns * fns;
+
     unsigned int timestamp;  // ?? maybe uint64_t
 
     int multi_slice;
@@ -1139,6 +1153,41 @@ fail:
     return rv;
 }
 
+
+static const v4l2_req_decode_fns V(ff_v4l2_req_hevc) = {
+    .frame_data_size = sizeof(V4L2MediaReqDescriptor),
+    .start_frame    = v4l2_request_hevc_start_frame,
+    .decode_slice   = v4l2_request_hevc_decode_slice,
+    .end_frame      = v4l2_request_hevc_end_frame,
+    .abort_frame    = v4l2_request_hevc_abort_frame,
+};
+
+static int v4l2_req_hevc_start_frame(AVCodecContext *avctx,
+                                     av_unused const uint8_t *buffer,
+                                     av_unused uint32_t size)
+{
+    const V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    return ctx->fns->start_frame(avctx, buffer, size);
+}
+
+static int v4l2_req_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
+{
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    return ctx->fns->decode_slice(avctx, buffer, size);
+}
+
+static int v4l2_req_hevc_end_frame(AVCodecContext *avctx)
+{
+    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
+    return ctx->fns->end_frame(avctx);
+}
+
+static void v4l2_req_hevc_abort_frame(AVCodecContext * const avctx)
+{
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    ctx->fns->abort_frame(avctx);
+}
+
 static int set_controls(AVCodecContext *avctx)
 {
     V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
@@ -1315,6 +1364,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         ctx->multi_slice = (qc.flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) != 0;
     }
 
+    ctx->fns = &V(ff_v4l2_req_hevc);
+
     if (mediabufs_src_pool_create(ctx->mbufs, ctx->dbufs, 6)) {
         av_log(avctx, AV_LOG_ERROR, "Failed to create source pool\n");
         goto fail4;
@@ -1344,6 +1395,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
 
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
+
     return 0;
 
 fail5:
@@ -1433,7 +1485,7 @@ static int v4l2_req_hevc_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fra
         hwfc->height = vfmt->fmt.pix.height;
     }
 
-    hwfc->pool = av_buffer_pool_init2(sizeof(V4L2MediaReqDescriptor), avctx, v4l2_req_frame_alloc, v4l2_req_pool_free);
+    hwfc->pool = av_buffer_pool_init2(ctx->fns->frame_data_size, avctx, v4l2_req_frame_alloc, v4l2_req_pool_free);
     if (!hwfc->pool)
         return AVERROR(ENOMEM);
 
@@ -1465,10 +1517,10 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .id             = AV_CODEC_ID_HEVC,
     .pix_fmt        = AV_PIX_FMT_DRM_PRIME,
 //    .alloc_frame    = v4l2_request_hevc_alloc_frame,
-    .start_frame    = v4l2_request_hevc_start_frame,
-    .decode_slice   = v4l2_request_hevc_decode_slice,
-    .end_frame      = v4l2_request_hevc_end_frame,
-    .abort_frame    = v4l2_request_hevc_abort_frame,
+    .start_frame    = v4l2_req_hevc_start_frame,
+    .decode_slice   = v4l2_req_hevc_decode_slice,
+    .end_frame      = v4l2_req_hevc_end_frame,
+    .abort_frame    = v4l2_req_hevc_abort_frame,
     .init           = v4l2_request_hevc_init,
     .uninit         = v4l2_request_hevc_uninit,
     .priv_data_size = sizeof(V4L2RequestContextHEVC),
