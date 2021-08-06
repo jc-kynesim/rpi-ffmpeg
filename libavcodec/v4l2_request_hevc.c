@@ -90,20 +90,31 @@
 #define V4L2_CTRL_FLAG_DYNAMIC_ARRAY	0x0800
 #endif
 
+typedef struct req_decode_ent {
+    struct req_decode_ent * next;
+    struct req_decode_ent * prev;
+    int in_q;
+} req_decode_ent;
+
+typedef struct req_decode_q {
+    pthread_mutex_t q_lock;
+    pthread_cond_t q_cond;
+    req_decode_ent * head;
+    req_decode_ent * tail;
+} req_decode_q;
+
 // Attached to buf[0] in frame
 // Pooled in hwcontext so generally create once - 1/frame
 typedef struct V4L2MediaReqDescriptor {
     AVDRMFrameDescriptor drm;
-
-    struct V4L2MediaReqDescriptor * next;
-    struct V4L2MediaReqDescriptor * prev;
-    int in_q;
 
     // Media
     uint64_t timestamp;
     struct qent_dst * qe_dst;
 
     // Decode only - should be NULL by the time we emit the frame
+    struct req_decode_ent decode_ent;
+
     struct media_request *req;
     struct qent_src *qe_src;
 
@@ -142,10 +153,7 @@ typedef struct V4L2RequestContextHEVC {
     int start_code;
     int max_slices;
 
-    pthread_mutex_t q_lock;
-    pthread_cond_t q_cond;
-    V4L2MediaReqDescriptor * decode_q_head;
-    V4L2MediaReqDescriptor * decode_q_tail;
+    req_decode_q decode_q;
 
     struct devscan *devscan;
     struct dmabufs_ctl *dbufs;
@@ -157,66 +165,80 @@ typedef struct V4L2RequestContextHEVC {
 //static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
 
-static void decode_q_add(V4L2RequestContextHEVC * const rc, V4L2MediaReqDescriptor * const d)
+static void decode_q_add(req_decode_q * const q, req_decode_ent * const d)
 {
-    pthread_mutex_lock(&rc->q_lock);
-    if (!rc->decode_q_head) {
-        rc->decode_q_head = d;
-        rc->decode_q_tail = d;
+    pthread_mutex_lock(&q->q_lock);
+    if (!q->head) {
+        q->head = d;
+        q->tail = d;
         d->prev = NULL;
     }
     else {
-        rc->decode_q_tail->next = d;
-        d->prev = rc->decode_q_tail;
-        rc->decode_q_tail = d;
+        q->tail->next = d;
+        d->prev = q->tail;
+        q->tail = d;
     }
     d->next = NULL;
     d->in_q = 1;
-    pthread_mutex_unlock(&rc->q_lock);
+    pthread_mutex_unlock(&q->q_lock);
 }
 
 // Remove entry from Q - if head wake-up anything that was waiting
-static void decode_q_remove(V4L2RequestContextHEVC * const rc, V4L2MediaReqDescriptor * const d)
+static void decode_q_remove(req_decode_q * const q, req_decode_ent * const d)
 {
     int try_signal = false;
 
     if (!d->in_q)
         return;
 
-    pthread_mutex_lock(&rc->q_lock);
+    pthread_mutex_lock(&q->q_lock);
     if (d->prev)
         d->prev->next = d->next;
     else {
         try_signal = true;  // Only need to signal if we were head
-        rc->decode_q_head = d->next;
+        q->head = d->next;
     }
 
     if (d->next)
         d->next->prev = d->prev;
     else {
         try_signal = false; // If we were a singleton then no point signalling
-        rc->decode_q_tail = d->prev;
+        q->tail = d->prev;
     }
 
     // Not strictly needed but makes debug easier
     d->next = NULL;
     d->prev = NULL;
     d->in_q = 0;
-    pthread_mutex_unlock(&rc->q_lock);
+    pthread_mutex_unlock(&q->q_lock);
 
     if (try_signal)
-        pthread_cond_broadcast(&rc->q_cond);
+        pthread_cond_broadcast(&q->q_cond);
 }
 
-static void decode_q_wait(V4L2RequestContextHEVC * const rc, V4L2MediaReqDescriptor * const d)
+static void decode_q_wait(req_decode_q * const q, req_decode_ent * const d)
 {
-    pthread_mutex_lock(&rc->q_lock);
+    pthread_mutex_lock(&q->q_lock);
 
-    while (rc->decode_q_head != d)
-        pthread_cond_wait(&rc->q_cond, &rc->q_lock);
+    while (q->head != d)
+        pthread_cond_wait(&q->q_cond, &q->q_lock);
 
-    pthread_mutex_unlock(&rc->q_lock);
+    pthread_mutex_unlock(&q->q_lock);
 }
+
+static void decode_q_uninit(req_decode_q * const q)
+{
+    pthread_mutex_destroy(&q->q_lock);
+    pthread_cond_destroy(&q->q_cond);
+}
+
+static void decode_q_init(req_decode_q * const q)
+{
+    memset(q, 0, sizeof(*q));
+    pthread_mutex_init(&q->q_lock, NULL);
+    pthread_cond_init(&q->q_cond, NULL);
+}
+
 
 static size_t bit_buf_size(unsigned int w, unsigned int h, unsigned int bits_minus8)
 {
@@ -740,7 +762,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
 
 //    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
-    decode_q_add(ctx, rd);
+    decode_q_add(&ctx->decode_q, &rd->decode_ent);
 
     rd->num_slices = 0;
     ctx->timestamp++;
@@ -980,7 +1002,7 @@ static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx)
     media_request_abort(&rd->req);
     mediabufs_src_qent_abort(ctx->mbufs, &rd->qe_src);
 
-    decode_q_remove(ctx, rd);
+    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
 }
 
 static int send_slice(AVCodecContext * const avctx,
@@ -1073,7 +1095,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
         }
     }
 
-    decode_q_wait(ctx, rd);
+    decode_q_wait(&ctx->decode_q, &rd->decode_ent);
 
     // qe_dst needs to be bound to the data buffer and only returned when that is
     // Alloc almost certainly wants to be serialised if there is any chance of blocking
@@ -1103,7 +1125,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
         }
     }
 
-    decode_q_remove(ctx, rd);
+    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
 
     // Set the drm_prime desriptor
     drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
@@ -1113,7 +1135,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     return 0;
 
 fail:
-    decode_q_remove(ctx, rd);
+    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
     return rv;
 }
 
@@ -1173,8 +1195,7 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     dmabufs_ctl_delete(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
 
-    pthread_mutex_destroy(&ctx->q_lock);
-    pthread_cond_destroy(&ctx->q_cond);
+    decode_q_uninit(&ctx->decode_q);
 
 //    if (avctx->hw_frames_ctx) {
 //        AVHWFramesContext *hwfc = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
@@ -1211,9 +1232,6 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const struct decdev * decdev;
     uint32_t src_pix_fmt = V4L2_PIX_FMT_HEVC_SLICE;
     size_t src_size;
-
-    pthread_mutex_init(&ctx->q_lock, NULL);
-    pthread_cond_init(&ctx->q_cond, NULL);
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
@@ -1322,6 +1340,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail5;
     }
 
+    decode_q_init(&ctx->decode_q);
+
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
     return 0;
@@ -1338,9 +1358,6 @@ fail1:
     dmabufs_ctl_delete(&ctx->dbufs);
 fail0:
     devscan_delete(&ctx->devscan);
-
-    pthread_mutex_destroy(&ctx->q_lock);
-    pthread_cond_destroy(&ctx->q_cond);
     return ret;
 }
 
