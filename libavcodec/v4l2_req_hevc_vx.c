@@ -957,14 +957,40 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
     const HEVCContext *h = avctx->priv_data;
     const HEVCSPS * const sps = h->ps.sps;
     struct v4l2_ctrl_hevc_sps ctrl_sps;
+    unsigned int i;
 
     // Check for var slice array
-    struct v4l2_query_ext_ctrl qc = {
-        .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS
+    struct v4l2_query_ext_ctrl qc[] = {
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS },
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SPS },
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_PPS },
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX },
+#if HEVC_CTRLS_VERSION >= 2
+        { .id = V4L2_CID_MPEG_VIDEO_HEVC_DECODE_PARAMS },
+#endif
     };
-    if (mediabufs_ctl_query_ext_ctrls(ctx->mbufs, &qc, 1)) {
-        av_log(avctx, AV_LOG_ERROR, "Slice param control missing\n");
+    // Order & size must match!
+    static const size_t ctrl_sizes[] = {
+        sizeof(struct v4l2_ctrl_hevc_slice_params),
+        sizeof(struct v4l2_ctrl_hevc_sps),
+        sizeof(struct v4l2_ctrl_hevc_pps),
+        sizeof(struct v4l2_ctrl_hevc_scaling_matrix),
+#if HEVC_CTRLS_VERSION >= 2
+        sizeof(struct v4l2_ctrl_hevc_decode_params),
+#endif
+    };
+    const unsigned int noof_ctrls = FF_ARRAY_ELEMS(qc);
+
+    if (mediabufs_ctl_query_ext_ctrls(ctx->mbufs, qc, noof_ctrls)) {
+        av_log(avctx, AV_LOG_ERROR, "Probed V%d control missing\n", HEVC_CTRLS_VERSION);
         return AVERROR(EINVAL);
+    }
+    for (i = 0; i != noof_ctrls; ++i) {
+        if (ctrl_sizes[i] != qc[i].elem_size) {
+            av_log(avctx, AV_LOG_ERROR, "Probed V%d control %d size mismatch %u != %u\n",
+                   HEVC_CTRLS_VERSION, i, ctrl_sizes[i], qc[i].elem_size);
+            return AVERROR(EINVAL);
+        }
     }
 
     fill_sps(&ctrl_sps, sps);
@@ -974,7 +1000,7 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         return AVERROR(EINVAL);
     }
 
-    ctx->multi_slice = (qc.flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) != 0;
+    ctx->multi_slice = (qc[0].flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) != 0;
     return 0;
 }
 
