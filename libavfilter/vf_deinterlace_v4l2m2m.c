@@ -154,12 +154,12 @@ static int deint_v4l2m2m_try_format(V4L2Queue *queue)
         field = V4L2_FIELD_NONE;
 
     if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
-        fmt->fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
+        fmt->fmt.pix_mp.pixelformat = V4L2_PIX_FMT_YUV420;
         fmt->fmt.pix_mp.field = field;
         fmt->fmt.pix_mp.width = ctx->width;
         fmt->fmt.pix_mp.height = ctx->height;
     } else {
-        fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_NV12;
+        fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_YUV420;
         fmt->fmt.pix.field = field;
         fmt->fmt.pix.width = ctx->width;
         fmt->fmt.pix.height = ctx->height;
@@ -170,14 +170,14 @@ static int deint_v4l2m2m_try_format(V4L2Queue *queue)
         return AVERROR(EINVAL);
 
     if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
-        if (fmt->fmt.pix_mp.pixelformat != V4L2_PIX_FMT_NV12 ||
+        if (fmt->fmt.pix_mp.pixelformat != V4L2_PIX_FMT_YUV420 ||
             fmt->fmt.pix_mp.field != field) {
             av_log(NULL, AV_LOG_DEBUG, "format not supported for type %d\n", fmt->type);
 
             return AVERROR(EINVAL);
         }
     } else {
-        if (fmt->fmt.pix.pixelformat != V4L2_PIX_FMT_NV12 ||
+        if (fmt->fmt.pix.pixelformat != V4L2_PIX_FMT_YUV420 ||
             fmt->fmt.pix.field != field) {
             av_log(NULL, AV_LOG_DEBUG, "format not supported for type %d\n", fmt->type);
 
@@ -615,7 +615,7 @@ static uint8_t *v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
         layer->planes[i].pitch = avbuf->plane_info[i].bytesperline;
     }
 
-    layer->format = DRM_FORMAT_NV12;
+    layer->format = DRM_FORMAT_YUV420;
 
     if (avbuf->num_planes == 1) {
         layer->nb_planes = 2;
