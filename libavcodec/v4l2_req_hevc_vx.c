@@ -375,13 +375,21 @@ fill_decode_params(const HEVCContext * const h,
                    struct v4l2_ctrl_hevc_decode_params * const dec)
 {
     *dec = (struct v4l2_ctrl_hevc_decode_params){
+        .pic_order_cnt_val = h->poc,
         .num_poc_st_curr_before = h->rps[ST_CURR_BEF].nb_refs,
         .num_poc_st_curr_after = h->rps[ST_CURR_AFT].nb_refs,
         .num_poc_lt_curr = h->rps[LT_CURR].nb_refs,
     };
-#warning Missing various fields we dont care about
 
     dec->num_active_dpb_entries = fill_dpb_entries(h, dec->dpb);
+
+    if (IS_IRAP(h))
+        dec->flags |= V4L2_HEVC_DECODE_PARAM_FLAG_IRAP_PIC;
+    if (IS_IDR(h))
+        dec->flags |= V4L2_HEVC_DECODE_PARAM_FLAG_IDR_PIC;
+    if (h->sh.no_output_of_prior_pics_flag)
+        dec->flags |= V4L2_HEVC_DECODE_PARAM_FLAG_NO_OUTPUT_OF_PRIOR;
+
 }
 #endif
 
