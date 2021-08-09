@@ -134,18 +134,18 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     size_t src_size;
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to find any V4L2 devices\n");
+        av_log(avctx, AV_LOG_WARNING, "Failed to find any V4L2 devices\n");
         return (AVERROR(-ret));
     }
     ret = AVERROR(ENOMEM);  // Assume mem fail by default for these
 
     if ((decdev = devscan_find(ctx->devscan, src_pix_fmt)) == NULL)
     {
-        av_log(avctx, AV_LOG_ERROR, "Failed to find a V4L2 device for H265\n");
+        av_log(avctx, AV_LOG_WARNING, "Failed to find a V4L2 device for H265\n");
         ret = AVERROR(ENODEV);
         goto fail0;
     }
-    av_log(avctx, AV_LOG_INFO, "Trying V4L2 devices: %s,%s\n",
+    av_log(avctx, AV_LOG_DEBUG, "Trying V4L2 devices: %s,%s\n",
            decdev_media_path(decdev), decdev_video_path(decdev));
 
     if ((ctx->dbufs = dmabufs_ctl_new()) == NULL) {
@@ -186,11 +186,11 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     }
 
     if (V2(ff_v4l2_req_hevc, 2).probe(avctx, ctx) == 0) {
-        av_log(avctx, AV_LOG_INFO, "HEVC API version 2 probed successfully\n");
+        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 2 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 2);
     }
     else if (V2(ff_v4l2_req_hevc, 1).probe(avctx, ctx) == 0) {
-        av_log(avctx, AV_LOG_INFO, "HEVC API version 1 probed successfully\n");
+        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 1 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 1);
     }
     else {
@@ -234,6 +234,10 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
 
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
+
+    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s\n",
+           ctx->fns->name,
+           decdev_media_path(decdev), decdev_video_path(decdev));
 
     return 0;
 

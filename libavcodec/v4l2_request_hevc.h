@@ -51,6 +51,9 @@
 #define V2(n,v) VCAT(n, v)
 #define V(n) V2(n, HEVC_CTRLS_VERSION)
 
+#define S2(x) #x
+#define STR(x) S2(x)
+
 // 1 per decoder
 struct v4l2_req_decode_fns;
 
@@ -76,6 +79,7 @@ typedef struct V4L2RequestContextHEVC {
 
 typedef struct v4l2_req_decode_fns {
     int src_pix_fmt_v4l2;
+    const char * name;
 
     // Init setup
     int (*probe)(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx);

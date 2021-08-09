@@ -982,12 +982,12 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
     const unsigned int noof_ctrls = FF_ARRAY_ELEMS(qc);
 
     if (mediabufs_ctl_query_ext_ctrls(ctx->mbufs, qc, noof_ctrls)) {
-        av_log(avctx, AV_LOG_ERROR, "Probed V%d control missing\n", HEVC_CTRLS_VERSION);
+        av_log(avctx, AV_LOG_DEBUG, "Probed V%d control missing\n", HEVC_CTRLS_VERSION);
         return AVERROR(EINVAL);
     }
     for (i = 0; i != noof_ctrls; ++i) {
         if (ctrl_sizes[i] != qc[i].elem_size) {
-            av_log(avctx, AV_LOG_ERROR, "Probed V%d control %d size mismatch %u != %u\n",
+            av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %d size mismatch %u != %u\n",
                    HEVC_CTRLS_VERSION, i, ctrl_sizes[i], qc[i].elem_size);
             return AVERROR(EINVAL);
         }
@@ -1147,7 +1147,7 @@ static int frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
 
 const v4l2_req_decode_fns V(ff_v4l2_req_hevc) = {
     .src_pix_fmt_v4l2 = V4L2_PIX_FMT_HEVC_SLICE,
-
+    .name = "V4L2 HEVC stateless V" STR(HEVC_CTRLS_VERSION),
     .probe = probe,
     .set_controls = set_controls,
 
