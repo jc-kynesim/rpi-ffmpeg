@@ -374,6 +374,8 @@ static void
 fill_decode_params(const HEVCContext * const h,
                    struct v4l2_ctrl_hevc_decode_params * const dec)
 {
+    unsigned int i;
+
     *dec = (struct v4l2_ctrl_hevc_decode_params){
         .pic_order_cnt_val = h->poc,
         .num_poc_st_curr_before = h->rps[ST_CURR_BEF].nb_refs,
@@ -382,6 +384,16 @@ fill_decode_params(const HEVCContext * const h,
     };
 
     dec->num_active_dpb_entries = fill_dpb_entries(h, dec->dpb);
+
+    // The docn does seem to ask that we fit our 32 bit signed POC into
+    // a U8 so... (To be fair 16 bits would be enough)
+    // Luckily we (Pi) don't use these fields
+    for (i = 0; i != h->rps[ST_CURR_BEF].nb_refs; ++i)
+        dec->poc_st_curr_before[i] = h->rps[ST_CURR_BEF].ref[i]->poc;
+    for (i = 0; i != h->rps[ST_CURR_AFT].nb_refs; ++i)
+        dec->poc_st_curr_after[i] = h->rps[ST_CURR_AFT].ref[i]->poc;
+    for (i = 0; i != h->rps[LT_CURR].nb_refs; ++i)
+        dec->poc_lt_curr[i] = h->rps[LT_CURR].ref[i]->poc;
 
     if (IS_IRAP(h))
         dec->flags |= V4L2_HEVC_DECODE_PARAM_FLAG_IRAP_PIC;
