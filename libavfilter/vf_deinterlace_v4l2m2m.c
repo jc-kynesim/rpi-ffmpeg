@@ -597,8 +597,9 @@ static void v4l2_free_buffer(void *opaque, uint8_t *unused)
     deint_v4l2m2m_destroy_context(ctx);
 }
 
-static uint8_t *v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
+static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
 {
+    int av_pix_fmt = AV_PIX_FMT_YUV420P;
     AVDRMFrameDescriptor *drm_desc = &avbuf->drm_frame;
     AVDRMLayerDescriptor *layer;
 
@@ -615,17 +616,58 @@ static uint8_t *v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
         layer->planes[i].pitch = avbuf->plane_info[i].bytesperline;
     }
 
-    layer->format = DRM_FORMAT_YUV420;
+    switch (av_pix_fmt) {
+    case AV_PIX_FMT_YUYV422:
 
-    if (avbuf->num_planes == 1) {
+        layer->format = DRM_FORMAT_YUYV;
+        layer->nb_planes = 1;
+
+        break;
+
+    case AV_PIX_FMT_NV12:
+    case AV_PIX_FMT_NV21:
+
+        layer->format = av_pix_fmt == AV_PIX_FMT_NV12 ?
+            DRM_FORMAT_NV12 : DRM_FORMAT_NV21;
+
+        if (avbuf->num_planes > 1)
+            break;
+
         layer->nb_planes = 2;
 
         layer->planes[1].object_index = 0;
-        layer->planes[1].offset = avbuf->plane_info[0].bytesperline * height;
+        layer->planes[1].offset = avbuf->plane_info[0].bytesperline *
+            height;
         layer->planes[1].pitch = avbuf->plane_info[0].bytesperline;
+        break;
+
+    case AV_PIX_FMT_YUV420P:
+
+        layer->format = DRM_FORMAT_YUV420;
+
+        if (avbuf->num_planes > 1)
+            break;
+
+        layer->nb_planes = 3;
+
+        layer->planes[1].object_index = 0;
+        layer->planes[1].offset = avbuf->plane_info[0].bytesperline *
+            height;
+        layer->planes[1].pitch = avbuf->plane_info[0].bytesperline >> 1;
+
+        layer->planes[2].object_index = 0;
+        layer->planes[2].offset = layer->planes[1].offset +
+            ((avbuf->plane_info[0].bytesperline *
+              height) >> 2);
+        layer->planes[2].pitch = avbuf->plane_info[0].bytesperline >> 1;
+        break;
+
+    default:
+        drm_desc->nb_layers = 0;
+        break;
     }
 
-    return (uint8_t *)drm_desc;
+    return (uint8_t *) drm_desc;
 }
 
 static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int timeout)
