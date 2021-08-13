@@ -713,6 +713,10 @@ static int v4l2_get_coded_format(V4L2Context* ctx, uint32_t *p)
 static void flush_all_buffers_status(V4L2Context* const ctx)
 {
     int i;
+
+    if (!ctx->bufrefs)
+        return;
+
     for (i = 0; i < ctx->num_buffers; ++i) {
         struct V4L2Buffer * const buf = (struct V4L2Buffer *)ctx->bufrefs[i]->data;
         if (buf->status == V4L2BUF_IN_DRIVER)
