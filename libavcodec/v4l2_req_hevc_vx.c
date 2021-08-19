@@ -827,13 +827,15 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
 static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx)
 {
     const HEVCContext * const h = avctx->priv_data;
-    V4L2MediaReqDescriptor * const rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
-    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    if (h->ref != NULL) {
+        V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)h->ref->frame->data[0];
+        V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
 
-    media_request_abort(&rd->req);
-    mediabufs_src_qent_abort(ctx->mbufs, &rd->qe_src);
+        media_request_abort(&rd->req);
+        mediabufs_src_qent_abort(ctx->mbufs, &rd->qe_src);
 
-    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
+        decode_q_remove(&ctx->decode_q, &rd->decode_ent);
+    }
 }
 
 static int send_slice(AVCodecContext * const avctx,
