@@ -539,6 +539,14 @@ static int deint_v4l2m2m_enqueue(V4L2Queue *queue, const AVFrame* frame)
     else
         buf->buffer.m.fd = drm_desc->objects[0].fd;
 
+    if (frame->interlaced_frame)
+    {
+        if (frame->top_field_first)
+            buf->buffer.field = V4L2_FIELD_INTERLACED_TB;
+        else
+            buf->buffer.field = V4L2_FIELD_INTERLACED_BT;
+    }
+
     return deint_v4l2m2m_enqueue_buffer(buf);
 }
 
