@@ -64,6 +64,7 @@ typedef struct V4L2Buffer {
     int reenqueue;
     int fd;
     struct v4l2_buffer buffer;
+    AVFrame frame;
     struct v4l2_plane planes[VIDEO_MAX_PLANES];
     int num_planes;
     V4L2PlaneInfo plane_info[VIDEO_MAX_PLANES];
@@ -85,6 +86,7 @@ typedef struct DeintV4L2M2MContextShared {
     int height;
     int orig_width;
     int orig_height;
+    AVRational sample_aspect_ratio;
     atomic_uint refcount;
 
     AVBufferRef *hw_frames_ctx;
@@ -97,6 +99,8 @@ typedef struct DeintV4L2M2MContextShared {
     AVFrame *cur_in_frame;
     AVFrame *prev_in_frame;
     unsigned int field_order;
+    int64_t last_pts;
+    int64_t frame_interval;
 
     V4L2Queue output;
     V4L2Queue capture;
@@ -107,6 +111,36 @@ typedef struct DeintV4L2M2MContext {
 
     DeintV4L2M2MContextShared *shared;
 } DeintV4L2M2MContext;
+
+#define USEC_PER_SEC 1000000
+
+static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts)
+{
+    if (pts == AV_NOPTS_VALUE)
+    {
+        out->buffer.timestamp.tv_usec = 0;
+        out->buffer.timestamp.tv_sec = 1000000;
+    }
+    else
+    {
+        out->buffer.timestamp.tv_usec = pts % USEC_PER_SEC;
+        out->buffer.timestamp.tv_sec = pts / USEC_PER_SEC;
+    }
+}
+
+static inline int64_t v4l2_get_pts(V4L2Buffer *avbuf)
+{
+    if (avbuf->buffer.timestamp.tv_sec == 1000000 && avbuf->buffer.timestamp.tv_usec == 0)
+    {
+        return AV_NOPTS_VALUE;
+    }
+    else
+    {
+        return (int64_t)avbuf->buffer.timestamp.tv_sec * USEC_PER_SEC +
+                        avbuf->buffer.timestamp.tv_usec;
+    }
+}
+
 
 static int deint_v4l2m2m_prepare_context(DeintV4L2M2MContextShared *ctx)
 {
@@ -525,10 +559,14 @@ static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, const AVFrame* frame)
     AVDRMFrameDescriptor *drm_desc = (AVDRMFrameDescriptor *)frame->data[0];
     V4L2Buffer *buf;
     int i;
+    int ret;
 
-    if (V4L2_TYPE_IS_OUTPUT(queue->format.type))
-        while (deint_v4l2m2m_dequeue_buffer(queue, 0));
-
+    if (V4L2_TYPE_IS_OUTPUT(queue->format.type)) {
+        V4L2Buffer* avbuf;
+        while (avbuf = deint_v4l2m2m_dequeue_buffer(queue, 0), avbuf) {
+            av_frame_unref(&avbuf->frame);
+        }
+    }
     buf = deint_v4l2m2m_find_free_buf(queue);
     if (!buf)
         return AVERROR(ENOMEM);
@@ -546,6 +584,12 @@ static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, const AVFrame* frame)
         else
             buf->buffer.field = V4L2_FIELD_INTERLACED_BT;
     }
+
+    v4l2_set_pts(buf, frame->pts);
+
+    ret = av_frame_ref(&buf->frame, frame);
+    if (ret != 0)
+       av_log(NULL, AV_LOG_ERROR, "%s: av_frame_ref returned %d\n", __func__, ret);
 
     return deint_v4l2m2m_enqueue_buffer(buf);
 }
@@ -685,8 +729,8 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
 
     avbuf = deint_v4l2m2m_dequeue_buffer(queue, timeout);
     if (!avbuf) {
-        av_log(NULL, AV_LOG_ERROR, "dequeueing failed\n");
-        return AVERROR(EINVAL);
+        av_log(NULL, AV_LOG_DEBUG, "%s: No buffer to dequeue (timeout=%d)\n", __func__, timeout);
+        return AVERROR(EAGAIN);
     }
 
     frame->buf[0] = av_buffer_create((uint8_t *) &avbuf->drm_frame,
@@ -703,6 +747,18 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
         frame->hw_frames_ctx = av_buffer_ref(ctx->hw_frames_ctx);
     frame->height = ctx->height;
     frame->width = ctx->width;
+    frame->sample_aspect_ratio = ctx->sample_aspect_ratio;
+
+    frame->pts = v4l2_get_pts(avbuf);
+
+    if (frame->pts == AV_NOPTS_VALUE || frame->pts == ctx->last_pts)
+        frame->pts = ctx->last_pts + ctx->frame_interval;
+
+    frame->best_effort_timestamp = frame->pts;
+
+    ctx->last_pts = frame->pts;
+
+    v4l2_set_pts(avbuf, frame->pts);
 
     if (avbuf->buffer.flags & V4L2_BUF_FLAG_ERROR) {
         av_log(NULL, AV_LOG_ERROR, "driver decode error\n");
@@ -712,80 +768,39 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
     return 0;
 }
 
-static int deint_v4l2m2m_dequeue(AVFilterContext *avctx, AVFrame *input_frame)
+
+static int deint_v4l2m2m_request_frame(AVFilterLink *link)
 {
+    AVFilterContext *avctx         = link->src;
     DeintV4L2M2MContext *priv      = avctx->priv;
     DeintV4L2M2MContextShared *ctx = priv->shared;
     AVFilterLink *outlink          = avctx->outputs[0];
-    AVFrame *output_frame_1, *output_frame_2;
-    int64_t first_pts = AV_NOPTS_VALUE;
+    AVFrame *output_frame;
     int err;
 
-    av_log(priv, AV_LOG_DEBUG, "input pts: %"PRId64" (field %d)\n",
-          input_frame->pts, ctx->field_order);
-
-    output_frame_1 = av_frame_alloc();
-    if (!output_frame_1)
+    output_frame = av_frame_alloc();
+    if (!output_frame) {
+        av_log(priv, AV_LOG_ERROR, "%s: error %d allocating frame\n", __func__, err);
         return AVERROR(ENOMEM);
-
-    err = deint_v4l2m2m_dequeue_frame(&ctx->capture, output_frame_1, 500);
-    if (err < 0) {
-        av_log(priv, AV_LOG_ERROR, "no 1st frame (field %d)\n", ctx->field_order);
-        goto fail_out1;
     }
 
-    err = av_frame_copy_props(output_frame_1, input_frame);
-    if (err < 0)
-        goto fail_out1;
-
-    output_frame_1->interlaced_frame = 0;
-
-    output_frame_2 = av_frame_alloc();
-    if (!output_frame_2) {
-        err = AVERROR(ENOMEM);
-        goto fail_out1;
-    }
-
-    err = deint_v4l2m2m_dequeue_frame(&ctx->capture, output_frame_2, 500);
-    if (err < 0) {
-        av_log(priv, AV_LOG_ERROR, "no 2nd frame (field %d)\n", ctx->field_order);
-        goto fail_out2;
-    }
-
-    err = av_frame_copy_props(output_frame_2, input_frame);
-    if (err < 0)
-        goto fail_out2;
-
-    output_frame_2->interlaced_frame = 0;
-
-    if (ctx->prev_in_frame && ctx->prev_in_frame->pts != AV_NOPTS_VALUE
-       && input_frame->pts != AV_NOPTS_VALUE) {
-      first_pts = (ctx->prev_in_frame->pts + input_frame->pts) / 2;
-      av_log(priv, AV_LOG_DEBUG, "calculated first pts %"PRId64"\n", first_pts);
-    }
-
-    output_frame_1->pts = first_pts;
-
-    err = ff_filter_frame(outlink, output_frame_1);
-    if (err < 0) {
-        av_frame_free(&output_frame_2);
+    err = deint_v4l2m2m_dequeue_frame(&ctx->capture, output_frame, 0);
+    if (err) {
+        if (err != AVERROR(EAGAIN))
+        av_log(priv, AV_LOG_ERROR, "%s: deint_v4l2m2m_dequeue_frame error %d\n", __func__, err);
+        av_frame_free(&output_frame);
         return err;
     }
-    err = ff_filter_frame(outlink, output_frame_2);
 
-    if (err < 0)
+    output_frame->interlaced_frame = 0;
+
+    err = ff_filter_frame(outlink, output_frame);
+    if (err) {
+        av_log(priv, AV_LOG_ERROR, "%s: ff_filter_frame error %d\n", __func__, err);
+        av_frame_free(&output_frame);
         return err;
-
-    av_log(priv, AV_LOG_DEBUG, "1st frame pts: %"PRId64" 2nd frame pts: %"PRId64" first pts: %"PRId64" (field %d)\n",
-           output_frame_1->pts, output_frame_2->pts, first_pts, ctx->field_order);
-
+    }
     return 0;
-
-fail_out2:
-    av_frame_free(&output_frame_2);
-fail_out1:
-    av_frame_free(&output_frame_1);
-    return err;
 }
 
 static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
@@ -836,10 +851,11 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     V4L2Queue *output              = &ctx->output;
     int ret;
 
-    av_log(priv, AV_LOG_DEBUG, "input pts: %"PRId64" field :%d interlaced: %d\n",
-          in->pts, in->top_field_first, in->interlaced_frame);
+    av_log(priv, AV_LOG_DEBUG, "%s: input pts: %"PRId64" (%"PRId64") field :%d interlaced: %d\n",
+          __func__, in->pts, AV_NOPTS_VALUE, in->top_field_first, in->interlaced_frame);
 
     ctx->cur_in_frame = in;
+    ctx->sample_aspect_ratio = in->sample_aspect_ratio;
 
     if (ctx->field_order == V4L2_FIELD_ANY) {
         AVDRMFrameDescriptor *drm_desc = (AVDRMFrameDescriptor *)in->data[0];
@@ -880,10 +896,6 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     if (ret)
         return ret;
 
-    ret = deint_v4l2m2m_dequeue(avctx, in);
-    if (ret)
-        return ret;
-
     if (ctx->prev_in_frame)
 	av_frame_free(&ctx->prev_in_frame);
 
@@ -912,6 +924,8 @@ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
     ctx->field_order = V4L2_FIELD_ANY;
     ctx->cur_in_frame = NULL;
     ctx->prev_in_frame = NULL;
+    ctx->last_pts = 0;
+    ctx->frame_interval = 1000000 / 60;
     atomic_init(&ctx->refcount, 1);
 
     return 0;
@@ -946,6 +960,7 @@ static const AVFilterPad deint_v4l2m2m_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = deint_v4l2m2m_config_props,
+        .request_frame = deint_v4l2m2m_request_frame,
     },
     { NULL }
 };
