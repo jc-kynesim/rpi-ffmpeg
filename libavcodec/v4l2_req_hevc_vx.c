@@ -911,6 +911,13 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     unsigned int i;
     int rv;
 
+    // It is possible, though maybe a bug, to get an end_frame without
+    // a previous start_frame.  If we do then give up.
+    if (!decode_q_in_q(&rd->decode_ent)) {
+        av_log(avctx, AV_LOG_DEBUG, "%s: Frame not in decode Q\n", __func__);
+        return AVERROR_INVALIDDATA;
+    }
+
     {
         const ScalingList *sl = h->ps.pps->scaling_list_data_present_flag ?
                                     &h->ps.pps->scaling_list :
