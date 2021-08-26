@@ -4,6 +4,11 @@
 
 #include "v4l2_req_decode_q.h"
 
+int decode_q_in_q(const req_decode_ent * const d)
+{
+    return d->in_q;
+}
+
 void decode_q_add(req_decode_q * const q, req_decode_ent * const d)
 {
     pthread_mutex_lock(&q->q_lock);
