@@ -14,6 +14,7 @@ typedef struct req_decode_q {
     req_decode_ent * tail;
 } req_decode_q;
 
+int decode_q_in_q(const req_decode_ent * const d);
 void decode_q_add(req_decode_q * const q, req_decode_ent * const d);
 void decode_q_remove(req_decode_q * const q, req_decode_ent * const d);
 void decode_q_wait(req_decode_q * const q, req_decode_ent * const d);
