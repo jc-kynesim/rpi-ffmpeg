@@ -520,7 +520,7 @@ static V4L2Buffer *deint_v4l2m2m_find_free_buf(V4L2Queue *queue)
     return NULL;
 }
 
-static int deint_v4l2m2m_enqueue(V4L2Queue *queue, const AVFrame* frame)
+static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, const AVFrame* frame)
 {
     AVDRMFrameDescriptor *drm_desc = (AVDRMFrameDescriptor *)frame->data[0];
     V4L2Buffer *buf;
@@ -876,7 +876,7 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
             return ret;
     }
 
-    ret = deint_v4l2m2m_enqueue(output, in);
+    ret = deint_v4l2m2m_enqueue_frame(output, in);
     if (ret)
         return ret;
 
