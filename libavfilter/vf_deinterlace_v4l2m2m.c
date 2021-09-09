@@ -699,7 +699,8 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
 
     frame->data[0] = (uint8_t *)v4l2_get_drm_frame(avbuf, ctx->orig_height);
     frame->format = AV_PIX_FMT_DRM_PRIME;
-    frame->hw_frames_ctx = av_buffer_ref(ctx->hw_frames_ctx);
+    if (ctx->hw_frames_ctx)
+        frame->hw_frames_ctx = av_buffer_ref(ctx->hw_frames_ctx);
     frame->height = ctx->height;
     frame->width = ctx->width;
 
@@ -807,15 +808,11 @@ static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
     if (ret)
         return ret;
 
-    if (!inlink->hw_frames_ctx) {
-        av_log(priv, AV_LOG_ERROR, "No hw context provided on input\n");
-        return AVERROR(EINVAL);
-    }
-
-    ctx->hw_frames_ctx = av_buffer_ref(inlink->hw_frames_ctx);
-    if (!ctx->hw_frames_ctx)
+    if (inlink->hw_frames_ctx) {
+        ctx->hw_frames_ctx = av_buffer_ref(inlink->hw_frames_ctx);
+        if (!ctx->hw_frames_ctx)
             return AVERROR(ENOMEM);
-
+    }
     return 0;
 }
 
