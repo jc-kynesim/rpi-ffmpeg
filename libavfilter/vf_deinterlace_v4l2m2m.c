@@ -222,17 +222,23 @@ static int deint_v4l2m2m_try_format(V4L2Queue *queue)
     return 0;
 }
 
-static int deint_v4l2m2m_set_format(V4L2Queue *queue, uint32_t field, int width, int height)
+static int deint_v4l2m2m_set_format(V4L2Queue *queue, uint32_t field, int width, int height, int pitch, int ysize)
 {
     struct v4l2_format *fmt        = &queue->format;
     DeintV4L2M2MContextShared *ctx = queue->ctx;
     int ret;
 
+    struct v4l2_selection sel = {
+        .type = fmt->type,
+        .target = V4L2_TYPE_IS_OUTPUT(fmt->type) ? V4L2_SEL_TGT_CROP_BOUNDS : V4L2_SEL_TGT_COMPOSE_BOUNDS,
+    };
+
     if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
         fmt->fmt.pix_mp.field = field;
         fmt->fmt.pix_mp.width = width;
-        fmt->fmt.pix_mp.height = height;
-        /* TODO: bytesperline and imagesize */
+        fmt->fmt.pix_mp.height = ysize / pitch;
+        fmt->fmt.pix_mp.plane_fmt[0].bytesperline = pitch;
+        fmt->fmt.pix_mp.plane_fmt[0].sizeimage = ysize + (ysize >> 1);
     } else {
         fmt->fmt.pix.field = field;
         fmt->fmt.pix.width = width;
@@ -244,6 +250,21 @@ static int deint_v4l2m2m_set_format(V4L2Queue *queue, uint32_t field, int width,
     ret = ioctl(ctx->fd, VIDIOC_S_FMT, fmt);
     if (ret)
         av_log(NULL, AV_LOG_ERROR, "VIDIOC_S_FMT failed: %d\n", ret);
+
+    ret = ioctl(ctx->fd, VIDIOC_G_SELECTION, &sel);
+    if (ret)
+        av_log(NULL, AV_LOG_ERROR, "VIDIOC_G_SELECTION failed: %d\n", ret);
+
+    sel.r.width = width;
+    sel.r.height = height;
+    sel.r.left = 0;
+    sel.r.top = 0;
+    sel.target = V4L2_TYPE_IS_OUTPUT(fmt->type) ? V4L2_SEL_TGT_CROP : V4L2_SEL_TGT_COMPOSE,
+    sel.flags = V4L2_SEL_FLAG_LE;
+
+    ret = ioctl(ctx->fd, VIDIOC_S_SELECTION, &sel);
+    if (ret)
+        av_log(NULL, AV_LOG_ERROR, "VIDIOC_S_SELECTION failed: %d\n", ret);
 
     return ret;
 }
@@ -883,11 +904,11 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
         else
             ctx->field_order = V4L2_FIELD_INTERLACED_BT;
 
-        ret = deint_v4l2m2m_set_format(output, ctx->field_order, ctx->orig_width, ctx->orig_height);
+        ret = deint_v4l2m2m_set_format(output, ctx->field_order, ctx->width, ctx->height, ctx->orig_width, drm_desc->layers[0].planes[1].offset);
         if (ret)
             return ret;
 
-	ret = deint_v4l2m2m_set_format(capture, V4L2_FIELD_NONE, ctx->orig_width, ctx->orig_height);
+	ret = deint_v4l2m2m_set_format(capture, V4L2_FIELD_NONE, ctx->width, ctx->height, ctx->orig_width, drm_desc->layers[0].planes[1].offset);
         if (ret)
             return ret;
 
