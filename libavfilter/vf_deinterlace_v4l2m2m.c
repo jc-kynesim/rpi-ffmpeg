@@ -954,9 +954,9 @@ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
     priv->shared = ctx;
     ctx->fd = -1;
     ctx->output.ctx = ctx;
-    ctx->output.num_buffers = 6;
+    ctx->output.num_buffers = 10;
     ctx->capture.ctx = ctx;
-    ctx->capture.num_buffers = 6;
+    ctx->capture.num_buffers = 8;
     ctx->done = 0;
     ctx->field_order = V4L2_FIELD_ANY;
     ctx->cur_in_frame = NULL;
