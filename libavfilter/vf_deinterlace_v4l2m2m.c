@@ -554,6 +554,20 @@ static V4L2Buffer *deint_v4l2m2m_find_free_buf(V4L2Queue *queue)
     return NULL;
 }
 
+static void deint_v4l2m2m_unref_queued(V4L2Queue *queue)
+{
+    int i;
+    V4L2Buffer *buf = NULL;
+
+    if (!queue || !queue->buffers)
+        return;
+    for (i = 0; i < queue->num_buffers; i++) {
+        buf = &queue->buffers[i];
+        if (queue->buffers[i].enqueued)
+            av_frame_unref(&buf->frame);
+    }
+}
+
 static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, const AVFrame* frame)
 {
     AVDRMFrameDescriptor *drm_desc = (AVDRMFrameDescriptor *)frame->data[0];
@@ -614,6 +628,8 @@ static void deint_v4l2m2m_destroy_context(DeintV4L2M2MContextShared *ctx)
                 if (capture->buffers[i].fd >= 0)
                     close(capture->buffers[i].fd);
             }
+
+        deint_v4l2m2m_unref_queued(output);
 
 	if (ctx->cur_in_frame)
 		av_frame_free(&ctx->cur_in_frame);
