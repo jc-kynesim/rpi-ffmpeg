@@ -54,6 +54,7 @@ struct drm_setup {
 
 typedef struct drm_aux_s {
     unsigned int fb_handle;
+    uint32_t bo_handles[AV_DRM_MAX_PLANES];
     AVFrame * frame;
 } drm_aux_t;
 
@@ -167,6 +168,13 @@ static void da_uninit(drm_display_env_t * const de, drm_aux_t * da)
         da->fb_handle = 0;
     }
 
+    for (unsigned int i = 0; i != AV_DRM_MAX_PLANES; ++i) {
+        if (da->bo_handles[i]) {
+            struct drm_gem_close gem_close = {.handle = da->bo_handles[i]};
+            drmIoctl(de->drm_fd, DRM_IOCTL_GEM_CLOSE, &gem_close);
+            da->bo_handles[i] = 0;
+        }
+    }
     av_frame_free(&da->frame);
 }
 
@@ -212,14 +220,13 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
         uint32_t pitches[4] = {0};
         uint32_t offsets[4] = {0};
         uint64_t modifiers[4] = {0};
-        uint32_t bo_object_handles[4] = {0};
         uint32_t bo_handles[4] = {0};
         int i, j, n;
 
         da->frame = frame;
 
         for (i = 0; i < desc->nb_objects; ++i) {
-            if (drmPrimeFDToHandle(de->drm_fd, desc->objects[i].fd, bo_object_handles + i) != 0) {
+            if (drmPrimeFDToHandle(de->drm_fd, desc->objects[i].fd, da->bo_handles + i) != 0) {
                 av_log(s, AV_LOG_WARNING, "drmPrimeFDToHandle[%d](%d) failed: %s\n", i, desc->objects[i].fd, ERRSTR);
                 return -1;
             }
@@ -233,7 +240,7 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
                 pitches[n] = p->pitch;
                 offsets[n] = p->offset;
                 modifiers[n] = obj->format_modifier;
-                bo_handles[n] = bo_object_handles[p->object_index];
+                bo_handles[n] = da->bo_handles[p->object_index];
                 ++n;
             }
         }
@@ -588,6 +595,9 @@ static void drm_vout_deinit(struct AVFormatContext * s)
     pthread_join(de->q_thread, NULL);
     sem_destroy(&de->q_sem_in);
     sem_destroy(&de->q_sem_out);
+
+    for (unsigned int i = 0; i != AUX_SIZE; ++i)
+        da_uninit(de, de->aux + i);
 
     av_frame_free(&de->q_next);
 
