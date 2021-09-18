@@ -82,7 +82,8 @@ int qent_dst_dup_fd(const struct qent_dst *const be, unsigned int plane);
 MediaBufsStatus qent_dst_wait(struct qent_dst *const be);
 void qent_dst_delete(struct qent_dst *const be);
 // Returns a qent_dst to its mbc free Q or deletes it if the mbc is dead
-void qent_dst_free(struct qent_dst ** const pbe_dst);
+void qent_dst_unref(struct qent_dst ** const pbe_dst);
+struct qent_dst * qent_dst_ref(struct qent_dst * const be_dst);
 
 const uint8_t * qent_dst_data(struct qent_dst *const be, unsigned int buf_no);
 MediaBufsStatus qent_dst_read_start(struct qent_dst *const be);

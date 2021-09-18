@@ -965,13 +965,12 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
         }
     }
 
-    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
-
     // Set the drm_prime desriptor
     drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
     rd->drm.objects[0].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, 0));
     rd->drm.objects[0].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, 0));
 
+    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
     return 0;
 
 fail:
@@ -1087,7 +1086,7 @@ static void v4l2_req_frame_free(void *opaque, uint8_t *data)
 
     av_log(NULL, AV_LOG_DEBUG, "%s: avctx=%p data=%p\n", __func__, avctx, data);
 
-    qent_dst_free(&rd->qe_dst);
+    qent_dst_unref(&rd->qe_dst);
 
     // We don't expect req or qe_src to be set
     if (rd->req || rd->qe_src)
