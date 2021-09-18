@@ -17,6 +17,7 @@
 #define DMABUF_NAME1  "/dev/dma_heap/linux,cma"
 #define DMABUF_NAME2  "/dev/dma_heap/reserved"
 
+#define TRACE_ALLOC 0
 
 struct dmabufs_ctl {
     int fd;
@@ -29,6 +30,11 @@ struct dmabuf_h {
     size_t len;
     void * mapptr;
 };
+
+#if TRACE_ALLOC
+static unsigned int total_bufs = 0;
+static size_t total_size = 0;
+#endif
 
 struct dmabuf_h * dmabuf_import(int fd, size_t size)
 {
@@ -49,6 +55,13 @@ struct dmabuf_h * dmabuf_import(int fd, size_t size)
         .size = size,
         .mapptr = MAP_FAILED
     };
+
+#if TRACE_ALLOC
+    ++total_bufs;
+    total_size += dh->size;
+    request_log("%s: Import: %zd, total=%zd, bufs=%d\n", __func__, dh->size, total_size, total_bufs);
+#endif
+
     return dh;
 }
 
@@ -90,6 +103,12 @@ struct dmabuf_h * dmabuf_realloc(struct dmabufs_ctl * dbsc, struct dmabuf_h * ol
         .size = (size_t)data.len,
         .mapptr = MAP_FAILED
     };
+
+#if TRACE_ALLOC
+    ++total_bufs;
+    total_size += dh->size;
+    request_log("%s: Alloc: %zd, total=%zd, bufs=%d\n", __func__, dh->size, total_size, total_bufs);
+#endif
 
     return dh;
 
@@ -185,6 +204,12 @@ void dmabuf_free(struct dmabuf_h * dh)
 {
     if (!dh)
         return;
+
+#if TRACE_ALLOC
+    --total_bufs;
+    total_size -= dh->size;
+    request_log("%s: Free: %zd, total=%zd, bufs=%d\n", __func__, dh->size, total_size, total_bufs);
+#endif
 
     if (dh->mapptr != MAP_FAILED)
         munmap(dh->mapptr, dh->size);
