@@ -4,14 +4,15 @@
 struct polltask;
 struct pollqueue;
 
-struct polltask *polltask_new(const int fd, const short events,
+struct polltask *polltask_new(struct pollqueue *const pq,
+			      const int fd, const short events,
 			      void (*const fn)(void *v, short revents),
 			      void *const v);
 void polltask_delete(struct polltask **const ppt);
 
-void pollqueue_add_task(struct pollqueue *const pq, struct polltask *const pt,
-			const int timeout);
+void pollqueue_add_task(struct polltask *const pt, const int timeout);
 struct pollqueue * pollqueue_new(void);
-void pollqueue_delete(struct pollqueue **const ppq);
+void pollqueue_unref(struct pollqueue **const ppq);
+struct pollqueue * pollqueue_ref(struct pollqueue *const pq);
 
 #endif /* POLLQUEUE_H_ */

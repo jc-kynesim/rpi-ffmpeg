@@ -89,9 +89,13 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
 {
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
 
+    av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
+
+    decode_q_wait(&ctx->decode_q, NULL);  // Wait for all other threads to be out of decode
+
     mediabufs_ctl_unref(&ctx->mbufs);
     media_pool_delete(&ctx->mpool);
-    pollqueue_delete(&ctx->pq);
+    pollqueue_unref(&ctx->pq);
     dmabufs_ctl_delete(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
 
@@ -132,6 +136,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const struct decdev * decdev;
     const uint32_t src_pix_fmt = V2(ff_v4l2_req_hevc, 1).src_pix_fmt_v4l2;  // Assuming constant for all APIs but avoiding V4L2 includes
     size_t src_size;
+
+    av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_WARNING, "Failed to find any V4L2 devices\n");
@@ -248,7 +254,7 @@ fail4:
 fail3:
     media_pool_delete(&ctx->mpool);
 fail2:
-    pollqueue_delete(&ctx->pq);
+    pollqueue_unref(&ctx->pq);
 fail1:
     dmabufs_ctl_delete(&ctx->dbufs);
 fail0:
