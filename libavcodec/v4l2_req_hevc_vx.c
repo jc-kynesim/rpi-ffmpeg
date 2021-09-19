@@ -965,13 +965,12 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
         }
     }
 
-    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
-
     // Set the drm_prime desriptor
     drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
     rd->drm.objects[0].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, 0));
     rd->drm.objects[0].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, 0));
 
+    decode_q_remove(&ctx->decode_q, &rd->decode_ent);
     return 0;
 
 fail:
