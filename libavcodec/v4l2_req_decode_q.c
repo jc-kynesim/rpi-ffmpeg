@@ -45,10 +45,8 @@ void decode_q_remove(req_decode_q * const q, req_decode_ent * const d)
 
     if (d->next)
         d->next->prev = d->prev;
-    else {
-        try_signal = 0; // If we were a singleton then no point signalling
+    else
         q->tail = d->prev;
-    }
 
     // Not strictly needed but makes debug easier
     d->next = NULL;
