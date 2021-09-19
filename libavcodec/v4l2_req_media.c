@@ -340,15 +340,17 @@ struct qent_dst {
     struct ff_weak_link_client * mbc_wl;
 };
 
+struct qe_list_head {
+    struct qent_base *head;
+    struct qent_base *tail;
+};
 
 struct buf_pool {
     pthread_mutex_t lock;
     sem_t free_sem;
     enum v4l2_buf_type buf_type;
-    struct qent_base *free_head;
-    struct qent_base *free_tail;
-    struct qent_base *inuse_head;
-    struct qent_base *inuse_tail;
+    struct qe_list_head free;
+    struct qe_list_head inuse;
 };
 
 
@@ -422,36 +424,18 @@ static struct qent_dst * qe_dst_new(void)
     return be_dst;
 }
 
-
-static void bq_put_free(struct buf_pool *const bp, struct qent_base * be)
+static void ql_add_tail(struct qe_list_head * const ql, struct qent_base * be)
 {
-    if (bp->free_tail)
-        bp->free_tail->next = be;
+    if (ql->tail)
+        ql->tail->next = be;
     else
-        bp->free_head = be;
-    be->prev = bp->free_tail;
+        ql->head = be;
+    be->prev = ql->tail;
     be->next = NULL;
-    bp->free_tail = be;
+    ql->tail = be;
 }
 
-static struct qent_base * bq_get_free(struct buf_pool *const bp)
-{
-    struct qent_base *be;
-
-    be = bp->free_head;
-    if (be) {
-        if (be->next)
-            be->next->prev = be->prev;
-        else
-            bp->free_tail = be->prev;
-        bp->free_head = be->next;
-        be->next = NULL;
-        be->prev = NULL;
-    }
-    return be;
-}
-
-static struct qent_base * bq_extract_inuse(struct buf_pool *const bp, struct qent_base *const be)
+static struct qent_base * ql_extract(struct qe_list_head * const ql, struct qent_base * be)
 {
     if (!be)
         return NULL;
@@ -459,14 +443,35 @@ static struct qent_base * bq_extract_inuse(struct buf_pool *const bp, struct qen
     if (be->next)
         be->next->prev = be->prev;
     else
-        bp->inuse_tail = be->prev;
+        ql->tail = be->prev;
     if (be->prev)
         be->prev->next = be->next;
     else
-        bp->inuse_head = be->next;
+        ql->head = be->next;
     be->next = NULL;
     be->prev = NULL;
     return be;
+}
+
+
+static void bq_put_free(struct buf_pool *const bp, struct qent_base * be)
+{
+    ql_add_tail(&bp->free, be);
+}
+
+static struct qent_base * bq_get_free(struct buf_pool *const bp)
+{
+    return ql_extract(&bp->free, bp->free.head);
+}
+
+static struct qent_base * bq_extract_inuse(struct buf_pool *const bp, struct qent_base *const be)
+{
+    return ql_extract(&bp->inuse, be);
+}
+
+static struct qent_base * bq_get_inuse(struct buf_pool *const bp)
+{
+    return ql_extract(&bp->inuse, bp->inuse.head);
 }
 
 static void bq_free_all_free_src(struct buf_pool *const bp)
@@ -479,7 +484,7 @@ static void bq_free_all_free_src(struct buf_pool *const bp)
 static void bq_free_all_inuse_src(struct buf_pool *const bp)
 {
     struct qent_base *be;
-    while ((be = bq_extract_inuse(bp, bp->inuse_head)) != NULL)
+    while ((be = bq_get_inuse(bp)) != NULL)
         qe_src_free(base_to_src(be));
 }
 
@@ -508,7 +513,7 @@ static void queue_put_free(struct buf_pool *const bp, struct qent_base *be)
 
 static bool queue_is_inuse(const struct buf_pool *const bp)
 {
-    return bp->inuse_tail != NULL;
+    return bp->inuse.tail != NULL;
 }
 
 static void queue_put_inuse(struct buf_pool *const bp, struct qent_base *be)
@@ -516,13 +521,7 @@ static void queue_put_inuse(struct buf_pool *const bp, struct qent_base *be)
     if (!be)
         return;
     pthread_mutex_lock(&bp->lock);
-    if (bp->inuse_tail)
-        bp->inuse_tail->next = be;
-    else
-        bp->inuse_head = be;
-    be->prev = bp->inuse_tail;
-    be->next = NULL;
-    bp->inuse_tail = be;
+    ql_add_tail(&bp->inuse, be);
     be->status = QENT_WAITING;
     pthread_mutex_unlock(&bp->lock);
 }
@@ -557,7 +556,7 @@ static struct qent_base * queue_find_extract_fd(struct buf_pool *const bp, const
 
     pthread_mutex_lock(&bp->lock);
     /* Expect 1st in Q, but allow anywhere */
-    for (be = bp->inuse_head; be; be = be->next) {
+    for (be = bp->inuse.head; be; be = be->next) {
         if (dmabuf_fd(be->dh[0]) == fd) {
             bq_extract_inuse(bp, be);
             break;
@@ -1435,7 +1434,7 @@ static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
 
     {
         struct qent_dst *dst_be;
-        while ((dst_be = base_to_dst(bq_extract_inuse(mbc->dst, mbc->dst->inuse_head))) != NULL) {
+        while ((dst_be = base_to_dst(bq_get_inuse(mbc->dst))) != NULL) {
             dst_be->base.timestamp = (struct timeval){0};
             dst_be->base.status = QENT_ERROR;
             qe_dst_done(dst_be);
