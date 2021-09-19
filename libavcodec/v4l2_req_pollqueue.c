@@ -22,7 +22,8 @@ enum polltask_state {
     POLLTASK_UNQUEUED = 0,
     POLLTASK_QUEUED,
     POLLTASK_RUNNING,
-    POLLTASK_KILL,
+    POLLTASK_Q_KILL,
+    POLLTASK_RUN_KILL,
 };
 
 struct polltask {
@@ -119,12 +120,11 @@ void polltask_delete(struct polltask **const ppt)
 
     if (!pt)
         return;
-    *ppt = NULL;
 
     pq = pt->q;
     pthread_mutex_lock(&pq->lock);
     state = pt->state;
-    pt->state = POLLTASK_KILL;
+    pt->state = (state == POLLTASK_RUNNING) ? POLLTASK_RUN_KILL : POLLTASK_Q_KILL;
     prodme = !pq->no_prod;
     pthread_mutex_unlock(&pq->lock);
 
@@ -135,6 +135,9 @@ void polltask_delete(struct polltask **const ppt)
             /* loop */;
     }
 
+    // Leave zapping the ref until we have DQed the PT as might well be
+    // legitimately used in it
+    *ppt = NULL;
     polltask_free(pt);
     pollqueue_unref(&pq);
 }
@@ -156,7 +159,7 @@ void pollqueue_add_task(struct polltask *const pt, const int timeout)
     struct pollqueue * const pq = pt->q;
 
     pthread_mutex_lock(&pq->lock);
-    if (pt->state != POLLTASK_KILL) {
+    if (pt->state != POLLTASK_Q_KILL && pt->state != POLLTASK_RUN_KILL) {
         if (pq->tail)
             pq->tail->next = pt;
         else
@@ -191,7 +194,7 @@ static void *poll_thread(void *v)
         for (pt = pq->head; pt; pt = pt->next) {
             int64_t t;
 
-            if (pt->state == POLLTASK_KILL) {
+            if (pt->state == POLLTASK_Q_KILL) {
                 struct polltask * const prev = pt->prev;
                 pollqueue_rem_task(pq, pt);
                 sem_post(&pt->kill_sem);
@@ -242,7 +245,10 @@ static void *poll_thread(void *v)
             if (a[i].revents ||
                 (pt->timeout && (int64_t)(now - pt->timeout) >= 0)) {
                 pollqueue_rem_task(pq, pt);
-                pt->state = POLLTASK_RUNNING;
+                if (pt->state == POLLTASK_QUEUED)
+                    pt->state = POLLTASK_RUNNING;
+                if (pt->state == POLLTASK_Q_KILL)
+                    pt->state = POLLTASK_RUN_KILL;
                 pthread_mutex_unlock(&pq->lock);
 
                 /* This can add new entries to the Q but as
@@ -254,6 +260,8 @@ static void *poll_thread(void *v)
                 pthread_mutex_lock(&pq->lock);
                 if (pt->state == POLLTASK_RUNNING)
                     pt->state = POLLTASK_UNQUEUED;
+                if (pt->state == POLLTASK_RUN_KILL)
+                    sem_post(&pt->kill_sem);
             }
 
             pt = pt_next;
