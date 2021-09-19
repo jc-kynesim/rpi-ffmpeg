@@ -1087,7 +1087,7 @@ static void v4l2_req_frame_free(void *opaque, uint8_t *data)
 
     av_log(NULL, AV_LOG_DEBUG, "%s: avctx=%p data=%p\n", __func__, avctx, data);
 
-    qent_dst_free(&rd->qe_dst);
+    qent_dst_unref(&rd->qe_dst);
 
     // We don't expect req or qe_src to be set
     if (rd->req || rd->qe_src)
