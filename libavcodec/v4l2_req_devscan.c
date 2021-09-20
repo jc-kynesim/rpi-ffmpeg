@@ -332,9 +332,6 @@ static int probe_media_device(void * const dc,
             goto fail;
     }
 
-    free(interfaces);
-    return ret;
-
 fail:
     free(interfaces);
     if (media_fd != -1)
