@@ -229,6 +229,8 @@ static void delete_req_chain(struct media_request * const chain)
     while (next) {
         struct media_request * const req = next;
         next = req->next;
+        if (req->pt)
+            polltask_delete(&req->pt);
         if (req->fd != -1)
             close(req->fd);
         free(req);
