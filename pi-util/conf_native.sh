@@ -29,15 +29,16 @@ else
   RPIOPTS="--enable-mmal --enable-rpi"
 fi
 C=`lsb_release -sc`
+V=`cat RELEASE`
 
 SHARED_LIBS="--enable-shared"
 if [ "$1" == "--noshared" ]; then
   SHARED_LIBS="--disable-shared"
-  OUT=out/$B-$C-static-rel
+  OUT=out/$B-$C-$V-static-rel
   echo Static libs
 else
   echo Shared libs
-  OUT=out/$B-$C-shared-rel
+  OUT=out/$B-$C-$V-shared-rel
 fi
 
 USR_PREFIX=$FFSRC/$OUT/install
