@@ -1322,13 +1322,13 @@ MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc)
     if (!mbc->stream_on)
         return MEDIABUFS_STATUS_SUCCESS;
 
-    if (set_stream(mbc->vfd, mbc->src_fmt.type, false) < 0) {
-        request_log("Failed to set stream off src type %d\n", mbc->src_fmt.type);
+    if (set_stream(mbc->vfd, mbc->dst_fmt.type, false) < 0) {
+        request_log("Failed to set stream off dst type %d\n", mbc->dst_fmt.type);
         status = MEDIABUFS_ERROR_OPERATION_FAILED;
     }
 
-    if (set_stream(mbc->vfd, mbc->dst_fmt.type, false) < 0) {
-        request_log("Failed to set stream off dst type %d\n", mbc->dst_fmt.type);
+    if (set_stream(mbc->vfd, mbc->src_fmt.type, false) < 0) {
+        request_log("Failed to set stream off src type %d\n", mbc->src_fmt.type);
         status = MEDIABUFS_ERROR_OPERATION_FAILED;
     }
 
