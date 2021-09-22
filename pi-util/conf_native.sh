@@ -45,6 +45,7 @@ USR_PREFIX=$FFSRC/$OUT/install
 LIB_PREFIX=$USR_PREFIX/lib/$A
 INC_PREFIX=$USR_PREFIX/include/$A
 
+echo Destination directory: $OUT
 mkdir -p $FFSRC/$OUT
 cd $FFSRC/$OUT
 
