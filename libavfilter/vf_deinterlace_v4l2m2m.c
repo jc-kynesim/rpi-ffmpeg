@@ -96,13 +96,6 @@ typedef struct DeintV4L2M2MContextShared {
 
     AVBufferRef *hw_frames_ctx;
 
-    /*
-     * TODO: check if its really neccessary to hold this
-     * ref, it's only used for freeing av_frame on decoding
-     * end/abort
-     */
-    AVFrame *cur_in_frame;
-    AVFrame *prev_in_frame;
     unsigned int field_order;
     int64_t last_pts;
     int64_t frame_interval;
@@ -650,9 +643,7 @@ static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, const AVFrame* frame)
 
     buf->drm_frame.objects[0].fd = drm_desc->objects[0].fd;
 
-    ret = av_frame_ref(&buf->frame, frame);
-    if (ret != 0)
-       av_log(NULL, AV_LOG_ERROR, "%s: av_frame_ref returned %d\n", __func__, ret);
+    av_frame_move_ref(&buf->frame, frame);
 
     return deint_v4l2m2m_enqueue_buffer(buf);
 }
@@ -679,12 +670,6 @@ static void deint_v4l2m2m_destroy_context(DeintV4L2M2MContextShared *ctx)
             }
 
         deint_v4l2m2m_unref_queued(output);
-
-	if (ctx->cur_in_frame)
-		av_frame_free(&ctx->cur_in_frame);
-
-	if (ctx->prev_in_frame)
-		av_frame_free(&ctx->prev_in_frame);
 
         av_buffer_unref(&ctx->hw_frames_ctx);
 
@@ -926,7 +911,6 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     av_log(priv, AV_LOG_DEBUG, "%s: input pts: %"PRId64" (%"PRId64") field :%d interlaced: %d aspect:%d/%d\n",
           __func__, in->pts, AV_NOPTS_VALUE, in->top_field_first, in->interlaced_frame, in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
 
-    ctx->cur_in_frame = in;
     ctx->sample_aspect_ratio = in->sample_aspect_ratio;
 
     if (ctx->field_order == V4L2_FIELD_ANY) {
@@ -971,12 +955,6 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     if (ret)
         return ret;
 
-    if (ctx->prev_in_frame)
-	av_frame_free(&ctx->prev_in_frame);
-
-    ctx->prev_in_frame = in;
-    ctx->cur_in_frame = NULL;
-
     return 0;
 }
 
@@ -998,8 +976,6 @@ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
     ctx->capture.num_buffers = 8;
     ctx->done = 0;
     ctx->field_order = V4L2_FIELD_ANY;
-    ctx->cur_in_frame = NULL;
-    ctx->prev_in_frame = NULL;
     ctx->last_pts = 0;
     ctx->frame_interval = 1000000 / 60;
     atomic_init(&ctx->refcount, 1);
