@@ -187,19 +187,19 @@ static void *poll_thread(void *v)
         unsigned int i;
         unsigned int n = 0;
         struct polltask *pt;
+        struct polltask *pt_next;
         uint64_t now = pollqueue_now(0);
         int timeout = -1;
         int rv;
 
-        for (pt = pq->head; pt; pt = pt->next) {
+        for (pt = pq->head; pt; pt = pt_next) {
             int64_t t;
 
+            pt_next = pt->next;
+
             if (pt->state == POLLTASK_Q_KILL) {
-                struct polltask * const prev = pt->prev;
                 pollqueue_rem_task(pq, pt);
                 sem_post(&pt->kill_sem);
-                if ((pt = prev) == NULL)
-                    break;
                 continue;
             }
 
@@ -238,8 +238,8 @@ static void *poll_thread(void *v)
          * infinite looping
         */
         pq->no_prod = true;
-        for (i = 0, pt = pq->head; i < n; ++i) {
-            struct polltask *const pt_next = pt->next;
+        for (i = 0, pt = pq->head; i < n; ++i, pt = pt_next) {
+            pt_next = pt->next;
 
             /* Pending? */
             if (a[i].revents ||
@@ -263,8 +263,6 @@ static void *poll_thread(void *v)
                 if (pt->state == POLLTASK_RUN_KILL)
                     sem_post(&pt->kill_sem);
             }
-
-            pt = pt_next;
         }
         pq->no_prod = false;
 
