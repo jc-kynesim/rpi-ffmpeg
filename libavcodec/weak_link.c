@@ -54,6 +54,8 @@ void ff_weak_link_break(struct ff_weak_link_master ** ppLink)
 
 struct ff_weak_link_client* ff_weak_link_ref(struct ff_weak_link_master * w)
 {
+    if (!w)
+        return NULL;
     atomic_fetch_add(&w->ref_count, 1);
     return (struct ff_weak_link_client*)w;
 }
