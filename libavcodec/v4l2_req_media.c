@@ -413,7 +413,7 @@ static void qe_dst_free(struct qent_dst *const be_dst)
     free(be_dst);
 }
 
-static struct qent_dst * qe_dst_new(void)
+static struct qent_dst* qe_dst_new(struct ff_weak_link_master * const wl)
 {
     struct qent_dst *const be_dst = malloc(sizeof(*be_dst));
     if (!be_dst)
@@ -421,7 +421,8 @@ static struct qent_dst * qe_dst_new(void)
     *be_dst = (struct qent_dst){
         .base = QENT_BASE_INITIALIZER,
         .lock = PTHREAD_MUTEX_INITIALIZER,
-        .cond = PTHREAD_COND_INITIALIZER
+        .cond = PTHREAD_COND_INITIALIZER,
+        .mbc_wl = ff_weak_link_ref(wl)
     };
     return be_dst;
 }
@@ -1117,7 +1118,7 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struc
     struct qent_dst * be_dst;
 
     if (mbc == NULL) {
-        be_dst = qe_dst_new();
+        be_dst = qe_dst_new(NULL);
         if (be_dst)
             be_dst->base.status = QENT_IMPORT;
         return be_dst;
@@ -1127,12 +1128,11 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struc
     if (!be_dst) {
         int index;
 
-        be_dst = qe_dst_new();
+        be_dst = qe_dst_new(mbc->this_wlm);
         if (!be_dst)
             return NULL;
 
-        if ((be_dst->mbc_wl = ff_weak_link_ref(mbc->this_wlm)) == NULL ||
-            (index = create_dst_buf(mbc)) < 0) {
+        if ((index = create_dst_buf(mbc)) < 0) {
             qe_dst_free(be_dst);
             return NULL;
         }
@@ -1199,7 +1199,7 @@ MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, unsi
     for (i = 0; i != n; ++i)
     {
         int index;
-        struct qent_dst * const be_dst = qe_dst_new();
+        struct qent_dst *const be_dst = qe_dst_new(mbc->this_wlm);
         if (!be_dst)
             return MEDIABUFS_ERROR_OPERATION_FAILED;
 
