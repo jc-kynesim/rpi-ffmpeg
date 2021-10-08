@@ -99,11 +99,14 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
                 struct qent_dst *const dst_be,
                 const bool is_final);
 // Get / alloc a dst buffer & associate with a slot
-// * BEWARE * Currently has no alloc limit
+// If the dst pool is empty then behaviour depends on the fixed flag passed to
+// dst_slots_create.  Default is !fixed = unlimited alloc
 struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc,
                            struct dmabufs_ctl *const dbsc);
 // Create dst slots without alloc
-MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, unsigned int n);
+// If fixed true then qent_alloc will only get slots from this pool and will
+// block until a qent has been unrefed
+MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, const unsigned int n, const bool fixed);
 
 MediaBufsStatus mediabufs_stream_on(struct mediabufs_ctl *const mbc);
 MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc);
