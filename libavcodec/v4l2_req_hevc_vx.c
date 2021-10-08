@@ -1120,6 +1120,7 @@ static AVBufferRef *v4l2_req_frame_alloc(void *opaque, int size)
     return ref;
 }
 
+#if 0
 static void v4l2_req_pool_free(void *opaque)
 {
     av_log(NULL, AV_LOG_DEBUG, "%s: opaque=%p\n", __func__, opaque);
@@ -1131,6 +1132,7 @@ static void v4l2_req_hwframe_ctx_free(AVHWFramesContext *hwfc)
 
     av_buffer_pool_uninit(&hwfc->pool);
 }
+#endif
 
 static int frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
 {
@@ -1147,7 +1149,7 @@ static int frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
         hwfc->width = vfmt->fmt.pix.width;
         hwfc->height = vfmt->fmt.pix.height;
     }
-
+#if 0
     hwfc->pool = av_buffer_pool_init2(sizeof(V4L2MediaReqDescriptor), avctx, v4l2_req_frame_alloc, v4l2_req_pool_free);
     if (!hwfc->pool)
         return AVERROR(ENOMEM);
@@ -1166,12 +1168,32 @@ static int frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
     default:
         hwfc->initial_pool_size += 2;
     }
-
+#endif
     av_log(avctx, AV_LOG_DEBUG, "%s: avctx=%p ctx=%p hw_frames_ctx=%p hwfc=%p pool=%p width=%d height=%d initial_pool_size=%d\n", __func__, avctx, ctx, hw_frames_ctx, hwfc, hwfc->pool, hwfc->width, hwfc->height, hwfc->initial_pool_size);
 
     return 0;
 }
 
+static int alloc_frame(AVCodecContext * avctx, AVFrame *frame)
+{
+    int rv;
+
+    frame->buf[0] = v4l2_req_frame_alloc(avctx, sizeof(V4L2MediaReqDescriptor));
+    if (!frame->buf[0])
+        return AVERROR(ENOMEM);
+
+    frame->data[0] = frame->buf[0]->data;
+
+    frame->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
+
+    if ((rv = ff_attach_decode_data(frame)) != 0) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to attach decode data to frame\n");
+        av_frame_unref(frame);
+        return rv;
+    }
+
+    return 0;
+}
 
 const v4l2_req_decode_fns V(ff_v4l2_req_hevc) = {
     .src_pix_fmt_v4l2 = V4L2_PIX_FMT_HEVC_SLICE,
@@ -1184,5 +1206,6 @@ const v4l2_req_decode_fns V(ff_v4l2_req_hevc) = {
     .end_frame      = v4l2_request_hevc_end_frame,
     .abort_frame    = v4l2_request_hevc_abort_frame,
     .frame_params   = frame_params,
+    .alloc_frame    = alloc_frame,
 };
 
