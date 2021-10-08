@@ -85,6 +85,13 @@ static int v4l2_req_hevc_frame_params(AVCodecContext *avctx, AVBufferRef *hw_fra
     return ctx->fns->frame_params(avctx, hw_frames_ctx);
 }
 
+static int v4l2_req_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
+{
+    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    return ctx->fns->alloc_frame(avctx, frame);
+}
+
+
 static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
 {
     V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
@@ -276,7 +283,7 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .type           = AVMEDIA_TYPE_VIDEO,
     .id             = AV_CODEC_ID_HEVC,
     .pix_fmt        = AV_PIX_FMT_DRM_PRIME,
-//    .alloc_frame    = v4l2_request_hevc_alloc_frame,
+    .alloc_frame    = v4l2_req_hevc_alloc_frame,
     .start_frame    = v4l2_req_hevc_start_frame,
     .decode_slice   = v4l2_req_hevc_decode_slice,
     .end_frame      = v4l2_req_hevc_end_frame,
