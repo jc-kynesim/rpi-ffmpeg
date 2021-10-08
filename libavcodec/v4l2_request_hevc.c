@@ -216,9 +216,18 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    if (mediabufs_dst_slots_create(ctx->mbufs, 1)) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to create destination slots\n");
-        goto fail4;
+    {
+        unsigned int dst_slots = sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering +
+            avctx->thread_count + (avctx->extra_hw_frames > 0 ? avctx->extra_hw_frames : 6);
+        av_log(avctx, AV_LOG_DEBUG, "Slots=%d: Reordering=%d, threads=%d, hw+=%d\n", dst_slots,
+               sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering,
+               avctx->thread_count, avctx->extra_hw_frames);
+
+        // extra_hw_frames is -1 if unset
+        if (mediabufs_dst_slots_create(ctx->mbufs, dst_slots, (avctx->extra_hw_frames > 0))) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to create destination slots\n");
+            goto fail4;
+        }
     }
 
     if (mediabufs_stream_on(ctx->mbufs)) {

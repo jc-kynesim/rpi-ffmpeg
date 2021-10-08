@@ -594,6 +594,7 @@ struct mediabufs_ctl {
     int vfd;
     bool stream_on;
     bool polling;
+    bool dst_fixed;             // Dst Q is fixed size
     pthread_mutex_t lock;
     struct buf_pool * src;
     struct buf_pool * dst;
@@ -1095,10 +1096,13 @@ MediaBufsStatus qent_dst_import_fd(struct qent_dst *const be_dst,
     return MEDIABUFS_STATUS_SUCCESS;
 }
 
-static int create_dst_buf(struct mediabufs_ctl *const mbc)
+// Returns noof buffers created, -ve for error
+static int create_dst_bufs(struct mediabufs_ctl *const mbc, unsigned int n, struct qent_dst * const qes[])
 {
+    unsigned int i;
+
     struct v4l2_create_buffers cbuf = {
-        .count = 1,
+        .count = n,
         .memory = V4L2_MEMORY_DMABUF,
         .format = mbc->dst_fmt,
     };
@@ -1110,7 +1114,14 @@ static int create_dst_buf(struct mediabufs_ctl *const mbc)
             return -err;
         }
     }
-    return cbuf.index;
+
+    if (cbuf.count != n)
+        request_warn(mbc->dc, "%s: Created %d of %d V4L2 buffers requested\n", __func__, cbuf.count, n);
+
+    for (i = 0; i != cbuf.count; ++i)
+        qes[i]->base.index = cbuf.index + i;
+
+    return cbuf.count;
 }
 
 struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struct dmabufs_ctl *const dbsc)
@@ -1124,20 +1135,23 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struc
         return be_dst;
     }
 
-    be_dst = base_to_dst(queue_tryget_free(mbc->dst));
-    if (!be_dst) {
-        int index;
-
-        be_dst = qe_dst_new(mbc->this_wlm);
+    if (mbc->dst_fixed) {
+        be_dst = base_to_dst(queue_get_free(mbc->dst));
         if (!be_dst)
             return NULL;
+    }
+    else {
+        be_dst = base_to_dst(queue_tryget_free(mbc->dst));
+        if (!be_dst) {
+            be_dst = qe_dst_new(mbc->this_wlm);
+            if (!be_dst)
+                return NULL;
 
-        if ((index = create_dst_buf(mbc)) < 0) {
-            qe_dst_free(be_dst);
-            return NULL;
+            if (create_dst_bufs(mbc, 1, &be_dst) != 1) {
+                qe_dst_free(be_dst);
+                return NULL;
+            }
         }
-
-        be_dst->base.index = (uint32_t)index;
     }
 
     if (qe_alloc_from_fmt(&be_dst->base, dbsc, &mbc->dst_fmt)) {
@@ -1191,29 +1205,42 @@ MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
     return status;
 }
 
-MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, unsigned int n)
+// ** This is a mess if we get partial alloc but without any way to remove
+//    individual V4L2 Q members we are somewhat stuffed
+MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, const unsigned int n, const bool fixed)
 {
-    // **** request buffers
     unsigned int i;
+    int a = 0;
+    unsigned int qc;
+    struct qent_dst * qes[32];
 
-    for (i = 0; i != n; ++i)
+    if (n > 32)
+        return MEDIABUFS_ERROR_ALLOCATION_FAILED;
+
+    // Create qents first as it is hard to get rid of the V4L2 buffers on error
+    for (qc = 0; qc != n; ++qc)
     {
-        int index;
-        struct qent_dst *const be_dst = qe_dst_new(mbc->this_wlm);
-        if (!be_dst)
-            return MEDIABUFS_ERROR_OPERATION_FAILED;
-
-        index = create_dst_buf(mbc);
-        if (index < 0) {
-            qe_dst_free(be_dst);
-            return MEDIABUFS_ERROR_OPERATION_FAILED;
-        }
-
-        // Add index to free chain
-        be_dst->base.index = (uint32_t)index;
-        queue_put_free(mbc->dst, &be_dst->base);
+        if ((qes[qc] = qe_dst_new(mbc->this_wlm)) == NULL)
+            goto fail;
     }
+
+    if ((a = create_dst_bufs(mbc, n, qes)) < 0)
+        goto fail;
+
+    for (i = 0; i != a; ++i)
+        queue_put_free(mbc->dst, &qes[i]->base);
+
+    if (a != n)
+        goto fail;
+
+    mbc->dst_fixed = fixed;
     return MEDIABUFS_STATUS_SUCCESS;
+
+fail:
+    for (i = (a < 0 ? 0 : a); i != qc; ++i)
+        qe_dst_free(qes[i]);
+
+    return MEDIABUFS_ERROR_ALLOCATION_FAILED;
 }
 
 struct qent_src *mediabufs_src_qent_get(struct mediabufs_ctl *const mbc)
