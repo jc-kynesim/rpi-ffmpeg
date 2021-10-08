@@ -91,6 +91,7 @@ typedef struct v4l2_req_decode_fns {
     int (*end_frame)(AVCodecContext *avctx);
     void (*abort_frame)(AVCodecContext *avctx);
     int (*frame_params)(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx);
+    int (*alloc_frame)(AVCodecContext * avctx, AVFrame *frame);
 } v4l2_req_decode_fns;
 
 
