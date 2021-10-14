@@ -46,6 +46,9 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/time.h"
 
+#define FF_INTERNAL_FIELDS 1
+#include "framequeue.h"
+#include "filters.h"
 #include "avfilter.h"
 #include "formats.h"
 #include "internal.h"
@@ -607,23 +610,38 @@ static void deint_v4l2m2m_unref_queued(V4L2Queue *queue)
     }
 }
 
-static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, const AVFrame* frame)
+static void recycle_q(V4L2Queue * const queue)
+{
+    V4L2Buffer* avbuf;
+    while (avbuf = deint_v4l2m2m_dequeue_buffer(queue, 0), avbuf) {
+        av_frame_unref(&avbuf->frame);
+    }
+}
+
+static int count_enqueued(V4L2Queue *queue)
+{
+    int i;
+    int n = 0;
+
+    for (i = 0; i < queue->num_buffers; i++)
+        if (queue->buffers[i].enqueued)
+            ++n;
+    return n;
+}
+
+static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, AVFrame* frame)
 {
     AVDRMFrameDescriptor *drm_desc = (AVDRMFrameDescriptor *)frame->data[0];
     V4L2Buffer *buf;
     int i;
-    int ret;
 
-    if (V4L2_TYPE_IS_OUTPUT(queue->format.type)) {
-        V4L2Buffer* avbuf;
-        while (avbuf = deint_v4l2m2m_dequeue_buffer(queue, 0), avbuf) {
-            av_frame_unref(&avbuf->frame);
-        }
-    }
+    if (V4L2_TYPE_IS_OUTPUT(queue->format.type))
+        recycle_q(queue);
+
     buf = deint_v4l2m2m_find_free_buf(queue);
     if (!buf) {
         av_log(NULL, AV_LOG_ERROR, "%s: error %d finding free buf\n", __func__, 0);
-        return AVERROR(ENOMEM);
+        return AVERROR(EAGAIN);
     }
     if (V4L2_TYPE_IS_MULTIPLANAR(buf->buffer.type))
         for (i = 0; i < drm_desc->nb_objects; i++)
@@ -779,6 +797,8 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
     DeintV4L2M2MContextShared *ctx = queue->ctx;
     V4L2Buffer* avbuf;
 
+    av_log(NULL, AV_LOG_TRACE, "<<< %s\n", __func__);
+
     avbuf = deint_v4l2m2m_dequeue_buffer(queue, timeout);
     if (!avbuf) {
         av_log(NULL, AV_LOG_DEBUG, "%s: No buffer to dequeue (timeout=%d)\n", __func__, timeout);
@@ -831,7 +851,23 @@ static int deint_v4l2m2m_request_frame(AVFilterLink *link)
     DeintV4L2M2MContextShared *ctx = priv->shared;
     AVFilterLink *outlink          = avctx->outputs[0];
     AVFrame *output_frame;
+    int n;
     int err;
+
+    av_log(priv, AV_LOG_TRACE, "<<< %s\n", __func__);
+    av_log(priv, AV_LOG_DEBUG, "--- %s: [src] in status in %d/ot %d; out status in %d/out %d\n", __func__,
+           avctx->inputs[0]->status_in, avctx->inputs[0]->status_out, avctx->outputs[0]->status_in, avctx->outputs[0]->status_out);
+
+    if (ff_outlink_get_status(avctx->inputs[0])) {
+        av_log(priv, AV_LOG_TRACE, ">>> %s: EOF\n", __func__);
+        ff_outlink_set_status(outlink, AVERROR_EOF, avctx->inputs[0]->status_in_pts);
+        return 0;
+    }
+
+    recycle_q(&ctx->output);
+    n = count_enqueued(&ctx->output);
+
+    av_log(priv, AV_LOG_TRACE, "%s: n=%d\n", __func__, n);
 
     output_frame = av_frame_alloc();
     if (!output_frame) {
@@ -839,11 +875,16 @@ static int deint_v4l2m2m_request_frame(AVFilterLink *link)
         return AVERROR(ENOMEM);
     }
 
-    err = deint_v4l2m2m_dequeue_frame(&ctx->capture, output_frame, 0);
+    err = deint_v4l2m2m_dequeue_frame(&ctx->capture, output_frame, n < 5 ? 0 : 10000);
     if (err) {
         if (err != AVERROR(EAGAIN))
-        av_log(priv, AV_LOG_ERROR, "%s: deint_v4l2m2m_dequeue_frame error %d\n", __func__, err);
+            av_log(priv, AV_LOG_ERROR, "%s: deint_v4l2m2m_dequeue_frame error %d\n", __func__, err);
         av_frame_free(&output_frame);
+        if (err == AVERROR(EAGAIN)) {
+            if (n < 5)
+                ff_request_frame(avctx->inputs[0]);
+            av_log(priv, AV_LOG_TRACE, ">>> %s: %s\n", __func__, av_err2str(err));
+        }
         return err;
     }
 
@@ -855,6 +896,8 @@ static int deint_v4l2m2m_request_frame(AVFilterLink *link)
         av_frame_free(&output_frame);
         return err;
     }
+
+    av_log(priv, AV_LOG_TRACE, ">>> %s: OK\n", __func__);
     return 0;
 }
 
@@ -908,8 +951,10 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     V4L2Queue *output              = &ctx->output;
     int ret;
 
-    av_log(priv, AV_LOG_DEBUG, "%s: input pts: %"PRId64" (%"PRId64") field :%d interlaced: %d aspect:%d/%d\n",
+    av_log(priv, AV_LOG_DEBUG, "<<< %s: input pts: %"PRId64" (%"PRId64") field :%d interlaced: %d aspect:%d/%d\n",
           __func__, in->pts, AV_NOPTS_VALUE, in->top_field_first, in->interlaced_frame, in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
+    av_log(priv, AV_LOG_DEBUG, "--- %s: in status in %d/ot %d; out status in %d/out %d\n", __func__,
+           avctx->inputs[0]->status_in, avctx->inputs[0]->status_out, avctx->outputs[0]->status_in, avctx->outputs[0]->status_out);
 
     ctx->sample_aspect_ratio = in->sample_aspect_ratio;
 
@@ -918,10 +963,10 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
         ctx->orig_width = drm_desc->layers[0].planes[0].pitch;
         ctx->orig_height = drm_desc->layers[0].planes[1].offset / ctx->orig_width;
 
-        av_log(NULL, AV_LOG_DEBUG, "%s: %dx%d (%d,%d)\n", __func__, ctx->width, ctx->height,
+        av_log(priv, AV_LOG_DEBUG, "%s: %dx%d (%d,%d)\n", __func__, ctx->width, ctx->height,
            drm_desc->layers[0].planes[0].pitch, drm_desc->layers[0].planes[1].offset);
 
-	if (in->top_field_first)
+        if (in->top_field_first)
             ctx->field_order = V4L2_FIELD_INTERLACED_TB;
         else
             ctx->field_order = V4L2_FIELD_INTERLACED_BT;
@@ -930,7 +975,7 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
         if (ret)
             return ret;
 
-	ret = deint_v4l2m2m_set_format(capture, V4L2_FIELD_NONE, ctx->width, ctx->height, ctx->orig_width, drm_desc->layers[0].planes[1].offset);
+        ret = deint_v4l2m2m_set_format(capture, V4L2_FIELD_NONE, ctx->width, ctx->height, ctx->orig_width, drm_desc->layers[0].planes[1].offset);
         if (ret)
             return ret;
 
@@ -952,10 +997,9 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     }
 
     ret = deint_v4l2m2m_enqueue_frame(output, in);
-    if (ret)
-        return ret;
 
-    return 0;
+    av_log(priv, AV_LOG_TRACE, ">>> %s: %s\n", __func__, av_err2str(ret));
+    return ret;
 }
 
 static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
