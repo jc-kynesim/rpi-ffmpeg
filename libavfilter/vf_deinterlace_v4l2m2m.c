@@ -520,6 +520,7 @@ static int deint_v4l2m2m_streamoff(V4L2Queue *queue)
     return 0;
 }
 
+// timeout in ms
 static V4L2Buffer* deint_v4l2m2m_dequeue_buffer(V4L2Queue *queue, int timeout)
 {
     struct v4l2_plane planes[VIDEO_MAX_PLANES];
@@ -622,6 +623,9 @@ static int count_enqueued(V4L2Queue *queue)
 {
     int i;
     int n = 0;
+
+    if (queue->buffers == NULL)
+        return 0;
 
     for (i = 0; i < queue->num_buffers; i++)
         if (queue->buffers[i].enqueued)
@@ -792,6 +796,7 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
     return (uint8_t *) drm_desc;
 }
 
+// timeout in ms
 static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int timeout)
 {
     DeintV4L2M2MContextShared *ctx = queue->ctx;
@@ -890,10 +895,11 @@ static int deint_v4l2m2m_request_frame(AVFilterLink *link)
 
     output_frame->interlaced_frame = 0;
 
+    // frame is always consumed by filter_frame - even on error despite
+    // a somewhat confusing comment in the header
     err = ff_filter_frame(outlink, output_frame);
     if (err) {
         av_log(priv, AV_LOG_ERROR, "%s: ff_filter_frame error %d\n", __func__, err);
-        av_frame_free(&output_frame);
         return err;
     }
 
@@ -1002,6 +1008,90 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     return ret;
 }
 
+static int deint_v4l2m2m_activate(AVFilterContext *avctx)
+{
+    DeintV4L2M2MContext * const priv = avctx->priv;
+    DeintV4L2M2MContextShared *const s = priv->shared;
+    AVFilterLink * const outlink = avctx->outputs[0];
+    AVFilterLink * const inlink = avctx->inputs[0];
+    int n = 0;
+    int cn = 99;
+
+    av_log(priv, AV_LOG_TRACE, "<<< %s\n", __func__);
+
+    FF_FILTER_FORWARD_STATUS_BACK_ALL(outlink, avctx);
+
+    if (!ff_outlink_frame_wanted(outlink)) {
+        av_log(priv, AV_LOG_TRACE, "--- %s: Not wanted out\n", __func__);
+        cn = 0;
+    }
+    else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
+    {
+        AVFrame * frame = av_frame_alloc();
+        int rv;
+
+        recycle_q(&s->output);
+        n = count_enqueued(&s->output);
+
+        if (frame == NULL) {
+            av_log(priv, AV_LOG_ERROR, "%s: error allocating frame\n", __func__);
+            return AVERROR(ENOMEM);
+        }
+
+        rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame, n > 4 ? 300 : 0);
+        if (rv == 0) {
+            frame->interlaced_frame = 0;
+            // frame is always consumed by filter_frame - even on error despite
+            // a somewhat confusing comment in the header
+            rv = ff_filter_frame(outlink, frame);
+            av_log(priv, AV_LOG_TRACE, ">>> %s: Filtered: %s\n", __func__, av_err2str(rv));
+            return rv;
+        }
+
+        av_frame_free(&frame);
+        if (rv != AVERROR(EAGAIN)) {
+            av_log(priv, AV_LOG_ERROR, ">>> %s: DQ fail: %s\n", __func__, av_err2str(rv));
+            return rv;
+        }
+
+        cn = count_enqueued(&s->capture);
+    }
+
+    {
+        AVFrame * frame;
+        int rv;
+
+        n = count_enqueued(&s->output);
+
+        while (n < 6) {
+            if ((rv = ff_inlink_consume_frame(inlink, &frame)) < 0) {
+                av_log(priv, AV_LOG_ERROR, "%s: consume in failed: %s\n", __func__, av_err2str(rv));
+                return rv;
+            }
+
+            if (frame == NULL)
+                break;
+
+            deint_v4l2m2m_filter_frame(inlink, frame);
+            av_log(priv, AV_LOG_TRACE, "--- %s: Q frame\n", __func__);
+            ++n;
+        }
+    }
+
+    if (n < 6) {
+        ff_inlink_request_frame(inlink);
+        av_log(priv, AV_LOG_TRACE, "--- %s: req frame\n", __func__);
+    }
+
+    if (n > 4 && cn != 0) {
+        ff_filter_set_ready(avctx, 1);
+        av_log(priv, AV_LOG_TRACE, "--- %s: ready\n", __func__);
+    }
+
+    av_log(priv, AV_LOG_TRACE, ">>> %s: OK (n=%d, cn=%d)\n", __func__, n, cn);
+    return n < 6 || cn != 0 ? 0 : FFERROR_NOT_READY;
+}
+
 static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
 {
     DeintV4L2M2MContext *priv = avctx->priv;
@@ -1046,7 +1136,7 @@ static const AVFilterPad deint_v4l2m2m_inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = deint_v4l2m2m_filter_frame,
+//        .filter_frame = deint_v4l2m2m_filter_frame,
     },
     { NULL }
 };
@@ -1056,7 +1146,7 @@ static const AVFilterPad deint_v4l2m2m_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = deint_v4l2m2m_config_props,
-        .request_frame = deint_v4l2m2m_request_frame,
+//        .request_frame = deint_v4l2m2m_request_frame,
     },
     { NULL }
 };
@@ -1071,4 +1161,5 @@ AVFilter ff_vf_deinterlace_v4l2m2m = {
     .inputs         = deint_v4l2m2m_inputs,
     .outputs        = deint_v4l2m2m_outputs,
     .priv_class     = &deinterlace_v4l2m2m_class,
+    .activate       = deint_v4l2m2m_activate,
 };
