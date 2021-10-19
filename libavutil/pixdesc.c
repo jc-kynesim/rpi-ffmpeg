@@ -2509,8 +2509,8 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .log2_chroma_h = 1,
         .comp = {
             { 0, 2, 0, 0, 10, 0, 9, 1 },        /* Y */
-            { 1, 4, 0, 0, 10, 1, 9, 1 },        /* U */
-            { 1, 4, 1, 0, 10, 1, 9, 2 },        /* V */
+            { 1, 4, 0, 0, 10, 3, 9, 1 },        /* U */
+            { 1, 4, 2, 0, 10, 3, 9, 3 },        /* V */
         },
         .flags = 0,
     },
