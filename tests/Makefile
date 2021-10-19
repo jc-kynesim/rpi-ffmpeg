@@ -184,7 +184,7 @@ include $(SRC_PATH)/tests/fate/qtrle.mak
 include $(SRC_PATH)/tests/fate/real.mak
 include $(SRC_PATH)/tests/fate/screen.mak
 include $(SRC_PATH)/tests/fate/segment.mak
-include $(SRC_PATH)/tests/fate/source.mak
+#include $(SRC_PATH)/tests/fate/source.mak
 include $(SRC_PATH)/tests/fate/speedhq.mak
 include $(SRC_PATH)/tests/fate/subtitles.mak
 include $(SRC_PATH)/tests/fate/truehd.mak

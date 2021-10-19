@@ -963,10 +963,13 @@ static int h264_decode_frame(AVCodecContext *avctx, void *data,
     AVFrame *pict      = data;
     int buf_index;
     int ret;
+    static int n = 0;
 
     h->flags = avctx->flags;
     h->setup_finished = 0;
     h->nb_slice_ctx_queued = 0;
+
+    printf("In: %d pts %"PRId64" dts %"PRId64"\n", n++, avpkt->pts, avpkt->dts);
 
     ff_h264_unref_picture(h, &h->last_pic_for_ec);
 
