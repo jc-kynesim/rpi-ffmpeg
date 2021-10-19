@@ -87,6 +87,15 @@ typedef struct V4L2Queue {
     DeintV4L2M2MContextShared *ctx;
 } V4L2Queue;
 
+typedef struct pts_stats_s
+{
+    void * logctx;
+    const char * name;  // For debug
+    unsigned int last_count;
+    unsigned int last_interval;
+    int64_t last_pts;
+} pts_stats_t;
+
 typedef struct DeintV4L2M2MContextShared {
     int fd;
     int done;
@@ -99,9 +108,13 @@ typedef struct DeintV4L2M2MContextShared {
 
     AVBufferRef *hw_frames_ctx;
 
+    unsigned int last_count;  // Frames since we had a valid pts
     unsigned int field_order;
     int64_t last_pts;
     int64_t frame_interval;
+
+    pts_stats_t pts_in;
+    pts_stats_t pts_out;
 
     V4L2Queue output;
     V4L2Queue capture;
@@ -114,6 +127,34 @@ typedef struct DeintV4L2M2MContext {
 } DeintV4L2M2MContext;
 
 #define USEC_PER_SEC 1000000
+
+static void pts_stats_add(pts_stats_t * const stats, int64_t pts)
+{
+    int64_t frame_time;
+    int64_t interval;
+
+    if (pts == AV_NOPTS_VALUE) {
+        ++stats->last_count;
+        return;
+    }
+
+    interval = pts - stats->last_pts;
+    frame_time = stats->last_count == 0 ? 0 : interval / (int64_t)stats->last_count;
+    if (frame_time != stats->last_interval) {
+        av_log(stats->logctx, AV_LOG_INFO, "%s: %s: New interval: %" PRId64 "/%d=%" PRId64 "\n",
+                __func__, stats->name, interval, stats->last_count, frame_time);
+        stats->last_interval = frame_time;
+    }
+
+    stats->last_pts = pts;
+    stats->last_count = 1;
+}
+
+static void pts_stats_init(pts_stats_t * const stats, void * logctx, const char * name)
+{
+    *stats = (pts_stats_t){.logctx = logctx, .name = name};
+}
+
 
 static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts)
 {
@@ -829,6 +870,7 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
     frame->sample_aspect_ratio = ctx->sample_aspect_ratio;
 
     frame->pts = v4l2_get_pts(avbuf);
+    pts_stats_add(&ctx->pts_out, frame->pts);
 
     if (frame->pts == AV_NOPTS_VALUE || frame->pts == ctx->last_pts)
         frame->pts = ctx->last_pts + ctx->frame_interval;
@@ -1072,6 +1114,8 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
             if (frame == NULL)
                 break;
 
+            pts_stats_add(&s->pts_in, frame->pts);
+
             deint_v4l2m2m_filter_frame(inlink, frame);
             av_log(priv, AV_LOG_TRACE, "--- %s: Q frame\n", __func__);
             ++n;
@@ -1105,13 +1149,17 @@ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
     priv->shared = ctx;
     ctx->fd = -1;
     ctx->output.ctx = ctx;
-    ctx->output.num_buffers = 10;
+    ctx->output.num_buffers = 8;
     ctx->capture.ctx = ctx;
-    ctx->capture.num_buffers = 8;
+    ctx->capture.num_buffers = 12;
     ctx->done = 0;
     ctx->field_order = V4L2_FIELD_ANY;
     ctx->last_pts = 0;
     ctx->frame_interval = 1000000 / 60;
+
+    pts_stats_init(&ctx->pts_in, priv, "in");
+    pts_stats_init(&ctx->pts_out, priv, "out");
+
     atomic_init(&ctx->refcount, 1);
 
     return 0;

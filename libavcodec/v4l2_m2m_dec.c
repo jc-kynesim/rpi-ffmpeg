@@ -42,6 +42,35 @@
 #include "v4l2_m2m.h"
 #include "v4l2_fmt.h"
 
+
+static void pts_stats_add(pts_stats_t * const stats, int64_t pts)
+{
+    int64_t frame_time;
+    int64_t interval;
+
+    if (pts == AV_NOPTS_VALUE) {
+        ++stats->last_count;
+        return;
+    }
+
+    interval = pts - stats->last_pts;
+    frame_time = stats->last_count == 0 ? 0 : interval / (int64_t)stats->last_count;
+    if (frame_time != stats->last_interval) {
+        av_log(stats->logctx, AV_LOG_INFO, "%s: %s: New interval: %" PRId64 "/%d=%" PRId64 "\n",
+                __func__, stats->name, interval, stats->last_count, frame_time);
+        stats->last_interval = frame_time;
+    }
+
+    stats->last_pts = pts;
+    stats->last_count = 1;
+}
+
+static void pts_stats_init(pts_stats_t * const stats, void * logctx, const char * name)
+{
+    *stats = (pts_stats_t){.logctx = logctx, .name = name};
+}
+
+
 static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *const s)
 {
     int ret;
@@ -188,6 +217,7 @@ static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts
 static void
 xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *const avpkt)
 {
+#if 0
     int64_t track_pts;
 
     // Avoid 0
@@ -208,12 +238,14 @@ xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *cons
         .track_pts        = track_pts
     };
     avpkt->pts = track_pts;
+#endif
 }
 
 // Returns -1 if we should discard the frame
 static int
 xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *const frame)
 {
+#if 0
     unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
     const V4L2m2mTrackEl *const t = s->track_els + n;
     if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
@@ -252,6 +284,10 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->best_effort_timestamp = frame->pts;
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
     av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
+#endif
+    frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
+    pts_stats_add(&s->pts_dec, frame->pts);
+
     return 0;
 }
 
@@ -284,6 +320,11 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     // tried to Q it
     if (!s->buf_pkt.size) {
         ret = ff_decode_get_packet(avctx, &s->buf_pkt);
+
+        if (ret == 0)
+            printf("Get: pts %"PRId64"\n", s->buf_pkt.pts);
+        else
+            printf("Noget: %d\n", ret);
 
         if (ret == AVERROR(EAGAIN)) {
             if (!stream_started(s)) {
@@ -327,6 +368,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     if ((ret = check_output_streamon(avctx, s)) != 0)
         return ret;
 
+    printf("Try: pts %"PRId64"\n", s->buf_pkt.pts);
     ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt,
                                          avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size,
                                          1);
@@ -389,7 +431,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // when discarding
                 // This returns AVERROR(EAGAIN) if there isn't a frame ready yet
                 // but there is room in the input Q
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, 1);
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, src_rv == NQ_Q_FULL ? 100 : -1, 1);
 
                 if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
                     av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",
@@ -427,10 +469,13 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     }
 #endif
 
-    return dst_rv == 0 ? 0 :
+    dst_rv = dst_rv == 0 ? 0 :
         src_rv < 0 ? src_rv :
         dst_rv < 0 ? dst_rv :
             AVERROR(EAGAIN);
+
+    printf("Rv: %d\n", dst_rv);
+    return dst_rv;
 }
 
 #if 0
@@ -485,6 +530,16 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     int ret;
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
+
+    if (avctx->codec_id == AV_CODEC_ID_H264) {
+        if (avctx->ticks_per_frame == 1) {
+            if(avctx->time_base.den < INT_MAX/2) {
+                avctx->time_base.den *= 2;
+            } else
+                avctx->time_base.num /= 2;
+        }
+        avctx->ticks_per_frame = 2;
+    }
 
     av_log(avctx, AV_LOG_INFO, "level=%d\n", avctx->level);
     ret = ff_v4l2_m2m_create_context(priv, &s);
@@ -542,6 +597,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_ERROR, "can't configure decoder\n");
         return ret;
     }
+
+    pts_stats_init(&s->pts_dec, avctx, "dec");
 
     return v4l2_prepare_decoder(s);
 }

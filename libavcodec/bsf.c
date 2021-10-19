@@ -209,8 +209,12 @@ int av_bsf_send_packet(AVBSFContext *ctx, AVPacket *pkt)
         return AVERROR(EINVAL);
     }
 
-    if (!IS_EMPTY(bsfi->buffer_pkt))
+    printf("bsf: pts %"PRId64" dts %"PRId64"\n", pkt->pts, pkt->dts);
+
+    if (!IS_EMPTY(bsfi->buffer_pkt)) {
+        printf("bsfagain\n");
         return AVERROR(EAGAIN);
+    }
 
     ret = av_packet_make_refcounted(pkt);
     if (ret < 0)
