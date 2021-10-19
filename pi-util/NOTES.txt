@@ -1,0 +1,69 @@
+Notes on the hevc_rpi decoder & associated support code
+-------------------------------------------------------
+
+There are 3 main parts to the existing code:
+
+1) The decoder - this is all in libavcodec as rpi_hevc*.
+
+2) A few filters to deal with Sand frames and a small patch to
+automatically select the sand->i420 converter when required.
+
+3) A kludge in ffmpeg.c to display the decoded video. This could & should
+be converted into a proper ffmpeg display module.
+
+
+Decoder
+-------
+
+The decoder is a modified version of the existing ffmpeg hevc decoder.
+Generally it is ~100% faster than the existing ffmpeg hevc s/w decoder.
+More complex bitstreams can be up to ~200% faster but particularly easy
+streams can cut its advantage down to ~50%.  This means that a Pi3+ can
+display nearly all 8-bit 1080p30 streams and with some overclocking it can
+display most lower bitrate 10-bit 1080p30 streams - this latter case is
+not helped by the requirement to downsample to 8-bit before display on a
+Pi.
+
+It has had co-processor offload added for inter-pred and large block
+residual transform.  Various parts have had optimized ARM NEON assembler
+added and the existing ARM asm sections have been profiled and
+re-optimized for A53. The main C code has been substantially reworked at
+its lower levels in an attempt to optimize it and minimize memory
+bandwidth. To some extent code paths that deal with frame types that it
+doesn't support have been pruned.
+
+It outputs frames in Broadcom Sand format. This is a somewhat annoying
+layout that doesn't fit into ffmpegs standard frame descriptions. It has
+vertical stripes of 128 horizontal pixels (64 in 10 bit forms) with Y for
+the stripe followed by interleaved U & V, that is then followed by the Y
+for the next stripe, etc. The final stripe is always padded to
+stripe-width. This is used in an attempt to help with cache locality and
+cut down on the number of dram bank switches. It is annoying to use for
+inter-pred with conventional processing but the way the Pi QPU (which is
+used for inter-pred) works means that it has negligible downsides here and
+the improved memory performance exceeds the overhead of the increased
+complexity in the rest of the code.
+
+Frames must be allocated out of GPU memory (as otherwise they can't be
+accessed by the co-processors). Utility functions (in rpi_zc.c) have been
+written to make this easier. As the frames are already in GPU memory they
+can be displayed by the Pi h/w without any further copying.
+
+
+Known non-features
+------------------
+
+Frame allocation should probably be done in some other way in order to fit
+into the standard framework better.
+
+Sand frames are currently declared as software frames, there is an
+argument that they should be hardware frames but they aren't really.
+
+There must be a better way of auto-selecting the hevc_rpi decoder over the
+normal s/w hevc decoder, but I became confused by the existing h/w
+acceleration framework and what I wanted to do didn't seem to fit in
+neatly.
+
+Display should be a proper device rather than a kludge in ffmpeg.c
+
+
