@@ -890,7 +890,7 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
     return 0;
 }
 
-
+#if 0
 static int deint_v4l2m2m_request_frame(AVFilterLink *link)
 {
     AVFilterContext *avctx         = link->src;
@@ -948,6 +948,7 @@ static int deint_v4l2m2m_request_frame(AVFilterLink *link)
     av_log(priv, AV_LOG_TRACE, ">>> %s: OK\n", __func__);
     return 0;
 }
+#endif
 
 static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
 {
@@ -1058,13 +1059,19 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
     AVFilterLink * const inlink = avctx->inputs[0];
     int n = 0;
     int cn = 99;
+    int instatus = 0;
+    int64_t inpts = 0;
 
-    av_log(priv, AV_LOG_TRACE, "<<< %s\n", __func__);
+    printf("<<< %s\n", __func__);
 
     FF_FILTER_FORWARD_STATUS_BACK_ALL(outlink, avctx);
 
+    if (ff_inlink_acknowledge_status(inlink, &instatus, &inpts)) {
+        printf("dei: pts %"PRId64" status %s\n", inpts, av_err2str(instatus));
+    }
+
     if (!ff_outlink_frame_wanted(outlink)) {
-        av_log(priv, AV_LOG_TRACE, "--- %s: Not wanted out\n", __func__);
+        printf("--- %s: Not wanted out\n", __func__);
         cn = 0;
     }
     else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
@@ -1072,6 +1079,7 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
         AVFrame * frame = av_frame_alloc();
         int rv;
 
+again:
         recycle_q(&s->output);
         n = count_enqueued(&s->output);
 
@@ -1086,7 +1094,13 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
             // frame is always consumed by filter_frame - even on error despite
             // a somewhat confusing comment in the header
             rv = ff_filter_frame(outlink, frame);
-            av_log(priv, AV_LOG_TRACE, ">>> %s: Filtered: %s\n", __func__, av_err2str(rv));
+
+            if (instatus != 0) {
+                printf("dei: eof loop\n");
+                goto again;
+            }
+
+            printf(">>> %s: Filtered: %s\n", __func__, av_err2str(rv));
             return rv;
         }
 
@@ -1097,6 +1111,12 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
         }
 
         cn = count_enqueued(&s->capture);
+    }
+
+    if (instatus != 0) {
+        ff_outlink_set_status(outlink, instatus, inpts);
+        printf(">>> %s: Status done: %s\n", __func__, av_err2str(instatus));
+        return 0;
     }
 
     {
@@ -1111,28 +1131,30 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
                 return rv;
             }
 
-            if (frame == NULL)
+            if (frame == NULL) {
+                printf("--- %s: No frame\n", __func__);
                 break;
+            }
 
             pts_stats_add(&s->pts_in, frame->pts);
 
             deint_v4l2m2m_filter_frame(inlink, frame);
-            av_log(priv, AV_LOG_TRACE, "--- %s: Q frame\n", __func__);
+            printf("--- %s: Q frame\n", __func__);
             ++n;
         }
     }
 
     if (n < 6) {
         ff_inlink_request_frame(inlink);
-        av_log(priv, AV_LOG_TRACE, "--- %s: req frame\n", __func__);
+        printf("--- %s: req frame\n", __func__);
     }
 
     if (n > 4 && cn != 0) {
         ff_filter_set_ready(avctx, 1);
-        av_log(priv, AV_LOG_TRACE, "--- %s: ready\n", __func__);
+        printf("--- %s: ready\n", __func__);
     }
 
-    av_log(priv, AV_LOG_TRACE, ">>> %s: OK (n=%d, cn=%d)\n", __func__, n, cn);
+    printf(">>> %s: OK (n=%d, cn=%d)\n", __func__, n, cn);
     return n < 6 || cn != 0 ? 0 : FFERROR_NOT_READY;
 }
 

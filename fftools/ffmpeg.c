@@ -2713,6 +2713,14 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
                 printf("pip: pts %"PRId64" next_pts %"PRId64" duration_pts %"PRId64"\n", ist->pts, ist->next_pts, duration_pts);
             }
             av_packet_unref(avpkt);
+
+            if (ret == 0)
+                /* Nothing */;
+            else if (ret == AVERROR_EOF)
+                printf("===: EOF\n");
+            else
+                printf("===: Error: %s\n", av_err2str(ret));
+
             break;
         case AVMEDIA_TYPE_SUBTITLE:
             if (repeating)
