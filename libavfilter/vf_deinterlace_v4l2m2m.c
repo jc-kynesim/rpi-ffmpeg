@@ -96,6 +96,24 @@ typedef struct pts_stats_s
     int64_t last_pts;
 } pts_stats_t;
 
+#define PTS_TRACK_SIZE 32
+typedef struct pts_track_el_s
+{
+    uint32_t n;
+    unsigned int interval;
+    AVFrame * props;
+} pts_track_el_t;
+
+typedef struct pts_track_s
+{
+    uint32_t n;
+    uint32_t last_n;
+    int got_2;
+    void * logctx;
+    pts_stats_t stats;
+    pts_track_el_t a[PTS_TRACK_SIZE];
+} pts_track_t;
+
 typedef struct DeintV4L2M2MContextShared {
     int fd;
     int done;
@@ -113,6 +131,7 @@ typedef struct DeintV4L2M2MContextShared {
     int64_t last_pts;
     int64_t frame_interval;
 
+    pts_track_t track;
     pts_stats_t pts_in;
     pts_stats_t pts_out;
 
@@ -128,22 +147,27 @@ typedef struct DeintV4L2M2MContext {
 
 #define USEC_PER_SEC 1000000
 
+static unsigned int pts_stats_interval(const pts_stats_t * const stats)
+{
+    return stats->last_interval;
+}
+
 static void pts_stats_add(pts_stats_t * const stats, int64_t pts)
 {
-    int64_t frame_time;
-    int64_t interval;
-
-    if (pts == AV_NOPTS_VALUE) {
+    if (pts == AV_NOPTS_VALUE || pts == stats->last_pts) {
         ++stats->last_count;
         return;
     }
 
-    interval = pts - stats->last_pts;
-    frame_time = stats->last_count == 0 ? 0 : interval / (int64_t)stats->last_count;
-    if (frame_time != stats->last_interval) {
-        av_log(stats->logctx, AV_LOG_INFO, "%s: %s: New interval: %" PRId64 "/%d=%" PRId64 "\n",
-                __func__, stats->name, interval, stats->last_count, frame_time);
-        stats->last_interval = frame_time;
+    if (stats->last_pts != AV_NOPTS_VALUE) {
+        int64_t interval = pts - stats->last_pts;
+        int64_t frame_time = stats->last_count == 0 ? 0 : interval / (int64_t)stats->last_count;
+
+        if (frame_time != stats->last_interval) {
+            av_log(stats->logctx, AV_LOG_INFO, "%s: %s: New interval: %u->%" PRId64 "/%d=%" PRId64 "\n",
+                   __func__, stats->name, stats->last_interval, interval, stats->last_count, frame_time);
+            stats->last_interval = frame_time;
+        }
     }
 
     stats->last_pts = pts;
@@ -152,13 +176,122 @@ static void pts_stats_add(pts_stats_t * const stats, int64_t pts)
 
 static void pts_stats_init(pts_stats_t * const stats, void * logctx, const char * name)
 {
-    *stats = (pts_stats_t){.logctx = logctx, .name = name};
+    *stats = (pts_stats_t){.logctx = logctx, .name = name, .last_pts = AV_NOPTS_VALUE};
+}
+
+static inline uint32_t pts_track_next_n(pts_track_t * const trk)
+{
+    if (++trk->n == 0)
+        trk->n = 1;
+    return trk->n;
+}
+
+static int pts_track_get_frame(pts_track_t * const trk, const struct timeval tv, AVFrame * const dst)
+{
+    uint32_t n = (uint32_t)(tv.tv_usec / 2 + tv.tv_sec * 500000);
+    pts_track_el_t * t;
+
+    // As a first guess assume that n==0 means last frame
+    if (n == 0) {
+        n = trk->last_n;
+        if (n == 0)
+            goto fail;
+    }
+
+    t = trk->a + (n & (PTS_TRACK_SIZE - 1));
+
+    if (t->n != n) {
+        av_log(trk->logctx, AV_LOG_ERROR, "%s: track failure: got %u, expected %u\n", __func__, n, trk->n);
+        goto fail;
+    }
+
+    // 1st frame is simple - just believe it
+    if (n != trk->last_n) {
+        trk->last_n = n;
+        trk->got_2 = 0;
+        return av_frame_copy_props(dst, t->props);
+    }
+
+    // Only believe in a single interpolated frame
+    if (trk->got_2)
+        goto fail;
+    trk->got_2 = 1;
+
+    av_frame_copy_props(dst, t->props);
+
+    if (t->interval == 0 || dst->pts == AV_NOPTS_VALUE) {
+        // If we can't guess - don't
+        dst->pts = AV_NOPTS_VALUE;
+        dst->pkt_dts = AV_NOPTS_VALUE;
+    }
+    else {
+        dst->pts += t->interval / 2;
+        dst->pkt_dts += t->interval / 2;
+        dst->best_effort_timestamp += t->interval / 2;
+    }
+
+    return 0;
+
+fail:
+    trk->last_n = 0;
+    trk->got_2 = 0;
+    dst->pts = AV_NOPTS_VALUE;
+    dst->pkt_dts = AV_NOPTS_VALUE;
+    return 0;
+}
+
+static struct timeval pts_track_add_frame(pts_track_t * const trk, const AVFrame * const src)
+{
+    const uint32_t n = pts_track_next_n(trk);
+    pts_track_el_t * const t = trk->a + (n & (PTS_TRACK_SIZE - 1));
+
+    pts_stats_add(&trk->stats, src->pts);
+
+    t->n = n;
+    t->interval = pts_stats_interval(&trk->stats); // guess that next interval is the same as the last
+    av_frame_unref(t->props);
+    av_frame_copy_props(t->props, src);
+
+    // We now know what the previous interval was, rather than having to guess,
+    // so set it.  There is a better than decent chance that this is before
+    // we use it.
+    if (t->interval != 0) {
+        pts_track_el_t * const prev_t = trk->a + ((n - 1) & (PTS_TRACK_SIZE - 1));
+        prev_t->interval = t->interval;
+    }
+
+    // In case deinterlace interpolates frames use every other usec
+    return (struct timeval){.tv_sec = n / 500000, .tv_usec = (n % 500000) * 2};
+}
+
+static void pts_track_uninit(pts_track_t * const trk)
+{
+    unsigned int i;
+    for (i = 0; i != PTS_TRACK_SIZE; ++i) {
+        trk->a[i].n = 0;
+        av_frame_free(&trk->a[i].props);
+    }
+}
+
+static int pts_track_init(pts_track_t * const trk, void *logctx)
+{
+    unsigned int i;
+    trk->n = 1;
+    pts_stats_init(&trk->stats, logctx, "track");
+    for (i = 0; i != PTS_TRACK_SIZE; ++i) {
+        trk->a[i].n = 0;
+        if ((trk->a[i].props = av_frame_alloc()) == NULL) {
+            pts_track_uninit(trk);
+            return AVERROR(ENOMEM);
+        }
+    }
+    return 0;
 }
 
 
 static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts)
 {
-    if (pts == AV_NOPTS_VALUE)
+    if (pts == AV_NOPTS_VALUE || pts <= 0)
     {
         out->buffer.timestamp.tv_usec = 0;
         out->buffer.timestamp.tv_sec = 1000000;
@@ -174,7 +307,7 @@ av_log(NULL, AV_LOG_DEBUG, "%s: %ld.%ld\n", __func__, out->buffer.timestamp.tv_s
 static inline int64_t v4l2_get_pts(V4L2Buffer *avbuf)
 {
 av_log(NULL, AV_LOG_DEBUG, "%s: %ld.%ld\n", __func__, avbuf->buffer.timestamp.tv_sec, avbuf->buffer.timestamp.tv_usec);
-    if (avbuf->buffer.timestamp.tv_sec == 1000000 && avbuf->buffer.timestamp.tv_usec == 0)
+    if ((avbuf->buffer.timestamp.tv_sec == 1000000 || avbuf->buffer.timestamp.tv_sec == 0) && avbuf->buffer.timestamp.tv_usec == 0)
     {
         return AV_NOPTS_VALUE;
     }
@@ -702,7 +835,7 @@ static int deint_v4l2m2m_enqueue_frame(V4L2Queue *queue, AVFrame* frame)
             buf->buffer.field = V4L2_FIELD_INTERLACED_BT;
     }
 
-    v4l2_set_pts(buf, frame->pts);
+    buf->buffer.timestamp = pts_track_add_frame(&queue->ctx->track, frame);
 
     buf->drm_frame.objects[0].fd = drm_desc->objects[0].fd;
 
@@ -851,6 +984,10 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
         return AVERROR(EAGAIN);
     }
 
+    // Fill in PTS and anciliary info from src frame
+    // we will want to overwrite some bits
+    pts_track_get_frame(&ctx->track, avbuf->buffer.timestamp, frame);
+
     frame->buf[0] = av_buffer_create((uint8_t *) &avbuf->drm_frame,
                             sizeof(avbuf->drm_frame), v4l2_free_buffer,
                             avbuf, AV_BUFFER_FLAG_READONLY);
@@ -867,17 +1004,10 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
         frame->hw_frames_ctx = av_buffer_ref(ctx->hw_frames_ctx);
     frame->height = ctx->height;
     frame->width = ctx->width;
-    frame->sample_aspect_ratio = ctx->sample_aspect_ratio;
 
-    frame->pts = v4l2_get_pts(avbuf);
-    pts_stats_add(&ctx->pts_out, frame->pts);
-
-    if (frame->pts == AV_NOPTS_VALUE || frame->pts == ctx->last_pts)
-        frame->pts = ctx->last_pts + ctx->frame_interval;
-
-    frame->best_effort_timestamp = frame->pts;
-
-    ctx->last_pts = frame->pts;
+    // Not interlaced now
+    frame->interlaced_frame = 0;
+    frame->top_field_first = 0;
 
     v4l2_set_pts(avbuf, frame->pts);
 
@@ -887,6 +1017,7 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
     }
 
     LOGBUF(avbuf);
+    av_log(NULL, AV_LOG_TRACE, ">>> %s: PTS=%"PRId64"\n", __func__, frame->pts);
     return 0;
 }
 
@@ -963,10 +1094,17 @@ static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
 
     av_log(NULL, AV_LOG_DEBUG, "%s: %dx%d\n", __func__, ctx->width, ctx->height);
 
-    outlink->frame_rate = av_mul_q(inlink->frame_rate,
-                                   (AVRational){ 2, 1 });
-    outlink->time_base  = av_mul_q(inlink->time_base,
-                                   (AVRational){ 1, 2 });
+    outlink->time_base           = inlink->time_base;
+    outlink->w                   = inlink->w;
+    outlink->h                   = inlink->h;
+    outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
+    outlink->format              = inlink->format;
+    outlink->frame_rate = (AVRational) {1, 0};
+
+//    outlink->frame_rate = av_mul_q(inlink->frame_rate,
+//                                   (AVRational){ 2, 1 });
+//    outlink->time_base  = av_mul_q(inlink->time_base,
+//                                   (AVRational){ 1, 2 });
 
     ret = deint_v4l2m2m_find_device(ctx);
     if (ret)
@@ -1062,16 +1200,14 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
     int instatus = 0;
     int64_t inpts = 0;
 
-    printf("<<< %s\n", __func__);
+    av_log(priv, AV_LOG_TRACE, "<<< %s\n", __func__);
 
     FF_FILTER_FORWARD_STATUS_BACK_ALL(outlink, avctx);
 
-    if (ff_inlink_acknowledge_status(inlink, &instatus, &inpts)) {
-        printf("dei: pts %"PRId64" status %s\n", inpts, av_err2str(instatus));
-    }
+    ff_inlink_acknowledge_status(inlink, &instatus, &inpts);
 
     if (!ff_outlink_frame_wanted(outlink)) {
-        printf("--- %s: Not wanted out\n", __func__);
+        av_log(priv, AV_LOG_TRACE, "%s: Not wanted out\n", __func__);
         cn = 0;
     }
     else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
@@ -1096,11 +1232,11 @@ again:
             rv = ff_filter_frame(outlink, frame);
 
             if (instatus != 0) {
-                printf("dei: eof loop\n");
+                av_log(priv, AV_LOG_TRACE, "%s: eof loop\n", __func__);
                 goto again;
             }
 
-            printf(">>> %s: Filtered: %s\n", __func__, av_err2str(rv));
+            av_log(priv, AV_LOG_TRACE, ">>> %s: Filtered: %s\n", __func__, av_err2str(rv));
             return rv;
         }
 
@@ -1115,7 +1251,7 @@ again:
 
     if (instatus != 0) {
         ff_outlink_set_status(outlink, instatus, inpts);
-        printf(">>> %s: Status done: %s\n", __func__, av_err2str(instatus));
+        av_log(priv, AV_LOG_TRACE, ">>> %s: Status done: %s\n", __func__, av_err2str(instatus));
         return 0;
     }
 
@@ -1132,29 +1268,29 @@ again:
             }
 
             if (frame == NULL) {
-                printf("--- %s: No frame\n", __func__);
+                av_log(priv, AV_LOG_TRACE, "%s: No frame\n", __func__);
                 break;
             }
 
             pts_stats_add(&s->pts_in, frame->pts);
 
             deint_v4l2m2m_filter_frame(inlink, frame);
-            printf("--- %s: Q frame\n", __func__);
+            av_log(priv, AV_LOG_TRACE, "%s: Q frame\n", __func__);
             ++n;
         }
     }
 
     if (n < 6) {
         ff_inlink_request_frame(inlink);
-        printf("--- %s: req frame\n", __func__);
+        av_log(priv, AV_LOG_TRACE, "%s: req frame\n", __func__);
     }
 
     if (n > 4 && cn != 0) {
         ff_filter_set_ready(avctx, 1);
-        printf("--- %s: ready\n", __func__);
+        av_log(priv, AV_LOG_TRACE, "%s: ready\n", __func__);
     }
 
-    printf(">>> %s: OK (n=%d, cn=%d)\n", __func__, n, cn);
+    av_log(priv, AV_LOG_TRACE, ">>> %s: OK (n=%d, cn=%d)\n", __func__, n, cn);
     return n < 6 || cn != 0 ? 0 : FFERROR_NOT_READY;
 }
 
@@ -1179,6 +1315,7 @@ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
     ctx->last_pts = 0;
     ctx->frame_interval = 1000000 / 60;
 
+    pts_track_init(&ctx->track, priv);
     pts_stats_init(&ctx->pts_in, priv, "in");
     pts_stats_init(&ctx->pts_out, priv, "out");
 
@@ -1193,6 +1330,7 @@ static void deint_v4l2m2m_uninit(AVFilterContext *avctx)
     DeintV4L2M2MContextShared *ctx = priv->shared;
 
     ctx->done = 1;
+    pts_track_uninit(&ctx->track);
     deint_v4l2m2m_destroy_context(ctx);
 }
 

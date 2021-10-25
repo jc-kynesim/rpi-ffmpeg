@@ -1719,8 +1719,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
     update_stream_avctx(s);
 #endif
 
-    printf("rf%d: pts %"PRId64" dts %"PRId64"\n", pkt->stream_index, pkt->pts, pkt->dts);
-
     if (s->debug & FF_FDEBUG_TS)
         av_log(s, AV_LOG_DEBUG,
                "read_frame_internal stream=%d, pts=%s, dts=%s, "

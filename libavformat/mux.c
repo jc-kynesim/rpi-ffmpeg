@@ -561,7 +561,7 @@ static int compute_muxer_pkt_fields(AVFormatContext *s, AVStream *st, AVPacket *
         s->internal->missing_ts_warning = 1;
     }
 
-    if (s->debug & FF_FDEBUG_TS)
+//    if (s->debug & FF_FDEBUG_TS)
         av_log(s, AV_LOG_DEBUG, "compute_muxer_pkt_fields: pts:%s dts:%s cur_dts:%s b:%d size:%d st:%d\n",
             av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(st->cur_dts), delay, pkt->size, pkt->stream_index);
 

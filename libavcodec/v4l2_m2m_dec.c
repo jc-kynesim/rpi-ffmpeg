@@ -217,7 +217,6 @@ static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts
 static void
 xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *const avpkt)
 {
-#if 0
     int64_t track_pts;
 
     // Avoid 0
@@ -238,14 +237,12 @@ xlat_pts_in(AVCodecContext *const avctx, V4L2m2mContext *const s, AVPacket *cons
         .track_pts        = track_pts
     };
     avpkt->pts = track_pts;
-#endif
 }
 
 // Returns -1 if we should discard the frame
 static int
 xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *const frame)
 {
-#if 0
     unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
     const V4L2m2mTrackEl *const t = s->track_els + n;
     if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
@@ -283,9 +280,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
     frame->best_effort_timestamp = frame->pts;
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
-    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
-#endif
-    frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
     pts_stats_add(&s->pts_dec, frame->pts);
 
     return 0;
@@ -320,11 +314,6 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     // tried to Q it
     if (!s->buf_pkt.size) {
         ret = ff_decode_get_packet(avctx, &s->buf_pkt);
-
-        if (ret == 0)
-            printf("Get: pts %"PRId64"\n", s->buf_pkt.pts);
-        else
-            printf("Noget: %d\n", ret);
 
         if (ret == AVERROR(EAGAIN)) {
             if (!stream_started(s)) {
@@ -368,7 +357,6 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     if ((ret = check_output_streamon(avctx, s)) != 0)
         return ret;
 
-    printf("Try: pts %"PRId64"\n", s->buf_pkt.pts);
     ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt,
                                          avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size,
                                          1);
@@ -474,7 +462,6 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         dst_rv < 0 ? dst_rv :
             AVERROR(EAGAIN);
 
-    printf("Rv: %d\n", dst_rv);
     return dst_rv;
 }
 
