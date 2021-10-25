@@ -1288,8 +1288,8 @@ static void do_video_out(OutputFile *of,
             if (ret < 0)
                 goto error;
 
-            if (debug_ts) {
-                av_log(NULL, AV_LOG_INFO, "encoder -> type:video "
+            if (debug_ts || 1) {
+                av_log(NULL, AV_LOG_INFO, "encoder -> type:video raw "
                        "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s\n",
                        av_ts2str(pkt.pts), av_ts2timestr(pkt.pts, &enc->time_base),
                        av_ts2str(pkt.dts), av_ts2timestr(pkt.dts, &enc->time_base));
@@ -1300,8 +1300,8 @@ static void do_video_out(OutputFile *of,
 
             av_packet_rescale_ts(&pkt, enc->time_base, ost->mux_timebase);
 
-            if (debug_ts) {
-                av_log(NULL, AV_LOG_INFO, "encoder -> type:video "
+            if (debug_ts || 1) {
+                av_log(NULL, AV_LOG_INFO, "encoder -> type:video scaled "
                     "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s\n",
                     av_ts2str(pkt.pts), av_ts2timestr(pkt.pts, &ost->mux_timebase),
                     av_ts2str(pkt.dts), av_ts2timestr(pkt.dts, &ost->mux_timebase));
@@ -2410,19 +2410,6 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
     }
     ist->hwaccel_retrieved_pix_fmt = decoded_frame->format;
 
-    {
-        static int n = 0;
-        printf("Out: %d pts %"PRId64" dts %"PRId64"\n", n++, decoded_frame->pts, decoded_frame->pkt_dts);
-    }
-    if (decoded_frame->pts != AV_NOPTS_VALUE)
-    {
-        static int64_t last_pts = 0;
-        if (last_pts > decoded_frame->pts) {
-            av_log(NULL, AV_LOG_ERROR, "***** PTS go backwards: %"PRId64" -> %"PRId64"\n", last_pts, decoded_frame->pts);
-        }
-        last_pts = decoded_frame->pts;
-    }
-
     best_effort_timestamp= decoded_frame->best_effort_timestamp;
     *duration_pts = decoded_frame->pkt_duration;
 
@@ -2614,8 +2601,12 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
         case AVMEDIA_TYPE_VIDEO:
             ret = decode_video    (ist, repeating ? NULL : &avpkt, &got_output, &duration_pts, !pkt,
                                    &decode_failed);
-//            if (!repeating || !pkt || got_output) {
-            if (!repeating || !pkt) {
+            // Pi: Do not inc dts if no_cvt_hw set
+            // V4L2 H264 decode has long latency and sometimes spits out a long
+            // stream of output without input. In this case incrementing DTS is wrong.
+            // There may be cases where the condition as written is correct so only
+            // "fix" in the cases which cause problems
+            if (!repeating || !pkt || (got_output && !no_cvt_hw)) {
                 if (pkt && pkt->duration) {
                     duration_dts = av_rescale_q(pkt->duration, ist->st->time_base, AV_TIME_BASE_Q);
                 } else if(ist->dec_ctx->framerate.num != 0 && ist->dec_ctx->framerate.den != 0) {
@@ -2625,7 +2616,6 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
                                     ist->dec_ctx->framerate.num / ist->dec_ctx->ticks_per_frame;
                 }
 
-                printf("pip: dts %"PRId64" next_dts %"PRId64" duration_dts %"PRId64"\n", ist->dts, ist->next_dts, duration_dts);
                 if(ist->dts != AV_NOPTS_VALUE && duration_dts) {
                     ist->next_dts += duration_dts;
                 }else
@@ -2638,16 +2628,7 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
                 } else {
                     ist->next_pts += duration_dts;
                 }
-                printf("pip: pts %"PRId64" next_pts %"PRId64" duration_pts %"PRId64"\n", ist->pts, ist->next_pts, duration_pts);
             }
-
-            if (ret == 0)
-                /* Nothing */;
-            else if (ret == AVERROR_EOF)
-                printf("===: EOF\n");
-            else
-                printf("===: Error: %s\n", av_err2str(ret));
-
             break;
         case AVMEDIA_TYPE_SUBTITLE:
             if (repeating)
@@ -4358,8 +4339,6 @@ static int process_input(int file_index)
     if (ist->discard)
         goto discard_packet;
 
-    printf("gi%d: pts %"PRId64" dts %"PRId64"\n", pkt.stream_index, pkt.pts, pkt.dts);
-
     if (pkt.flags & AV_PKT_FLAG_CORRUPT) {
         av_log(NULL, exit_on_error ? AV_LOG_FATAL : AV_LOG_WARNING,
                "%s: corrupt input packet in stream %d\n", is->url, pkt.stream_index);
@@ -4395,7 +4374,7 @@ static int process_input(int file_index)
                 new_start_time = FFMIN(new_start_time, av_rescale_q(st->start_time, st->time_base, AV_TIME_BASE_Q));
             }
             if (new_start_time > is->start_time) {
-                av_log(is, AV_LOG_ERROR, "Correcting start time by %"PRId64"\n", new_start_time - is->start_time);
+                av_log(is, AV_LOG_VERBOSE, "Correcting start time by %"PRId64"\n", new_start_time - is->start_time);
                 ifile->ts_offset = -new_start_time;
             }
         }
@@ -4453,7 +4432,7 @@ static int process_input(int file_index)
         if (delta < -1LL*dts_delta_threshold*AV_TIME_BASE ||
             delta >  1LL*dts_delta_threshold*AV_TIME_BASE){
             ifile->ts_offset -= delta;
-            av_log(NULL, AV_LOG_ERROR,
+            av_log(NULL, AV_LOG_DEBUG,
                    "Inter stream timestamp discontinuity %"PRId64", new offset= %"PRId64"\n",
                    delta, ifile->ts_offset);
             pkt.dts -= av_rescale_q(delta, AV_TIME_BASE_Q, ist->st->time_base);
@@ -4493,13 +4472,12 @@ static int process_input(int file_index)
                 delta >  1LL*dts_delta_threshold*AV_TIME_BASE ||
                 pkt_dts + AV_TIME_BASE/10 < FFMAX(ist->pts, ist->dts)) {
                 ifile->ts_offset -= delta;
-                printf("timestamp discontinuity for stream #%d:%d "
+                av_log(NULL, AV_LOG_DEBUG,
+                       "timestamp discontinuity for stream #%d:%d "
                        "(id=%d, type=%s): %"PRId64", new offset= %"PRId64"\n",
                        ist->file_index, ist->st->index, ist->st->id,
                        av_get_media_type_string(ist->dec_ctx->codec_type),
                        delta, ifile->ts_offset);
-                printf("dts %"PRId64" next_dts %"PRId64" pkt_dts %"PRId64" ist->pts %"PRId64" ist->dts %"PRId64" duration %"PRId64" threshold %f\n",
-                       pkt.dts, ist->next_dts, pkt_dts, ist->pts, ist->dts, duration, dts_delta_threshold);
                 pkt.dts -= av_rescale_q(delta, AV_TIME_BASE_Q, ist->st->time_base);
                 if (pkt.pts != AV_NOPTS_VALUE)
                     pkt.pts -= av_rescale_q(delta, AV_TIME_BASE_Q, ist->st->time_base);
@@ -4536,7 +4514,6 @@ static int process_input(int file_index)
 
     sub2video_heartbeat(ist, pkt.pts);
 
-    printf("PIn: pts %"PRId64" dts %"PRId64"\n", pkt.pts, pkt.dts);
     process_input_packet(ist, &pkt, 0);
 
 discard_packet:

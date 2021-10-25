@@ -180,7 +180,6 @@ static int h264_mp4toannexb_filter(AVBSFContext *ctx, AVPacket *opkt)
     ret = ff_bsf_get_packet(ctx, &in);
     if (ret < 0)
         return ret;
-    printf("AxB: pts %"PRId64" dts %"PRId64"\n", in->pts, in->dts);
 
     /* nothing to filter */
     if (!s->extradata_parsed) {
