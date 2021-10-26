@@ -1108,6 +1108,7 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
     int cn = 99;
     int instatus = 0;
     int64_t inpts = 0;
+    int did_something = 0;
 
     av_log(priv, AV_LOG_TRACE, "<<< %s\n", __func__);
 
@@ -1117,7 +1118,6 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
 
     if (!ff_outlink_frame_wanted(outlink)) {
         av_log(priv, AV_LOG_TRACE, "%s: Not wanted out\n", __func__);
-        cn = 0;
     }
     else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
     {
@@ -1134,7 +1134,14 @@ again:
         }
 
         rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame, n > 4 ? 300 : 0);
-        if (rv == 0) {
+        if (rv != 0) {
+            av_frame_free(&frame);
+            if (rv != AVERROR(EAGAIN)) {
+                av_log(priv, AV_LOG_ERROR, ">>> %s: DQ fail: %s\n", __func__, av_err2str(rv));
+                return rv;
+            }
+        }
+        else {
             frame->interlaced_frame = 0;
             // frame is always consumed by filter_frame - even on error despite
             // a somewhat confusing comment in the header
@@ -1145,14 +1152,8 @@ again:
                 goto again;
             }
 
-            av_log(priv, AV_LOG_TRACE, ">>> %s: Filtered: %s\n", __func__, av_err2str(rv));
-            return rv;
-        }
-
-        av_frame_free(&frame);
-        if (rv != AVERROR(EAGAIN)) {
-            av_log(priv, AV_LOG_ERROR, ">>> %s: DQ fail: %s\n", __func__, av_err2str(rv));
-            return rv;
+            av_log(priv, AV_LOG_TRACE, "%s: Filtered: %s\n", __func__, av_err2str(rv));
+            did_something = 1;
         }
 
         cn = count_enqueued(&s->capture);
@@ -1168,6 +1169,7 @@ again:
         AVFrame * frame;
         int rv;
 
+        recycle_q(&s->output);
         n = count_enqueued(&s->output);
 
         while (n < 6) {
@@ -1189,16 +1191,18 @@ again:
 
     if (n < 6) {
         ff_inlink_request_frame(inlink);
+        did_something = 1;
         av_log(priv, AV_LOG_TRACE, "%s: req frame\n", __func__);
     }
 
-    if (n > 4 && cn != 0) {
+    if (n > 4 && ff_outlink_frame_wanted(outlink)) {
         ff_filter_set_ready(avctx, 1);
+        did_something = 1;
         av_log(priv, AV_LOG_TRACE, "%s: ready\n", __func__);
     }
 
     av_log(priv, AV_LOG_TRACE, ">>> %s: OK (n=%d, cn=%d)\n", __func__, n, cn);
-    return n < 6 || cn != 0 ? 0 : FFERROR_NOT_READY;
+    return did_something ? 0 : FFERROR_NOT_READY;
 }
 
 static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
