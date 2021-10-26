@@ -227,15 +227,20 @@ static int pts_track_get_frame(pts_track_t * const trk, const struct timeval tv,
 
     av_frame_copy_props(dst, t->props);
 
-    if (t->interval == 0 || dst->pts == AV_NOPTS_VALUE) {
-        // If we can't guess - don't
+
+    // If we can't guess - don't
+    if (t->interval == 0) {
+        dst->best_effort_timestamp = AV_NOPTS_VALUE;
         dst->pts = AV_NOPTS_VALUE;
         dst->pkt_dts = AV_NOPTS_VALUE;
     }
     else {
-        dst->pts += t->interval / 2;
-        dst->pkt_dts += t->interval / 2;
-        dst->best_effort_timestamp += t->interval / 2;
+        if (dst->best_effort_timestamp != AV_NOPTS_VALUE)
+            dst->best_effort_timestamp += t->interval / 2;
+        if (dst->pts != AV_NOPTS_VALUE)
+            dst->pts += t->interval / 2;
+        if (dst->pkt_dts != AV_NOPTS_VALUE)
+            dst->pkt_dts += t->interval / 2;
     }
 
     return 0;
