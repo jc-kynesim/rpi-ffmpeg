@@ -42,35 +42,6 @@
 #include "v4l2_m2m.h"
 #include "v4l2_fmt.h"
 
-
-static void pts_stats_add(pts_stats_t * const stats, int64_t pts)
-{
-    int64_t frame_time;
-    int64_t interval;
-
-    if (pts == AV_NOPTS_VALUE) {
-        ++stats->last_count;
-        return;
-    }
-
-    interval = pts - stats->last_pts;
-    frame_time = stats->last_count == 0 ? 0 : interval / (int64_t)stats->last_count;
-    if (frame_time != stats->last_interval) {
-        av_log(stats->logctx, AV_LOG_INFO, "%s: %s: New interval: %" PRId64 "/%d=%" PRId64 "\n",
-                __func__, stats->name, interval, stats->last_count, frame_time);
-        stats->last_interval = frame_time;
-    }
-
-    stats->last_pts = pts;
-    stats->last_count = 1;
-}
-
-static void pts_stats_init(pts_stats_t * const stats, void * logctx, const char * name)
-{
-    *stats = (pts_stats_t){.logctx = logctx, .name = name};
-}
-
-
 static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *const s)
 {
     int ret;
@@ -280,8 +251,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
     frame->best_effort_timestamp = frame->pts;
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
-    pts_stats_add(&s->pts_dec, frame->pts);
-
+    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
     return 0;
 }
 
@@ -457,12 +427,10 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     }
 #endif
 
-    dst_rv = dst_rv == 0 ? 0 :
+    return dst_rv == 0 ? 0 :
         src_rv < 0 ? src_rv :
         dst_rv < 0 ? dst_rv :
             AVERROR(EAGAIN);
-
-    return dst_rv;
 }
 
 #if 0
@@ -584,8 +552,6 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_ERROR, "can't configure decoder\n");
         return ret;
     }
-
-    pts_stats_init(&s->pts_dec, avctx, "dec");
 
     return v4l2_prepare_decoder(s);
 }

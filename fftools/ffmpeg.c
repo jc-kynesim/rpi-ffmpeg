@@ -1288,8 +1288,8 @@ static void do_video_out(OutputFile *of,
             if (ret < 0)
                 goto error;
 
-            if (debug_ts || 1) {
-                av_log(NULL, AV_LOG_INFO, "encoder -> type:video raw "
+            if (debug_ts) {
+                av_log(NULL, AV_LOG_INFO, "encoder -> type:video "
                        "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s\n",
                        av_ts2str(pkt.pts), av_ts2timestr(pkt.pts, &enc->time_base),
                        av_ts2str(pkt.dts), av_ts2timestr(pkt.dts, &enc->time_base));
@@ -1300,8 +1300,8 @@ static void do_video_out(OutputFile *of,
 
             av_packet_rescale_ts(&pkt, enc->time_base, ost->mux_timebase);
 
-            if (debug_ts || 1) {
-                av_log(NULL, AV_LOG_INFO, "encoder -> type:video scaled "
+            if (debug_ts) {
+                av_log(NULL, AV_LOG_INFO, "encoder -> type:video "
                     "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s\n",
                     av_ts2str(pkt.pts), av_ts2timestr(pkt.pts, &ost->mux_timebase),
                     av_ts2str(pkt.dts), av_ts2timestr(pkt.dts, &ost->mux_timebase));
