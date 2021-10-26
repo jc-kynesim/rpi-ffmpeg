@@ -136,8 +136,6 @@ typedef struct DeintV4L2M2MContext {
     DeintV4L2M2MContextShared *shared;
 } DeintV4L2M2MContext;
 
-#define USEC_PER_SEC 1000000
-
 static unsigned int pts_stats_interval(const pts_stats_t * const stats)
 {
     return stats->last_interval;
