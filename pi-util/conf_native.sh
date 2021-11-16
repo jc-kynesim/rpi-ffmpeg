@@ -1,12 +1,12 @@
 echo "Configure for native build"
 
 FFSRC=`pwd`
-MC=`uname -m`
+MC=`dpkg --print-architecture`
 
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
 
-if [ "$MC" == "aarch64" ]; then
+if [ "$MC" == "arm64" ]; then
   echo "M/C aarch64"
   A=aarch64-linux-gnu
   B=arm64
@@ -16,7 +16,7 @@ if [ "$MC" == "aarch64" ]; then
   RPI_DEFINES=
   RPI_EXTRALIBS=
   RPIOPTS="--disable-mmal --enable-sand"
-else
+elif [ "$MC" == "armhf" ]; then
   echo "M/C armv7"
   A=arm-linux-gnueabihf
   B=armv7
@@ -27,7 +27,11 @@ else
   RPI_DEFINES="-D__VCCOREVER__=0x4000000 -mfpu=neon-vfpv4"
   RPI_EXTRALIBS="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm -Wl,--end-group"
   RPIOPTS="--enable-mmal --enable-rpi"
+else
+  echo Unexpected architecture $MC
+  exit 1
 fi
+
 C=`lsb_release -sc`
 V=`cat RELEASE`
 
