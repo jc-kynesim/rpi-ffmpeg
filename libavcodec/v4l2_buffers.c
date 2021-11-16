@@ -726,7 +726,7 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf, int no_resc
         frame->crop_right = ctx->selection.left + ctx->selection.width < frame->width ?
             frame->width - (ctx->selection.left + ctx->selection.width) : 0;
         frame->crop_bottom = ctx->selection.top + ctx->selection.height < frame->height ?
-            frame->width - (ctx->selection.top + ctx->selection.height) : 0;
+            frame->height - (ctx->selection.top + ctx->selection.height) : 0;
     }
 
     /* 3. report errors upstream */
