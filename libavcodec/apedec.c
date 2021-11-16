@@ -952,7 +952,7 @@ static void long_filter_ehigh_3830(int32_t *buffer, int length)
         for (j = 7; j > 0; j--)
             delay[j] = delay[j - 1];
         delay[0] = buffer[i];
-        buffer[i] -= dotprod >> 9;
+        buffer[i] -= (unsigned)(dotprod >> 9);
     }
 }
 
@@ -1309,7 +1309,7 @@ static void do_apply_filter(APEContext *ctx, int version, APEFilter *f,
             absres = res < 0 ? -(unsigned)res : res;
             if (absres)
                 *f->adaptcoeffs = APESIGN(res) *
-                                  (8 << ((absres > f->avg * 3) + (absres > (f->avg + f->avg / 3))));
+                                  (8 << ((absres > f->avg * 3LL) + (absres > (f->avg + f->avg / 3))));
                 /* equivalent to the following code
                     if (absres <= f->avg * 4 / 3)
                         *f->adaptcoeffs = APESIGN(res) * 8;
