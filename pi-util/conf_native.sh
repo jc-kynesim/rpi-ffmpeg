@@ -1,7 +1,7 @@
 echo "Configure for native build"
 
 FFSRC=`pwd`
-MC=`uname -m`
+MC=`dpkg --print-architecture`
 
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
@@ -57,6 +57,7 @@ if [ $MMAL ]; then
 else
   RPIOPTS="--disable-mmal --enable-sand"
 fi
+
 C=`lsb_release -sc`
 V=`cat RELEASE`
 
