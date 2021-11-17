@@ -481,6 +481,16 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
 
+    if (avctx->codec_id == AV_CODEC_ID_H264) {
+        if (avctx->ticks_per_frame == 1) {
+            if(avctx->time_base.den < INT_MAX/2) {
+                avctx->time_base.den *= 2;
+            } else
+                avctx->time_base.num /= 2;
+        }
+        avctx->ticks_per_frame = 2;
+    }
+
     av_log(avctx, AV_LOG_INFO, "level=%d\n", avctx->level);
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
