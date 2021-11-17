@@ -2609,7 +2609,12 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
         case AVMEDIA_TYPE_VIDEO:
             ret = decode_video    (ist, repeating ? NULL : avpkt, &got_output, &duration_pts, !pkt,
                                    &decode_failed);
-            if (!repeating || !pkt || got_output) {
+            // Pi: Do not inc dts if no_cvt_hw set
+            // V4L2 H264 decode has long latency and sometimes spits out a long
+            // stream of output without input. In this case incrementing DTS is wrong.
+            // There may be cases where the condition as written is correct so only
+            // "fix" in the cases which cause problems
+            if (!repeating || !pkt || (got_output && !no_cvt_hw)) {
                 if (pkt && pkt->duration) {
                     duration_dts = av_rescale_q(pkt->duration, ist->st->time_base, AV_TIME_BASE_Q);
                 } else if(ist->dec_ctx->framerate.num != 0 && ist->dec_ctx->framerate.den != 0) {
