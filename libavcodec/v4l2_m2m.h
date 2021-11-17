@@ -52,6 +52,16 @@ typedef struct V4L2m2mTrackEl {
     int64_t track_pts;
 } V4L2m2mTrackEl;
 
+typedef struct pts_stats_s
+{
+    void * logctx;
+    const char * name;  // For debug
+    unsigned int last_count;
+    unsigned int last_interval;
+    int64_t last_pts;
+    int64_t guess;
+} pts_stats_t;
+
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
     int fd;
@@ -90,6 +100,8 @@ typedef struct V4L2m2mContext {
     int64_t last_opaque;
     unsigned int track_no;
     V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
+
+    pts_stats_t pts_stat;
 
     /* req pkt */
     int req_pkt;
