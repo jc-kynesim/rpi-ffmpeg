@@ -381,7 +381,7 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 start:
     if (is_capture) {
         /* no need to listen to requests for more input while draining */
-        if (ctx_to_m2mctx(ctx)->draining)
+        if (ctx_to_m2mctx(ctx)->draining || timeout > 0)
             pfd.events =  POLLIN | POLLRDNORM | POLLPRI;
     } else {
         pfd.events =  POLLOUT | POLLWRNORM;
