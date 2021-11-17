@@ -262,6 +262,7 @@ OBJS-$(CONFIG_DEFLATE_FILTER)                += vf_neighbor.o
 OBJS-$(CONFIG_DEFLICKER_FILTER)              += vf_deflicker.o
 OBJS-$(CONFIG_DEINTERLACE_QSV_FILTER)        += vf_vpp_qsv.o
 OBJS-$(CONFIG_DEINTERLACE_VAAPI_FILTER)      += vf_deinterlace_vaapi.o vaapi_vpp.o
+OBJS-$(CONFIG_DEINTERLACE_V4L2M2M_FILTER)    += vf_deinterlace_v4l2m2m.o
 OBJS-$(CONFIG_DEJUDDER_FILTER)               += vf_dejudder.o
 OBJS-$(CONFIG_DELOGO_FILTER)                 += vf_delogo.o
 OBJS-$(CONFIG_DENOISE_VAAPI_FILTER)          += vf_misc_vaapi.o vaapi_vpp.o
