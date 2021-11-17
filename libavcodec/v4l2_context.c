@@ -498,10 +498,10 @@ dequeue:
             return NULL;
         }
         --ctx->q_count;
-        av_log(logger(ctx), AV_LOG_DEBUG, "--- %s VIDIOC_DQBUF OK: index=%d, ts=%ld.%06ld, count=%d, dq=%d\n",
+        av_log(logger(ctx), AV_LOG_DEBUG, "--- %s VIDIOC_DQBUF OK: index=%d, ts=%ld.%06ld, count=%d, dq=%d field=%d\n",
                ctx->name, buf.index,
                buf.timestamp.tv_sec, buf.timestamp.tv_usec,
-               ctx->q_count, ++ctx->dq_count);
+               ctx->q_count, ++ctx->dq_count, buf.field);
 
         avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
         avbuf->status = V4L2BUF_AVAILABLE;
