@@ -442,7 +442,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // when discarding
                 // This returns AVERROR(EAGAIN) if there isn't a frame ready yet
                 // but there is room in the input Q
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, 1);
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, src_rv == NQ_Q_FULL ? 100 : -1, 1);
 
                 if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
                     av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",
