@@ -248,6 +248,7 @@ extern const AVFilter ff_vf_derain;
 extern const AVFilter ff_vf_deshake;
 extern const AVFilter ff_vf_deshake_opencl;
 extern const AVFilter ff_vf_despill;
+extern const AVFilter ff_vf_deinterlace_v4l2m2m;
 extern const AVFilter ff_vf_detelecine;
 extern const AVFilter ff_vf_dilation;
 extern const AVFilter ff_vf_dilation_opencl;
