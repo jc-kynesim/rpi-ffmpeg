@@ -403,7 +403,7 @@ static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 start:
     if (is_capture) {
         /* no need to listen to requests for more input while draining */
-        if (ctx_to_m2mctx(ctx)->draining)
+        if (ctx_to_m2mctx(ctx)->draining || timeout > 0)
             pfd.events =  POLLIN | POLLRDNORM | POLLPRI;
     } else {
         pfd.events =  POLLOUT | POLLWRNORM;
@@ -520,10 +520,10 @@ dequeue:
             return NULL;
         }
         --ctx->q_count;
-        av_log(logger(ctx), AV_LOG_DEBUG, "--- %s VIDIOC_DQBUF OK: index=%d, ts=%ld.%06ld, count=%d, dq=%d\n",
+        av_log(logger(ctx), AV_LOG_DEBUG, "--- %s VIDIOC_DQBUF OK: index=%d, ts=%ld.%06ld, count=%d, dq=%d field=%d\n",
                ctx->name, buf.index,
                buf.timestamp.tv_sec, buf.timestamp.tv_usec,
-               ctx->q_count, ++ctx->dq_count);
+               ctx->q_count, ++ctx->dq_count, buf.field);
 
         avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
         avbuf->status = V4L2BUF_AVAILABLE;

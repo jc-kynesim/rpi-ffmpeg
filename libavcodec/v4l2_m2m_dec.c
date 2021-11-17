@@ -42,6 +42,62 @@
 #include "v4l2_m2m.h"
 #include "v4l2_fmt.h"
 
+// Pick 64 for max last count - that is >1sec at 60fps
+#define STATS_LAST_COUNT_MAX 64
+#define STATS_INTERVAL_MAX (1 << 30)
+
+static int64_t pts_stats_guess(const pts_stats_t * const stats)
+{
+    if (stats->last_pts == AV_NOPTS_VALUE ||
+            stats->last_interval == 0 ||
+            stats->last_count >= STATS_LAST_COUNT_MAX)
+        return AV_NOPTS_VALUE;
+    return stats->last_pts + (int64_t)(stats->last_count - 1) * (int64_t)stats->last_interval;
+}
+
+static void pts_stats_add(pts_stats_t * const stats, int64_t pts)
+{
+    if (pts == AV_NOPTS_VALUE || pts == stats->last_pts) {
+        if (stats->last_count < STATS_LAST_COUNT_MAX)
+            ++stats->last_count;
+        return;
+    }
+
+    if (stats->last_pts != AV_NOPTS_VALUE) {
+        const int64_t interval = pts - stats->last_pts;
+
+        if (interval < 0 || interval >= STATS_INTERVAL_MAX ||
+            stats->last_count >= STATS_LAST_COUNT_MAX) {
+            if (stats->last_interval != 0)
+                av_log(stats->logctx, AV_LOG_DEBUG, "%s: %s: Bad interval: %" PRId64 "/%d\n",
+                       __func__, stats->name, interval, stats->last_count);
+            stats->last_interval = 0;
+        }
+        else {
+            const int64_t frame_time = interval / (int64_t)stats->last_count;
+
+            if (frame_time != stats->last_interval)
+                av_log(stats->logctx, AV_LOG_DEBUG, "%s: %s: New interval: %u->%" PRId64 "/%d=%" PRId64 "\n",
+                       __func__, stats->name, stats->last_interval, interval, stats->last_count, frame_time);
+            stats->last_interval = frame_time;
+        }
+    }
+
+    stats->last_pts = pts;
+    stats->last_count = 1;
+}
+
+static void pts_stats_init(pts_stats_t * const stats, void * logctx, const char * name)
+{
+    *stats = (pts_stats_t){
+        .logctx = logctx,
+        .name = name,
+        .last_count = 1,
+        .last_interval = 0,
+        .last_pts = AV_NOPTS_VALUE
+    };
+}
+
 static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *const s)
 {
     int ret;
@@ -244,14 +300,16 @@ xlat_pts_out(AVCodecContext *const avctx, V4L2m2mContext *const s, AVFrame *cons
         return -1;
     }
 
+    pts_stats_add(&s->pts_stat, frame->pts);
+
 #if FF_API_PKT_PTS
 FF_DISABLE_DEPRECATION_WARNINGS
     frame->pkt_pts = frame->pts;
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
-    frame->best_effort_timestamp = frame->pts;
+    frame->best_effort_timestamp = pts_stats_guess(&s->pts_stat);
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
-    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 ", DTS=%" PRId64 "\n", frame->pts, frame->pkt_dts);
+    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 "/%"PRId64", DTS=%" PRId64 "\n", frame->pts, frame->best_effort_timestamp, frame->pkt_dts);
     return 0;
 }
 
@@ -389,7 +447,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // when discarding
                 // This returns AVERROR(EAGAIN) if there isn't a frame ready yet
                 // but there is room in the input Q
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, -1, 1);
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, src_rv == NQ_Q_FULL ? 100 : -1, 1);
 
                 if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
                     av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",
@@ -486,10 +544,22 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
 
+    if (avctx->codec_id == AV_CODEC_ID_H264) {
+        if (avctx->ticks_per_frame == 1) {
+            if(avctx->time_base.den < INT_MAX/2) {
+                avctx->time_base.den *= 2;
+            } else
+                avctx->time_base.num /= 2;
+        }
+        avctx->ticks_per_frame = 2;
+    }
+
     av_log(avctx, AV_LOG_INFO, "level=%d\n", avctx->level);
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
+
+    pts_stats_init(&s->pts_stat, avctx, "decoder");
 
     capture = &s->capture;
     output = &s->output;
