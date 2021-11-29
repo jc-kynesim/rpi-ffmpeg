@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import string
 import os
@@ -75,16 +75,16 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_e
         pass
 
     if  m1 and m2 and m1.group() == m2.group():
-        print >> flog, "Match: " + m1.group()
+        print("Match: " + m1.group(), file=flog)
         rv = 0
     elif not m1:
-        print >> flog, "****** Cannot find m1"
+        print("****** Cannot find m1", file=flog)
         rv = 3
     elif not m2:
-        print >> flog, "****** Cannot find m2"
+        print("****** Cannot find m2", file=flog)
         rv = 2
     else:
-        print >> flog, "****** Mismatch: " + m1.group() + " != " + m2.group()
+        print("****** Mismatch: " + m1.group() + " != " + m2.group(), file=flog)
         rv = 1
     flog.close()
     return rv
@@ -130,7 +130,7 @@ def doconf(csva, tests, test_root, vcodec, dectype, ffmpeg_exec):
         exp_test = int(a[0])
         if (exp_test and runtest(a[1], tests)):
             name = a[1]
-            print "==== ", name,
+            print ("==== ", name, end="")
             sys.stdout.flush()
 
             rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, ffmpeg_exec=ffmpeg_exec)
@@ -141,31 +141,31 @@ def doconf(csva, tests, test_root, vcodec, dectype, ffmpeg_exec):
 
             if (rv == 0):
                 if exp_test == 2:
-                    print ": * OK *"
+                    print(": * OK *")
                     unx_success.append(name)
                 else:
-                    print ": ok"
+                    print(": ok")
             elif exp_test == 2 and rv == 1:
-                print ": fail"
+                print(": fail")
             elif exp_test == 3 and rv == 2:
                 # Call an expected "crash" an abort
-                print ": abort"
+                print(": abort")
             else:
                 unx_failures.append(name)
                 if rv == 1:
-                    print ": * FAIL *"
+                    print(": * FAIL *")
                 elif (rv == 2) :
-                    print ": * CRASH *"
+                    print(": * CRASH *")
                 elif (rv == 3) :
-                    print ": * MD5 MISSING *"
+                    print(": * MD5 MISSING *")
                 else :
-                    print ": * BANG *"
+                    print(": * BANG *")
 
     if unx_failures or unx_success:
-        print "Unexpected Failures:", unx_failures
-        print "Unexpected Success: ", unx_success
+        print("Unexpected Failures:", unx_failures)
+        print("Unexpected Success: ", unx_success)
     else:
-        print "All tests normal:", successes, "ok,", failures, "failed"
+        print("All tests normal:", successes, "ok,", failures, "failed")
 
 
 class ConfCSVDialect(csv.Dialect):
