@@ -39,7 +39,7 @@
 #define USEC_PER_SEC 1000000
 static const AVRational v4l2_timebase = { 1, USEC_PER_SEC };
 
-static inline V4L2m2mContext *buf_to_m2mctx(V4L2Buffer *buf)
+static inline V4L2m2mContext *buf_to_m2mctx(const V4L2Buffer * const buf)
 {
     return V4L2_TYPE_IS_OUTPUT(buf->context->type) ?
         container_of(buf->context, V4L2m2mContext, output) :
@@ -51,34 +51,34 @@ static inline AVCodecContext *logger(V4L2Buffer *buf)
     return buf_to_m2mctx(buf)->avctx;
 }
 
-static inline AVRational v4l2_get_timebase(V4L2Buffer *avbuf)
+static inline AVRational v4l2_get_timebase(const V4L2Buffer * const avbuf)
 {
-    V4L2m2mContext *s = buf_to_m2mctx(avbuf);
+    const V4L2m2mContext *s = buf_to_m2mctx(avbuf);
     const AVRational tb = s->avctx->pkt_timebase.num ?
         s->avctx->pkt_timebase :
         s->avctx->time_base;
     return tb.num && tb.den ? tb : v4l2_timebase;
 }
 
-static inline void v4l2_set_pts(V4L2Buffer *out, int64_t pts, int no_rescale)
+static inline void v4l2_set_pts(V4L2Buffer * const out, const int64_t pts)
 {
     /* convert pts to v4l2 timebase */
     const int64_t v4l2_pts =
-        no_rescale ? pts :
+        out->context->no_pts_rescale ? pts :
         pts == AV_NOPTS_VALUE ? 0 :
             av_rescale_q(pts, v4l2_get_timebase(out), v4l2_timebase);
     out->buf.timestamp.tv_usec = v4l2_pts % USEC_PER_SEC;
     out->buf.timestamp.tv_sec = v4l2_pts / USEC_PER_SEC;
 }
 
-static inline int64_t v4l2_get_pts(V4L2Buffer *avbuf, int no_rescale)
+static inline int64_t v4l2_get_pts(const V4L2Buffer * const avbuf)
 {
     /* convert pts back to encoder timebase */
     const int64_t v4l2_pts = (int64_t)avbuf->buf.timestamp.tv_sec * USEC_PER_SEC +
                         avbuf->buf.timestamp.tv_usec;
 
     return
-        no_rescale ? v4l2_pts :
+        avbuf->context->no_pts_rescale ? v4l2_pts :
         v4l2_pts == 0 ? AV_NOPTS_VALUE :
             av_rescale_q(v4l2_pts, v4l2_timebase, v4l2_get_timebase(avbuf));
 }
@@ -686,13 +686,13 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
     v4l2_set_color(out, frame->color_primaries, frame->colorspace, frame->color_trc);
     v4l2_set_color_range(out, frame->color_range);
     // PTS & interlace are buffer vars
-    v4l2_set_pts(out, frame->pts, 0);
+    v4l2_set_pts(out, frame->pts);
     v4l2_set_interlace(out, frame->interlaced_frame, frame->top_field_first);
 
     return v4l2_buffer_swframe_to_buf(frame, out);
 }
 
-int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf, int no_rescale_pts)
+int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
 {
     int ret;
     V4L2Context * const ctx = avbuf->context;
@@ -710,7 +710,7 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf, int no_resc
     frame->colorspace = v4l2_get_color_space(avbuf);
     frame->color_range = v4l2_get_color_range(avbuf);
     frame->color_trc = v4l2_get_color_trc(avbuf);
-    frame->pts = v4l2_get_pts(avbuf, no_rescale_pts);
+    frame->pts = v4l2_get_pts(avbuf);
     frame->pkt_dts = AV_NOPTS_VALUE;
     frame->interlaced_frame = v4l2_buf_is_interlaced(avbuf);
     frame->top_field_first = v4l2_buf_is_top_first(avbuf);
@@ -757,13 +757,13 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
         pkt->flags |= AV_PKT_FLAG_CORRUPT;
     }
 
-    pkt->dts = pkt->pts = v4l2_get_pts(avbuf, 0);
+    pkt->dts = pkt->pts = v4l2_get_pts(avbuf);
 
     return 0;
 }
 
 int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
-                                    const void *extdata, size_t extlen, int no_rescale_pts)
+                                    const void *extdata, size_t extlen)
 {
     int ret;
 
@@ -777,7 +777,7 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
     if (ret && ret != AVERROR(ENOMEM))
         return ret;
 
-    v4l2_set_pts(out, pkt->pts, no_rescale_pts);
+    v4l2_set_pts(out, pkt->pts);
 
     if (pkt->flags & AV_PKT_FLAG_KEY)
         out->flags = V4L2_BUF_FLAG_KEYFRAME;
@@ -787,7 +787,7 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
 
 int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out)
 {
-    return ff_v4l2_buffer_avpkt_to_buf_ext(pkt, out, NULL, 0, 0);
+    return ff_v4l2_buffer_avpkt_to_buf_ext(pkt, out, NULL, 0);
 }
 
 

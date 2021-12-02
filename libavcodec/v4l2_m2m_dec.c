@@ -360,7 +360,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
             if (!s->draining) {
                 // Calling enqueue with an empty pkt starts drain
                 av_assert0(s->buf_pkt.size == 0);
-                ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, NULL, 0, 1);
+                ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, NULL, 0);
                 if (ret) {
                     av_log(avctx, AV_LOG_ERROR, "Failed to start drain: ret=%d\n", ret);
                     return ret;
@@ -381,8 +381,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
         return ret;
 
     ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt,
-                                         avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size,
-                                         1);
+                                         avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size);
 
     if (ret == AVERROR(EAGAIN)) {
         // Out of input buffers - keep packet
@@ -442,7 +441,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // when discarding
                 // This returns AVERROR(EAGAIN) if there isn't a frame ready yet
                 // but there is room in the input Q
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, src_rv == NQ_Q_FULL ? 100 : -1, 1);
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, src_rv == NQ_Q_FULL ? 100 : -1);
 
                 if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
                     av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",
@@ -569,10 +568,12 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     output->av_codec_id = avctx->codec_id;
     output->av_pix_fmt  = AV_PIX_FMT_NONE;
     output->min_buf_size = max_coded_size(avctx);
+    output->no_pts_rescale = 1;
 
     capture->av_codec_id = AV_CODEC_ID_RAWVIDEO;
     capture->av_pix_fmt = avctx->pix_fmt;
     capture->min_buf_size = 0;
+    capture->no_pts_rescale = 1;
 
     /* the client requests the codec to generate DRM frames:
      *   - data[0] will therefore point to the returned AVDRMFrameDescriptor
