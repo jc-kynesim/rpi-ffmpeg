@@ -83,12 +83,11 @@ typedef struct V4L2Buffer {
  *
  * @param[in] frame The AVFRame to push the information to
  * @param[in] buf The V4L2Buffer to get the information from
- * @param[in] no_rescale_pts If non-zero do not rescale PTS
  *
  * @returns 0 in case of success, AVERROR(EINVAL) if the number of planes is incorrect,
  * AVERROR(ENOMEM) if the AVBufferRef can't be created.
  */
-int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *buf, int no_rescale_pts);
+int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *buf);
 
 /**
  * Extracts the data from a V4L2Buffer to an AVPacket
@@ -113,7 +112,7 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *buf);
 int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out);
 
 int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
-                                    const void *extdata, size_t extlen, int no_rescale_pts);
+                                    const void *extdata, size_t extlen);
 
 /**
  * Extracts the data from an AVFrame to a V4L2Buffer
