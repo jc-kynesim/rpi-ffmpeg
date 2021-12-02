@@ -236,7 +236,7 @@ static int do_source_change(V4L2m2mContext * const s)
     /* Buffers are OK so just stream off to ack */
     av_log(avctx, AV_LOG_DEBUG, "%s: Parameters only - restart decode\n", __func__);
 
-#if 1
+#if 0
     s->draining = 0;
 
     {
