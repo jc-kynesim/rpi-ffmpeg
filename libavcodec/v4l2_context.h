@@ -102,6 +102,13 @@ typedef struct V4L2Context {
      */
     int done;
 
+    /**
+     * PTS rescale not wanted
+     * If the PTS is just a dummy frame count then rescale is
+     * actively harmful
+     */
+    int no_pts_rescale;
+
     AVBufferRef *frames_ref;
     int q_count;
     int dq_count;
@@ -172,12 +179,10 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
  * @param[in] ctx The V4L2Context to dequeue from.
  * @param[inout] f The AVFrame to dequeue to.
  * @param[in] timeout The timeout for dequeue (-1 to block, 0 to return immediately, or milliseconds)
- * @param[in] no_rescale_pts (0 rescale pts, 1 use pts as
- *       timestamp directly)
  *
  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
  */
-int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout, int no_rescale_pts);
+int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout);
 
 /**
  * Enqueues a buffer to a V4L2Context from an AVPacket
@@ -189,7 +194,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout, int
  * @param[in] pkt A pointer to an AVPacket.
  * @return 0 in case of success, a negative error otherwise.
  */
-int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const void * ext_data, size_t ext_size, int no_rescale_pts);
+int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const void * ext_data, size_t ext_size);
 
 /**
  * Enqueues a buffer to a V4L2Context from an AVFrame
