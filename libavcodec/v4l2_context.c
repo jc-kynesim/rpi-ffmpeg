@@ -808,7 +808,7 @@ int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* frame)
 }
 
 int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
-                                   const void * extdata, size_t extlen, int no_rescale_pts)
+                                   const void * extdata, size_t extlen)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
     V4L2Buffer* avbuf;
@@ -827,7 +827,7 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
     if (!avbuf)
         return AVERROR(EAGAIN);
 
-    ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen, no_rescale_pts);
+    ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen);
     if (ret == AVERROR(ENOMEM))
         av_log(logger(ctx), AV_LOG_ERROR, "Buffer overflow in %s: pkt->size=%d > buf->length=%d\n",
                __func__, pkt->size, avbuf->planes[0].length);
@@ -837,7 +837,7 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
     return ff_v4l2_buffer_enqueue(avbuf);
 }
 
-int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout, int no_rescale_pts)
+int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
 {
     V4L2Buffer *avbuf;
 
@@ -854,7 +854,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout,
         return AVERROR(EAGAIN);
     }
 
-    return ff_v4l2_buffer_buf_to_avframe(frame, avbuf, no_rescale_pts);
+    return ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
 }
 
 int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
