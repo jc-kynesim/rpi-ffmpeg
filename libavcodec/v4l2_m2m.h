@@ -44,8 +44,10 @@
 #define FF_V4L2_M2M_TRACK_SIZE 128
 typedef struct V4L2m2mTrackEl {
     int     discard;   // If we see this buffer its been flushed, so discard
+    int     pending;
     int     pkt_size;
     int64_t pts;
+    int64_t dts;
     int64_t reordered_opaque;
     int64_t pkt_pos;
     int64_t pkt_duration;
@@ -61,6 +63,14 @@ typedef struct pts_stats_s
     int64_t last_pts;
     int64_t guess;
 } pts_stats_t;
+
+typedef struct xlat_track_s {
+    unsigned int track_no;
+    int64_t last_pts;
+    int64_t last_pkt_dts;
+    int64_t last_opaque;
+    V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
+} xlat_track_t;
 
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
@@ -96,10 +106,7 @@ typedef struct V4L2m2mContext {
     int output_drm;
 
     /* Frame tracking */
-    int64_t last_pkt_dts;
-    int64_t last_opaque;
-    unsigned int track_no;
-    V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
+    xlat_track_t xlat;
 
     pts_stats_t pts_stat;
 
