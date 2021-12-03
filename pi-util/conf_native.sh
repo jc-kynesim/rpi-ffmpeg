@@ -6,37 +6,63 @@ MC=`dpkg --print-architecture`
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
 
+NOSHARED=
+MMAL=
+
+while [ "$1" != "" ] ; do
+    case $1 in
+	--noshared)
+	    NOSHARED=1
+	    ;;
+	--mmal)
+	    MMAL=1
+	    ;;
+	*)
+	    echo "Usage $0: [--noshared] [--mmal]"
+	    exit 1
+	    ;;
+    esac
+    shift
+done
+
+
+MCOPTS=
+RPI_INCLUDES=
+RPI_LIBDIRS=
+RPI_DEFINES=
+RPI_EXTRALIBS=
+
 if [ "$MC" == "arm64" ]; then
   echo "M/C aarch64"
   A=aarch64-linux-gnu
   B=arm64
-  MCOPTS=
-  RPI_INCLUDES=
-  RPI_LIBDIRS=
-  RPI_DEFINES=
-  RPI_EXTRALIBS=
-  RPIOPTS="--disable-mmal --enable-sand"
 elif [ "$MC" == "armhf" ]; then
   echo "M/C armv7"
   A=arm-linux-gnueabihf
   B=armv7
   MCOPTS="--arch=armv6t2 --cpu=cortex-a7"
-  RPI_OPT_VC=/opt/vc
-  RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
-  RPI_LIBDIRS="-L$RPI_OPT_VC/lib"
-  RPI_DEFINES="-D__VCCOREVER__=0x4000000 -mfpu=neon-vfpv4"
-  RPI_EXTRALIBS="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm -Wl,--end-group"
-  RPIOPTS="--enable-mmal --enable-rpi"
+  RPI_DEFINES=-mfpu=neon-vfpv4
 else
   echo Unexpected architecture $MC
   exit 1
+fi
+
+if [ $MMAL ]; then
+  RPI_OPT_VC=/opt/vc
+  RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
+  RPI_LIBDIRS="-L$RPI_OPT_VC/lib"
+  RPI_DEFINES="$RPI_DEFINES -D__VCCOREVER__=0x4000000"
+  RPI_EXTRALIBS="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm -Wl,--end-group"
+  RPIOPTS="--enable-mmal --enable-rpi"
+else
+  RPIOPTS="--disable-mmal --enable-sand"
 fi
 
 C=`lsb_release -sc`
 V=`cat RELEASE`
 
 SHARED_LIBS="--enable-shared"
-if [ "$1" == "--noshared" ]; then
+if [ $NOSHARED ]; then
   SHARED_LIBS="--disable-shared"
   OUT=out/$B-$C-$V-static-rel
   echo Static libs
@@ -64,8 +90,8 @@ $FFSRC/configure \
  --enable-libdrm\
  --enable-epoxy\
  --enable-libudev\
- --enable-vout-drm\
  --enable-vout-egl\
+ --enable-vout-drm\
  $SHARED_LIBS\
  $RPIOPTS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
@@ -74,9 +100,6 @@ $FFSRC/configure \
  --extra-libs="$RPI_EXTRALIBS"\
  --extra-version="rpi"
 
-# --enable-decoder=hevc_rpi\
-# --enable-extra-warnings\
-# --arch=armv71\
 
 # gcc option for getting asm listing
 # -Wa,-ahls
