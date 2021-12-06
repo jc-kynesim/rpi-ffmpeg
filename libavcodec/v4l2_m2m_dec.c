@@ -113,8 +113,8 @@ static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *co
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON on output context\n");
 
-    if (!s->capture.streamon || ret < 0)
-        return ret;
+//    if (!s->capture.streamon || ret < 0)
+//        return ret;
 
     ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
     if (ret < 0)
@@ -182,14 +182,14 @@ static int v4l2_try_start(AVCodecContext *avctx)
         }
     }
 #endif
-
+#if 0
     /* 5. start the capture process */
     ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
     if (ret) {
         av_log(avctx, AV_LOG_DEBUG, "VIDIOC_STREAMON, on capture context\n");
         return ret;
     }
-
+#endif
     return 0;
 }
 
@@ -638,8 +638,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      * by the v4l2 driver; this event will trigger a full pipeline reconfig and
      * the proper values will be retrieved from the kernel driver.
      */
-    output->height = capture->height = avctx->coded_height;
-    output->width = capture->width = avctx->coded_width;
+//    output->height = capture->height = avctx->coded_height;
+//    output->width = capture->width = avctx->coded_width;
+    output->height = capture->height = 0;
+    output->width = capture->width = 0;
 
     output->av_codec_id = avctx->codec_id;
     output->av_pix_fmt  = AV_PIX_FMT_NONE;

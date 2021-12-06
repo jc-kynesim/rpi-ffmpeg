@@ -162,19 +162,19 @@ static int v4l2_configure_contexts(V4L2m2mContext *s)
         av_log(log_ctx, AV_LOG_ERROR, "can't set v4l2 output format\n");
         goto error;
     }
-
+#if 0
     ret = ff_v4l2_context_set_format(&s->capture);
     if (ret) {
         av_log(log_ctx, AV_LOG_ERROR, "can't to set v4l2 capture format\n");
         goto error;
     }
-
+#endif
     ret = ff_v4l2_context_init(&s->output);
     if (ret) {
         av_log(log_ctx, AV_LOG_ERROR, "no v4l2 output context's buffers\n");
         goto error;
     }
-
+#if 0
     /* decoder's buffers need to be updated at a later stage */
     if (s->avctx && !av_codec_is_decoder(s->avctx->codec)) {
         ret = ff_v4l2_context_init(&s->capture);
@@ -183,7 +183,7 @@ static int v4l2_configure_contexts(V4L2m2mContext *s)
             goto error;
         }
     }
-
+#endif
     return 0;
 
 error:

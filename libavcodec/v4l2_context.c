@@ -370,8 +370,214 @@ static int count_in_driver(const V4L2Context * const ctx)
     return n;
 }
 
+static inline int
+ff_v4l2_ctx_eos(const V4L2Context * const ctx)
+{
+    return ctx->flag_last;
+}
+
+// DQ a buffer
+// Amalgamates all the various ways there are of signalling EOS to generate
+// a consistant EPIPE.
+//
+// Returns:
+//  0               Success
+//  AVERROR(EPIPE)  Nothing more to read
+//  *               AVERROR(..)
+
+ static int
+rx_dqbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
+{
+    V4L2m2mContext * const m = ctx_to_m2mctx(ctx);
+    AVCodecContext * const avctx = m->avctx;
+    V4L2Buffer * avbuf;
+    const int is_mp = V4L2_TYPE_IS_MULTIPLANAR(ctx->type);
+
+    struct v4l2_plane planes[VIDEO_MAX_PLANES] = {{0}};
+
+    struct v4l2_buffer buf = {
+        .type = ctx->type,
+        .memory = V4L2_MEMORY_MMAP,
+    };
+
+    *ppavbuf = NULL;
+
+    if (ctx->flag_last)
+        return AVERROR(EPIPE);
+
+    if (is_mp) {
+        buf.length = VIDEO_MAX_PLANES;
+        buf.m.planes = planes;
+    }
+
+    while (ioctl(m->fd, VIDIOC_DQBUF, &buf) != 0) {
+        const int err = errno;
+        if (err != EINTR) {
+            av_log(avctx, AV_LOG_DEBUG, "%s VIDIOC_DQBUF, errno (%s)\n",
+                ctx->name, av_err2str(AVERROR(err)));
+
+            if (err == EPIPE)
+                ctx->flag_last = 1;
+
+            return AVERROR(err);
+        }
+    }
+
+    avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
+    avbuf->status = V4L2BUF_AVAILABLE;
+    avbuf->buf = buf;
+    if (is_mp) {
+        memcpy(avbuf->planes, planes, sizeof(planes));
+        avbuf->buf.m.planes = avbuf->planes;
+    }
+
+    if (V4L2_TYPE_IS_CAPTURE(ctx->type)) {
+        // Zero length cap buffer return == EOS
+        if ((is_mp ? buf.m.planes[0].bytesused : buf.bytesused) == 0) {
+            av_log(avctx, AV_LOG_DEBUG, "Buffer empty - reQ\n");
+
+            // Must reQ so we don't leak
+            // May not matter if the next thing we do is release all the
+            // buffers but better to be tidy.
+            ff_v4l2_buffer_enqueue(avbuf);
+
+            ctx->flag_last = 1;
+            return AVERROR(EPIPE);
+        }
+
+#ifdef V4L2_BUF_FLAG_LAST
+        // If flag_last set then this contains data but is the last frame
+        // so remember that but return OK
+        if ((buf.flags & V4L2_BUF_FLAG_LAST) != 0)
+            ctx->flag_last = 1;
+#endif
+    }
+
+    *ppavbuf = avbuf;
+    return 0;
+}
+
+/**
+ * handle resolution change event and end of stream event
+ * Expects to be called after the stream has stopped
+ *
+ * returns 1 if reinit was successful, negative if it failed
+ * returns 0 if reinit was not executed
+ */
+static int
+get_event(V4L2m2mContext * const m)
+{
+    AVCodecContext * const avctx = m->avctx;
+    struct v4l2_event evt = { 0 };
+
+    while (ioctl(m->fd, VIDIOC_DQEVENT, &evt) != 0) {
+        const int rv = AVERROR(errno);
+        if (rv == AVERROR(EINTR))
+            continue;
+        av_log(avctx, AV_LOG_ERROR, "V4L2 VIDIOC_DQEVENT: %s\n", av_err2str(rv));
+        return rv;
+    }
+
+    av_log(avctx, AV_LOG_INFO, "Dq event %d\n", evt.type);
+
+    if (evt.type == V4L2_EVENT_EOS) {
+        av_log(avctx, AV_LOG_TRACE, "V4L2 VIDIOC_EVENT_EOS\n");
+        return AVERROR_EOF;
+    }
+
+    if (evt.type == V4L2_EVENT_SOURCE_CHANGE)
+        return do_source_change(m);
+
+    return 0;
+}
+
+
+// Get a buffer
+// If output then just gets the buffer in the expected way
+// If capture then runs the capture state m/c to deal with res change etc.
+
+static int
+get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout)
+{
+    V4L2m2mContext * const m = ctx_to_m2mctx(ctx);
+    AVCodecContext * const avctx = m->avctx;
+    const int is_cap = V4L2_TYPE_IS_CAPTURE(ctx->type);
+    const unsigned int poll_cap = (POLLIN | POLLRDNORM);
+    const unsigned int poll_out = (POLLOUT | POLLWRNORM);
+    const unsigned int poll_event = POLLPRI;
+
+    *ppavbuf = NULL;
+
+    for (;;) {
+        struct pollfd pfd = {
+            .fd = m->fd,
+            // If capture && stream not started then assume we are waiting for the initial event
+            .events = !is_cap ? poll_out :
+                !ff_v4l2_ctx_eos(ctx) && ctx->streamon ? poll_cap :
+                    poll_event,
+        };
+        int ret;
+
+        // If capture && timeout == -1 then also wait for rx buffer free
+        if (is_cap && timeout == -1 && m->output.streamon && !m->draining)
+            pfd.events |= poll_out;
+
+        ret = poll(&pfd, 1, timeout == -1 ? 3000 : timeout);
+
+        av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s ret=%d, timeout=%d, events=%#x, revents=%#x\n",
+               ctx->name, ret, timeout, pfd.events, pfd.revents);
+
+        if (ret < 0) {
+            const int err = errno;
+            if (err == EINTR)
+                continue;
+            av_log(avctx, AV_LOG_ERROR, "V4L2 %s poll error %d (%s)\n", ctx->name, err, strerror(err));
+            return AVERROR(err);
+        }
+
+        if (ret == 0) {
+            if (timeout == -1)
+                av_log(avctx, AV_LOG_ERROR, "V4L2 %s poll unexpected timeout\n", ctx->name);
+            return 0;
+        }
+
+        if ((pfd.revents & POLLERR) != 0) {
+            av_log(avctx, AV_LOG_WARNING, "V4L2 %s POLLERR\n", ctx->name);
+            return AVERROR_UNKNOWN;
+        }
+
+        if ((pfd.revents & poll_event) != 0) {
+            int ret = get_event(m);
+            if (ret < 0) {
+                ctx->done = 1;
+                return ret;
+            }
+            continue;
+        }
+
+        if ((pfd.revents & poll_cap) != 0) {
+            int rv = rx_dqbuf(ctx, ppavbuf);
+            if (rv == AVERROR(EPIPE))
+                continue;
+            return rv;
+        }
+
+        if ((pfd.revents & poll_out) != 0) {
+            return is_cap ? 0 : rx_dqbuf(ctx, ppavbuf);
+        }
+
+        av_log(avctx, AV_LOG_ERROR, "V4L2 poll unexpected events=%#x, revents=%#x\n", pfd.events, pfd.revents);
+        return AVERROR_UNKNOWN;
+    }
+}
+
 static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 {
+#if 1
+    V4L2Buffer *avbuf;
+    get_qbuf(ctx, &avbuf, timeout);
+    return avbuf;
+#else
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     const int is_capture = !V4L2_TYPE_IS_OUTPUT(ctx->type);
     struct v4l2_plane planes[VIDEO_MAX_PLANES];
@@ -580,6 +786,7 @@ dequeue:
     }
 
     return NULL;
+#endif
 }
 
 static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
@@ -817,6 +1024,9 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
         av_log(avctx, AV_LOG_DEBUG, "%s set status %d (%s) OK\n", ctx->name,
                cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF");
     }
+
+    // Both stream off & on effecitively clear flag_last
+    ctx->flag_last = 0;
 
     ff_mutex_unlock(&ctx->lock);
 
@@ -1073,8 +1283,8 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         hwframes = (AVHWFramesContext*)ctx->frames_ref->data;
         hwframes->format = AV_PIX_FMT_DRM_PRIME;
         hwframes->sw_format = ctx->av_pix_fmt;
-        hwframes->width = ctx->width;
-        hwframes->height = ctx->height;
+        hwframes->width = ctx->width != 0 ? ctx->width : s->avctx->width;
+        hwframes->height = ctx->height != 0 ? ctx->height : s->avctx->height;
         ret = av_hwframe_ctx_init(ctx->frames_ref);
         if (ret < 0)
             goto fail_unref_hwframes;
