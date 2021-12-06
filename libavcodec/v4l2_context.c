@@ -167,7 +167,7 @@ static int do_source_change(V4L2m2mContext * const s)
 
     int ret;
     int reinit;
-    int full_reinit;
+    int full_reinit = 0;
     struct v4l2_format cap_fmt = s->capture.format;
     struct v4l2_format out_fmt = s->output.format;
 
@@ -185,13 +185,14 @@ static int do_source_change(V4L2m2mContext * const s)
         av_log(avctx, AV_LOG_ERROR, "%s VIDIOC_G_FMT failed\n", s->capture.name);
         return 0;
     }
-
+#if 0
     full_reinit = v4l2_resolution_changed(&s->output, &out_fmt);
     if (full_reinit) {
         s->output.height = ff_v4l2_get_format_height(&out_fmt);
         s->output.width = ff_v4l2_get_format_width(&out_fmt);
     }
     s->output.sample_aspect_ratio = v4l2_get_sar(&s->output);
+#endif
 
     get_default_selection(&s->capture, &s->capture.selection);
 

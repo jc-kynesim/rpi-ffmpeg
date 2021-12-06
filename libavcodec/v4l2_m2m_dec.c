@@ -369,7 +369,8 @@ xlat_pending(const xlat_track_t * const x)
 }
 
 static inline int stream_started(const V4L2m2mContext * const s) {
-    return s->capture.streamon && s->output.streamon;
+//    return s->capture.streamon && s->output.streamon;
+    return s->output.streamon;
 }
 
 #define NQ_OK        0
