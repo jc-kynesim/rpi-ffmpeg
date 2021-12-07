@@ -180,12 +180,12 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *ctx);
 int ff_v4l2_m2m_codec_full_reinit(V4L2m2mContext *ctx);
 
 
-static inline unsigned int ff_v4l2_get_format_width(struct v4l2_format *fmt)
+static inline unsigned int ff_v4l2_get_format_width(const struct v4l2_format * const fmt)
 {
     return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.width : fmt->fmt.pix.width;
 }
 
-static inline unsigned int ff_v4l2_get_format_height(struct v4l2_format *fmt)
+static inline unsigned int ff_v4l2_get_format_height(const struct v4l2_format * const fmt)
 {
     return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.height : fmt->fmt.pix.height;
 }

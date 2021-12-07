@@ -43,14 +43,14 @@ struct v4l2_format_update {
     int update_avfmt;
 };
 
-static inline V4L2m2mContext *ctx_to_m2mctx(V4L2Context *ctx)
+static inline V4L2m2mContext *ctx_to_m2mctx(const V4L2Context *ctx)
 {
     return V4L2_TYPE_IS_OUTPUT(ctx->type) ?
         container_of(ctx, V4L2m2mContext, output) :
         container_of(ctx, V4L2m2mContext, capture);
 }
 
-static inline AVCodecContext *logger(V4L2Context *ctx)
+static inline AVCodecContext *logger(const V4L2Context *ctx)
 {
     return ctx_to_m2mctx(ctx)->avctx;
 }
@@ -73,19 +73,27 @@ static AVRational v4l2_get_sar(V4L2Context *ctx)
     return sar;
 }
 
-static inline unsigned int v4l2_resolution_changed(V4L2Context *ctx, struct v4l2_format *fmt2)
+static inline int ctx_buffers_alloced(const V4L2Context * const ctx)
 {
-    struct v4l2_format *fmt1 = &ctx->format;
-    int ret =  V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ?
-        fmt1->fmt.pix_mp.width != fmt2->fmt.pix_mp.width ||
-        fmt1->fmt.pix_mp.height != fmt2->fmt.pix_mp.height
-        :
-        fmt1->fmt.pix.width != fmt2->fmt.pix.width ||
-        fmt1->fmt.pix.height != fmt2->fmt.pix.height;
+    return ctx->bufrefs != NULL;
+}
+
+// Width/Height changed or we don't have an alloc in the first place?
+static int ctx_resolution_changed(const V4L2Context *ctx, const struct v4l2_format *fmt2)
+{
+    const struct v4l2_format *fmt1 = &ctx->format;
+    int ret = !ctx_buffers_alloced(ctx) ||
+        (V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ?
+            fmt1->fmt.pix_mp.width != fmt2->fmt.pix_mp.width ||
+            fmt1->fmt.pix_mp.height != fmt2->fmt.pix_mp.height
+            :
+            fmt1->fmt.pix.width != fmt2->fmt.pix.width ||
+            fmt1->fmt.pix.height != fmt2->fmt.pix.height);
 
     if (ret)
-        av_log(logger(ctx), AV_LOG_DEBUG, "%s changed (%dx%d) -> (%dx%d)\n",
+        av_log(logger(ctx), AV_LOG_DEBUG, "V4L2 %s changed: alloc=%d (%dx%d) -> (%dx%d)\n",
             ctx->name,
+            ctx_buffers_alloced(ctx),
             ff_v4l2_get_format_width(fmt1), ff_v4l2_get_format_height(fmt1),
             ff_v4l2_get_format_width(fmt2), ff_v4l2_get_format_height(fmt2));
 
@@ -196,7 +204,7 @@ static int do_source_change(V4L2m2mContext * const s)
 
     get_default_selection(&s->capture, &s->capture.selection);
 
-    reinit = v4l2_resolution_changed(&s->capture, &cap_fmt);
+    reinit = ctx_resolution_changed(&s->capture, &cap_fmt);
     if (reinit) {
         s->capture.height = ff_v4l2_get_format_height(&cap_fmt);
         s->capture.width = ff_v4l2_get_format_width(&cap_fmt);
@@ -1004,6 +1012,10 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
     int ret;
     AVCodecContext * const avctx = logger(ctx);
 
+    // Avoid doing anything if there is nothing we can do
+    if (cmd == VIDIOC_STREAMOFF && !ctx_buffers_alloced(ctx) && !ctx->streamon)
+        return 0;
+
     ff_mutex_lock(&ctx->lock);
 
     if (cmd == VIDIOC_STREAMON && !V4L2_TYPE_IS_OUTPUT(ctx->type))
@@ -1026,7 +1038,7 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
                cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF");
     }
 
-    // Both stream off & on effecitively clear flag_last
+    // Both stream off & on effectively clear flag_last
     ctx->flag_last = 0;
 
     ff_mutex_unlock(&ctx->lock);
@@ -1207,6 +1219,8 @@ static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers
     struct v4l2_requestbuffers req;
     int ret;
     int i;
+
+    av_assert0(ctx->bufrefs == NULL);
 
     memset(&req, 0, sizeof(req));
     req.count = req_buffers;
