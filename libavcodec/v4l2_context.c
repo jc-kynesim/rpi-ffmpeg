@@ -205,10 +205,18 @@ static int do_source_change(V4L2m2mContext * const s)
     get_default_selection(&s->capture, &s->capture.selection);
 
     reinit = ctx_resolution_changed(&s->capture, &cap_fmt);
+    s->capture.format = cap_fmt;
     if (reinit) {
         s->capture.height = ff_v4l2_get_format_height(&cap_fmt);
         s->capture.width = ff_v4l2_get_format_width(&cap_fmt);
     }
+
+    // If we don't support selection (or it is bust) and we obviously have HD then kludge
+    if ((s->capture.selection.width == 0 || s->capture.selection.height == 0) &&
+        (s->capture.height == 1088 && s->capture.width == 1920)) {
+        s->capture.selection = (struct v4l2_rect){.width = 1920, .height = 1080};
+    }
+
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
 
     av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, crop %dx%d @ %d,%d\n",
@@ -230,7 +238,9 @@ static int do_source_change(V4L2m2mContext * const s)
 
     if (reinit) {
         if (avctx)
-            ret = ff_set_dimensions(s->avctx, s->capture.width, s->capture.height);
+            ret = ff_set_dimensions(s->avctx,
+                                    s->capture.selection.width != 0 ? s->capture.selection.width : s->capture.width,
+                                    s->capture.selection.height != 0 ? s->capture.selection.height : s->capture.height);
         if (ret < 0)
             av_log(avctx, AV_LOG_WARNING, "update avcodec height and width failed\n");
 

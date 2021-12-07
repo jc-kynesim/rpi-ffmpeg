@@ -47,7 +47,7 @@ static inline V4L2m2mContext *buf_to_m2mctx(const V4L2Buffer * const buf)
         container_of(buf->context, V4L2m2mContext, capture);
 }
 
-static inline AVCodecContext *logger(V4L2Buffer *buf)
+static inline AVCodecContext *logger(const V4L2Buffer * const buf)
 {
     return buf_to_m2mctx(buf)->avctx;
 }
@@ -530,6 +530,26 @@ static AVBufferRef * wrap_avbuf(V4L2Buffer * const avbuf)
     return newbuf;
 }
 
+static void
+dump_avdesc(const V4L2Buffer * const avbuf)
+{
+    AVCodecContext * avctx = logger(avbuf);
+    const AVDRMFrameDescriptor *const d = &avbuf->drm_frame;
+    const AVDRMObjectDescriptor *const o = d->objects;
+    const AVDRMLayerDescriptor *const a = d->layers;
+    const AVDRMPlaneDescriptor *const p = a[0].planes;
+
+    av_log(avctx, AV_LOG_TRACE, "Objects[%d]: fd: %d/%d/%d/%d size: %zd/%zd/%zd/%zd mods: %"PRIx64"/%"PRIx64"/%"PRIx64"/%"PRIx64"\n", d->nb_objects,
+           o[0].fd, o[1].fd, o[2].fd, o[3].fd,
+           o[0].size, o[1].size, o[2].size, o[3].size,
+           o[0].format_modifier, o[1].format_modifier, o[2].format_modifier, o[3].format_modifier);
+    av_log(avctx, AV_LOG_TRACE, "Layers[%d]: format: %.4s\n", d->nb_layers, (const char *)&a->format);
+    av_log(avctx, AV_LOG_TRACE, "Planes[%d]: idx: %d/%d/%d/%d offset: %td/%td/%td/%td pitch: %td/%td/%td/%td\n", a->nb_planes,
+           p[0].object_index, p[1].object_index, p[2].object_index, p[3].object_index,
+           p[0].offset, p[1].offset, p[2].offset, p[3].offset,
+           p[0].pitch, p[1].pitch, p[2].pitch, p[3].pitch);
+}
+
 static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 {
     int i;
@@ -545,6 +565,12 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
         frame->data[0] = (uint8_t *) v4l2_get_drm_frame(avbuf);
         frame->format = AV_PIX_FMT_DRM_PRIME;
         frame->hw_frames_ctx = av_buffer_ref(avbuf->context->frames_ref);
+
+        {
+            static int z = 0;
+            if (++z < 10)
+                dump_avdesc(avbuf);
+        }
         return 0;
     }
 
