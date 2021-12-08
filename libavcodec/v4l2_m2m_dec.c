@@ -719,8 +719,14 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     // wrong once)
 
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
-    if (ret < 0)
-        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", output->name, ret);
+
+    // Clear a pending EOS
+    if (ff_v4l2_ctx_eos(capture)) {
+        ff_v4l2_context_set_status(capture, VIDIOC_STREAMOFF);
+        // Arguably we could delay this but this is easy and doesn't require
+        // thought or extra vars
+        ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
+    }
 
     // V4L2 makes no guarantees about whether decoded frames are flushed or not
     // so mark all frames we are tracking to be discarded if they appear

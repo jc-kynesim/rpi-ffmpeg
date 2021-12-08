@@ -404,15 +404,11 @@ static int count_in_driver(const V4L2Context * const ctx)
 }
 #endif
 
-static inline int
-ff_v4l2_ctx_eos(const V4L2Context * const ctx)
-{
-    return ctx->flag_last;
-}
-
 // DQ a buffer
-// Amalgamates all the various ways there are of signalling EOS to generate
-// a consistant EPIPE.
+// Amalgamates all the various ways there are of signalling EOS/Event to
+// generate a consistant EPIPE.
+//
+// Sets ctx->flag_last if next dq would produce EPIPE (i.e. stream has stopped)
 //
 // Returns:
 //  0               Success
@@ -420,7 +416,7 @@ ff_v4l2_ctx_eos(const V4L2Context * const ctx)
 //  *               AVERROR(..)
 
  static int
-rx_dqbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
+dq_buf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
 {
     V4L2m2mContext * const m = ctx_to_m2mctx(ctx);
     AVCodecContext * const avctx = m->avctx;
@@ -600,14 +596,14 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         }
 
         if ((pfd.revents & poll_cap) != 0) {
-            int rv = rx_dqbuf(ctx, ppavbuf);
+            int rv = dq_buf(ctx, ppavbuf);
             if (rv == AVERROR(EPIPE))
                 continue;
             return rv;
         }
 
         if ((pfd.revents & poll_out) != 0) {
-            return is_cap ? 0 : rx_dqbuf(ctx, ppavbuf);
+            return is_cap ? 0 : dq_buf(ctx, ppavbuf);
         }
 
         av_log(avctx, AV_LOG_ERROR, "V4L2 poll unexpected events=%#x, revents=%#x\n", pfd.events, pfd.revents);
@@ -1017,7 +1013,7 @@ static void flush_all_buffers_status(V4L2Context* const ctx)
         if (buf->status == V4L2BUF_IN_DRIVER)
             buf->status = V4L2BUF_AVAILABLE;
     }
-    ctx->q_count = 0;
+    atomic_store(&ctx->q_count, 0);
 }
 
 static int stuff_all_buffers(AVCodecContext * avctx, V4L2Context* ctx)
