@@ -507,14 +507,11 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 }
 #endif
 
+// This heuristic is for H264 but use for everything
 static uint32_t max_coded_size(const AVCodecContext * const avctx)
 {
     uint32_t wxh = avctx->coded_width * avctx->coded_height;
     uint32_t size;
-
-    // Currently the only thing we try to set our own limits for is H264
-    if (avctx->codec_id != AV_CODEC_ID_H264)
-        return 0;
 
     size = wxh * 3 / 2;
     // H.264 Annex A table A-1 gives minCR which is either 2 or 4
