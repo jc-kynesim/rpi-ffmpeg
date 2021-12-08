@@ -135,7 +135,7 @@ static int v4l2_try_start(AVCodecContext *avctx)
     /* 1. start the output process */
     if ((ret = check_output_streamon(avctx, s)) != 0)
         return ret;
-
+#if 0
     if (capture->streamon)
         return 0;
 
@@ -182,7 +182,6 @@ static int v4l2_try_start(AVCodecContext *avctx)
         }
     }
 #endif
-#if 0
     /* 5. start the capture process */
     ret = ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
     if (ret) {
@@ -511,7 +510,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // when discarding
                 // This returns AVERROR(EAGAIN) on timeout or if
                 // there is room in the input Q and timeout == -1
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, prefer_dq ? 5 : -1);
+                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, prefer_dq ? 5 : src_rv == NQ_Q_FULL ? -1 : 0);
 
                 if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
                     av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",

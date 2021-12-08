@@ -190,5 +190,10 @@ static inline unsigned int ff_v4l2_get_format_height(const struct v4l2_format * 
     return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.height : fmt->fmt.pix.height;
 }
 
+static inline uint32_t ff_v4l2_get_format_pixelformat(const struct v4l2_format * const fmt)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.pixelformat : fmt->fmt.pix.pixelformat;
+}
+
 
 #endif /* AVCODEC_V4L2_M2M_H */

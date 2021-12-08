@@ -249,6 +249,17 @@ static int do_source_change(V4L2m2mContext * const s)
             av_log(avctx, AV_LOG_ERROR, "v4l2_m2m_codec_reinit failed\n");
             return AVERROR(EINVAL);
         }
+
+        // Update pixel format - should only actually do something on initial change
+        s->capture.av_pix_fmt =
+        ff_v4l2_format_v4l2_to_avfmt(ff_v4l2_get_format_pixelformat(&s->capture.format), AV_CODEC_ID_RAWVIDEO);
+        if (s->output_drm) {
+            avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+            avctx->sw_pix_fmt = s->capture.av_pix_fmt;
+        }
+        else
+            avctx->pix_fmt = s->capture.av_pix_fmt;
+
         goto reinit_run;
     }
 
@@ -441,6 +452,7 @@ rx_dqbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
             return AVERROR(err);
         }
     }
+    atomic_fetch_sub(&ctx->q_count, 1);
 
     avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
     avbuf->status = V4L2BUF_AVAILABLE;
@@ -540,6 +552,14 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         // If capture && timeout == -1 then also wait for rx buffer free
         if (is_cap && timeout == -1 && m->output.streamon && !m->draining)
             pfd.events |= poll_out;
+
+        // If nothing Qed all we will get is POLLERR - avoid that
+        if ((pfd.events == poll_out && atomic_load(&m->output.q_count) == 0) ||
+            (pfd.events == poll_cap && atomic_load(&m->capture.q_count) == 0) ||
+            (pfd.events == (poll_cap | poll_out) && atomic_load(&m->capture.q_count) == 0 && atomic_load(&m->output.q_count) == 0)) {
+            av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s empty\n", ctx->name);
+            return 0;
+        }
 
         ret = poll(&pfd, 1, timeout == -1 ? 3000 : timeout);
 
@@ -866,7 +886,7 @@ static int v4l2_release_buffers(V4L2Context* ctx)
                     "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
         }
     }
-    ctx->q_count = 0;
+    atomic_store(&ctx->q_count, 0);
 
     return ret;
 }
@@ -1295,6 +1315,7 @@ int ff_v4l2_context_init(V4L2Context* ctx)
     }
 
     ff_mutex_init(&ctx->lock, NULL);
+    atomic_init(&ctx->q_count, 0);
 
     if (s->output_drm) {
         AVHWFramesContext *hwframes;
