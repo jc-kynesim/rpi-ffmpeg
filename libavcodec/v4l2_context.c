@@ -296,6 +296,7 @@ reinit_run:
     return 1;
 }
 
+#if 0
 static int ctx_done(V4L2Context * const ctx)
 {
     int rv = 0;
@@ -343,6 +344,7 @@ static int v4l2_handle_event(V4L2Context *ctx)
 
     return do_source_change(s);
 }
+#endif
 
 static int v4l2_stop_decode(V4L2Context *ctx)
 {
@@ -384,6 +386,7 @@ static int v4l2_stop_encode(V4L2Context *ctx)
     return 0;
 }
 
+#if 0
 static int count_in_driver(const V4L2Context * const ctx)
 {
     int i;
@@ -399,6 +402,7 @@ static int count_in_driver(const V4L2Context * const ctx)
     }
     return n;
 }
+#endif
 
 static inline int
 ff_v4l2_ctx_eos(const V4L2Context * const ctx)
@@ -533,6 +537,7 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
     V4L2m2mContext * const m = ctx_to_m2mctx(ctx);
     AVCodecContext * const avctx = m->avctx;
     const int is_cap = V4L2_TYPE_IS_CAPTURE(ctx->type);
+
     const unsigned int poll_cap = (POLLIN | POLLRDNORM);
     const unsigned int poll_out = (POLLOUT | POLLWRNORM);
     const unsigned int poll_event = POLLPRI;
@@ -558,7 +563,7 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
             (pfd.events == poll_cap && atomic_load(&m->capture.q_count) == 0) ||
             (pfd.events == (poll_cap | poll_out) && atomic_load(&m->capture.q_count) == 0 && atomic_load(&m->output.q_count) == 0)) {
             av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s empty\n", ctx->name);
-            return 0;
+            return AVERROR(EAGAIN);
         }
 
         ret = poll(&pfd, 1, timeout == -1 ? 3000 : timeout);
@@ -577,7 +582,7 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         if (ret == 0) {
             if (timeout == -1)
                 av_log(avctx, AV_LOG_ERROR, "V4L2 %s poll unexpected timeout\n", ctx->name);
-            return 0;
+            return AVERROR(EAGAIN);
         }
 
         if ((pfd.revents & POLLERR) != 0) {
@@ -610,6 +615,7 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
     }
 }
 
+#if 0
 static V4L2Buffer* v4l2_dequeue_v4l2buf(V4L2Context *ctx, int timeout)
 {
 #if 1
@@ -827,16 +833,18 @@ dequeue:
     return NULL;
 #endif
 }
+#endif
 
 static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 {
-    int timeout = 0; /* return when no more buffers to dequeue */
     int i;
 
     /* get back as many output buffers as possible */
     if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
-          do {
-          } while (v4l2_dequeue_v4l2buf(ctx, timeout));
+        V4L2Buffer * avbuf;
+        do {
+            get_qbuf(ctx, &avbuf, 0);
+        } while (avbuf);
     }
 
     for (i = 0; i < ctx->num_buffers; i++) {
@@ -1134,19 +1142,10 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
 int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
 {
     V4L2Buffer *avbuf;
+    int rv;
 
-    /*
-     * timeout=-1 blocks until:
-     *  1. decoded frame available
-     *  2. an input buffer is ready to be dequeued
-     */
-    avbuf = v4l2_dequeue_v4l2buf(ctx, timeout);
-    if (!avbuf) {
-        if (ctx->done)
-            return AVERROR_EOF;
-
-        return AVERROR(EAGAIN);
-    }
+    if ((rv = get_qbuf(ctx, &avbuf, timeout)) != 0)
+        return rv;
 
     return ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
 }
@@ -1154,19 +1153,10 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
 int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
 {
     V4L2Buffer *avbuf;
+    int rv;
 
-    /*
-     * blocks until:
-     *  1. encoded packet available
-     *  2. an input buffer ready to be dequeued
-     */
-    avbuf = v4l2_dequeue_v4l2buf(ctx, -1);
-    if (!avbuf) {
-        if (ctx->done)
-            return AVERROR_EOF;
-
-        return AVERROR(EAGAIN);
-    }
+    if ((rv = get_qbuf(ctx, &avbuf, -1)) != 0)
+        return rv;
 
     return ff_v4l2_buffer_buf_to_avpkt(pkt, avbuf);
 }
