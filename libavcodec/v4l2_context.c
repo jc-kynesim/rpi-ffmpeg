@@ -268,6 +268,7 @@ static int do_source_change(V4L2m2mContext * const s)
 
 #if 1
     s->draining = 0;
+    s->capture.flag_last = 0;
 
     {
         struct v4l2_decoder_cmd cmd = {
