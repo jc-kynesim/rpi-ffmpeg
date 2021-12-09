@@ -743,6 +743,9 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
 
     ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
 
+    // Clear any buffered input packet
+    av_packet_unref(&s->buf_pkt);
+
     // Clear a pending EOS
     if (ff_v4l2_ctx_eos(capture)) {
         ff_v4l2_context_set_status(capture, VIDIOC_STREAMOFF);
