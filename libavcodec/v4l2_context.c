@@ -266,7 +266,7 @@ static int do_source_change(V4L2m2mContext * const s)
     /* Buffers are OK so just stream off to ack */
     av_log(avctx, AV_LOG_DEBUG, "%s: Parameters only - restart decode\n", __func__);
 
-#if 0
+#if 1
     s->draining = 0;
 
     {
@@ -293,20 +293,6 @@ static int do_source_change(V4L2m2mContext * const s)
     /* reinit executed */
 reinit_run:
     ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMON);
-
-    {
-        struct v4l2_decoder_cmd cmd = {
-            .cmd = V4L2_DEC_CMD_START,
-            .flags = 0,
-        };
-
-        ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
-        if (ret < 0)
-            av_log(avctx, AV_LOG_ERROR, "%s: VIDIOC_DECODER_CMD start error: %s\n", __func__, strerror(errno));
-        else
-            av_log(avctx, AV_LOG_DEBUG, "%s: VIDIOC_DECODER_CMD start OK\n", __func__);
-    }
-
     return 1;
 }
 
