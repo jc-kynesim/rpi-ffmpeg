@@ -293,6 +293,20 @@ static int do_source_change(V4L2m2mContext * const s)
     /* reinit executed */
 reinit_run:
     ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMON);
+
+    {
+        struct v4l2_decoder_cmd cmd = {
+            .cmd = V4L2_DEC_CMD_START,
+            .flags = 0,
+        };
+
+        ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
+        if (ret < 0)
+            av_log(avctx, AV_LOG_ERROR, "%s: VIDIOC_DECODER_CMD start error: %s\n", __func__, strerror(errno));
+        else
+            av_log(avctx, AV_LOG_DEBUG, "%s: VIDIOC_DECODER_CMD start OK\n", __func__);
+    }
+
     return 1;
 }
 
@@ -567,9 +581,10 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         }
 
         // Timeout kludged s.t. "forever" eventually gives up & produces logging
-        // If waiting for an event then we expect it to be ready already so force a short timeout
+        // If waiting for an event when we have seen a last_frame then we expect
+        //   it to be ready already so force a short timeout
         ret = poll(&pfd, 1,
-                   pfd.events == poll_event ? 10 :
+                   ff_v4l2_ctx_eos(ctx) ? 10 :
                    timeout == -1 ? 3000 : timeout);
 
         av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s ret=%d, timeout=%d, events=%#x, revents=%#x\n",
@@ -586,7 +601,7 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         if (ret == 0) {
             if (timeout == -1)
                 av_log(avctx, AV_LOG_ERROR, "V4L2 %s poll unexpected timeout: events=%#x\n", ctx->name, pfd.events);
-            if (pfd.events == poll_event) {
+            if (ff_v4l2_ctx_eos(ctx)) {
                 av_log(avctx, AV_LOG_WARNING, "V4L2 %s poll event timeout\n", ctx->name);
                 ret = get_event(m);
                 if (ret < 0) {

@@ -733,7 +733,6 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     V4L2m2mContext * const s = priv->context;
     V4L2Context * const output = &s->output;
     V4L2Context * const capture = &s->capture;
-    int ret;
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s: streamon=%d\n", __func__, output->streamon);
 
@@ -741,16 +740,16 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     // states like EOS processing so don't try to optimize out (having got it
     // wrong once)
 
-    ret = ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
+    ff_v4l2_context_set_status(output, VIDIOC_STREAMOFF);
 
     // Clear any buffered input packet
     av_packet_unref(&s->buf_pkt);
 
     // Clear a pending EOS
     if (ff_v4l2_ctx_eos(capture)) {
-        ff_v4l2_context_set_status(capture, VIDIOC_STREAMOFF);
         // Arguably we could delay this but this is easy and doesn't require
         // thought or extra vars
+        ff_v4l2_context_set_status(capture, VIDIOC_STREAMOFF);
         ff_v4l2_context_set_status(capture, VIDIOC_STREAMON);
     }
 
