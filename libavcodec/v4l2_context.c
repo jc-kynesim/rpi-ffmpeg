@@ -505,6 +505,10 @@ get_event(V4L2m2mContext * const m)
         const int rv = AVERROR(errno);
         if (rv == AVERROR(EINTR))
             continue;
+        if (rv == AVERROR(EAGAIN)) {
+            av_log(avctx, AV_LOG_WARNING, "V4L2 failed to get expected event - assume EOS\n");
+            return AVERROR_EOF;
+        }
         av_log(avctx, AV_LOG_ERROR, "V4L2 VIDIOC_DQEVENT: %s\n", av_err2str(rv));
         return rv;
     }
@@ -562,7 +566,11 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
             return AVERROR(EAGAIN);
         }
 
-        ret = poll(&pfd, 1, timeout == -1 ? 3000 : timeout);
+        // Timeout kludged s.t. "forever" eventually gives up & produces logging
+        // If waiting for an event then we expect it to be ready already so force a short timeout
+        ret = poll(&pfd, 1,
+                   pfd.events == poll_event ? 10 :
+                   timeout == -1 ? 3000 : timeout);
 
         av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s ret=%d, timeout=%d, events=%#x, revents=%#x\n",
                ctx->name, ret, timeout, pfd.events, pfd.revents);
@@ -577,7 +585,15 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
 
         if (ret == 0) {
             if (timeout == -1)
-                av_log(avctx, AV_LOG_ERROR, "V4L2 %s poll unexpected timeout\n", ctx->name);
+                av_log(avctx, AV_LOG_ERROR, "V4L2 %s poll unexpected timeout: events=%#x\n", ctx->name, pfd.events);
+            if (pfd.events == poll_event) {
+                av_log(avctx, AV_LOG_WARNING, "V4L2 %s poll event timeout\n", ctx->name);
+                ret = get_event(m);
+                if (ret < 0) {
+                    ctx->done = 1;
+                    return ret;
+                }
+            }
             return AVERROR(EAGAIN);
         }
 
@@ -587,7 +603,7 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         }
 
         if ((pfd.revents & poll_event) != 0) {
-            int ret = get_event(m);
+            ret = get_event(m);
             if (ret < 0) {
                 ctx->done = 1;
                 return ret;
@@ -596,10 +612,10 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         }
 
         if ((pfd.revents & poll_cap) != 0) {
-            int rv = dq_buf(ctx, ppavbuf);
-            if (rv == AVERROR(EPIPE))
+            ret = dq_buf(ctx, ppavbuf);
+            if (ret == AVERROR(EPIPE))
                 continue;
-            return rv;
+            return ret;
         }
 
         if ((pfd.revents & poll_out) != 0) {
