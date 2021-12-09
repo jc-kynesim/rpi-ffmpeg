@@ -47,7 +47,7 @@ else
   exit 1
 fi
 
-if [ $MMAL]; then
+if [ $MMAL ]; then
   RPI_OPT_VC=/opt/vc
   RPI_INCLUDES="-I$RPI_OPT_VC/include -I$RPI_OPT_VC/include/interface/vcos/pthreads -I$RPI_OPT_VC/include/interface/vmcs_host/linux"
   RPI_LIBDIRS="-L$RPI_OPT_VC/lib"
