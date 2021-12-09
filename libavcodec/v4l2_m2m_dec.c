@@ -715,6 +715,9 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMOFF %s error: %d\n", output->name, ret);
 
+    // Clear any buffered input packet
+    av_packet_unref(&s->buf_pkt);
+
     // V4L2 makes no guarantees about whether decoded frames are flushed or not
     // so mark all frames we are tracking to be discarded if they appear
     xlat_flush(&s->xlat);
