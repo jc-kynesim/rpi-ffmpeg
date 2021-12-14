@@ -234,7 +234,7 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
 
     /* 5. complete reinit */
     s->draining = 0;
-    s->reinit = 0;
+//    s->reinit = 0;
 
     return 0;
 }
@@ -268,7 +268,7 @@ int ff_v4l2_m2m_codec_full_reinit(V4L2m2mContext *s)
 
     /* start again now that we know the stream dimensions */
     s->draining = 0;
-    s->reinit = 0;
+//    s->reinit = 0;
 
     ret = ff_v4l2_context_get_format(&s->output, 0);
     if (ret) {

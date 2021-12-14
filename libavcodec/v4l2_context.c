@@ -175,11 +175,11 @@ static int do_source_change(V4L2m2mContext * const s)
 
     int ret;
     int reinit;
-    int full_reinit = 0;
+//    int full_reinit = 0;
     struct v4l2_format cap_fmt = s->capture.format;
     struct v4l2_format out_fmt = s->output.format;
 
-    s->resize_pending = 0;
+//    s->resize_pending = 0;
     s->capture.done = 0;
 
     ret = ioctl(s->fd, VIDIOC_G_FMT, &out_fmt);
@@ -223,7 +223,7 @@ static int do_source_change(V4L2m2mContext * const s)
            s->capture.sample_aspect_ratio.num, s->capture.sample_aspect_ratio.den,
            s->capture.selection.width, s->capture.selection.height,
            s->capture.selection.left, s->capture.selection.top);
-
+#if 0
     if (full_reinit || reinit)
         s->reinit = 1;
 
@@ -235,7 +235,7 @@ static int do_source_change(V4L2m2mContext * const s)
         }
         goto reinit_run;
     }
-
+#endif
     if (reinit) {
         if (avctx)
             ret = ff_set_dimensions(s->avctx,

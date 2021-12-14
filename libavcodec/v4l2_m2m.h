@@ -84,8 +84,8 @@ typedef struct V4L2m2mContext {
     AVCodecContext *avctx;
     sem_t refsync;
     atomic_uint refcount;
-    int reinit;
-    int resize_pending;
+//    int reinit;
+//    int resize_pending;
 
     /* null frame/packet received */
     int draining;
