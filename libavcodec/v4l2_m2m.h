@@ -113,6 +113,11 @@ typedef struct V4L2m2mContext {
 
     /* Ext data sent */
     int extdata_sent;
+
+#define FF_V4L2_QUIRK_REINIT_ALWAYS     1
+    /* Quirks */
+    unsigned int quirks;
+
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv {
