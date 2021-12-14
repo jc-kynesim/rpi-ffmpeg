@@ -540,6 +540,34 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 }
 #endif
 
+static int
+get_quirks(AVCodecContext * const avctx, V4L2m2mContext * const s)
+{
+    struct v4l2_capability cap;
+
+    memset(&cap, 0, sizeof(cap));
+    while (ioctl(s->fd, VIDIOC_QUERYCAP, &cap) != 0) {
+        int err = errno;
+        if (err == EINTR)
+            continue;
+        av_log(avctx, AV_LOG_ERROR, "V4L2: Failed to get capabilities: %s\n", strerror(err));
+        return AVERROR(err);
+    }
+
+    // Could be made table driven if we have a few more but right now there
+    // seems no point
+
+    // Meson (amlogic) always gives a resolution changed event after output
+    // streamon and userspace must (re)allocate capture buffers and streamon
+    // capture to clear the event even if the capture buffers were the right
+    // size in the first place.
+    if (strcmp(cap.driver, "meson-vdec") == 0)
+        s->quirks |= FF_V4L2_QUIRK_REINIT_ALWAYS;
+
+    av_log(avctx, AV_LOG_DEBUG, "Driver '%s': Quirks=%#x\n", cap.driver, s->quirks);
+    return 0;
+}
+
 // This heuristic is for H264 but use for everything
 static uint32_t max_coded_size(const AVCodecContext * const avctx)
 {
@@ -646,7 +674,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         return ret;
     }
 
-    return v4l2_prepare_decoder(s);
+    if ((ret = v4l2_prepare_decoder(s)) < 0)
+        return ret;
+
+    return get_quirks(avctx, s);
 }
 
 static av_cold int v4l2_decode_close(AVCodecContext *avctx)
