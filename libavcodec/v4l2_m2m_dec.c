@@ -648,6 +648,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     if (ret < 0)
         return ret;
 
+    s->quirks = FF_V4L2_QUIRK_REINIT_ALWAYS;
+
     xlat_init(&s->xlat);
     pts_stats_init(&s->pts_stat, avctx, "decoder");
 

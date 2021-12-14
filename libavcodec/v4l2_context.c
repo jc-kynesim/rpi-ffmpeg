@@ -205,6 +205,9 @@ static int do_source_change(V4L2m2mContext * const s)
     get_default_selection(&s->capture, &s->capture.selection);
 
     reinit = ctx_resolution_changed(&s->capture, &cap_fmt);
+    if ((s->quirks & FF_V4L2_QUIRK_REINIT_ALWAYS) != 0)
+        reinit = 1;
+
     s->capture.format = cap_fmt;
     if (reinit) {
         s->capture.height = ff_v4l2_get_format_height(&cap_fmt);
@@ -219,10 +222,10 @@ static int do_source_change(V4L2m2mContext * const s)
 
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
 
-    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, crop %dx%d @ %d,%d\n",
+    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, crop %dx%d @ %d,%d, reinit=%d\n",
            s->capture.sample_aspect_ratio.num, s->capture.sample_aspect_ratio.den,
            s->capture.selection.width, s->capture.selection.height,
-           s->capture.selection.left, s->capture.selection.top);
+           s->capture.selection.left, s->capture.selection.top, reinit);
 #if 0
     if (full_reinit || reinit)
         s->reinit = 1;
@@ -266,7 +269,7 @@ static int do_source_change(V4L2m2mContext * const s)
     /* Buffers are OK so just stream off to ack */
     av_log(avctx, AV_LOG_DEBUG, "%s: Parameters only - restart decode\n", __func__);
 
-#if 1
+#if 0
     s->draining = 0;
     s->capture.flag_last = 0;
 
