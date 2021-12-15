@@ -235,7 +235,6 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *s)
 
     /* 5. complete reinit */
     s->draining = 0;
-    s->reinit = 0;
 
     return 0;
 }
