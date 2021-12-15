@@ -110,8 +110,7 @@ typedef struct V4L2Context {
     int no_pts_rescale;
 
     AVBufferRef *frames_ref;
-    int q_count;
-    int dq_count;
+    atomic_int q_count;
     struct ff_weak_link_master *wl_master;
 
     AVMutex lock;

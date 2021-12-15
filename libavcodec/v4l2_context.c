@@ -599,7 +599,7 @@ static int v4l2_release_buffers(V4L2Context* ctx)
                     "  2. drmIoctl(.., DRM_IOCTL_GEM_CLOSE,... )\n");
         }
     }
-    ctx->q_count = 0;
+    atomic_store(&ctx->q_count, 0);
 
     return ret;
 }
@@ -1019,6 +1019,7 @@ int ff_v4l2_context_init(V4L2Context* ctx)
     }
 
     ff_mutex_init(&ctx->lock, NULL);
+    atomic_init(&ctx->q_count, 0);
 
     if (s->output_drm) {
         AVHWFramesContext *hwframes;
