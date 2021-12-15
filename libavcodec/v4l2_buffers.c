@@ -922,6 +922,7 @@ fail:
 int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
 {
     int ret;
+    int qc;
 
     avbuf->buf.flags = avbuf->flags;
 
@@ -941,11 +942,10 @@ int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
         return AVERROR(err);
     }
 
-    ++avbuf->context->q_count;
+    qc = atomic_fetch_add(&avbuf->context->q_count, 1) + 1;
     av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s VIDIOC_QBUF: index %d, ts=%ld.%06ld count=%d\n",
            avbuf->context->name, avbuf->buf.index,
-           avbuf->buf.timestamp.tv_sec, avbuf->buf.timestamp.tv_usec,
-           avbuf->context->q_count);
+           avbuf->buf.timestamp.tv_sec, avbuf->buf.timestamp.tv_usec, qc);
 
     avbuf->status = V4L2BUF_IN_DRIVER;
 
