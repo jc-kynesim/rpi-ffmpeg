@@ -102,6 +102,8 @@ typedef struct V4L2Context {
      */
     int done;
 
+    int flag_last;
+
     /**
      * PTS rescale not wanted
      * If the PTS is just a dummy frame count then rescale is
