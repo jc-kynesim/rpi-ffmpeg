@@ -46,7 +46,7 @@ static inline V4L2m2mContext *buf_to_m2mctx(const V4L2Buffer * const buf)
         container_of(buf->context, V4L2m2mContext, capture);
 }
 
-static inline AVCodecContext *logger(V4L2Buffer *buf)
+static inline AVCodecContext *logger(const V4L2Buffer * const buf)
 {
     return buf_to_m2mctx(buf)->avctx;
 }
