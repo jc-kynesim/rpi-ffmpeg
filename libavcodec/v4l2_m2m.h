@@ -44,8 +44,10 @@
 #define FF_V4L2_M2M_TRACK_SIZE 128
 typedef struct V4L2m2mTrackEl {
     int     discard;   // If we see this buffer its been flushed, so discard
+    int     pending;
     int     pkt_size;
     int64_t pts;
+    int64_t dts;
     int64_t reordered_opaque;
     int64_t pkt_pos;
     int64_t pkt_duration;
@@ -62,6 +64,14 @@ typedef struct pts_stats_s
     int64_t guess;
 } pts_stats_t;
 
+typedef struct xlat_track_s {
+    unsigned int track_no;
+    int64_t last_pts;
+    int64_t last_pkt_dts;
+    int64_t last_opaque;
+    V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
+} xlat_track_t;
+
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
     int fd;
@@ -74,8 +84,6 @@ typedef struct V4L2m2mContext {
     AVCodecContext *avctx;
     sem_t refsync;
     atomic_uint refcount;
-    int reinit;
-    int resize_pending;
 
     /* null frame/packet received */
     int draining;
@@ -93,10 +101,7 @@ typedef struct V4L2m2mContext {
     int output_drm;
 
     /* Frame tracking */
-    int64_t last_pkt_dts;
-    int64_t last_opaque;
-    unsigned int track_no;
-    V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
+    xlat_track_t xlat;
 
     pts_stats_t pts_stat;
 
@@ -105,6 +110,11 @@ typedef struct V4L2m2mContext {
 
     /* Ext data sent */
     int extdata_sent;
+
+#define FF_V4L2_QUIRK_REINIT_ALWAYS     1
+    /* Quirks */
+    unsigned int quirks;
+
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv {
@@ -170,14 +180,24 @@ int ff_v4l2_m2m_codec_reinit(V4L2m2mContext *ctx);
 int ff_v4l2_m2m_codec_full_reinit(V4L2m2mContext *ctx);
 
 
-static inline unsigned int ff_v4l2_get_format_width(struct v4l2_format *fmt)
+static inline unsigned int ff_v4l2_get_format_width(const struct v4l2_format * const fmt)
 {
     return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.width : fmt->fmt.pix.width;
 }
 
-static inline unsigned int ff_v4l2_get_format_height(struct v4l2_format *fmt)
+static inline unsigned int ff_v4l2_get_format_height(const struct v4l2_format * const fmt)
 {
     return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.height : fmt->fmt.pix.height;
+}
+
+static inline uint32_t ff_v4l2_get_format_pixelformat(const struct v4l2_format * const fmt)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.pixelformat : fmt->fmt.pix.pixelformat;
+}
+
+static inline int ff_v4l2_ctx_eos(const V4L2Context * const ctx)
+{
+    return ctx->flag_last;
 }
 
 
