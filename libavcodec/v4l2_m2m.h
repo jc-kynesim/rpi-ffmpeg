@@ -103,9 +103,6 @@ typedef struct V4L2m2mContext {
 
     pts_stats_t pts_stat;
 
-    /* req pkt */
-    int req_pkt;
-
     /* Ext data sent */
     int extdata_sent;
 } V4L2m2mContext;

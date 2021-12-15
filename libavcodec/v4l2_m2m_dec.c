@@ -425,13 +425,6 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     do {
         src_rv = try_enqueue_src(avctx, s);
 
-        // If we got a frame last time and we have nothing to enqueue then
-        // return now. rv will be AVERROR(EAGAIN) indicating that we want more input
-        // This should mean that once decode starts we enter a stable state where
-        // we alternately ask for input and produce output
-        if (s->req_pkt && src_rv == NQ_SRC_EMPTY)
-            break;
-
         if (src_rv == NQ_Q_FULL && dst_rv == AVERROR(EAGAIN)) {
             av_log(avctx, AV_LOG_WARNING, "Poll says src Q has space but enqueue fail");
             src_rv = NQ_SRC_EMPTY;  // If we can't enqueue pretend that there is nothing to enqueue
@@ -469,9 +462,6 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     // (might happen when discarding)
     if (dst_rv)
         av_frame_unref(frame);
-
-    // If we got a frame this time ask for a pkt next time
-    s->req_pkt = (dst_rv == 0);
 
 #if 0
     if (dst_rv == 0)
