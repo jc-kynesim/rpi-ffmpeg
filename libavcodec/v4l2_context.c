@@ -43,14 +43,14 @@ struct v4l2_format_update {
     int update_avfmt;
 };
 
-static inline V4L2m2mContext *ctx_to_m2mctx(V4L2Context *ctx)
+static inline V4L2m2mContext *ctx_to_m2mctx(const V4L2Context *ctx)
 {
     return V4L2_TYPE_IS_OUTPUT(ctx->type) ?
         container_of(ctx, V4L2m2mContext, output) :
         container_of(ctx, V4L2m2mContext, capture);
 }
 
-static inline AVCodecContext *logger(V4L2Context *ctx)
+static inline AVCodecContext *logger(const V4L2Context *ctx)
 {
     return ctx_to_m2mctx(ctx)->avctx;
 }
