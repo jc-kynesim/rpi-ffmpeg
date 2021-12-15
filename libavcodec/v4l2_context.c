@@ -400,7 +400,7 @@ get_event(V4L2m2mContext * const m)
         return rv;
     }
 
-    av_log(avctx, AV_LOG_INFO, "Dq event %d\n", evt.type);
+    av_log(avctx, AV_LOG_DEBUG, "Dq event %d\n", evt.type);
 
     if (evt.type == V4L2_EVENT_EOS) {
         av_log(avctx, AV_LOG_TRACE, "V4L2 VIDIOC_EVENT_EOS\n");
@@ -440,6 +440,11 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
                     poll_event,
         };
         int ret;
+
+        if (ctx->done) {
+            av_log(avctx, AV_LOG_TRACE, "V4L2 %s already done\n", ctx->name);
+            return AVERROR_EOF;
+        }
 
         // If capture && timeout == -1 then also wait for rx buffer free
         if (is_cap && timeout == -1 && m->output.streamon && !m->draining)
