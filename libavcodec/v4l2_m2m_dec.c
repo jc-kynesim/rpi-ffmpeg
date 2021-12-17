@@ -606,8 +606,6 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
 
-    avctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
-
     if (avctx->codec_id == AV_CODEC_ID_H264) {
         if (avctx->ticks_per_frame == 1) {
             if(avctx->time_base.den < INT_MAX/2) {
