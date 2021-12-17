@@ -449,7 +449,12 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         // indicating that we want more input.
         // This should mean that once decode starts we enter a stable state where
         // we alternately ask for input and produce output
-        if ((i != 0 || s->req_pkt) && src_rv == NQ_SRC_EMPTY)
+        //
+        // If user has requested low_delay then only ask for more input if we
+        // cannot dequeue a frame
+        if ((i != 0 || s->req_pkt) &&
+            src_rv == NQ_SRC_EMPTY &&
+            (avctx->flags & AV_CODEC_FLAG_LOW_DELAY) == 0)
             break;
 
         // Try to get a new frame if
@@ -601,6 +606,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
 
+    avctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+
     if (avctx->codec_id == AV_CODEC_ID_H264) {
         if (avctx->ticks_per_frame == 1) {
             if(avctx->time_base.den < INT_MAX/2) {
@@ -611,7 +618,6 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         avctx->ticks_per_frame = 2;
     }
 
-    av_log(avctx, AV_LOG_INFO, "level=%d\n", avctx->level);
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
@@ -650,8 +656,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     avctx->sw_pix_fmt = avctx->pix_fmt;
     gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
-    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s); get_format requested=%d (%s)\n",
-           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt), gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
+    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s); get_format requested=%d (%s); flags=%#x\n",
+           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt), gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt), avctx->flags);
 
     if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
         avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
