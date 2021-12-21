@@ -109,6 +109,8 @@ static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *co
     if (s->output.streamon)
         return 0;
 
+    ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMON);
+
     ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMON);
     if (ret < 0)
         av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON on output context\n");
