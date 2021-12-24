@@ -384,7 +384,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     }
 
     if (s->draining) {
-        if (!s->buf_pkt.size) {
+        if (s->buf_pkt.size) {
             av_log(avctx, AV_LOG_WARNING, "Unexpected input whilst draining\n");
             av_packet_unref(&s->buf_pkt);
         }
