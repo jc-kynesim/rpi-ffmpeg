@@ -527,6 +527,22 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
     }
 }
 
+// Clear out flags and timestamps that should should be set by the user
+// Returns the passed avbuf
+static V4L2Buffer *
+clean_v4l2_buffer(V4L2Buffer * const avbuf)
+{
+    struct v4l2_buffer *const buf = &avbuf->buf;
+
+    buf->flags = 0;
+    buf->field = V4L2_FIELD_ANY;
+    buf->timestamp = (struct timeval){0};
+    buf->timecode = (struct v4l2_timecode){0};
+    buf->sequence = 0;
+
+    return avbuf;
+}
+
 static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 {
     int i;
@@ -542,7 +558,7 @@ static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer * const avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
         if (avbuf->status == V4L2BUF_AVAILABLE)
-            return avbuf;
+            return clean_v4l2_buffer(avbuf);
     }
 
     return NULL;
