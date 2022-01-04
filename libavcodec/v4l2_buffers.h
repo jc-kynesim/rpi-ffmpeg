@@ -73,7 +73,6 @@ typedef struct V4L2Buffer {
     struct v4l2_buffer buf;
     struct v4l2_plane planes[VIDEO_MAX_PLANES];
 
-    int flags;
     enum V4L2Buffer_status status;
 
 } V4L2Buffer;
