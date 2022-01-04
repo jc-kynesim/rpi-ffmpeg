@@ -680,7 +680,9 @@ static int v4l2_buffer_swframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 
 int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 {
-    out->buf.flags = frame->key_frame ? (out->buf.flags & ~V4L2_BUF_FLAG_KEYFRAME) : (out->buf.flags | V4L2_BUF_FLAG_KEYFRAME);
+    out->buf.flags = frame->key_frame ?
+        (out->buf.flags | V4L2_BUF_FLAG_KEYFRAME) :
+        (out->buf.flags & ~V4L2_BUF_FLAG_KEYFRAME);
     // Beware that colour info is held in format rather than the actual
     // v4l2 buffer struct so this may not be as useful as you might hope
     v4l2_set_color(out, frame->color_primaries, frame->colorspace, frame->color_trc);
@@ -706,6 +708,10 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
 
     /* 2. get frame information */
     frame->key_frame = !!(avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME);
+    frame->pict_type = frame->key_frame ? AV_PICTURE_TYPE_I :
+        (avbuf->buf.flags & V4L2_BUF_FLAG_PFRAME) != 0 ? AV_PICTURE_TYPE_P :
+        (avbuf->buf.flags & V4L2_BUF_FLAG_BFRAME) != 0 ? AV_PICTURE_TYPE_B :
+            AV_PICTURE_TYPE_NONE;
     frame->color_primaries = v4l2_get_color_primaries(avbuf);
     frame->colorspace = v4l2_get_color_space(avbuf);
     frame->color_range = v4l2_get_color_range(avbuf);
@@ -779,8 +785,9 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
 
     v4l2_set_pts(out, pkt->pts);
 
-    if (pkt->flags & AV_PKT_FLAG_KEY)
-        out->flags = V4L2_BUF_FLAG_KEYFRAME;
+    out->buf.flags = (pkt->flags & AV_PKT_FLAG_KEY) != 0 ?
+        (out->buf.flags | V4L2_BUF_FLAG_KEYFRAME) :
+        (out->buf.flags & ~V4L2_BUF_FLAG_KEYFRAME);
 
     return ret;
 }
@@ -923,8 +930,6 @@ int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
 {
     int ret;
     int qc;
-
-    avbuf->buf.flags = avbuf->flags;
 
     if (avbuf->buf.timestamp.tv_sec || avbuf->buf.timestamp.tv_usec) {
         av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s pre VIDIOC_QBUF: index %d, ts=%ld.%06ld count=%d\n",
