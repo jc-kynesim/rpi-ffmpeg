@@ -747,8 +747,6 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
 
 int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *avbuf)
 {
-    av_log(logger(avbuf), AV_LOG_INFO, "%s\n", __func__);
-
     av_packet_unref(pkt);
 
     pkt->buf = wrap_avbuf(avbuf);
