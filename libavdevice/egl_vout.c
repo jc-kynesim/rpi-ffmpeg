@@ -40,16 +40,7 @@
 #include <stdatomic.h>
 #include <unistd.h>
 
-#include "drm_fourcc.h"
-#include <drm.h>
-#include <drm_mode.h>
-#include <xf86drm.h>
-#include <xf86drmMode.h>
 #include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xlib-xcb.h>
-#include <xcb/xcb.h>
-#include <xcb/dri3.h>
 
 #include "libavutil/rpi_sand_fns.h"
 
@@ -261,8 +252,7 @@ make_window(struct AVFormatContext * const s,
    XMapWindow(dpy, win);
 
    {
-      EGLSurface surf = eglCreateWindowSurface(egl_dpy, config,
-                                               (void *)(uintptr_t)win, NULL);
+      EGLSurface surf = eglCreateWindowSurface(egl_dpy, config, (uintptr_t)win, NULL);
       if (!surf) {
          av_log(s, AV_LOG_ERROR, "Error: eglCreateWindowSurface failed\n");
          return -1;
