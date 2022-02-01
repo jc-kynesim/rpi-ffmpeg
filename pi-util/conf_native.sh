@@ -2,6 +2,7 @@ echo "Configure for native build"
 
 FFSRC=`pwd`
 MC=`dpkg --print-architecture`
+BUILDBASE=$FFSRC/out
 
 #RPI_KEEPS="-save-temps=obj"
 RPI_KEEPS=""
@@ -64,20 +65,22 @@ V=`cat RELEASE`
 SHARED_LIBS="--enable-shared"
 if [ $NOSHARED ]; then
   SHARED_LIBS="--disable-shared"
-  OUT=out/$B-$C-$V-static-rel
+  OUT=$BUILDBASE/$B-$C-$V-static-rel
   echo Static libs
 else
   echo Shared libs
-  OUT=out/$B-$C-$V-shared-rel
+  OUT=$BUILDBASE/$B-$C-$V-shared-rel
 fi
 
-USR_PREFIX=$FFSRC/$OUT/install
+USR_PREFIX=$OUT/install
 LIB_PREFIX=$USR_PREFIX/lib/$A
 INC_PREFIX=$USR_PREFIX/include/$A
 
 echo Destination directory: $OUT
-mkdir -p $FFSRC/$OUT
-cd $FFSRC/$OUT
+mkdir -p $OUT
+# Nothing under here need worry git - including this .gitignore!
+echo "**" > $BUILDBASE/.gitignore
+cd $OUT
 
 $FFSRC/configure \
  --prefix=$USR_PREFIX\
