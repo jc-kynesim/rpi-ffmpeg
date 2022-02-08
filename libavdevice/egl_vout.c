@@ -41,6 +41,7 @@
 #include <unistd.h>
 
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
 #include "libavutil/rpi_sand_fns.h"
 
