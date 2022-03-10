@@ -41,6 +41,7 @@ typedef struct BlockDSPContext {
 
 void ff_blockdsp_init(BlockDSPContext *c, AVCodecContext *avctx);
 
+void ff_blockdsp_init_aarch64(BlockDSPContext *c);
 void ff_blockdsp_init_alpha(BlockDSPContext *c);
 void ff_blockdsp_init_arm(BlockDSPContext *c);
 void ff_blockdsp_init_ppc(BlockDSPContext *c);

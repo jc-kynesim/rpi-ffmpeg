@@ -65,6 +65,8 @@ av_cold void ff_blockdsp_init(BlockDSPContext *c, AVCodecContext *avctx)
     c->fill_block_tab[0] = fill_block16_c;
     c->fill_block_tab[1] = fill_block8_c;
 
+    if (ARCH_AARCH64)
+        ff_blockdsp_init_aarch64(c);
     if (ARCH_ALPHA)
         ff_blockdsp_init_alpha(c);
     if (ARCH_ARM)
