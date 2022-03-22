@@ -947,12 +947,14 @@ int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf)
         return AVERROR(err);
     }
 
+    // Lock not wanted - if called from buffer free then lock already obtained
     qc = atomic_fetch_add(&avbuf->context->q_count, 1) + 1;
+    avbuf->status = V4L2BUF_IN_DRIVER;
+    pthread_cond_broadcast(&avbuf->context->cond);
+
     av_log(logger(avbuf), AV_LOG_DEBUG, "--- %s VIDIOC_QBUF: index %d, ts=%ld.%06ld count=%d\n",
            avbuf->context->name, avbuf->buf.index,
            avbuf->buf.timestamp.tv_sec, avbuf->buf.timestamp.tv_usec, qc);
-
-    avbuf->status = V4L2BUF_IN_DRIVER;
 
     return 0;
 }
