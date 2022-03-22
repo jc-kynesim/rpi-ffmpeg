@@ -102,6 +102,8 @@ typedef struct V4L2m2mContext {
 
     /* Frame tracking */
     xlat_track_t xlat;
+    int pending_hw;
+    int pending_n;
 
     pts_stats_t pts_stat;
 
