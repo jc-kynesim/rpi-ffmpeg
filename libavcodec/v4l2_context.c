@@ -300,6 +300,7 @@ static int v4l2_stop_encode(V4L2Context *ctx)
 // Returns:
 //  0               Success
 //  AVERROR(EPIPE)  Nothing more to read
+//  AVERROR(ENOSPC) No buffers in Q to put result in
 //  *               AVERROR(..)
 
  static int
@@ -457,7 +458,7 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
             (pfd.events == poll_cap && atomic_load(&m->capture.q_count) == 0) ||
             (pfd.events == (poll_cap | poll_out) && atomic_load(&m->capture.q_count) == 0 && atomic_load(&m->output.q_count) == 0)) {
             av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s empty\n", ctx->name);
-            return AVERROR(EAGAIN);
+            return AVERROR(ENOSPC);
         }
 
         // Timeout kludged s.t. "forever" eventually gives up & produces logging
@@ -864,7 +865,7 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
     int rv;
 
     if ((rv = get_qbuf(ctx, &avbuf, -1)) != 0)
-        return rv;
+        return rv == AVERROR(ENOSPC) ? AVERROR(EAGAIN) : rv;  // Caller not currently expecting ENOSPC
 
     return ff_v4l2_buffer_buf_to_avpkt(pkt, avbuf);
 }
@@ -938,6 +939,7 @@ void ff_v4l2_context_release(V4L2Context* ctx)
     av_buffer_unref(&ctx->frames_ref);
 
     ff_mutex_destroy(&ctx->lock);
+    pthread_cond_destroy(&ctx->cond);
 }
 
 
@@ -1013,6 +1015,7 @@ int ff_v4l2_context_init(V4L2Context* ctx)
     }
 
     ff_mutex_init(&ctx->lock, NULL);
+    pthread_cond_init(&ctx->cond, NULL);
     atomic_init(&ctx->q_count, 0);
 
     if (s->output_drm) {
