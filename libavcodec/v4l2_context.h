@@ -116,6 +116,7 @@ typedef struct V4L2Context {
     struct ff_weak_link_master *wl_master;
 
     AVMutex lock;
+    pthread_cond_t cond;
 } V4L2Context;
 
 /**
@@ -182,6 +183,8 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
  * @param[in] timeout The timeout for dequeue (-1 to block, 0 to return immediately, or milliseconds)
  *
  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
+ *                AVERROR(ENOSPC) if no buffer availible to put
+ *                the frame in
  */
 int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* f, int timeout);
 

@@ -251,7 +251,8 @@ xlat_pts_out(AVCodecContext *const avctx,
 
     frame->best_effort_timestamp = pts_stats_guess(ps);
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
-    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 "/%"PRId64", DTS=%" PRId64 "\n", frame->pts, frame->best_effort_timestamp, frame->pkt_dts);
+    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 "/%"PRId64", DTS=%" PRId64 ", track=%"PRId64", n=%d\n",
+           frame->pts, frame->best_effort_timestamp, frame->pkt_dts, t->track_pts, n);
     return 0;
 }
 
@@ -422,6 +423,36 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     return ret;
 }
 
+static int qbuf_wait(AVCodecContext * const avctx, V4L2Context * const ctx)
+{
+    int rv = 0;
+
+    ff_mutex_lock(&ctx->lock);
+
+    while (atomic_load(&ctx->q_count) == 0 && ctx->streamon) {
+        if (pthread_cond_wait(&ctx->cond, &ctx->lock) != 0) {
+            rv = AVERROR(errno);
+            av_log(avctx, AV_LOG_ERROR, "Cond wait failure: %s\n", av_err2str(rv));
+            break;
+        }
+    }
+
+    ff_mutex_unlock(&ctx->lock);
+    return rv;
+}
+
+// Number of frames over what xlat_pending returns that we keep *16
+// This is a min value - if it appears to be too small the threshold should
+// adjust dynamically.
+#define PENDING_HW_MIN      (3 * 16)
+// Offset to use when setting dynamically
+// Set to %16 == 15 to avoid the threshold changing immediately as we relax
+#define PENDING_HW_OFFSET   (PENDING_HW_MIN - 1)
+// Number of consecutive times we've failed to get a frame when we prefer it
+// before we increase the prefer threshold (5ms * N = max expected decode
+// time)
+#define PENDING_N_THRESHOLD 6
+
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     V4L2m2mContext *const s = ((V4L2m2mPriv*)avctx->priv_data)->context;
@@ -431,7 +462,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
     do {
         const int pending = xlat_pending(&s->xlat);
-        const int prefer_dq = (pending > 5);
+        const int prefer_dq = (pending > s->pending_hw / 16);
 
         // Enqueue another pkt for decode if
         // (a) We don't have a lot of stuff in the buffer already OR
@@ -464,6 +495,27 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 // This returns AVERROR(EAGAIN) on timeout or if
                 // there is room in the input Q and timeout == -1
                 dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
+
+                // Failure due to no buffer in Q?
+                if (dst_rv == AVERROR(ENOSPC)) {
+                    // Wait & retry
+                    if ((dst_rv = qbuf_wait(avctx, &s->capture)) == 0) {
+                        dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
+                    }
+                }
+
+                // Adjust dynamic pending threshold
+                if (dst_rv == 0) {
+                    if (--s->pending_hw < PENDING_HW_MIN)
+                        s->pending_hw = PENDING_HW_MIN;
+                    s->pending_n = 0;
+                }
+                else if (dst_rv == AVERROR(EAGAIN)) {
+                    if (prefer_dq && ++s->pending_n > PENDING_N_THRESHOLD) {
+                        s->pending_hw = pending * 16 + PENDING_HW_OFFSET;
+                        s->pending_n = 0;
+                    }
+                }
 
                 if (dst_rv == AVERROR(EAGAIN) && src_rv == NQ_DRAINING) {
                     av_log(avctx, AV_LOG_WARNING, "Timeout in drain - assume EOF");
@@ -613,6 +665,7 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     xlat_init(&s->xlat);
     pts_stats_init(&s->pts_stat, avctx, "decoder");
+    s->pending_hw = PENDING_HW_MIN;
 
     capture = &s->capture;
     output = &s->output;
