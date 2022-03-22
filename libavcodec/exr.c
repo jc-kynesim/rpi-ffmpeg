@@ -1511,6 +1511,7 @@ static int decode_header(EXRContext *s, AVFrame *frame)
             ymax   = bytestream2_get_le32(&s->gb);
 
             if (xmin > xmax || ymin > ymax ||
+                ymax == INT_MAX || xmax == INT_MAX ||
                 (unsigned)xmax - xmin >= INT_MAX ||
                 (unsigned)ymax - ymin >= INT_MAX) {
                 ret = AVERROR_INVALIDDATA;
@@ -1825,13 +1826,14 @@ static int decode_frame(AVCodecContext *avctx, void *data,
     avctx->execute2(avctx, decode_block, s->thread_data, NULL, nb_blocks);
 
     // Zero out the end if ymax+1 is not h
-    for (i = 0; i < planes; i++) {
-        ptr = picture->data[i] + ((s->ymax+1) * picture->linesize[i]);
-        for (y = s->ymax + 1; y < avctx->height; y++) {
-            memset(ptr, 0, out_line_size);
-            ptr += picture->linesize[i];
+    if ((s->ymax+1) < avctx->height)
+        for (i = 0; i < planes; i++) {
+            ptr = picture->data[i] + ((s->ymax+1) * picture->linesize[i]);
+            for (y = s->ymax + 1; y < avctx->height; y++) {
+                memset(ptr, 0, out_line_size);
+                ptr += picture->linesize[i];
+            }
         }
-    }
 
     picture->pict_type = AV_PICTURE_TYPE_I;
     *got_frame = 1;
