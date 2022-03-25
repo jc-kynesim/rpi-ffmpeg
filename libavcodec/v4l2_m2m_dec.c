@@ -593,6 +593,76 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 #endif
 
 static int
+check_size(AVCodecContext * const avctx, V4L2m2mContext * const s)
+{
+    unsigned int i;
+    const uint32_t fcc = ff_v4l2_get_format_pixelformat(&s->capture.format);
+    const uint32_t w = avctx->coded_width;
+    const uint32_t h = avctx->coded_height;
+
+    if (w == 0 || h == 0 || fcc == 0) {
+        av_log(avctx, AV_LOG_TRACE, "%s: Size %dx%d or fcc %s empty\n", __func__, w, h, av_fourcc2str(fcc));
+        return 0;
+    }
+
+    for (i = 0;; ++i) {
+        struct v4l2_frmsizeenum fs = {
+            .index = i,
+            .pixel_format = fcc,
+        };
+
+        while (ioctl(s->fd, VIDIOC_ENUM_FRAMESIZES, &fs) != 0) {
+            const int err = AVERROR(errno);
+            if (err == AVERROR(EINTR))
+                continue;
+            if (i == 0 && err == AVERROR(ENOTTY)) {
+                av_log(avctx, AV_LOG_DEBUG, "Framesize enum not supported\n");
+                return 0;
+            }
+            if (err != AVERROR(EINVAL)) {
+                av_log(avctx, AV_LOG_ERROR, "Failed to enum framesizes: %s", av_err2str(err));
+                return err;
+            }
+            av_log(avctx, AV_LOG_WARNING, "Failed to find Size=%dx%d, fmt=%s in frame size enums\n",
+                   w, h, av_fourcc2str(fcc));
+            return err;
+        }
+
+        switch (fs.type) {
+            case V4L2_FRMSIZE_TYPE_DISCRETE:
+                av_log(avctx, AV_LOG_TRACE, "%s[%d]: Discrete: %dx%d\n", __func__, i,
+                       fs.discrete.width,fs.discrete.height);
+                if (w == fs.discrete.width && h == fs.discrete.height)
+                    return 0;
+                break;
+            case V4L2_FRMSIZE_TYPE_STEPWISE:
+                av_log(avctx, AV_LOG_TRACE, "%s[%d]: Stepwise: Min: %dx%d Max: %dx%d, Step: %dx%d\n", __func__, i,
+                       fs.stepwise.min_width, fs.stepwise.min_height,
+                       fs.stepwise.max_width, fs.stepwise.max_height,
+                       fs.stepwise.step_width,fs.stepwise.step_height);
+                if (w >= fs.stepwise.min_width && w <= fs.stepwise.max_width &&
+                    h >= fs.stepwise.min_height && h <= fs.stepwise.max_height &&
+                    (w - fs.stepwise.min_width) % fs.stepwise.step_width == 0 &&
+                    (h - fs.stepwise.min_height) % fs.stepwise.step_height == 0)
+                    return 0;
+                break;
+            case V4L2_FRMSIZE_TYPE_CONTINUOUS:
+                av_log(avctx, AV_LOG_TRACE, "%s[%d]: Continuous: Min: %dx%d Max: %dx%d, Step: %dx%d\n", __func__, i,
+                       fs.stepwise.min_width, fs.stepwise.min_height,
+                       fs.stepwise.max_width, fs.stepwise.max_height,
+                       fs.stepwise.step_width,fs.stepwise.step_height);
+                if (w >= fs.stepwise.min_width && w <= fs.stepwise.max_width &&
+                    h >= fs.stepwise.min_height && h <= fs.stepwise.max_height)
+                    return 0;
+                break;
+            default:
+                av_log(avctx, AV_LOG_ERROR, "Unexpected framesize enum: %d", fs.type);
+                return AVERROR(EINVAL);
+        }
+    }
+}
+
+static int
 get_quirks(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
     struct v4l2_capability cap;
@@ -698,8 +768,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     avctx->sw_pix_fmt = avctx->pix_fmt;
     gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
-    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s); get_format requested=%d (%s)\n",
-           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt), gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
+    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
+           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt),
+           avctx->coded_width, avctx->coded_height,
+           gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
 
     if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
         avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
@@ -730,7 +802,13 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     if ((ret = v4l2_prepare_decoder(s)) < 0)
         return ret;
 
-    return get_quirks(avctx, s);
+    if ((ret = get_quirks(avctx, s)) != 0)
+        return ret;
+
+    if ((ret = check_size(avctx, s)) != 0)
+        return ret;
+
+    return 0;
 }
 
 static av_cold int v4l2_decode_close(AVCodecContext *avctx)
