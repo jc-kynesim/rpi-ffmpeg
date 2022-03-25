@@ -146,6 +146,17 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
+    // Give up immediately if this is something that we have no code to deal with
+    if (h->ps.sps->chroma_format_idc != 1) {
+        av_log(avctx, AV_LOG_WARNING, "chroma_format_idc(%d) != 1: Not implemented\n", h->ps.sps->chroma_format_idc);
+        return AVERROR_PATCHWELCOME;
+    }
+    if (!(h->ps.sps->bit_depth == 10 || h->ps.sps->bit_depth == 8) ||
+        h->ps.sps->bit_depth != h->ps.sps->bit_depth_chroma) {
+        av_log(avctx, AV_LOG_WARNING, "Bit depth Y:%d C:%d: Not implemented\n", h->ps.sps->bit_depth, h->ps.sps->bit_depth_chroma);
+        return AVERROR_PATCHWELCOME;
+    }
+
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_WARNING, "Failed to find any V4L2 devices\n");
         return (AVERROR(-ret));
