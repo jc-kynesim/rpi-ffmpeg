@@ -142,6 +142,9 @@ MediaBufsStatus mediabufs_src_pool_create(struct mediabufs_ctl *const rw,
                   struct dmabufs_ctl * const dbsc,
                   unsigned int n);
 
+#define MEDIABUFS_DRIVER_VERSION(a, b, c) (((a) << 16) | ((b) << 8) | (c))
+unsigned int mediabufs_ctl_driver_version(struct mediabufs_ctl *const mbc);
+
 struct mediabufs_ctl * mediabufs_ctl_new(void * const dc,
                      const char *vpath, struct pollqueue *const pq);
 void mediabufs_ctl_unref(struct mediabufs_ctl **const pmbc);

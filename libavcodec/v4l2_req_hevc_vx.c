@@ -16,6 +16,8 @@
 
 #elif HEVC_CTRLS_VERSION == 2
 #include "hevc-ctrls-v2.h"
+#elif HEVC_CTRLS_VERSION == 3
+#include "hevc-ctrls-v3.h"
 #else
 #error Unknown HEVC_CTRLS_VERSION
 #endif
@@ -147,6 +149,7 @@ static void fill_pred_table(const HEVCContext *h, struct v4l2_hevc_pred_weight_t
     }
 }
 
+#if HEVC_CTRLS_VERSION <= 2
 static int find_frame_rps_type(const HEVCContext *h, uint64_t timestamp)
 {
     const HEVCFrame *frame;
@@ -172,6 +175,7 @@ static int find_frame_rps_type(const HEVCContext *h, uint64_t timestamp)
 
     return 0;
 }
+#endif
 
 static unsigned int
 get_ref_pic_index(const HEVCContext *h, const HEVCFrame *frame,
@@ -247,7 +251,12 @@ fill_dpb_entries(const HEVCContext * const h, struct v4l2_hevc_dpb_entry * const
             struct v4l2_hevc_dpb_entry * const entry = entries + n++;
 
             entry->timestamp = frame_capture_dpb(frame->frame);
+#if HEVC_CTRLS_VERSION <= 2
             entry->rps = find_frame_rps_type(h, entry->timestamp);
+#else
+            entry->flags = (frame->flags & HEVC_FRAME_FLAG_LONG_REF) == 0 ? 0 :
+                V4L2_HEVC_DPB_ENTRY_LONG_TERM_REFERENCE;
+#endif
             entry->field_pic = frame->frame->interlaced_frame;
 
             /* TODO: Interleaved: Get the POC for each field. */
@@ -1010,6 +1019,14 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
 #endif
     };
     const unsigned int noof_ctrls = FF_ARRAY_ELEMS(qc);
+
+#if HEVC_CTRLS_VERSION == 2
+    if (mediabufs_ctl_driver_version(ctx->mbufs) >= MEDIABUFS_DRIVER_VERSION(5, 18, 0))
+        return AVERROR(EINVAL);
+#elif HEVC_CTRLS_VERSION == 3
+    if (mediabufs_ctl_driver_version(ctx->mbufs) < MEDIABUFS_DRIVER_VERSION(5, 18, 0))
+        return AVERROR(EINVAL);
+#endif
 
     if (mediabufs_ctl_query_ext_ctrls(ctx->mbufs, qc, noof_ctrls)) {
         av_log(avctx, AV_LOG_DEBUG, "Probed V%d control missing\n", HEVC_CTRLS_VERSION);
