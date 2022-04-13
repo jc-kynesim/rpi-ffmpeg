@@ -957,7 +957,7 @@ OBJS-$(CONFIG_HEVC_QSV_HWACCEL)           += qsvdec.o
 OBJS-$(CONFIG_HEVC_RPI4_8_HWACCEL)        += rpivid_hevc.o
 OBJS-$(CONFIG_HEVC_RPI4_10_HWACCEL)       += rpivid_hevc.o
 OBJS-$(CONFIG_HEVC_V4L2REQUEST_HWACCEL)   += v4l2_request_hevc.o v4l2_req_decode_q.o\
-                                             v4l2_req_hevc_v1.o v4l2_req_hevc_v2.o
+                                             v4l2_req_hevc_v1.o v4l2_req_hevc_v2.o v4l2_req_hevc_v3.o
 OBJS-$(CONFIG_HEVC_VAAPI_HWACCEL)         += vaapi_hevc.o h265_profile_level.o
 OBJS-$(CONFIG_HEVC_VDPAU_HWACCEL)         += vdpau_hevc.o h265_profile_level.o
 OBJS-$(CONFIG_MJPEG_NVDEC_HWACCEL)        += nvdec_mjpeg.o
