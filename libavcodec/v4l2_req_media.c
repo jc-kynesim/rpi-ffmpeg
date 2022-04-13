@@ -604,6 +604,7 @@ struct mediabufs_ctl {
 
     struct v4l2_format src_fmt;
     struct v4l2_format dst_fmt;
+    struct v4l2_capability capability;
 };
 
 static int qe_v4l2_queue(struct qent_base *const be,
@@ -1498,20 +1499,24 @@ void mediabufs_ctl_unref(struct mediabufs_ctl **const pmbc)
     mediabufs_ctl_delete(mbc);
 }
 
+unsigned int mediabufs_ctl_driver_version(struct mediabufs_ctl *const mbc)
+{
+    return mbc->capability.version;
+}
+
 static int set_capabilities(struct mediabufs_ctl *const mbc)
 {
-    struct v4l2_capability capability = { 0 };
     uint32_t caps;
 
-    if (ioctl(mbc->vfd, VIDIOC_QUERYCAP, &capability)) {
+    if (ioctl(mbc->vfd, VIDIOC_QUERYCAP, &mbc->capability)) {
         int err = errno;
         request_err(mbc->dc, "Failed to get capabilities: %s\n", strerror(err));
         return -err;
     }
 
-    caps = (capability.capabilities & V4L2_CAP_DEVICE_CAPS) != 0 ?
-            capability.device_caps :
-            capability.capabilities;
+    caps = (mbc->capability.capabilities & V4L2_CAP_DEVICE_CAPS) != 0 ?
+            mbc->capability.device_caps :
+            mbc->capability.capabilities;
 
     if ((caps & V4L2_CAP_VIDEO_M2M_MPLANE) != 0) {
         mbc->src_fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
