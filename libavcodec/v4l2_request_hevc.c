@@ -209,7 +209,11 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    if (V2(ff_v4l2_req_hevc, 2).probe(avctx, ctx) == 0) {
+    if (V2(ff_v4l2_req_hevc, 3).probe(avctx, ctx) == 0) {
+        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 3 probed successfully\n");
+        ctx->fns = &V2(ff_v4l2_req_hevc, 3);
+    }
+    else if (V2(ff_v4l2_req_hevc, 2).probe(avctx, ctx) == 0) {
         av_log(avctx, AV_LOG_DEBUG, "HEVC API version 2 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 2);
     }
