@@ -98,5 +98,6 @@ typedef struct v4l2_req_decode_fns {
 
 extern const v4l2_req_decode_fns V2(ff_v4l2_req_hevc, 1);
 extern const v4l2_req_decode_fns V2(ff_v4l2_req_hevc, 2);
+extern const v4l2_req_decode_fns V2(ff_v4l2_req_hevc, 3);
 
 #endif
