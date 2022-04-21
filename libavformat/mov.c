@@ -605,10 +605,12 @@ static int mov_read_dref(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     for (i = 0; i < entries; i++) {
         MOVDref *dref = &sc->drefs[i];
         uint32_t size = avio_rb32(pb);
-        int64_t next = avio_tell(pb) + size - 4;
+        int64_t next = avio_tell(pb);
 
-        if (size < 12)
+        if (size < 12 || next < 0 || next > INT64_MAX - size)
             return AVERROR_INVALIDDATA;
+
+        next += size - 4;
 
         dref->type = avio_rl32(pb);
         avio_rb32(pb); // version + flags
@@ -1916,6 +1918,8 @@ static int mov_read_glbl(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         // wrap a whole fiel atom inside of a glbl atom.
         unsigned size = avio_rb32(pb);
         unsigned type = avio_rl32(pb);
+        if (avio_feof(pb))
+            return AVERROR_INVALIDDATA;
         avio_seek(pb, -8, SEEK_CUR);
         if (type == MKTAG('f','i','e','l') && size == atom.size)
             return mov_read_default(c, pb, atom);
@@ -2530,6 +2534,10 @@ int ff_mov_read_stsd_entries(MOVContext *c, AVIOContext *pb, int entries)
             mov_parse_stsd_audio(c, pb, st, sc);
             if (st->codecpar->sample_rate < 0) {
                 av_log(c->fc, AV_LOG_ERROR, "Invalid sample rate %d\n", st->codecpar->sample_rate);
+                return AVERROR_INVALIDDATA;
+            }
+            if (st->codecpar->channels < 0) {
+                av_log(c->fc, AV_LOG_ERROR, "Invalid channels %d\n", st->codecpar->channels);
                 return AVERROR_INVALIDDATA;
             }
         } else if (st->codecpar->codec_type==AVMEDIA_TYPE_SUBTITLE){
@@ -5096,6 +5104,8 @@ static int mov_read_sidx(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     avio_rb16(pb); // reserved
 
     item_count = avio_rb16(pb);
+    if (item_count == 0)
+        return AVERROR_INVALIDDATA;
 
     for (i = 0; i < item_count; i++) {
         int index;
@@ -5400,6 +5410,9 @@ static int mov_read_smdm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         av_log(c->fc, AV_LOG_WARNING, "Unsupported Mastering Display Metadata box version %d\n", version);
         return 0;
     }
+    if (sc->mastering)
+        return AVERROR_INVALIDDATA;
+
     avio_skip(pb, 3); /* flags */
 
     sc->mastering = av_mastering_display_metadata_alloc();
@@ -6097,6 +6110,8 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         }
         if (pb->eof_reached) {
             av_log(c->fc, AV_LOG_ERROR, "Hit EOF while reading senc\n");
+            if (ret >= 0)
+                av_encryption_info_free(encryption_index->encrypted_samples[i]);
             ret = AVERROR_INVALIDDATA;
         }
 
@@ -7039,6 +7054,8 @@ static int mov_read_default(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (a.size == 0) {
             a.size = atom.size - total_size + 8;
         }
+        if (a.size < 0)
+            break;
         a.size -= 8;
         if (a.size < 0)
             break;
