@@ -253,7 +253,7 @@ make_window(struct AVFormatContext * const s,
    XMapWindow(dpy, win);
 
    {
-      EGLSurface surf = eglCreateWindowSurface(egl_dpy, config, (uintptr_t)win, NULL);
+      EGLSurface surf = eglCreateWindowSurface(egl_dpy, config, (EGLNativeWindowType)win, NULL);
       if (!surf) {
          av_log(s, AV_LOG_ERROR, "Error: eglCreateWindowSurface failed\n");
          return -1;
