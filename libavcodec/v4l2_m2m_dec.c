@@ -609,6 +609,10 @@ check_size(AVCodecContext * const avctx, V4L2m2mContext * const s)
         av_log(avctx, AV_LOG_TRACE, "%s: Size %dx%d or fcc %s empty\n", __func__, w, h, av_fourcc2str(fcc));
         return 0;
     }
+    if ((s->quirks & FF_V4L2_QUIRK_ENUM_FRAMESIZES_BROKEN) != 0) {
+        av_log(avctx, AV_LOG_TRACE, "%s: Skipped (quirk): Size %dx%d, fcc %s\n", __func__, w, h, av_fourcc2str(fcc));
+        return 0;
+    }
 
     for (i = 0;; ++i) {
         struct v4l2_frmsizeenum fs = {
@@ -628,8 +632,8 @@ check_size(AVCodecContext * const avctx, V4L2m2mContext * const s)
                 av_log(avctx, AV_LOG_ERROR, "Failed to enum framesizes: %s", av_err2str(err));
                 return err;
             }
-            av_log(avctx, AV_LOG_WARNING, "Failed to find Size=%dx%d, fmt=%s in frame size enums\n",
-                   w, h, av_fourcc2str(fcc));
+            av_log(avctx, AV_LOG_WARNING, "Failed to find Size=%dx%d, fmt=%s in %u frame size enums\n",
+                   w, h, av_fourcc2str(fcc), i);
             return err;
         }
 
@@ -689,7 +693,7 @@ get_quirks(AVCodecContext * const avctx, V4L2m2mContext * const s)
     // capture to clear the event even if the capture buffers were the right
     // size in the first place.
     if (strcmp(cap.driver, "meson-vdec") == 0)
-        s->quirks |= FF_V4L2_QUIRK_REINIT_ALWAYS;
+        s->quirks |= FF_V4L2_QUIRK_REINIT_ALWAYS | FF_V4L2_QUIRK_ENUM_FRAMESIZES_BROKEN;
 
     av_log(avctx, AV_LOG_DEBUG, "Driver '%s': Quirks=%#x\n", cap.driver, s->quirks);
     return 0;
