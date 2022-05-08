@@ -775,13 +775,13 @@ static int qent_base_realloc(struct qent_base *const be, const size_t len, struc
 {
     if (!be->dh[0] || len > dmabuf_size(be->dh[0])) {
         size_t newsize = round_up_size(len);
-        request_log("%s: Overrun %d > %d; trying %d\n", __func__, len, dmabuf_size(be->dh[0]), newsize);
+        request_log("%s: Overrun %zd > %zd; trying %zd\n", __func__, len, dmabuf_size(be->dh[0]), newsize);
         if (!dbsc) {
             request_log("%s: No dmbabuf_ctrl for realloc\n", __func__);
             return -ENOMEM;
         }
         if ((be->dh[0] = dmabuf_realloc(dbsc, be->dh[0], newsize)) == NULL) {
-            request_log("%s: Realloc %d failed\n", __func__, newsize);
+            request_log("%s: Realloc %zd failed\n", __func__, newsize);
             return -ENOMEM;
         }
     }
