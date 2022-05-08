@@ -1031,9 +1031,9 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         return AVERROR(EINVAL);
     }
     for (i = 0; i != noof_ctrls; ++i) {
-        if (ctrl_sizes[i] != qc[i].elem_size) {
-            av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %d size mismatch %u != %u\n",
-                   HEVC_CTRLS_VERSION, i, ctrl_sizes[i], qc[i].elem_size);
+        if (ctrl_sizes[i] != (size_t)qc[i].elem_size) {
+            av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %d size mismatch %zu != %zu\n",
+                   HEVC_CTRLS_VERSION, i, ctrl_sizes[i], (size_t)qc[i].elem_size);
             return AVERROR(EINVAL);
         }
     }
