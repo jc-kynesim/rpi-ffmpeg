@@ -329,13 +329,15 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
     capture = &s->capture;
     output  = &s->output;
 
+    s->input_drm = (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME);
+
     /* common settings output/capture */
     output->height = capture->height = avctx->height;
     output->width = capture->width = avctx->width;
 
     /* output context */
     output->av_codec_id = AV_CODEC_ID_RAWVIDEO;
-    output->av_pix_fmt = avctx->pix_fmt;
+    output->av_pix_fmt = s->input_drm ? avctx->sw_pix_fmt : avctx->pix_fmt;
 
     /* capture context */
     capture->av_codec_id = avctx->codec_id;

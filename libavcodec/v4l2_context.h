@@ -90,6 +90,11 @@ typedef struct V4L2Context {
     int num_buffers;
 
     /**
+     * Buffer memory type V4L2_MEMORY_MMAP or V4L2_MEMORY_DMABUF
+     */
+    enum v4l2_memory buf_mem;
+
+    /**
      * Whether the stream has been started (VIDIOC_STREAMON has been sent).
      */
     int streamon;

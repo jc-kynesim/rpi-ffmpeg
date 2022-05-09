@@ -68,7 +68,9 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
 
     s->capture.done = s->output.done = 0;
     s->capture.name = "capture";
+    s->capture.buf_mem = V4L2_MEMORY_MMAP;
     s->output.name = "output";
+    s->output.buf_mem = s->input_drm ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     atomic_init(&s->refcount, 0);
     sem_init(&s->refsync, 0, 0);
 

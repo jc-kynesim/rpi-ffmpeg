@@ -344,12 +344,14 @@ dq_buf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
     atomic_fetch_sub(&ctx->q_count, 1);
 
     avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
-    avbuf->status = V4L2BUF_AVAILABLE;
+    ff_v4l2_buffer_set_avail(avbuf);
     avbuf->buf = buf;
     if (is_mp) {
         memcpy(avbuf->planes, planes, sizeof(planes));
         avbuf->buf.m.planes = avbuf->planes;
     }
+    // Done with any attached buffer
+    av_buffer_unref(&avbuf->ref_buf);
 
     if (V4L2_TYPE_IS_CAPTURE(ctx->type)) {
         // Zero length cap buffer return == EOS
@@ -724,7 +726,7 @@ static void flush_all_buffers_status(V4L2Context* const ctx)
     for (i = 0; i < ctx->num_buffers; ++i) {
         struct V4L2Buffer * const buf = (struct V4L2Buffer *)ctx->bufrefs[i]->data;
         if (buf->status == V4L2BUF_IN_DRIVER)
-            buf->status = V4L2BUF_AVAILABLE;
+            ff_v4l2_buffer_set_avail(buf);
     }
     atomic_store(&ctx->q_count, 0);
 }
@@ -943,7 +945,7 @@ void ff_v4l2_context_release(V4L2Context* ctx)
 }
 
 
-static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers)
+static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers, const enum v4l2_memory mem)
 {
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     struct v4l2_requestbuffers req;
@@ -954,7 +956,7 @@ static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers
 
     memset(&req, 0, sizeof(req));
     req.count = req_buffers;
-    req.memory = V4L2_MEMORY_MMAP;
+    req.memory = mem;
     req.type = ctx->type;
     while ((ret = ioctl(s->fd, VIDIOC_REQBUFS, &req)) == -1) {
         if (errno != EINTR) {
@@ -978,7 +980,7 @@ static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers
     }
 
     for (i = 0; i < ctx->num_buffers; i++) {
-        ret = ff_v4l2_buffer_initialize(&ctx->bufrefs[i], i, ctx);
+        ret = ff_v4l2_buffer_initialize(&ctx->bufrefs[i], i, ctx, mem);
         if (ret) {
             av_log(logger(ctx), AV_LOG_ERROR, "%s buffer[%d] initialization (%s)\n", ctx->name, i, av_err2str(ret));
             goto fail_release;
@@ -1044,7 +1046,7 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         goto fail_unref_hwframes;
     }
 
-    ret = create_buffers(ctx, ctx->num_buffers);
+    ret = create_buffers(ctx, ctx->num_buffers, ctx->buf_mem);
     if (ret < 0)
         goto fail_unref_hwframes;
 

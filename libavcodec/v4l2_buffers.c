@@ -436,7 +436,7 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
 
         ff_mutex_lock(&ctx->lock);
 
-        avbuf->status = V4L2BUF_AVAILABLE;
+        ff_v4l2_buffer_set_avail(avbuf);
 
         if (s->draining && V4L2_TYPE_IS_OUTPUT(ctx->type)) {
             av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer avail\n", ctx->name);
@@ -598,6 +598,64 @@ static void cpy_2d(uint8_t * dst, int dst_stride, const uint8_t * src, int src_s
 static int is_chroma(const AVPixFmtDescriptor *desc, int i, int num_planes)
 {
     return i != 0  && !(i == num_planes - 1 && (desc->flags & AV_PIX_FMT_FLAG_ALPHA));
+}
+
+static int frame_to_mp_format(const AVFrame * const frame, struct v4l2_pix_format_mplane * const fmt)
+{
+    const AVDRMFrameDescriptor *const src = (const AVDRMFrameDescriptor *)frame->data[0];
+
+    unsigned int i;
+    unsigned int n = 0;
+
+    fmt->width  = frame->width;
+    fmt->height = frame->height;
+
+    for (i = 0; i != src->nb_layers; ++i) {
+        const AVDRMLayerDescriptor *const layer = src->layers + i;
+        unsigned int j;
+        for (j = 0; j != layer->nb_planes; ++j) {
+            const AVDRMPlaneDescriptor *const plane = layer->planes + j;
+
+            fmt->plane_fmt[n].bytesperline = plane->pitch;
+            fmt->plane_fmt[n].sizeimage    = frame->height * plane->pitch;  //*******
+            ++n;
+        }
+    }
+    return 0;
+}
+
+static int v4l2_buffer_primeframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
+{
+    const AVDRMFrameDescriptor *const src = (const AVDRMFrameDescriptor *)frame->data[0];
+
+    if (frame->format != AV_PIX_FMT_DRM_PRIME || !src)
+        return AVERROR(EINVAL);
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(out->buf.type)) {
+        unsigned int i;
+        unsigned int n = 0;
+        for (i = 0; i != src->nb_layers; ++i) {
+            const AVDRMLayerDescriptor *const layer = src->layers + i;
+            unsigned int j;
+            for (j = 0; j != layer->nb_planes; ++j) {
+                const AVDRMPlaneDescriptor *const plane = layer->planes + j;
+                out->planes[n].data_offset = plane->offset;
+                out->planes[n].m.fd = src->objects[plane->object_index].fd;
+                ++n;
+            }
+        }
+    }
+    else {
+        if (src->nb_objects != 1)
+            return AVERROR(EINVAL);
+        out->buf.m.fd      = src->objects[0].fd;
+    }
+
+    // No need to copy src AVDescriptor and if we did then we may confuse
+    // fd close on free
+    out->ref_buf = av_buffer_ref(frame->buf[0]);
+
+    return 0;
 }
 
 static int v4l2_buffer_swframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
@@ -815,13 +873,15 @@ static void v4l2_buffer_buffer_free(void *opaque, uint8_t *data)
             close(avbuf->drm_frame.objects[i].fd);
     }
 
+    av_buffer_unref(&avbuf->ref_buf);
+
     ff_weak_link_unref(&avbuf->context_wl);
 
     av_free(avbuf);
 }
 
 
-int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ctx)
+int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ctx, enum v4l2_memory mem)
 {
     int ret, i;
     V4L2Buffer * const avbuf = av_mallocz(sizeof(*avbuf));
@@ -838,7 +898,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
     }
 
     avbuf->context = ctx;
-    avbuf->buf.memory = V4L2_MEMORY_MMAP;
+    avbuf->buf.memory = mem;
     avbuf->buf.type = ctx->type;
     avbuf->buf.index = index;
 
@@ -868,6 +928,8 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
         avbuf->num_planes = 1;
 
     for (i = 0; i < avbuf->num_planes; i++) {
+        const int want_mmap = avbuf->buf.memory == V4L2_MEMORY_MMAP &&
+            (V4L2_TYPE_IS_OUTPUT(ctx->type) || !buf_to_m2mctx(avbuf)->output_drm);
 
         avbuf->plane_info[i].bytesperline = V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ?
             ctx->format.fmt.pix_mp.plane_fmt[i].bytesperline :
@@ -876,21 +938,17 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
         if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
             avbuf->plane_info[i].length = avbuf->buf.m.planes[i].length;
 
-            if ((V4L2_TYPE_IS_OUTPUT(ctx->type) && buf_to_m2mctx(avbuf)->output_drm) ||
-                !buf_to_m2mctx(avbuf)->output_drm) {
+            if (want_mmap)
                 avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.m.planes[i].length,
                                                PROT_READ | PROT_WRITE, MAP_SHARED,
                                                buf_to_m2mctx(avbuf)->fd, avbuf->buf.m.planes[i].m.mem_offset);
-            }
         } else {
             avbuf->plane_info[i].length = avbuf->buf.length;
 
-            if ((V4L2_TYPE_IS_OUTPUT(ctx->type) && buf_to_m2mctx(avbuf)->output_drm) ||
-                !buf_to_m2mctx(avbuf)->output_drm) {
+            if (want_mmap)
                 avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.length,
                                                PROT_READ | PROT_WRITE, MAP_SHARED,
                                                buf_to_m2mctx(avbuf)->fd, avbuf->buf.m.offset);
-            }
         }
 
         if (avbuf->plane_info[i].mm_addr == MAP_FAILED) {
