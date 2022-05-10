@@ -205,8 +205,9 @@ static int do_source_change(V4L2m2mContext * const s)
 
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
 
-    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, crop %dx%d @ %d,%d, reinit=%d\n",
+    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, wxh %dx%d crop %dx%d @ %d,%d, reinit=%d\n",
            s->capture.sample_aspect_ratio.num, s->capture.sample_aspect_ratio.den,
+           s->capture.width, s->capture.height,
            s->capture.selection.width, s->capture.selection.height,
            s->capture.selection.left, s->capture.selection.top, reinit);
 
@@ -224,9 +225,17 @@ static int do_source_change(V4L2m2mContext * const s)
             return AVERROR(EINVAL);
         }
 
+        if (s->capture.width > ff_v4l2_get_format_width(&s->capture.format) ||
+            s->capture.height > ff_v4l2_get_format_height(&s->capture.format)) {
+            av_log(avctx, AV_LOG_ERROR, "Format post reinit too small: wanted %dx%d > got %dx%d\n",
+                   s->capture.width, s->capture.height,
+                   ff_v4l2_get_format_width(&s->capture.format), ff_v4l2_get_format_height(&s->capture.format));
+            return AVERROR(EINVAL);
+        }
+
         // Update pixel format - should only actually do something on initial change
         s->capture.av_pix_fmt =
-        ff_v4l2_format_v4l2_to_avfmt(ff_v4l2_get_format_pixelformat(&s->capture.format), AV_CODEC_ID_RAWVIDEO);
+            ff_v4l2_format_v4l2_to_avfmt(ff_v4l2_get_format_pixelformat(&s->capture.format), AV_CODEC_ID_RAWVIDEO);
         if (s->output_drm) {
             avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
             avctx->sw_pix_fmt = s->capture.av_pix_fmt;
