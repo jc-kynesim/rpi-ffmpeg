@@ -4,14 +4,6 @@
 #include <drm_fourcc.h>
 #include "v4l2_req_decode_q.h"
 
-#ifndef DRM_FORMAT_NV15
-#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
-#endif
-
-#ifndef DRM_FORMAT_NV20
-#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
-#endif
-
 // P030 should be defined in drm_fourcc.h and hopefully will be sometime
 // in the future but until then...
 #ifndef DRM_FORMAT_P030

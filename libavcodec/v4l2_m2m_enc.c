@@ -24,6 +24,8 @@
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 #include <search.h>
+#include <drm_fourcc.h>
+
 #include "libavcodec/avcodec.h"
 #include "libavcodec/internal.h"
 #include "libavutil/pixdesc.h"
@@ -36,6 +38,36 @@
 
 #define MPEG_CID(x) V4L2_CID_MPEG_VIDEO_##x
 #define MPEG_VIDEO(x) V4L2_MPEG_VIDEO_##x
+
+// P030 should be defined in drm_fourcc.h and hopefully will be sometime
+// in the future but until then...
+#ifndef DRM_FORMAT_P030
+#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
+#endif
+
+#ifndef DRM_FORMAT_NV15
+#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#endif
+
+#ifndef DRM_FORMAT_NV20
+#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
+#endif
+
+#ifndef V4L2_CID_CODEC_BASE
+#define V4L2_CID_CODEC_BASE V4L2_CID_MPEG_BASE
+#endif
+
+// V4L2_PIX_FMT_NV12_10_COL128 and V4L2_PIX_FMT_NV12_COL128 should be defined
+// in videodev2.h hopefully will be sometime in the future but until then...
+#ifndef V4L2_PIX_FMT_NV12_10_COL128
+#define V4L2_PIX_FMT_NV12_10_COL128 v4l2_fourcc('N', 'C', '3', '0')
+#endif
+
+#ifndef V4L2_PIX_FMT_NV12_COL128
+#define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+#endif
+
+
 
 static inline void v4l2_set_timeperframe(V4L2m2mContext *s, unsigned int num, unsigned int den)
 {
@@ -270,10 +302,117 @@ static int v4l2_prepare_encoder(V4L2m2mContext *s)
     return 0;
 }
 
+static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * const frame)
+{
+    const AVDRMFrameDescriptor *const src = (const AVDRMFrameDescriptor *)frame->data[0];
+
+    const uint32_t drm_fmt = src->layers[0].format;
+    const uint64_t mod = src->objects[0].format_modifier;
+    uint32_t pix_fmt = 0;
+    uint32_t w = 0;
+    uint32_t h = 0;
+    uint32_t bpl = src->layers[0].planes[0].pitch;
+
+    if (src->nb_layers != 1 || src->nb_objects == 0)
+        return AVERROR(EINVAL);
+
+    switch (drm_fmt) {
+        case DRM_FORMAT_YUV420:
+            if (mod == DRM_FORMAT_MOD_LINEAR) {
+                if (src->layers[0].nb_planes != 3)
+                    break;
+                pix_fmt = V4L2_PIX_FMT_YUV420;
+                h = src->layers[0].planes[1].offset / bpl;
+                w = bpl;
+            }
+            break;
+
+        case DRM_FORMAT_NV12:
+            if (mod == DRM_FORMAT_MOD_LINEAR) {
+                if (src->layers[0].nb_planes != 2)
+                    break;
+                pix_fmt = V4L2_PIX_FMT_NV12;
+                h = src->layers[0].planes[1].offset / bpl;
+                w = bpl;
+            }
+            else if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
+                if (src->layers[0].nb_planes != 2)
+                    break;
+                pix_fmt = V4L2_PIX_FMT_NV12_COL128;
+                w = bpl;
+                h = src->layers[0].planes[1].offset / 128;
+                bpl = fourcc_mod_broadcom_param(mod);
+            }
+            break;
+
+        case DRM_FORMAT_P030:
+            if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
+                if (src->layers[0].nb_planes != 2)
+                    break;
+                pix_fmt =  V4L2_PIX_FMT_NV12_10_COL128;
+                w = bpl / 2;  // Matching lie to how we construct this
+                h = src->layers[0].planes[1].offset / 128;
+                bpl = fourcc_mod_broadcom_param(mod);
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    if (!pix_fmt)
+        return AVERROR(EINVAL);
+
+    // All current formats are single object
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
+        struct v4l2_pix_format_mplane *const pix = &format->fmt.pix_mp;
+
+        pix->width = w;
+        pix->height = h;
+        pix->pixelformat = pix_fmt;
+        pix->plane_fmt[0].bytesperline = bpl;
+        pix->num_planes = 1;
+    }
+    else {
+        struct v4l2_pix_format *const pix = &format->fmt.pix;
+
+        pix->width = w;
+        pix->height = h;
+        pix->pixelformat = pix_fmt;
+        pix->bytesperline = bpl;
+    }
+
+    return 0;
+}
+
+
 static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
+
+    if (s->output_drm && !output->streamon) {
+        int rv;
+
+        ff_v4l2_context_release(output);
+
+        // Set format when we first get a buffer
+        if ((rv = avdrm_to_v4l2(&output->format, frame)) != 0) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to get V4L2 format from DRM_PRIME frame\n");
+            return rv;
+        }
+
+        if ((rv = ff_v4l2_context_set_format(output)) != 0) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to set V4L2 format\n");
+            return rv;
+        }
+
+        if ((rv = ff_v4l2_context_init(output)) != 0) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to (re)init context\n");
+            return rv;
+        }
+    }
 
 #ifdef V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME
     if (frame && frame->pict_type == AV_PICTURE_TYPE_I)

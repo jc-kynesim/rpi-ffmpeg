@@ -600,30 +600,6 @@ static int is_chroma(const AVPixFmtDescriptor *desc, int i, int num_planes)
     return i != 0  && !(i == num_planes - 1 && (desc->flags & AV_PIX_FMT_FLAG_ALPHA));
 }
 
-static int frame_to_mp_format(const AVFrame * const frame, struct v4l2_pix_format_mplane * const fmt)
-{
-    const AVDRMFrameDescriptor *const src = (const AVDRMFrameDescriptor *)frame->data[0];
-
-    unsigned int i;
-    unsigned int n = 0;
-
-    fmt->width  = frame->width;
-    fmt->height = frame->height;
-
-    for (i = 0; i != src->nb_layers; ++i) {
-        const AVDRMLayerDescriptor *const layer = src->layers + i;
-        unsigned int j;
-        for (j = 0; j != layer->nb_planes; ++j) {
-            const AVDRMPlaneDescriptor *const plane = layer->planes + j;
-
-            fmt->plane_fmt[n].bytesperline = plane->pitch;
-            fmt->plane_fmt[n].sizeimage    = frame->height * plane->pitch;  //*******
-            ++n;
-        }
-    }
-    return 0;
-}
-
 static int v4l2_buffer_primeframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 {
     const AVDRMFrameDescriptor *const src = (const AVDRMFrameDescriptor *)frame->data[0];
@@ -750,7 +726,9 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
     v4l2_set_pts(out, frame->pts);
     v4l2_set_interlace(out, frame->interlaced_frame, frame->top_field_first);
 
-    return v4l2_buffer_swframe_to_buf(frame, out);
+    return frame->format == AV_PIX_FMT_DRM_PRIME ?
+        v4l2_buffer_primeframe_to_buf(frame, out) :
+        v4l2_buffer_swframe_to_buf(frame, out);
 }
 
 int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
