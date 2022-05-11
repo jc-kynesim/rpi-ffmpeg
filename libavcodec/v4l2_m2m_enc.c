@@ -313,7 +313,10 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
     uint32_t h = 0;
     uint32_t bpl = src->layers[0].planes[0].pitch;
 
-    if (src->nb_layers != 1 || src->nb_objects == 0)
+    // We really don't expect multiple layers
+    // All formats that we currently cope with are single object
+
+    if (src->nb_layers != 1 || src->nb_objects != 1)
         return AVERROR(EINVAL);
 
     switch (drm_fmt) {
@@ -363,8 +366,6 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
     if (!pix_fmt)
         return AVERROR(EINVAL);
 
-    // All current formats are single object
-
     if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
         struct v4l2_pix_format_mplane *const pix = &format->fmt.pix_mp;
 
@@ -386,26 +387,62 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
     return 0;
 }
 
+// Do we have similar enough formats to be usable?
+static int fmt_eq(const struct v4l2_format * const a, const struct v4l2_format * const b)
+{
+    if (a->type != b->type)
+        return 0;
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(a->type)) {
+        const struct v4l2_pix_format_mplane *const pa = &a->fmt.pix_mp;
+        const struct v4l2_pix_format_mplane *const pb = &b->fmt.pix_mp;
+        unsigned int i;
+        if (pa->pixelformat != pb->pixelformat ||
+            pa->num_planes != pb->num_planes)
+            return 0;
+        for (i = 0; i != pa->num_planes; ++i) {
+            if (pa->plane_fmt[i].bytesperline != pb->plane_fmt[i].bytesperline)
+                return 0;
+        }
+    }
+    else {
+        const struct v4l2_pix_format *const pa = &a->fmt.pix;
+        const struct v4l2_pix_format *const pb = &b->fmt.pix;
+        if (pa->pixelformat != pb->pixelformat ||
+            pa->bytesperline != pb->bytesperline)
+            return 0;
+    }
+    return 1;
+}
+
 
 static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
 
-    if (s->output_drm && !output->streamon) {
+    if (s->input_drm && !output->streamon) {
         int rv;
-
-        ff_v4l2_context_release(output);
+        struct v4l2_format req_format = {.type = output->format.type};
 
         // Set format when we first get a buffer
-        if ((rv = avdrm_to_v4l2(&output->format, frame)) != 0) {
+        if ((rv = avdrm_to_v4l2(&req_format, frame)) != 0) {
             av_log(avctx, AV_LOG_ERROR, "Failed to get V4L2 format from DRM_PRIME frame\n");
             return rv;
         }
 
+        ff_v4l2_context_release(output);
+
+        output->format = req_format;
+
         if ((rv = ff_v4l2_context_set_format(output)) != 0) {
             av_log(avctx, AV_LOG_ERROR, "Failed to set V4L2 format\n");
             return rv;
+        }
+
+        if (!fmt_eq(&req_format, &output->format)) {
+            av_log(avctx, AV_LOG_ERROR, "Format mismatch after setup\n");
+            return AVERROR(EINVAL);
         }
 
         if ((rv = ff_v4l2_context_init(output)) != 0) {
@@ -461,6 +498,8 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
     uint32_t v4l2_fmt_output;
     int ret;
 
+    av_log(avctx, AV_LOG_INFO, " <<< %s: fmt=%d/%d\n", __func__, avctx->pix_fmt, avctx->sw_pix_fmt);
+
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
@@ -476,7 +515,9 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
 
     /* output context */
     output->av_codec_id = AV_CODEC_ID_RAWVIDEO;
-    output->av_pix_fmt = s->input_drm ? avctx->sw_pix_fmt : avctx->pix_fmt;
+    output->av_pix_fmt = !s->input_drm ? avctx->pix_fmt :
+            avctx->sw_pix_fmt != AV_PIX_FMT_NONE ? avctx->sw_pix_fmt :
+            AV_PIX_FMT_YUV420P;
 
     /* capture context */
     capture->av_codec_id = avctx->codec_id;
@@ -495,7 +536,7 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
         v4l2_fmt_output = output->format.fmt.pix.pixelformat;
 
     pix_fmt_output = ff_v4l2_format_v4l2_to_avfmt(v4l2_fmt_output, AV_CODEC_ID_RAWVIDEO);
-    if (pix_fmt_output != avctx->pix_fmt) {
+    if (!s->input_drm && pix_fmt_output != avctx->pix_fmt) {
         const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt_output);
         av_log(avctx, AV_LOG_ERROR, "Encoder requires %s pixel format.\n", desc->name);
         return AVERROR(EINVAL);
