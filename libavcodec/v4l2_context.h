@@ -99,6 +99,9 @@ typedef struct V4L2Context {
      */
     int streamon;
 
+    /* 1st buffer after stream on */
+    int first_buf;
+
     /**
      *  Either no more buffers available or an unrecoverable error was notified
      *  by the V4L2 kernel driver: once set the context has to be exited.
@@ -108,11 +111,10 @@ typedef struct V4L2Context {
     int flag_last;
 
     /**
-     * PTS rescale not wanted
-     * If the PTS is just a dummy frame count then rescale is
-     * actively harmful
+     * If NZ then when Qing frame/pkt use this rather than the
+     * "real" PTS
      */
-    int no_pts_rescale;
+    uint64_t track_ts;
 
     AVBufferRef *frames_ref;
     atomic_int q_count;

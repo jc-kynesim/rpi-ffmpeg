@@ -36,6 +36,14 @@
 #include "v4l2_fmt.h"
 #include "v4l2_m2m.h"
 
+static void
+xlat_init(xlat_track_t * const x)
+{
+    memset(x, 0, sizeof(*x));
+    x->last_pts = AV_NOPTS_VALUE;
+}
+
+
 static inline int v4l2_splane_video(struct v4l2_capability *cap)
 {
     if (cap->capabilities & (V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_OUTPUT) &&
@@ -406,28 +414,33 @@ int ff_v4l2_m2m_codec_init(V4L2m2mPriv *priv)
     return v4l2_configure_contexts(s);
 }
 
-int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **s)
+int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **pps)
 {
-    *s = av_mallocz(sizeof(V4L2m2mContext));
-    if (!*s)
+    V4L2m2mContext * const s = av_mallocz(sizeof(V4L2m2mContext));
+
+    *pps = NULL;
+    if (!s)
         return AVERROR(ENOMEM);
 
     priv->context_ref = av_buffer_create((uint8_t *) *s, sizeof(V4L2m2mContext),
                                          &v4l2_m2m_destroy_context, NULL, 0);
     if (!priv->context_ref) {
-        av_freep(s);
+        av_free(s);
         return AVERROR(ENOMEM);
     }
 
     /* assign the context */
-    priv->context = *s;
-    (*s)->priv = priv;
+    priv->context = s;
+    s->priv = priv;
 
     /* populate it */
-    priv->context->capture.num_buffers = priv->num_capture_buffers;
-    priv->context->output.num_buffers  = priv->num_output_buffers;
-    priv->context->self_ref = priv->context_ref;
-    priv->context->fd = -1;
+    s->capture.num_buffers = priv->num_capture_buffers;
+    s->output.num_buffers  = priv->num_output_buffers;
+    s->self_ref = priv->context_ref;
+    s->fd = -1;
 
+    xlat_init(&s->xlat);
+
+    *pps = s;
     return 0;
 }

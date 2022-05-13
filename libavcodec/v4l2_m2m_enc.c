@@ -67,8 +67,6 @@
 #define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
 #endif
 
-
-
 static inline void v4l2_set_timeperframe(V4L2m2mContext *s, unsigned int num, unsigned int den)
 {
     struct v4l2_streamparm parm = { 0 };
@@ -179,16 +177,17 @@ static inline int v4l2_mpeg4_profile_from_ff(int p)
 static int v4l2_check_b_frame_support(V4L2m2mContext *s)
 {
     if (s->avctx->max_b_frames)
-        av_log(s->avctx, AV_LOG_WARNING, "Encoder does not support b-frames yet\n");
+        av_log(s->avctx, AV_LOG_WARNING, "Encoder does not support %d b-frames yet\n", s->avctx->max_b_frames);
 
-    v4l2_set_ext_ctrl(s, MPEG_CID(B_FRAMES), 0, "number of B-frames", 0);
+    v4l2_set_ext_ctrl(s, MPEG_CID(B_FRAMES), s->avctx->max_b_frames, "number of B-frames", 1);
     v4l2_get_ext_ctrl(s, MPEG_CID(B_FRAMES), &s->avctx->max_b_frames, "number of B-frames", 0);
     if (s->avctx->max_b_frames == 0)
         return 0;
 
-    avpriv_report_missing_feature(s->avctx, "DTS/PTS calculation for V4L2 encoding");
-
-    return AVERROR_PATCHWELCOME;
+    av_log(s->avctx, AV_LOG_INFO, "B-frames got=%d\n", s->avctx->max_b_frames);
+//    avpriv_report_missing_feature(s->avctx, "DTS/PTS calculation for V4L2 encoding");
+    return 0;
+//    return AVERROR_PATCHWELCOME;
 }
 
 static inline void v4l2_subscribe_eos_event(V4L2m2mContext *s)
@@ -421,6 +420,11 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
 
+    // Signal EOF if needed
+    if (!frame) {
+        return ff_v4l2_context_enqueue_frame(output, frame);
+    }
+
     if (s->input_drm && !output->streamon) {
         int rv;
         struct v4l2_format req_format = {.type = output->format.type};
@@ -452,7 +456,7 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
     }
 
 #ifdef V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME
-    if (frame && frame->pict_type == AV_PICTURE_TYPE_I)
+    if (frame->pict_type == AV_PICTURE_TYPE_I)
         v4l2_set_ext_ctrl(s, MPEG_CID(FORCE_KEY_FRAME), 0, "force key frame", 1);
 #endif
 
@@ -486,7 +490,52 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     }
 
 dequeue:
-    return ff_v4l2_context_dequeue_packet(capture, avpkt);
+    if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
+        return ret;
+
+    if (capture->first_buf) {
+        // 1st buffer after streamon should be SPS/PPS
+        capture->first_buf = 0;
+
+        av_freep(&avctx->extradata);
+        avctx->extradata_size = 0;
+
+        if ((avctx->extradata = av_malloc(avpkt->size + AV_INPUT_BUFFER_PADDING_SIZE)) != NULL) {
+            memcpy(avctx->extradata, avpkt->data, avpkt->size);
+            avctx->extradata_size = avpkt->size;
+        }
+
+        av_packet_unref(avpkt);
+
+        if (avctx->extradata == NULL)
+            return AVERROR(ENOMEM);
+
+        if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
+            return ret;
+    }
+
+    if ((avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) == 0 && (avpkt->flags & AV_PKT_FLAG_KEY) != 0) {
+        // Add SPS/PPS to the start of every key frame
+
+        AVBufferRef *buf = av_buffer_alloc(avctx->extradata_size + avpkt->size + AV_INPUT_BUFFER_PADDING_SIZE);
+
+        if (buf == NULL) {
+            av_packet_unref(avpkt);
+            return AVERROR(ENOMEM);
+        }
+
+        memcpy(buf->data, avctx->extradata, avctx->extradata_size);
+        memcpy(buf->data + avctx->extradata_size, avpkt->data, avpkt->size);
+
+        av_buffer_unref(&avpkt->buf);
+        avpkt->buf = buf;
+        avpkt->data = buf->data;
+        avpkt->size = avctx->extradata_size + avpkt->size;
+    }
+
+//    av_log(avctx, AV_LOG_INFO, "%s: PTS out=%"PRId64", size=%d, ret=%d\n", __func__, avpkt->pts, avpkt->size, ret);
+
+    return 0;
 }
 
 static av_cold int v4l2_encode_init(AVCodecContext *avctx)
