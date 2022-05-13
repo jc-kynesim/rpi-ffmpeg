@@ -126,7 +126,8 @@ xlat_pts_frame_out(AVCodecContext *const avctx,
     V4L2m2mTrackEl *const t = x->track_els + n;
     if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
     {
-        av_log(avctx, AV_LOG_INFO, "Tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
+        av_log(avctx, frame->pts == AV_NOPTS_VALUE ? AV_LOG_DEBUG : AV_LOG_WARNING,
+               "Frame tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
         frame->pts              = AV_NOPTS_VALUE;
         frame->pkt_dts          = x->last_pkt_dts;
         frame->reordered_opaque = x->last_opaque;
@@ -169,7 +170,8 @@ xlat_pts_pkt_out(AVCodecContext *const avctx,
     V4L2m2mTrackEl *const t = x->track_els + n;
     if (pkt->pts == AV_NOPTS_VALUE || pkt->pts != t->track_pts)
     {
-        av_log(avctx, AV_LOG_INFO, "Tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", pkt->pts, n, t->track_pts);
+        av_log(avctx, pkt->pts == AV_NOPTS_VALUE ? AV_LOG_DEBUG : AV_LOG_WARNING,
+               "Pkt tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", pkt->pts, n, t->track_pts);
         pkt->pts                = AV_NOPTS_VALUE;
     }
     else if (!t->discard)

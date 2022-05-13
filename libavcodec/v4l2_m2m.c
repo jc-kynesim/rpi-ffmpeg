@@ -422,7 +422,7 @@ int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **pps)
     if (!s)
         return AVERROR(ENOMEM);
 
-    priv->context_ref = av_buffer_create((uint8_t *) *s, sizeof(V4L2m2mContext),
+    priv->context_ref = av_buffer_create((uint8_t *)s, sizeof(*s),
                                          &v4l2_m2m_destroy_context, NULL, 0);
     if (!priv->context_ref) {
         av_free(s);
