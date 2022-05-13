@@ -811,10 +811,13 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     if ((ret = v4l2_prepare_decoder(s)) < 0)
         return ret;
 
+    if ((ret = get_quirks(avctx, s)) != 0)
+        return ret;
+
     if ((ret = check_size(avctx, s)) != 0)
         return ret;
 
-    return get_quirks(avctx, s);
+    return 0;
 }
 
 static av_cold int v4l2_decode_close(AVCodecContext *avctx)
