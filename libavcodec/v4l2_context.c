@@ -107,9 +107,9 @@ xlat_pts_frame_in(AVCodecContext *const avctx, xlat_track_t *const x, const AVFr
         .pkt_size         = 0,
         .pts              = frame->pts,
         .dts              = AV_NOPTS_VALUE,
-        .reordered_opaque = avctx->reordered_opaque,
-        .pkt_pos          = 0,
-        .pkt_duration     = 0,
+        .reordered_opaque = frame->reordered_opaque,
+        .pkt_pos          = frame->pkt_pos,
+        .pkt_duration     = frame->pkt_duration,
         .track_pts        = track_pts
     };
     return track_pts;
