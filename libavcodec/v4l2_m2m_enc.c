@@ -449,9 +449,29 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
             return AVERROR(EINVAL);
         }
 
+        output->selection.top = frame->crop_top;
+        output->selection.left = frame->crop_left;
+        output->selection.width = av_frame_cropped_width(frame);
+        output->selection.height = av_frame_cropped_height(frame);
+
         if ((rv = ff_v4l2_context_init(output)) != 0) {
             av_log(avctx, AV_LOG_ERROR, "Failed to (re)init context\n");
             return rv;
+        }
+
+        {
+            struct v4l2_selection selection = {
+                .type = V4L2_BUF_TYPE_VIDEO_OUTPUT,
+                .target = V4L2_SEL_TGT_CROP,
+                .r = output->selection
+            };
+            if (ioctl(s->fd, VIDIOC_S_SELECTION, &selection) != 0) {
+                av_log(avctx, AV_LOG_WARNING, "S_SELECTION (CROP) %dx%d @ %d,%d failed: %s\n",
+                       selection.r.width, selection.r.height, selection.r.left, selection.r.top,
+                       av_err2str(AVERROR(errno)));
+            }
+            av_log(avctx, AV_LOG_TRACE, "S_SELECTION (CROP) %dx%d @ %d,%d OK\n",
+                   selection.r.width, selection.r.height, selection.r.left, selection.r.top);
         }
     }
 
