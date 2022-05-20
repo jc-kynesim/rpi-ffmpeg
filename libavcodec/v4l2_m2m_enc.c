@@ -306,7 +306,9 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
     const AVDRMFrameDescriptor *const src = (const AVDRMFrameDescriptor *)frame->data[0];
 
     const uint32_t drm_fmt = src->layers[0].format;
-    const uint64_t mod = src->objects[0].format_modifier;
+    // Treat INVALID as LINEAR
+    const uint64_t mod = src->objects[0].format_modifier == DRM_FORMAT_MOD_INVALID ?
+        DRM_FORMAT_MOD_LINEAR : src->objects[0].format_modifier;
     uint32_t pix_fmt = 0;
     uint32_t w = 0;
     uint32_t h = 0;
