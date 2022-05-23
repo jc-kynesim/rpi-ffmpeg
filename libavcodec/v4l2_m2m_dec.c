@@ -540,7 +540,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
         ++i;
         if (i >= 256) {
-            av_log(avctx, AV_LOG_ERROR, "Unexpectedly large retry count: %d", i);
+            av_log(avctx, AV_LOG_ERROR, "Unexpectedly large retry count: %d\n", i);
             src_rv = AVERROR(EIO);
         }
 
