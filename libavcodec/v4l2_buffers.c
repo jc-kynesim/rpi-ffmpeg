@@ -30,6 +30,7 @@
 #include <poll.h>
 #include "libavcodec/avcodec.h"
 #include "libavcodec/internal.h"
+#include "libavutil/avassert.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/hwcontext.h"
 #include "v4l2_context.h"
@@ -619,23 +620,21 @@ static int v4l2_buffer_primeframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
     if (frame->format != AV_PIX_FMT_DRM_PRIME || !src)
         return AVERROR(EINVAL);
 
+    av_assert0(out->buf.memory == V4L2_MEMORY_DMABUF);
+
     if (V4L2_TYPE_IS_MULTIPLANAR(out->buf.type)) {
-        unsigned int i;
-        unsigned int n = 0;
-        for (i = 0; i != src->nb_layers; ++i) {
-            const AVDRMLayerDescriptor *const layer = src->layers + i;
-            unsigned int j;
-            for (j = 0; j != layer->nb_planes; ++j) {
-                const AVDRMPlaneDescriptor *const plane = layer->planes + j;
-                out->planes[n].data_offset = plane->offset;
-                out->planes[n].m.fd = src->objects[plane->object_index].fd;
-                ++n;
-            }
-        }
+        // Only currently cope with single buffer types
+        if (out->buf.length != 1)
+            return AVERROR_PATCHWELCOME;
+        if (src->nb_objects != 1)
+            return AVERROR(EINVAL);
+
+        out->planes[0].m.fd = src->objects[0].fd;
     }
     else {
         if (src->nb_objects != 1)
             return AVERROR(EINVAL);
+
         out->buf.m.fd      = src->objects[0].fd;
     }
 
