@@ -765,7 +765,7 @@ static int stuff_all_buffers(AVCodecContext * avctx, V4L2Context* ctx)
 int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
 {
     int type = ctx->type;
-    int ret;
+    int ret = 0;
     AVCodecContext * const avctx = logger(ctx);
 
     // Avoid doing anything if there is nothing we can do
@@ -777,8 +777,7 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
     if (cmd == VIDIOC_STREAMON && !V4L2_TYPE_IS_OUTPUT(ctx->type))
         stuff_all_buffers(avctx, ctx);
 
-    ret = ioctl(ctx_to_m2mctx(ctx)->fd, cmd, &type);
-    if (ret < 0) {
+    if (ioctl(ctx_to_m2mctx(ctx)->fd, cmd, &type) < 0) {
         const int err = errno;
         av_log(avctx, AV_LOG_ERROR, "%s set status %d (%s) failed: err=%d\n", ctx->name,
                cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF", err);

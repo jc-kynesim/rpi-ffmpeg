@@ -110,16 +110,21 @@ static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *co
         return 0;
 
     ret = ff_v4l2_context_set_status(&s->output, VIDIOC_STREAMON);
-    if (ret < 0)
-        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON on output context\n");
+    if (ret != 0) {
+        av_log(avctx, AV_LOG_ERROR, "VIDIOC_STREAMON on output context: %s\n", av_err2str(ret));
+        return ret;
+    }
 
-    ret = ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd);
-    if (ret < 0)
-        av_log(avctx, AV_LOG_ERROR, "VIDIOC_DECODER_CMD start error: %d\n", errno);
-    else
-        av_log(avctx, AV_LOG_DEBUG, "VIDIOC_DECODER_CMD start OK\n");
-
-    return ret;
+    // STREAMON should do implicit START so this just for those that don't.
+    // It is optional so don't worry if it fails
+    if (ioctl(s->fd, VIDIOC_DECODER_CMD, &cmd) < 0) {
+        ret = AVERROR(errno);
+        av_log(avctx, AV_LOG_WARNING, "VIDIOC_DECODER_CMD start error: %s\n", av_err2str(ret));
+    }
+    else {
+        av_log(avctx, AV_LOG_TRACE, "VIDIOC_DECODER_CMD start OK\n");
+    }
+    return 0;
 }
 
 static int v4l2_try_start(AVCodecContext *avctx)
