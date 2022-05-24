@@ -251,6 +251,7 @@ static void v4l2_m2m_destroy_context(void *opaque, uint8_t *context)
     av_frame_unref(s->frame);
     av_frame_free(&s->frame);
     av_packet_unref(&s->buf_pkt);
+    av_freep(&s->extdata_data);
 
     av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Context destroyed\n");
 
