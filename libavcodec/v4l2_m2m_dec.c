@@ -343,7 +343,46 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     // We will already have a coded pkt if the output Q was full last time we
     // tried to Q it
     if (!s->buf_pkt.size && !do_not_get) {
-        ret = ff_decode_get_packet(avctx, &s->buf_pkt);
+        unsigned int i;
+
+        for (i = 0; i < 256; ++i) {
+            uint8_t * side_data;
+            size_t side_size;
+
+            ret = ff_decode_get_packet(avctx, &s->buf_pkt);
+            if (ret != 0)
+                break;
+
+            // New extradata is the only side-data we undertand
+            side_data = av_packet_get_side_data(&s->buf_pkt, AV_PKT_DATA_NEW_EXTRADATA, &side_size);
+            if (side_data) {
+                av_log(avctx, AV_LOG_DEBUG, "New extradata\n");
+                av_freep(&s->extdata_data);
+                if ((s->extdata_data = av_malloc(side_size ? side_size : 1)) == NULL) {
+                    av_log(avctx, AV_LOG_ERROR, "Failed to alloc %zd bytes of extra data\n", side_size);
+                    return AVERROR(ENOMEM);
+                }
+                memcpy(s->extdata_data, side_data, side_size);
+                s->extdata_size = side_size;
+                s->extdata_sent = 0;
+            }
+
+            if (s->buf_pkt.size != 0)
+                break;
+
+            if (s->buf_pkt.side_data_elems == 0) {
+                av_log(avctx, AV_LOG_WARNING, "Empty pkt from ff_decode_get_packet - treating as EOF\n");
+                ret = AVERROR_EOF;
+                break;
+            }
+
+            // Retry a side-data only pkt
+        }
+        // If i >= 256 something has gone wrong
+        if (i >= 256) {
+            av_log(avctx, AV_LOG_ERROR, "Too many side-data only packets\n");
+            return AVERROR(EIO);
+        }
 
         if (ret == AVERROR(EAGAIN)) {
             if (!stream_started(s)) {
@@ -398,8 +437,12 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
     if ((ret = check_output_streamon(avctx, s)) != 0)
         return ret;
 
-    ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt,
-                                         avctx->extradata, s->extdata_sent ? 0 : avctx->extradata_size);
+    if (s->extdata_sent)
+        ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, NULL, 0);
+    else if (s->extdata_data)
+        ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, s->extdata_data, s->extdata_size);
+    else
+        ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, avctx->extradata, avctx->extradata_size);
 
     if (ret == AVERROR(EAGAIN)) {
         // Out of input buffers - keep packet
