@@ -115,6 +115,9 @@ typedef struct V4L2m2mContext {
 
     /* Ext data sent */
     int extdata_sent;
+    /* Ext data sent in packet - overrides ctx */
+    uint8_t * extdata_data;
+    size_t extdata_size;
 
 #define FF_V4L2_QUIRK_REINIT_ALWAYS             1
 #define FF_V4L2_QUIRK_ENUM_FRAMESIZES_BROKEN    2
