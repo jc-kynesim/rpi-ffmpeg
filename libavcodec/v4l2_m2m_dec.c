@@ -504,13 +504,14 @@ static int qbuf_wait(AVCodecContext * const avctx, V4L2Context * const ctx)
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     V4L2m2mContext *const s = ((V4L2m2mPriv*)avctx->priv_data)->context;
-    int src_rv;
+    int src_rv = NQ_OK;
     int dst_rv = 1;  // Non-zero (done), non-negative (error) number
     unsigned int i = 0;
 
     do {
         const int pending = xlat_pending(&s->xlat);
         const int prefer_dq = (pending > s->pending_hw / 16);
+        const int last_src_rv = src_rv;
 
         // Enqueue another pkt for decode if
         // (a) We don't have a lot of stuff in the buffer already OR
@@ -525,6 +526,11 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         // we alternately ask for input and produce output
         if ((i != 0 || s->req_pkt) && src_rv == NQ_SRC_EMPTY)
             break;
+
+        if (src_rv == NQ_Q_FULL && last_src_rv == NQ_Q_FULL) {
+            av_log(avctx, AV_LOG_WARNING, "Poll thinks src Q has space; none found\n");
+            break;
+        }
 
         // Try to get a new frame if
         // (a) we haven't already got one AND
