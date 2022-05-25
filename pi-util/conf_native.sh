@@ -91,8 +91,6 @@ $FFSRC/configure \
  --disable-thumb\
  --enable-v4l2-request\
  --enable-libdrm\
- --enable-epoxy\
- --enable-libudev\
  --enable-vout-egl\
  --enable-vout-drm\
  $SHARED_LIBS\
