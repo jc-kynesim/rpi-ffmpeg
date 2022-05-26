@@ -16,6 +16,7 @@ FATE_CHECKASM = fate-checkasm-aacpsdsp                                  \
                 fate-checkasm-hevc_add_res                              \
                 fate-checkasm-hevc_idct                                 \
                 fate-checkasm-hevc_sao                                  \
+                fate-checkasm-idctdsp                                   \
                 fate-checkasm-jpeg2000dsp                               \
                 fate-checkasm-llviddsp                                  \
                 fate-checkasm-llviddspenc                               \
@@ -27,6 +28,7 @@ FATE_CHECKASM = fate-checkasm-aacpsdsp                                  \
                 fate-checkasm-sw_scale                                  \
                 fate-checkasm-v210dec                                   \
                 fate-checkasm-v210enc                                   \
+                fate-checkasm-vc1dsp                                    \
                 fate-checkasm-vf_blend                                  \
                 fate-checkasm-vf_colorspace                             \
                 fate-checkasm-vf_eq                                     \
