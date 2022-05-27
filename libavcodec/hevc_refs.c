@@ -98,18 +98,22 @@ static HEVCFrame *alloc_frame(HEVCContext *s)
         if (!frame->rpl_buf)
             goto fail;
 
-        frame->tab_mvf_buf = av_buffer_pool_get(s->tab_mvf_pool);
-        if (!frame->tab_mvf_buf)
-            goto fail;
-        frame->tab_mvf = (MvField *)frame->tab_mvf_buf->data;
+        if (s->tab_mvf_pool) {
+            frame->tab_mvf_buf = av_buffer_pool_get(s->tab_mvf_pool);
+            if (!frame->tab_mvf_buf)
+                goto fail;
+            frame->tab_mvf = (MvField *)frame->tab_mvf_buf->data;
+        }
 
-        frame->rpl_tab_buf = av_buffer_pool_get(s->rpl_tab_pool);
-        if (!frame->rpl_tab_buf)
-            goto fail;
-        frame->rpl_tab   = (RefPicListTab **)frame->rpl_tab_buf->data;
-        frame->ctb_count = s->ps.sps->ctb_width * s->ps.sps->ctb_height;
-        for (j = 0; j < frame->ctb_count; j++)
-            frame->rpl_tab[j] = (RefPicListTab *)frame->rpl_buf->data;
+        if (s->rpl_tab_pool) {
+            frame->rpl_tab_buf = av_buffer_pool_get(s->rpl_tab_pool);
+            if (!frame->rpl_tab_buf)
+                goto fail;
+            frame->rpl_tab   = (RefPicListTab **)frame->rpl_tab_buf->data;
+            frame->ctb_count = s->ps.sps->ctb_width * s->ps.sps->ctb_height;
+            for (j = 0; j < frame->ctb_count; j++)
+                frame->rpl_tab[j] = (RefPicListTab *)frame->rpl_buf->data;
+        }
 
         frame->frame->top_field_first  = s->sei.picture_timing.picture_struct == AV_PICTURE_STRUCTURE_TOP_FIELD;
         frame->frame->interlaced_frame = (s->sei.picture_timing.picture_struct == AV_PICTURE_STRUCTURE_TOP_FIELD) || (s->sei.picture_timing.picture_struct == AV_PICTURE_STRUCTURE_BOTTOM_FIELD);
@@ -297,14 +301,17 @@ static int init_slice_rpl(HEVCContext *s)
     int ctb_count    = frame->ctb_count;
     int ctb_addr_ts  = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_segment_addr];
     int i;
+    RefPicListTab * const tab = (RefPicListTab *)frame->rpl_buf->data + s->slice_idx;
 
     if (s->slice_idx >= frame->rpl_buf->size / sizeof(RefPicListTab))
         return AVERROR_INVALIDDATA;
 
-    for (i = ctb_addr_ts; i < ctb_count; i++)
-        frame->rpl_tab[i] = (RefPicListTab *)frame->rpl_buf->data + s->slice_idx;
+    if (frame->rpl_tab) {
+        for (i = ctb_addr_ts; i < ctb_count; i++)
+            frame->rpl_tab[i] = tab;
+    }
 
-    frame->refPicList = (RefPicList *)frame->rpl_tab[ctb_addr_ts];
+    frame->refPicList = tab->refPicList;
 
     return 0;
 }

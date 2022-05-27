@@ -536,6 +536,16 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps,
     if (!sps)
         return 0;
 
+    // If hwaccel then we don't need all the s/w decode helper arrays
+    if (s->avctx->hwaccel) {
+        export_stream_params(s, sps);
+
+        s->avctx->pix_fmt = pix_fmt;
+        s->ps.sps = sps;
+        s->ps.vps = (HEVCVPS*) s->ps.vps_list[s->ps.sps->vps_id]->data;
+        return 0;
+    }
+
     ret = pic_arrays_init(s, sps);
     if (ret < 0)
         goto fail;
@@ -2890,11 +2900,13 @@ static int hevc_frame_start(HEVCContext *s)
                            ((s->ps.sps->height >> s->ps.sps->log2_min_cb_size) + 1);
     int ret;
 
-    memset(s->horizontal_bs, 0, s->bs_width * s->bs_height);
-    memset(s->vertical_bs,   0, s->bs_width * s->bs_height);
-    memset(s->cbf_luma,      0, s->ps.sps->min_tb_width * s->ps.sps->min_tb_height);
-    memset(s->is_pcm,        0, (s->ps.sps->min_pu_width + 1) * (s->ps.sps->min_pu_height + 1));
-    memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
+    if (s->horizontal_bs) {
+        memset(s->horizontal_bs, 0, s->bs_width * s->bs_height);
+        memset(s->vertical_bs,   0, s->bs_width * s->bs_height);
+        memset(s->cbf_luma,      0, s->ps.sps->min_tb_width * s->ps.sps->min_tb_height);
+        memset(s->is_pcm,        0, (s->ps.sps->min_pu_width + 1) * (s->ps.sps->min_pu_height + 1));
+        memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
+    }
 
     s->is_decoded        = 0;
     s->first_nal_type    = s->nal_unit_type;
@@ -3438,15 +3450,19 @@ static int hevc_ref_frame(HEVCContext *s, HEVCFrame *dst, HEVCFrame *src)
         dst->needs_fg = 1;
     }
 
-    dst->tab_mvf_buf = av_buffer_ref(src->tab_mvf_buf);
-    if (!dst->tab_mvf_buf)
-        goto fail;
-    dst->tab_mvf = src->tab_mvf;
+    if (src->tab_mvf_buf) {
+        dst->tab_mvf_buf = av_buffer_ref(src->tab_mvf_buf);
+        if (!dst->tab_mvf_buf)
+            goto fail;
+        dst->tab_mvf = src->tab_mvf;
+    }
 
-    dst->rpl_tab_buf = av_buffer_ref(src->rpl_tab_buf);
-    if (!dst->rpl_tab_buf)
-        goto fail;
-    dst->rpl_tab = src->rpl_tab;
+    if (src->rpl_tab_buf) {
+        dst->rpl_tab_buf = av_buffer_ref(src->rpl_tab_buf);
+        if (!dst->rpl_tab_buf)
+            goto fail;
+        dst->rpl_tab = src->rpl_tab;
+    }
 
     dst->rpl_buf = av_buffer_ref(src->rpl_buf);
     if (!dst->rpl_buf)
