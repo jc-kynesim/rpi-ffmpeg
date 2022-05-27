@@ -184,10 +184,8 @@ static int v4l2_check_b_frame_support(V4L2m2mContext *s)
     if (s->avctx->max_b_frames == 0)
         return 0;
 
-    av_log(s->avctx, AV_LOG_INFO, "B-frames got=%d\n", s->avctx->max_b_frames);
-//    avpriv_report_missing_feature(s->avctx, "DTS/PTS calculation for V4L2 encoding");
-    return 0;
-//    return AVERROR_PATCHWELCOME;
+    avpriv_report_missing_feature(s->avctx, "DTS/PTS calculation for V4L2 encoding");
+    return AVERROR_PATCHWELCOME;
 }
 
 static inline void v4l2_subscribe_eos_event(V4L2m2mContext *s)
@@ -515,48 +513,66 @@ dequeue:
     if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
         return ret;
 
-    if (capture->first_buf) {
-        // 1st buffer after streamon should be SPS/PPS
-        capture->first_buf = 0;
+    if (capture->first_buf == 1) {
+        uint8_t * data;
+        const int len = avpkt->size;
 
+        // 1st buffer after streamon should be SPS/PPS
+        capture->first_buf = 2;
+
+        // Clear both possible stores so there is no chance of confusion
+        av_freep(&s->extdata_data);
+        s->extdata_size = 0;
         av_freep(&avctx->extradata);
         avctx->extradata_size = 0;
 
-        if ((avctx->extradata = av_malloc(avpkt->size + AV_INPUT_BUFFER_PADDING_SIZE)) != NULL) {
-            memcpy(avctx->extradata, avpkt->data, avpkt->size);
-            avctx->extradata_size = avpkt->size;
-        }
+        if ((data = av_malloc(len + AV_INPUT_BUFFER_PADDING_SIZE)) != NULL)
+            memcpy(data, avpkt->data, len);
 
         av_packet_unref(avpkt);
 
-        if (avctx->extradata == NULL)
+        if (data == NULL)
             return AVERROR(ENOMEM);
+
+        // We need to copy the header, but keep local if not global
+        if ((avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) != 0) {
+            avctx->extradata = data;
+            avctx->extradata_size = len;
+        }
+        else {
+            s->extdata_data = data;
+            s->extdata_size = len;
+        }
 
         if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
             return ret;
     }
 
-    if ((avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) == 0 && (avpkt->flags & AV_PKT_FLAG_KEY) != 0) {
-        // Add SPS/PPS to the start of every key frame
+    // First frame must be key so mark as such even if encoder forgot
+    if (capture->first_buf == 2)
+        avpkt->flags |= AV_PKT_FLAG_KEY;
 
-        AVBufferRef *buf = av_buffer_alloc(avctx->extradata_size + avpkt->size + AV_INPUT_BUFFER_PADDING_SIZE);
+    // Add SPS/PPS to the start of every key frame if non-global headers
+    if ((avpkt->flags & AV_PKT_FLAG_KEY) != 0 && s->extdata_size != 0) {
+        const size_t newlen = s->extdata_size + avpkt->size;
+        AVBufferRef * const buf = av_buffer_alloc(newlen + AV_INPUT_BUFFER_PADDING_SIZE);
 
         if (buf == NULL) {
             av_packet_unref(avpkt);
             return AVERROR(ENOMEM);
         }
 
-        memcpy(buf->data, avctx->extradata, avctx->extradata_size);
-        memcpy(buf->data + avctx->extradata_size, avpkt->data, avpkt->size);
+        memcpy(buf->data, s->extdata_data, s->extdata_size);
+        memcpy(buf->data + s->extdata_size, avpkt->data, avpkt->size);
 
         av_buffer_unref(&avpkt->buf);
         avpkt->buf = buf;
         avpkt->data = buf->data;
-        avpkt->size = avctx->extradata_size + avpkt->size;
+        avpkt->size = newlen;
     }
 
 //    av_log(avctx, AV_LOG_INFO, "%s: PTS out=%"PRId64", size=%d, ret=%d\n", __func__, avpkt->pts, avpkt->size, ret);
-
+    capture->first_buf = 0;
     return 0;
 }
 
