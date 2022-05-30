@@ -234,14 +234,14 @@ static int drm_transfer_get_formats(AVHWFramesContext *ctx,
                                     enum AVHWFrameTransferDirection dir,
                                     enum AVPixelFormat **formats)
 {
-    enum AVPixelFormat *pix_fmts;
+    enum AVPixelFormat *p;
 
-    pix_fmts = av_malloc_array(2, sizeof(*pix_fmts));
-    if (!pix_fmts)
+    p = *formats = av_malloc_array(3, sizeof(*p));
+    if (!p)
         return AVERROR(ENOMEM);
 
     // **** Offer native sand too ????
-    pix_fmts[0] =
+    *p++ =
 #if CONFIG_SAND
         ctx->sw_format == AV_PIX_FMT_RPI4_8 || ctx->sw_format == AV_PIX_FMT_SAND128 ?
             AV_PIX_FMT_YUV420P :
@@ -249,9 +249,14 @@ static int drm_transfer_get_formats(AVHWFramesContext *ctx,
             AV_PIX_FMT_YUV420P10LE :
 #endif
             ctx->sw_format;
-    pix_fmts[1] = AV_PIX_FMT_NONE;
 
-    *formats = pix_fmts;
+#if CONFIG_SAND
+    if (ctx->sw_format == AV_PIX_FMT_RPI4_10 ||
+        ctx->sw_format == AV_PIX_FMT_RPI4_8 || ctx->sw_format == AV_PIX_FMT_SAND128)
+        *p++ = AV_PIX_FMT_NV12;
+#endif
+
+    *p = AV_PIX_FMT_NONE;
     return 0;
 }
 
@@ -294,29 +299,12 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
         const unsigned int w = FFMIN(dst->width, map->width);
         const unsigned int h = FFMIN(dst->height, map->height);
 
-        if (map->format == AV_PIX_FMT_RPI4_8 && dst->format == AV_PIX_FMT_YUV420P) {
-            av_rpi_sand_to_planar_y8(dst->data[0], dst->linesize[0],
-                                     map->data[0],
-                                     128, stride2,
-                                     0, 0, w, h);
-            av_rpi_sand_to_planar_c8(dst->data[1], dst->linesize[1],
-                                     dst->data[2], dst->linesize[2],
-                                     map->data[1],
-                                     128, stride2,
-                                     0, 0, w / 2, h / 2);
-        }
-        else if (map->format == AV_PIX_FMT_RPI4_10 && dst->format == AV_PIX_FMT_YUV420P10LE) {
-            av_rpi_sand30_to_planar_y16(dst->data[0], dst->linesize[0],
-                                     map->data[0],
-                                     128, stride2,
-                                     0, 0, w, h);
-            av_rpi_sand30_to_planar_c16(dst->data[1], dst->linesize[1],
-                                     dst->data[2], dst->linesize[2],
-                                     map->data[1],
-                                     128, stride2,
-                                     0, 0, w / 2, h / 2);
-        }
-        else
+        map->crop_top = 0;
+        map->crop_bottom = 0;
+        map->crop_left = 0;
+        map->crop_right = 0;
+
+        if (av_rpi_sand_to_planar_frame(dst, map) != 0)
         {
             av_log(hwfc, AV_LOG_ERROR, "%s: Incompatible output pixfmt for sand\n", __func__);
             err = AVERROR(EINVAL);
