@@ -229,6 +229,75 @@ void av_rpi_sand30_to_planar_c16(uint8_t * dst_u, const unsigned int dst_stride_
     }
 }
 
+// Fetches a single patch - offscreen fixup not done here
+// w <= stride1
+// single lose bottom 2 bits truncation
+// _x & _w in pixels, strides in bytes
+void av_rpi_sand30_to_planar_y8(uint8_t * dst, const unsigned int dst_stride,
+                             const uint8_t * src,
+                             unsigned int stride1, unsigned int stride2,
+                             unsigned int _x, unsigned int y,
+                             unsigned int _w, unsigned int h)
+{
+    const unsigned int x0 = (_x / 3) * 4; // Byte offset of the word
+    const unsigned int xskip0 = _x - (x0 >> 2) * 3;
+    const unsigned int x1 = ((_x + _w) / 3) * 4;
+    const unsigned int xrem1 = _x + _w - (x1 >> 2) * 3;
+    const unsigned int mask = stride1 - 1;
+    const uint8_t * p0 = src + (x0 & mask) + y * stride1 + (x0 & ~mask) * stride2;
+    const unsigned int slice_inc = ((stride2 - 1) * stride1) >> 2;  // RHS of a stripe to LHS of next in words
+
+#if HAVE_SAND_ASM && 0
+    if (_x == 0) {
+        ff_rpi_sand30_lines_to_planar_y8(dst, dst_stride, src, stride1, stride2, _x, y, _w, h);
+        return;
+    }
+#endif
+
+    if (x0 == x1) {
+        // *******************
+        // Partial single word xfer
+        return;
+    }
+
+    for (unsigned int i = 0; i != h; ++i, dst += dst_stride, p0 += stride1)
+    {
+        unsigned int x = x0;
+        const uint32_t * p = (const uint32_t *)p0;
+        uint8_t * d = dst;
+
+        if (xskip0 != 0) {
+            const uint32_t p3 = *p++;
+
+            if (xskip0 == 1)
+                *d++ = (p3 >> 12) & 0xff;
+            *d++ = (p3 >> 22) & 0xff;
+
+            if (((x += 4) & mask) == 0)
+                p += slice_inc;
+        }
+
+        while (x != x1) {
+            const uint32_t p3 = *p++;
+            *d++ = (p3 >> 2) & 0xff;
+            *d++ = (p3 >> 12) & 0xff;
+            *d++ = (p3 >> 22) & 0xff;
+
+            if (((x += 4) & mask) == 0)
+                p += slice_inc;
+        }
+
+        if (xrem1 != 0) {
+            const uint32_t p3 = *p;
+
+            *d++ = (p3 >> 2) & 0xff;
+            if (xrem1 == 2)
+                *d++ = (p3 >> 12) & 0xff;
+        }
+    }
+}
+
+
 
 // w/h in pixels
 void av_rpi_sand16_to_sand8(uint8_t * dst, const unsigned int dst_stride1, const unsigned int dst_stride2,
@@ -310,6 +379,16 @@ int av_rpi_sand_to_planar_frame(AVFrame * const dst, const AVFrame * const src)
                                              av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
                                              x/2, y/2,  w/2, h/2);
                     break;
+                case AV_PIX_FMT_NV12:
+                    av_rpi_sand_to_planar_y8(dst->data[0], dst->linesize[0],
+                                             src->data[0],
+                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             x, y, w, h);
+                    av_rpi_sand_to_planar_y8(dst->data[1], dst->linesize[1],
+                                             src->data[1],
+                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             x/2, y/2, w, h/2);
+                    break;
                 default:
                     return -1;
             }
@@ -343,6 +422,16 @@ int av_rpi_sand_to_planar_frame(AVFrame * const dst, const AVFrame * const src)
                                              src->data[1],
                                              av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
                                              x/2, y/2, w/2, h/2);
+                    break;
+                case AV_PIX_FMT_NV12:
+                    av_rpi_sand30_to_planar_y8(dst->data[0], dst->linesize[0],
+                                             src->data[0],
+                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             x, y, w, h);
+                    av_rpi_sand30_to_planar_y8(dst->data[1], dst->linesize[1],
+                                             src->data[1],
+                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             x/2, y/2, w, h/2);
                     break;
                 default:
                     return -1;
