@@ -360,7 +360,6 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
                 ldr             r6,  [sp, #36]
                 ldr             r7,  [sp, #32]  @ y
                 mov             r12, #48
-                vmov.u16        q15, #0x3ff
                 sub             r3,  #1
                 lsl             r3,  #7
                 sub             r1,  r1,  r6,  lsl #1
@@ -376,37 +375,33 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
                 vldm            r2!, {q10-q13}
                 add             lr,  #64
 
-                vshr.u32        q14, q10, #20    @ Cannot vshrn.u32 #20!
+                vshrn.u32       d4 , q10, #14    @ Cannot vshrn.u32 #20!
                 ands            lr,  #127
                 vshrn.u32       d2,  q10, #10
                 vmovn.u32       d0,  q10
-                vmovn.u32       d4,  q14
 
-                vshr.u32        q14, q11, #20
+                vshrn.u32       d5,  q11, #14
                 it              eq
                 addeq           r2,  r3
                 vshrn.u32       d3,  q11, #10
                 vmovn.u32       d1,  q11
-                vmovn.u32       d5,  q14
 
                 subs            r5,  #48
-                vand            q0,  q15
-                vand            q1,  q15
-                vand            q2,  q15
+                vshr.u16        q2,  #6
+                vbic.u16        q0,  #0xfc00
+                vbic.u16        q1,  #0xfc00
 
-                vshr.u32        q14, q12, #20
+                vshrn.u32       d20, q12, #14
                 vshrn.u32       d18, q12, #10
                 vmovn.u32       d16, q12
-                vmovn.u32       d20, q14
 
-                vshr.u32        q14, q13, #20
+                vshrn.u32       d21, q13, #14
                 vshrn.u32       d19, q13, #10
                 vmovn.u32       d17, q13
-                vmovn.u32       d21, q14
 
-                vand            q8,  q15
-                vand            q9,  q15
-                vand            q10, q15
+                vshr.u16        q10, #6
+                vbic.u16        q8,  #0xfc00
+                vbic.u16        q9 , #0xfc00
                 blt             2f
 
                 vst3.16         {d0,  d2,  d4},  [r0], r12
@@ -499,7 +494,6 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 ldr             r7,  [sp, #48]
                 ldr             r9,  [sp, #52]
                 mov             r12, #48
-                vmov.u16        q15, #0x3ff
                 sub             r8,  #1
                 lsl             r8,  #7
                 add             r5,  r5,  r7,  lsl #7
@@ -515,48 +509,44 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 add             lr,  #64
 
                 @ N.B. unpack [0,1,2] -> (reg order) 1, 0, 2
-                vshr.u32        q14, q0,  #20
-                vshrn.u32       d16, q0,  #10
+                vshrn.u32       d20, q0,  #14
                 vmovn.u32       d18, q0
+                vshrn.u32       d0,  q0,  #10
                 ands            lr,  #127
-                vmovn.u32       d20, q14
 
-                vshr.u32        q14, q1,  #20
-                vshrn.u32       d17, q1,  #10
+                vshrn.u32       d21, q1,  #14
                 vmovn.u32       d19, q1
-                vmovn.u32       d21, q14
+                vshrn.u32       d1,  q1,  #10
 
-                vshr.u32        q14, q2,  #20
                 vshrn.u32       d22, q2,  #10
-                vmovn.u32       d24, q2
-                vmovn.u32       d26, q14
+                vmovn.u32       d2,  q2
+                vshrn.u32       d4,  q2,  #14
 
-                vshr.u32        q14, q3,  #20
-                vshrn.u32       d23, q3,  #10
-                vmovn.u32       d25, q3
                 add             r10, r0,  #24
-                vmovn.u32       d27, q14
+                vshrn.u32       d23, q3,  #10
+                vmovn.u32       d3,  q3
+                vshrn.u32       d5,  q3,  #14
 
                 it              eq
                 addeq           r4,  r8
-                vuzp.16         q8,  q11
-                vuzp.16         q9,  q12
-                vuzp.16         q10, q13
+                vuzp.16         q0,  q11
+                vuzp.16         q9,  q1
+                vuzp.16         q10, q2
 
-                @ q8   V0, V3,.. -> q0
+                @ q0   V0, V3,..
                 @ q9   U0, U3...
                 @ q10  U1, U4...
                 @ q11  U2, U5,..
-                @ q12  V1, V4,.. -> q1
-                @ q13  V2, V5,.. -> q2
+                @ q1   V1, V4,
+                @ q2   V2, V5,..
 
                 subs            r6,  #24
-                vand            q11, q15
-                vand            q9,  q15
-                vand            q10, q15
-                vand            q0,  q8,  q15
-                vand            q1,  q12, q15
-                vand            q2,  q13, q15
+                vbic.u16        q11, #0xfc00
+                vbic.u16        q9,  #0xfc00
+                vshr.u16        q10, #6
+                vshr.u16        q2,  #6
+                vbic.u16        q0,  #0xfc00
+                vbic.u16        q1,  #0xfc00
 
                 blt             2f
 
@@ -764,5 +754,172 @@ function ff_rpi_sand30_lines_to_planar_p010, export=1
 
 endfunc
 
+
+@ void ff_rpi_sand30_lines_to_planar_y8(
+@   uint8_t * dest,             // [r0]
+@   unsigned int dst_stride,    // [r1]
+@   const uint8_t * src,        // [r2]
+@   unsigned int src_stride1,   // [r3]      Ignored - assumed 128
+@   unsigned int src_stride2,   // [sp, #0]  -> r3
+@   unsigned int _x,            // [sp, #4]  Ignored - 0
+@   unsigned int y,             // [sp, #8]  (r7 in prefix)
+@   unsigned int _w,            // [sp, #12] -> r6 (cur r5)
+@   unsigned int h);            // [sp, #16] -> r7
+@
+@ Assumes that we are starting on a stripe boundary and that overreading
+@ within the stripe is OK. However it does respect the dest size for wri
+
+function ff_rpi_sand30_lines_to_planar_y8, export=1
+                push            {r4-r8, lr}     @ +24
+                ldr             r3,  [sp, #24]
+                ldr             r6,  [sp, #36]
+                ldr             r7,  [sp, #32]  @ y
+                mov             r12, #48
+                lsl             r3,  #7
+                sub             r1,  r1,  r6
+                add             r8,  r2,  r7,  lsl #7
+                ldr             r7,  [sp, #40]
+
+10:
+                mov             r2,  r8
+                add             r4,  r0,  #24
+                mov             r5,  r6
+1:
+                vldm            r2,  {q8-q15}
+
+                subs            r5,  #96
+
+                vmovn.u32       d0,  q8
+                vshrn.u32       d2,  q8,  #12
+                vshrn.u32       d4,  q8,  #16    @ Cannot vshrn.u32 #20!
+
+                add             r2,  r3
+
+                vmovn.u32       d1,  q9
+                vshrn.u32       d3,  q9,  #12
+                vshrn.u32       d5,  q9,  #16
+
+                pld             [r2, #0]
+
+                vshrn.u16       d0,  q0,  #2
+                vmovn.u16       d1,  q1
+                vshrn.u16       d2,  q2,  #6
+
+                vmovn.u32       d16, q10
+                vshrn.u32       d18, q10, #12
+                vshrn.u32       d20, q10, #16
+
+                vmovn.u32       d17, q11
+                vshrn.u32       d19, q11, #12
+                vshrn.u32       d21, q11, #16
+
+                pld             [r2, #64]
+
+                vshrn.u16       d4,  q8,  #2
+                vmovn.u16       d5,  q9
+                vshrn.u16       d6,  q10, #6
+
+                vmovn.u32       d16, q12
+                vshrn.u32       d18, q12, #12
+                vshrn.u32       d20, q12, #16
+
+                vmovn.u32       d17, q13
+                vshrn.u32       d19, q13, #12
+                vshrn.u32       d21, q13, #16
+
+                vshrn.u16       d16, q8,  #2
+                vmovn.u16       d17, q9
+                vshrn.u16       d18, q10, #6
+
+                vmovn.u32       d20, q14
+                vshrn.u32       d22, q14, #12
+                vshrn.u32       d24, q14, #16
+
+                vmovn.u32       d21, q15
+                vshrn.u32       d23, q15, #12
+                vshrn.u32       d25, q15, #16
+
+                vshrn.u16       d20, q10, #2
+                vmovn.u16       d21, q11
+                vshrn.u16       d22, q12, #6
+
+                blt             2f
+
+                vst3.8          {d0,  d1,  d2},  [r0], r12
+                vst3.8          {d4,  d5,  d6},  [r4], r12
+                vst3.8          {d16, d17, d18}, [r0], r12
+                vst3.8          {d20, d21, d22}, [r4], r12
+
+                bne             1b
+
+11:
+                subs            r7,  #1
+                add             r0,  r1
+                add             r8,  #128
+                bne             10b
+
+                pop             {r4-r8, pc}
+
+@ Partial final write
+2:
+                cmp             r5,  #48-96
+                blt             1f
+                vst3.8          {d0,  d1,  d2},  [r0], r12
+                vst3.8          {d4,  d5,  d6},  [r4], r12
+                beq             11b
+                vmov            q0,  q8
+                vmov            q2,  q10
+                sub             r5,  #48
+                vmov            d2,  d18
+                vmov            d6,  d22
+1:
+                cmp             r5,  #24-96
+                blt             1f
+                vst3.8          {d0,  d1,  d2},  [r0]!
+                beq             11b
+                vmov            q0,  q2
+                sub             r5,  #24
+                vmov            d2,  d6
+1:
+                cmp             r5,  #12-96
+                blt             1f
+                vst3.8          {d0[0], d1[0], d2[0]}, [r0]!
+                vst3.8          {d0[1], d1[1], d2[1]}, [r0]!
+                vst3.8          {d0[2], d1[2], d2[2]}, [r0]!
+                vst3.8          {d0[3], d1[3], d2[3]}, [r0]!
+                beq             11b
+                vmov            s0,  s1
+                sub             r5,  #12
+                vmov            s2,  s3
+                vmov            s4,  s5
+1:
+                cmp             r5,  #6-96
+                blt             1f
+                vst3.8          {d0[0], d1[0], d2[0]}, [r0]!
+                vst3.8          {d0[1], d1[1], d2[1]}, [r0]!
+                add             r0,  #12
+                beq             11b
+                vshr.u32        d0,  #16
+                sub             r5,  #6
+                vshr.u32        d1,  #16
+                vshr.u32        d2,  #16
+1:
+                cmp             r5, #3-96
+                blt             1f
+                vst3.8          {d0[0], d1[0], d2[0]}, [r0]!
+                beq             11b
+                sub             r5, #3
+                vshr.u32        d0, #8
+                vshr.u32        d1, #8
+1:
+                cmp             r5, #2-96
+                blt             1f
+                vst2.8          {d0[0], d1[0]}, [r0]!
+                b               11b
+1:
+                vst1.8          {d0[0]}, [r0]!
+                b               11b
+
+endfunc
 
 
