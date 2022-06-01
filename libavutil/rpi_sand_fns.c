@@ -247,7 +247,7 @@ void av_rpi_sand30_to_planar_y8(uint8_t * dst, const unsigned int dst_stride,
     const uint8_t * p0 = src + (x0 & mask) + y * stride1 + (x0 & ~mask) * stride2;
     const unsigned int slice_inc = ((stride2 - 1) * stride1) >> 2;  // RHS of a stripe to LHS of next in words
 
-#if HAVE_SAND_ASM && 0
+#if HAVE_SAND_ASM
     if (_x == 0) {
         ff_rpi_sand30_lines_to_planar_y8(dst, dst_stride, src, stride1, stride2, _x, y, _w, h);
         return;
