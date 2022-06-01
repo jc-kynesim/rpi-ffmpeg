@@ -95,5 +95,16 @@ void ff_rpi_sand30_lines_to_planar_p010(
   unsigned int _w,            // [sp, #12] -> r6 (cur r5)
   unsigned int h);            // [sp, #16] -> r7
 
+void ff_rpi_sand30_lines_to_planar_y8(
+  uint8_t * dest,             // [r0]
+  unsigned int dst_stride,    // [r1]
+  const uint8_t * src,        // [r2]
+  unsigned int src_stride1,   // [r3]      Ignored - assumed 128
+  unsigned int src_stride2,   // [sp, #0]  -> r3
+  unsigned int _x,            // [sp, #4]  Ignored - 0
+  unsigned int y,             // [sp, #8]  (r7 in prefix)
+  unsigned int _w,            // [sp, #12] -> r6 (cur r5)
+  unsigned int h);            // [sp, #16] -> r7
+
 #endif // AVUTIL_ARM_SAND_NEON_H
 

@@ -248,228 +248,6 @@ incomplete_block_loop_end_c8:
     ret
 endfunc
 
-//void ff_rpi_sand30_lines_to_planar_y16(
-//  uint8_t * dest,             // [x0]
-//  unsigned int dst_stride,    // [w1] -> assumed to be equal to _w
-//  const uint8_t * src,        // [x2]
-//  unsigned int src_stride1,   // [w3] -> 128
-//  unsigned int src_stride2,   // [w4]
-//  unsigned int _x,            // [w5]
-//  unsigned int y,             // [w6]
-//  unsigned int _w,            // [w7]
-//  unsigned int h);            // [sp, #0]
-
-function ff_rpi_sand30_lines_to_planar_y16, export=1
-    stp x19, x20, [sp, #-48]!
-    stp x21, x22, [sp, #16]
-    stp x23, x24, [sp, #32]
-
-    // w6 = argument h
-    ldr w6, [sp, #48]
-
-    // slice_inc = ((stride2 - 1) * stride1)
-    mov w5, w4
-    sub w5, w5, #1
-    lsl w5, w5, #7
-
-    // total number of bytes per row = (width / 3) * 4
-    mov w8, w7
-    mov w9, #3
-    udiv w8, w8, w9
-    lsl w8, w8, #2
-
-    // number of full 128 byte blocks to be processed
-    mov w9, #96
-    udiv w9, w7, w9 // = (width * 4) / (3*128) = width/96
-
-    // w10 = number of full integers to process (4 bytes)
-    // w11 = remaning zero to two 10bit values still to copy over
-    mov w12, #96
-    mul w12, w9, w12
-    sub w12, w7, w12  // width - blocks*96 = remaining points per row
-    mov w11, #3
-    udiv w10, w12, w11 // full integers to process = w12 / 3 
-    mul w11, w10, w11  // #integers *3
-    sub w11, w12, w11  // remaining 0-2 points = remaining points - integers*3
-
-    // increase w9 by one if w10+w11 is not zero, and decrease the row count by one
-    // this is to efficiently copy incomplete blocks at the end of the rows
-    // the last row is handled explicitly to avoid writing out of bounds
-    add w22, w10, w11
-    cmp w22, #0
-    cset w22, ne // 1 iff w10+w11 not zero, 0 otherwise
-    add w9, w9, w22
-    sub w6, w6, #1
-
-    // store the number of bytes in w20 which we copy too much for every row
-    // when the width of the frame is not a multiple of 96 (128bytes storing 96 10bit values)
-    mov w20, #96*2
-    mul w20, w20, w9
-    sub w20, w1, w20
-
-    mov w23, #0 // flag to check whether the last line had already been processed
-    
-    // bitmask to clear the uppper 6bits of the result values
-    mov x19, #0x03ff03ff03ff03ff
-    dup v22.2d, x19
-
-    // row counter = 0
-    eor w12, w12, w12
-row_loop_y16:
-    cmp w12, w6               // jump to row_loop_y16_fin if we processed all rows
-    bge row_loop_y16_fin
-
-    mov x13, x2               // row src
-    eor w14, w14, w14         // full block counter
-block_loop_y16:
-    cmp w14, w9
-    bge block_loop_y16_fin
-
-    // load 64 bytes
-    ld1 { v0.4s,  v1.4s, v2.4s, v3.4s }, [x13], #64
-   
-    // process v0 and v1
-    xtn v16.4h, v0.4s
-    ushr v0.4s, v0.4s, #10
-    xtn v17.4h, v0.4s
-    ushr v0.4s, v0.4s, #10
-    xtn v18.4h, v0.4s
-   
-    xtn2 v16.8h, v1.4s
-    and v16.16b, v16.16b, v22.16b
-    ushr v1.4s, v1.4s, #10
-    xtn2 v17.8h, v1.4s
-    and v17.16b, v17.16b, v22.16b
-    ushr v1.4s, v1.4s, #10
-    xtn2 v18.8h, v1.4s
-    and v18.16b, v18.16b, v22.16b
-
-    st3 { v16.8h, v17.8h, v18.8h }, [x0], #48
-
-    // process v2 and v3
-    xtn v23.4h, v2.4s
-    ushr v2.4s, v2.4s, #10
-    xtn v24.4h, v2.4s
-    ushr v2.4s, v2.4s, #10
-    xtn v25.4h, v2.4s
-    
-    xtn2 v23.8h, v3.4s
-    and v23.16b, v23.16b, v22.16b
-    ushr v3.4s, v3.4s, #10
-    xtn2 v24.8h, v3.4s
-    and v24.16b, v24.16b, v22.16b
-    ushr v3.4s, v3.4s, #10
-    xtn2 v25.8h, v3.4s
-    and v25.16b, v25.16b, v22.16b
-
-    st3 { v23.8h, v24.8h, v25.8h }, [x0], #48
-
-    // load the second half of the block -> 64 bytes into registers v4-v7
-    ld1 { v4.4s,  v5.4s,  v6.4s,  v7.4s }, [x13], #64
-    
-    // process v4 and v5
-    xtn v16.4h, v4.4s
-    ushr v4.4s, v4.4s, #10
-    xtn v17.4h, v4.4s
-    ushr v4.4s, v4.4s, #10
-    xtn v18.4h, v4.4s
-   
-    xtn2 v16.8h, v5.4s 
-    and v16.16b, v16.16b, v22.16b
-    ushr v5.4s, v5.4s, #10
-    xtn2 v17.8h, v5.4s
-    and v17.16b, v17.16b, v22.16b
-    ushr v5.4s, v5.4s, #10
-    xtn2 v18.8h, v5.4s
-    and v18.16b, v18.16b, v22.16b
-
-    st3 { v16.8h, v17.8h, v18.8h }, [x0], #48
-
-    // v6 and v7
-    xtn v23.4h, v6.4s
-    ushr v6.4s, v6.4s, #10
-    xtn v24.4h, v6.4s
-    ushr v6.4s, v6.4s, #10
-    xtn v25.4h, v6.4s
-   
-    xtn2 v23.8h, v7.4s 
-    and v23.16b, v23.16b, v22.16b
-    ushr v7.4s, v7.4s, #10
-    xtn2 v24.8h, v7.4s
-    and v24.16b, v24.16b, v22.16b
-    ushr v7.4s, v7.4s, #10
-    xtn2 v25.8h, v7.4s
-    and v25.16b, v25.16b, v22.16b
-
-    st3 { v23.8h, v24.8h, v25.8h }, [x0], #48
- 
-    add x13, x13, x5          // row src += slice_inc
-    add w14, w14, #1
-    b block_loop_y16
-block_loop_y16_fin:
-
-    
-
-
-    add x2, x2, #128          // src += stride1 (start of the next row)
-    add x0, x0, w20, sxtw     // subtract the bytes we copied too much from dst
-    add w12, w12, #1
-    b row_loop_y16
-row_loop_y16_fin:
-
-    // check whether we have incomplete blocks at the end of every row
-    // in that case decrease row block count by one
-    // change height back to it's original value (meaning increase it by 1)
-    // and jump back to another iteration of row_loop_y16
-
-    cmp w23, #1
-    beq row_loop_y16_fin2 // don't continue here if we already processed the last row
-    add w6, w6, #1    // increase height to the original value
-    sub w9, w9, w22   // block count - 1 or 0, depending on the remaining bytes count
-    mov w23, #1
-    b row_loop_y16
-row_loop_y16_fin2:
-
-    sub x0, x0, w20, sxtw // with the last row we didn't actually move the dst ptr to far ahead, therefore readd the diference
-
-    // now we've got to handle the last block in the last row
-    eor w12, w12, w12 // w12 = 0 = counter
-integer_loop_y16:
-    cmp w12, w10
-    bge integer_loop_y16_fin
-    ldr w14, [x13], #4
-    and w15, w14, #0x3ff
-    strh w15, [x0], #2
-    lsr w14, w14, #10
-    and w15, w14, #0x3ff
-    strh w15, [x0], #2
-    lsr w14, w14, #10
-    and w15, w14, #0x3ff
-    strh w15, [x0], #2
-    add w12, w12, #1
-    b integer_loop_y16
-integer_loop_y16_fin:
-
-final_values_y16:
-    // remaining point count = w11
-    ldr w14, [x13], #4
-    cmp w11, #0
-    beq final_values_y16_fin
-    and w15, w14, #0x3ff
-    strh w15, [x0], #2
-    cmp w11, #1
-    beq final_values_y16_fin
-    lsr w14, w14, #10
-    and w15, w14, #0x3ff
-    strh w15, [x0], #2
-final_values_y16_fin:
-
-    ldp x23, x24, [sp, #32]
-    ldp x21, x22, [sp, #16]
-    ldp x19, x20, [sp], #48
-    ret
-endfunc
-
 //void ff_rpi_sand30_lines_to_planar_c16(
 //  uint8_t * dst_u,            // [x0]
 //  unsigned int dst_stride_u,  // [w1] == _w*2
@@ -673,4 +451,331 @@ endfunc
 //  unsigned int y,
 //  unsigned int _w,
 //  unsigned int h);
+
+// void ff_rpi_sand30_lines_to_planar_y8(
+//   uint8_t * dest,            : x0
+//   unsigned int dst_stride,   : w1
+//   const uint8_t * src,       : x2
+//   unsigned int src_stride1,  : w3, always 128
+//   unsigned int src_stride2,  : w4
+//   unsigned int _x,           : w5
+//   unsigned int y,            : w6
+//   unsigned int _w,           : w7
+//   unsigned int h);           : [sp, #0]
+//
+// Assumes that we are starting on a stripe boundary and that overreading
+// within the stripe is OK. However it does respect the dest size for wri
+
+function ff_rpi_sand30_lines_to_planar_y16, export=1
+                lsl             w4,  w4,  #7
+                sub             w4,  w4,  #64
+                sub             w1,  w1,  w7, lsl #1
+                uxtw            x6,  w6
+                add             x8,  x2,  x6, lsl #7
+                ldr             w6,  [sp, #0]
+
+10:
+                mov             x2,  x8
+                mov             w5,  w7
+1:
+                ld1             {v0.4s, v1.4s, v2.4s, v3.4s}, [x2], #64
+                ld1             {v4.4s, v5.4s, v6.4s, v7.4s}, [x2], x4
+
+                subs            w5,  w5,  #96
+
+                // v0, v1
+
+                shrn            v18.4h,  v0.4s,   #14
+                xtn             v16.4h,  v0.4s
+                shrn            v17.4h,  v0.4s,   #10
+
+                shrn2           v18.8h,  v1.4s,   #14
+                xtn2            v16.8h,  v1.4s
+                shrn2           v17.8h,  v1.4s,   #10
+
+                ushr            v18.8h,  v18.8h,  #6
+                bic             v16.8h,  #0xfc,   lsl #8
+                bic             v17.8h,  #0xfc,   lsl #8
+
+                // v2, v3
+
+                shrn            v21.4h,  v2.4s,   #14
+                xtn             v19.4h,  v2.4s
+                shrn            v20.4h,  v2.4s,   #10
+
+                shrn2           v21.8h,  v3.4s,   #14
+                xtn2            v19.8h,  v3.4s
+                shrn2           v20.8h,  v3.4s,   #10
+
+                ushr            v21.8h,  v21.8h,  #6
+                bic             v19.8h,  #0xfc,   lsl #8
+                bic             v20.8h,  #0xfc,   lsl #8
+
+                // v4, v5
+
+                shrn            v24.4h,  v4.4s,   #14
+                xtn             v22.4h,  v4.4s
+                shrn            v23.4h,  v4.4s,   #10
+
+                shrn2           v24.8h,  v5.4s,   #14
+                xtn2            v22.8h,  v5.4s
+                shrn2           v23.8h,  v5.4s,   #10
+
+                ushr            v24.8h,  v24.8h,  #6
+                bic             v22.8h,  #0xfc,   lsl #8
+                bic             v23.8h,  #0xfc,   lsl #8
+
+                // v6, v7
+
+                shrn            v27.4h,  v6.4s,   #14
+                xtn             v25.4h,  v6.4s
+                shrn            v26.4h,  v6.4s,   #10
+
+                shrn2           v27.8h,  v7.4s,   #14
+                xtn2            v25.8h,  v7.4s
+                shrn2           v26.8h,  v7.4s,   #10
+
+                ushr            v27.8h,  v27.8h,  #6
+                bic             v25.8h,  #0xfc,   lsl #8
+                bic             v26.8h,  #0xfc,   lsl #8
+
+                blt             2f
+
+                st3             {v16.8h, v17.8h, v18.8h}, [x0], #48
+                st3             {v19.8h, v20.8h, v21.8h}, [x0], #48
+                st3             {v22.8h, v23.8h, v24.8h}, [x0], #48
+                st3             {v25.8h, v26.8h, v27.8h}, [x0], #48
+
+                bne             1b
+
+11:
+                subs            w6,  w6,  #1
+                add             x0,  x0,  w1,  uxtw
+                add             x8,  x8,  #128
+                bne             10b
+
+                ret
+
+// Partial final write
+2:
+                cmp             w5,  #48-96
+                blt             1f
+                st3             {v16.8h, v17.8h, v18.8h}, [x0], #48
+                st3             {v19.8h, v20.8h, v21.8h}, [x0], #48
+                beq             11b
+                mov             v16.16b, v22.16b
+                mov             v17.16b, v23.16b
+                sub             w5,  w5,  #48
+                mov             v18.16b, v24.16b
+                mov             v19.16b, v25.16b
+                mov             v20.16b, v26.16b
+                mov             v21.16b, v27.16b
+1:
+                cmp             w5,  #24-96
+                blt             1f
+                st3             {v16.8h, v17.8h, v18.8h}, [x0], #48
+                beq             11b
+                mov             v16.16b, v19.16b
+                mov             v17.16b, v20.16b
+                sub             w5,  w5,  #24
+                mov             v18.16b, v21.16b
+1:
+                cmp             w5,  #12-96
+                blt             1f
+                st3             {v16.4h, v17.4h, v18.4h}, [x0], #24
+                beq             11b
+                mov             v16.2d[0], v16.2d[1]
+                sub             w5,  w5,  #12
+                mov             v17.2d[0], v17.2d[1]
+                mov             v18.2d[0], v18.2d[1]
+1:
+                cmp             w5,  #6-96
+                blt             1f
+                st3             {v16.h, v17.h, v18.h}[0], [x0], #6
+                st3             {v16.h, v17.h, v18.h}[1], [x0], #6
+                beq             11b
+                mov             v16.2s[0], v16.2s[1]
+                sub             w5,  w5,  #6
+                mov             v17.2s[0], v17.2s[1]
+                mov             v18.2s[0], v18.2s[1]
+1:
+                cmp             w5,  #3-96
+                blt             1f
+                st3             {v16.h, v17.h, v18.h}[0], [x0], #6
+                beq             11b
+                mov             v16.4h[0], v16.4h[1]
+                sub             w5,  w5,  #3
+                mov             v17.4h[0], v17.4h[1]
+1:
+                cmp             w5,  #2-96
+                blt             1f
+                st2             {v16.h, v17.h}[0], [x0], #4
+                b               11b
+1:
+                st1             {v16.h}[0], [x0], #2
+                b               11b
+
+endfunc
+
+// void ff_rpi_sand30_lines_to_planar_y8(
+//   uint8_t * dest,            : x0
+//   unsigned int dst_stride,   : w1
+//   const uint8_t * src,       : x2
+//   unsigned int src_stride1,  : w3, always 128
+//   unsigned int src_stride2,  : w4
+//   unsigned int _x,           : w5
+//   unsigned int y,            : w6
+//   unsigned int _w,           : w7
+//   unsigned int h);           : [sp, #0]
+//
+// Assumes that we are starting on a stripe boundary and that overreading
+// within the stripe is OK. However it does respect the dest size for wri
+
+function ff_rpi_sand30_lines_to_planar_y8, export=1
+                lsl             w4,  w4,  #7
+                sub             w4,  w4,  #64
+                sub             w1,  w1,  w7
+                uxtw            x6,  w6
+                add             x8,  x2,  x6, lsl #7
+                ldr             w6,  [sp, #0]
+
+10:
+                mov             x2,  x8
+                mov             w5,  w7
+1:
+                ld1             {v0.4s, v1.4s, v2.4s, v3.4s}, [x2], #64
+                ld1             {v4.4s, v5.4s, v6.4s, v7.4s}, [x2], x4
+
+                subs            w5,  w5,  #96
+
+                // v0, v1
+
+                shrn            v18.4h,  v0.4s,   #16
+                xtn             v16.4h,  v0.4s
+                shrn            v17.4h,  v0.4s,   #12
+
+                shrn2           v18.8h,  v1.4s,   #16
+                xtn2            v16.8h,  v1.4s
+                shrn2           v17.8h,  v1.4s,   #12
+
+                shrn            v18.8b,  v18.8h,  #6
+                shrn            v16.8b,  v16.8h,  #2
+                xtn             v17.8b,  v17.8h
+
+                // v2, v3
+
+                shrn            v21.4h,  v2.4s,   #16
+                xtn             v19.4h,  v2.4s
+                shrn            v20.4h,  v2.4s,   #12
+
+                shrn2           v21.8h,  v3.4s,   #16
+                xtn2            v19.8h,  v3.4s
+                shrn2           v20.8h,  v3.4s,   #12
+
+                shrn2           v18.16b, v21.8h,  #6
+                shrn2           v16.16b, v19.8h,  #2
+                xtn2            v17.16b, v20.8h
+
+                // v4, v5
+
+                shrn            v24.4h,  v4.4s,   #16
+                xtn             v22.4h,  v4.4s
+                shrn            v23.4h,  v4.4s,   #12
+
+                shrn2           v24.8h,  v5.4s,   #16
+                xtn2            v22.8h,  v5.4s
+                shrn2           v23.8h,  v5.4s,   #12
+
+                shrn            v21.8b,  v24.8h,  #6
+                shrn            v19.8b,  v22.8h,  #2
+                xtn             v20.8b,  v23.8h
+
+                // v6, v7
+
+                shrn            v27.4h,  v6.4s,   #16
+                xtn             v25.4h,  v6.4s
+                shrn            v26.4h,  v6.4s,   #12
+
+                shrn2           v27.8h,  v7.4s,   #16
+                xtn2            v25.8h,  v7.4s
+                shrn2           v26.8h,  v7.4s,   #12
+
+                shrn2           v21.16b, v27.8h,  #6
+                shrn2           v19.16b, v25.8h,  #2
+                xtn2            v20.16b, v26.8h
+
+                blt             2f
+
+                st3             {v16.16b, v17.16b, v18.16b}, [x0], #48
+                st3             {v19.16b, v20.16b, v21.16b}, [x0], #48
+
+                bne             1b
+
+11:
+                subs            w6,  w6,  #1
+                add             x0,  x0,  w1,  uxtw
+                add             x8,  x8,  #128
+                bne             10b
+
+                ret
+
+// Partial final write
+2:
+                cmp             w5,  #48-96
+                blt             1f
+                st3             {v16.16b, v17.16b, v18.16b}, [x0], #48
+                beq             11b
+                mov             v16.16b, v22.16b
+                mov             v17.16b, v23.16b
+                sub             w5,  w5,  #48
+                mov             v18.16b, v24.16b
+1:
+                cmp             w5,  #24-96
+                blt             1f
+                st3             {v16.8b, v17.8b, v18.8b}, [x0], #24
+                beq             11b
+                mov             v16.2d[0], v16.2d[1]
+                sub             w5,  w5,  #24
+                mov             v17.2d[0], v17.2d[1]
+                mov             v18.2d[0], v18.2d[1]
+1:
+                cmp             w5,  #12-96
+                blt             1f
+                st3             {v16.b, v17.b, v18.b}[0], [x0], #3
+                st3             {v16.b, v17.b, v18.b}[1], [x0], #3
+                st3             {v16.b, v17.b, v18.b}[2], [x0], #3
+                st3             {v16.b, v17.b, v18.b}[3], [x0], #3
+                beq             11b
+                mov             v16.2s[0], v16.2s[1]
+                sub             w5,  w5,  #12
+                mov             v17.2s[0], v17.2s[1]
+                mov             v18.2s[0], v18.2s[1]
+1:
+                cmp             w5,  #6-96
+                blt             1f
+                st3             {v16.b, v17.b, v18.b}[0], [x0], #3
+                st3             {v16.b, v17.b, v18.b}[1], [x0], #3
+                beq             11b
+                mov             v16.4h[0], v16.4h[1]
+                sub             w5,  w5,  #6
+                mov             v17.4h[0], v17.4h[1]
+                mov             v18.4h[0], v18.4h[1]
+1:
+                cmp             w5,  #3-96
+                blt             1f
+                st3             {v16.b, v17.b, v18.b}[0], [x0], #3
+                beq             11b
+                mov             v16.8b[0], v16.8b[1]
+                sub             w5,  w5,  #3
+                mov             v17.8b[0], v17.8b[1]
+1:
+                cmp             w5,  #2-96
+                blt             1f
+                st2             {v16.b, v17.b}[0], [x0], #2
+                b               11b
+1:
+                st1             {v16.b}[0], [x0], #1
+                b               11b
+
+endfunc
 
