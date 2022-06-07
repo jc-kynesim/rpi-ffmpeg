@@ -103,6 +103,9 @@ typedef struct V4L2m2mContext {
     /* generate DRM frames */
     int output_drm;
 
+    /* input frames are drmprime */
+    int input_drm;
+
     /* Frame tracking */
     xlat_track_t xlat;
     int pending_hw;
