@@ -360,7 +360,6 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
                 ldr             r6,  [sp, #36]
                 ldr             r7,  [sp, #32]  @ y
                 mov             r12, #48
-                vmov.u16        q15, #0x3ff
                 sub             r3,  #1
                 lsl             r3,  #7
                 sub             r1,  r1,  r6,  lsl #1
@@ -376,37 +375,33 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
                 vldm            r2!, {q10-q13}
                 add             lr,  #64
 
-                vshr.u32        q14, q10, #20    @ Cannot vshrn.u32 #20!
+                vshrn.u32       d4 , q10, #14    @ Cannot vshrn.u32 #20!
                 ands            lr,  #127
                 vshrn.u32       d2,  q10, #10
                 vmovn.u32       d0,  q10
-                vmovn.u32       d4,  q14
 
-                vshr.u32        q14, q11, #20
+                vshrn.u32       d5,  q11, #14
                 it              eq
                 addeq           r2,  r3
                 vshrn.u32       d3,  q11, #10
                 vmovn.u32       d1,  q11
-                vmovn.u32       d5,  q14
 
                 subs            r5,  #48
-                vand            q0,  q15
-                vand            q1,  q15
-                vand            q2,  q15
+                vshr.u16        q2,  #6
+                vbic.u16        q0,  #0xfc00
+                vbic.u16        q1,  #0xfc00
 
-                vshr.u32        q14, q12, #20
+                vshrn.u32       d20, q12, #14
                 vshrn.u32       d18, q12, #10
                 vmovn.u32       d16, q12
-                vmovn.u32       d20, q14
 
-                vshr.u32        q14, q13, #20
+                vshrn.u32       d21, q13, #14
                 vshrn.u32       d19, q13, #10
                 vmovn.u32       d17, q13
-                vmovn.u32       d21, q14
 
-                vand            q8,  q15
-                vand            q9,  q15
-                vand            q10, q15
+                vshr.u16        q10, #6
+                vbic.u16        q8,  #0xfc00
+                vbic.u16        q9 , #0xfc00
                 blt             2f
 
                 vst3.16         {d0,  d2,  d4},  [r0], r12
@@ -499,7 +494,6 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 ldr             r7,  [sp, #48]
                 ldr             r9,  [sp, #52]
                 mov             r12, #48
-                vmov.u16        q15, #0x3ff
                 sub             r8,  #1
                 lsl             r8,  #7
                 add             r5,  r5,  r7,  lsl #7
@@ -515,48 +509,44 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 add             lr,  #64
 
                 @ N.B. unpack [0,1,2] -> (reg order) 1, 0, 2
-                vshr.u32        q14, q0,  #20
-                vshrn.u32       d16, q0,  #10
+                vshrn.u32       d20, q0,  #14
                 vmovn.u32       d18, q0
+                vshrn.u32       d0,  q0,  #10
                 ands            lr,  #127
-                vmovn.u32       d20, q14
 
-                vshr.u32        q14, q1,  #20
-                vshrn.u32       d17, q1,  #10
+                vshrn.u32       d21, q1,  #14
                 vmovn.u32       d19, q1
-                vmovn.u32       d21, q14
+                vshrn.u32       d1,  q1,  #10
 
-                vshr.u32        q14, q2,  #20
                 vshrn.u32       d22, q2,  #10
-                vmovn.u32       d24, q2
-                vmovn.u32       d26, q14
+                vmovn.u32       d2,  q2
+                vshrn.u32       d4,  q2,  #14
 
-                vshr.u32        q14, q3,  #20
-                vshrn.u32       d23, q3,  #10
-                vmovn.u32       d25, q3
                 add             r10, r0,  #24
-                vmovn.u32       d27, q14
+                vshrn.u32       d23, q3,  #10
+                vmovn.u32       d3,  q3
+                vshrn.u32       d5,  q3,  #14
 
                 it              eq
                 addeq           r4,  r8
-                vuzp.16         q8,  q11
-                vuzp.16         q9,  q12
-                vuzp.16         q10, q13
+                vuzp.16         q0,  q11
+                vuzp.16         q9,  q1
+                vuzp.16         q10, q2
 
-                @ q8   V0, V3,.. -> q0
+                @ q0   V0, V3,..
                 @ q9   U0, U3...
                 @ q10  U1, U4...
                 @ q11  U2, U5,..
-                @ q12  V1, V4,.. -> q1
-                @ q13  V2, V5,.. -> q2
+                @ q1   V1, V4,
+                @ q2   V2, V5,..
 
                 subs            r6,  #24
-                vand            q11, q15
-                vand            q9,  q15
-                vand            q10, q15
-                vand            q0,  q8,  q15
-                vand            q1,  q12, q15
-                vand            q2,  q13, q15
+                vbic.u16        q11, #0xfc00
+                vbic.u16        q9,  #0xfc00
+                vshr.u16        q10, #6
+                vshr.u16        q2,  #6
+                vbic.u16        q0,  #0xfc00
+                vbic.u16        q1,  #0xfc00
 
                 blt             2f
 
