@@ -24,6 +24,8 @@
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 #include <search.h>
+#include <drm_fourcc.h>
+
 #include "encode.h"
 #include "libavcodec/avcodec.h"
 #include "libavutil/pixdesc.h"
@@ -37,6 +39,34 @@
 
 #define MPEG_CID(x) V4L2_CID_MPEG_VIDEO_##x
 #define MPEG_VIDEO(x) V4L2_MPEG_VIDEO_##x
+
+// P030 should be defined in drm_fourcc.h and hopefully will be sometime
+// in the future but until then...
+#ifndef DRM_FORMAT_P030
+#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
+#endif
+
+#ifndef DRM_FORMAT_NV15
+#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
+#endif
+
+#ifndef DRM_FORMAT_NV20
+#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
+#endif
+
+#ifndef V4L2_CID_CODEC_BASE
+#define V4L2_CID_CODEC_BASE V4L2_CID_MPEG_BASE
+#endif
+
+// V4L2_PIX_FMT_NV12_10_COL128 and V4L2_PIX_FMT_NV12_COL128 should be defined
+// in videodev2.h hopefully will be sometime in the future but until then...
+#ifndef V4L2_PIX_FMT_NV12_10_COL128
+#define V4L2_PIX_FMT_NV12_10_COL128 v4l2_fourcc('N', 'C', '3', '0')
+#endif
+
+#ifndef V4L2_PIX_FMT_NV12_COL128
+#define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+#endif
 
 static inline void v4l2_set_timeperframe(V4L2m2mContext *s, unsigned int num, unsigned int den)
 {
@@ -148,15 +178,14 @@ static inline int v4l2_mpeg4_profile_from_ff(int p)
 static int v4l2_check_b_frame_support(V4L2m2mContext *s)
 {
     if (s->avctx->max_b_frames)
-        av_log(s->avctx, AV_LOG_WARNING, "Encoder does not support b-frames yet\n");
+        av_log(s->avctx, AV_LOG_WARNING, "Encoder does not support %d b-frames yet\n", s->avctx->max_b_frames);
 
-    v4l2_set_ext_ctrl(s, MPEG_CID(B_FRAMES), 0, "number of B-frames", 0);
+    v4l2_set_ext_ctrl(s, MPEG_CID(B_FRAMES), s->avctx->max_b_frames, "number of B-frames", 1);
     v4l2_get_ext_ctrl(s, MPEG_CID(B_FRAMES), &s->avctx->max_b_frames, "number of B-frames", 0);
     if (s->avctx->max_b_frames == 0)
         return 0;
 
     avpriv_report_missing_feature(s->avctx, "DTS/PTS calculation for V4L2 encoding");
-
     return AVERROR_PATCHWELCOME;
 }
 
@@ -271,13 +300,184 @@ static int v4l2_prepare_encoder(V4L2m2mContext *s)
     return 0;
 }
 
+static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * const frame)
+{
+    const AVDRMFrameDescriptor *const src = (const AVDRMFrameDescriptor *)frame->data[0];
+
+    const uint32_t drm_fmt = src->layers[0].format;
+    // Treat INVALID as LINEAR
+    const uint64_t mod = src->objects[0].format_modifier == DRM_FORMAT_MOD_INVALID ?
+        DRM_FORMAT_MOD_LINEAR : src->objects[0].format_modifier;
+    uint32_t pix_fmt = 0;
+    uint32_t w = 0;
+    uint32_t h = 0;
+    uint32_t bpl = src->layers[0].planes[0].pitch;
+
+    // We really don't expect multiple layers
+    // All formats that we currently cope with are single object
+
+    if (src->nb_layers != 1 || src->nb_objects != 1)
+        return AVERROR(EINVAL);
+
+    switch (drm_fmt) {
+        case DRM_FORMAT_YUV420:
+            if (mod == DRM_FORMAT_MOD_LINEAR) {
+                if (src->layers[0].nb_planes != 3)
+                    break;
+                pix_fmt = V4L2_PIX_FMT_YUV420;
+                h = src->layers[0].planes[1].offset / bpl;
+                w = bpl;
+            }
+            break;
+
+        case DRM_FORMAT_NV12:
+            if (mod == DRM_FORMAT_MOD_LINEAR) {
+                if (src->layers[0].nb_planes != 2)
+                    break;
+                pix_fmt = V4L2_PIX_FMT_NV12;
+                h = src->layers[0].planes[1].offset / bpl;
+                w = bpl;
+            }
+            else if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
+                if (src->layers[0].nb_planes != 2)
+                    break;
+                pix_fmt = V4L2_PIX_FMT_NV12_COL128;
+                w = bpl;
+                h = src->layers[0].planes[1].offset / 128;
+                bpl = fourcc_mod_broadcom_param(mod);
+            }
+            break;
+
+        case DRM_FORMAT_P030:
+            if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
+                if (src->layers[0].nb_planes != 2)
+                    break;
+                pix_fmt =  V4L2_PIX_FMT_NV12_10_COL128;
+                w = bpl / 2;  // Matching lie to how we construct this
+                h = src->layers[0].planes[1].offset / 128;
+                bpl = fourcc_mod_broadcom_param(mod);
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    if (!pix_fmt)
+        return AVERROR(EINVAL);
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
+        struct v4l2_pix_format_mplane *const pix = &format->fmt.pix_mp;
+
+        pix->width = w;
+        pix->height = h;
+        pix->pixelformat = pix_fmt;
+        pix->plane_fmt[0].bytesperline = bpl;
+        pix->num_planes = 1;
+    }
+    else {
+        struct v4l2_pix_format *const pix = &format->fmt.pix;
+
+        pix->width = w;
+        pix->height = h;
+        pix->pixelformat = pix_fmt;
+        pix->bytesperline = bpl;
+    }
+
+    return 0;
+}
+
+// Do we have similar enough formats to be usable?
+static int fmt_eq(const struct v4l2_format * const a, const struct v4l2_format * const b)
+{
+    if (a->type != b->type)
+        return 0;
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(a->type)) {
+        const struct v4l2_pix_format_mplane *const pa = &a->fmt.pix_mp;
+        const struct v4l2_pix_format_mplane *const pb = &b->fmt.pix_mp;
+        unsigned int i;
+        if (pa->pixelformat != pb->pixelformat ||
+            pa->num_planes != pb->num_planes)
+            return 0;
+        for (i = 0; i != pa->num_planes; ++i) {
+            if (pa->plane_fmt[i].bytesperline != pb->plane_fmt[i].bytesperline)
+                return 0;
+        }
+    }
+    else {
+        const struct v4l2_pix_format *const pa = &a->fmt.pix;
+        const struct v4l2_pix_format *const pb = &b->fmt.pix;
+        if (pa->pixelformat != pb->pixelformat ||
+            pa->bytesperline != pb->bytesperline)
+            return 0;
+    }
+    return 1;
+}
+
+
 static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
 
+    // Signal EOF if needed
+    if (!frame) {
+        return ff_v4l2_context_enqueue_frame(output, frame);
+    }
+
+    if (s->input_drm && !output->streamon) {
+        int rv;
+        struct v4l2_format req_format = {.type = output->format.type};
+
+        // Set format when we first get a buffer
+        if ((rv = avdrm_to_v4l2(&req_format, frame)) != 0) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to get V4L2 format from DRM_PRIME frame\n");
+            return rv;
+        }
+
+        ff_v4l2_context_release(output);
+
+        output->format = req_format;
+
+        if ((rv = ff_v4l2_context_set_format(output)) != 0) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to set V4L2 format\n");
+            return rv;
+        }
+
+        if (!fmt_eq(&req_format, &output->format)) {
+            av_log(avctx, AV_LOG_ERROR, "Format mismatch after setup\n");
+            return AVERROR(EINVAL);
+        }
+
+        output->selection.top = frame->crop_top;
+        output->selection.left = frame->crop_left;
+        output->selection.width = av_frame_cropped_width(frame);
+        output->selection.height = av_frame_cropped_height(frame);
+
+        if ((rv = ff_v4l2_context_init(output)) != 0) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to (re)init context\n");
+            return rv;
+        }
+
+        {
+            struct v4l2_selection selection = {
+                .type = V4L2_BUF_TYPE_VIDEO_OUTPUT,
+                .target = V4L2_SEL_TGT_CROP,
+                .r = output->selection
+            };
+            if (ioctl(s->fd, VIDIOC_S_SELECTION, &selection) != 0) {
+                av_log(avctx, AV_LOG_WARNING, "S_SELECTION (CROP) %dx%d @ %d,%d failed: %s\n",
+                       selection.r.width, selection.r.height, selection.r.left, selection.r.top,
+                       av_err2str(AVERROR(errno)));
+            }
+            av_log(avctx, AV_LOG_TRACE, "S_SELECTION (CROP) %dx%d @ %d,%d OK\n",
+                   selection.r.width, selection.r.height, selection.r.left, selection.r.top);
+        }
+    }
+
 #ifdef V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME
-    if (frame && frame->pict_type == AV_PICTURE_TYPE_I)
+    if (frame->pict_type == AV_PICTURE_TYPE_I)
         v4l2_set_ext_ctrl(s, MPEG_CID(FORCE_KEY_FRAME), 0, "force key frame", 1);
 #endif
 
@@ -328,7 +528,70 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     }
 
 dequeue:
-    return ff_v4l2_context_dequeue_packet(capture, avpkt);
+    if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
+        return ret;
+
+    if (capture->first_buf == 1) {
+        uint8_t * data;
+        const int len = avpkt->size;
+
+        // 1st buffer after streamon should be SPS/PPS
+        capture->first_buf = 2;
+
+        // Clear both possible stores so there is no chance of confusion
+        av_freep(&s->extdata_data);
+        s->extdata_size = 0;
+        av_freep(&avctx->extradata);
+        avctx->extradata_size = 0;
+
+        if ((data = av_malloc(len + AV_INPUT_BUFFER_PADDING_SIZE)) != NULL)
+            memcpy(data, avpkt->data, len);
+
+        av_packet_unref(avpkt);
+
+        if (data == NULL)
+            return AVERROR(ENOMEM);
+
+        // We need to copy the header, but keep local if not global
+        if ((avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) != 0) {
+            avctx->extradata = data;
+            avctx->extradata_size = len;
+        }
+        else {
+            s->extdata_data = data;
+            s->extdata_size = len;
+        }
+
+        if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
+            return ret;
+    }
+
+    // First frame must be key so mark as such even if encoder forgot
+    if (capture->first_buf == 2)
+        avpkt->flags |= AV_PKT_FLAG_KEY;
+
+    // Add SPS/PPS to the start of every key frame if non-global headers
+    if ((avpkt->flags & AV_PKT_FLAG_KEY) != 0 && s->extdata_size != 0) {
+        const size_t newlen = s->extdata_size + avpkt->size;
+        AVBufferRef * const buf = av_buffer_alloc(newlen + AV_INPUT_BUFFER_PADDING_SIZE);
+
+        if (buf == NULL) {
+            av_packet_unref(avpkt);
+            return AVERROR(ENOMEM);
+        }
+
+        memcpy(buf->data, s->extdata_data, s->extdata_size);
+        memcpy(buf->data + s->extdata_size, avpkt->data, avpkt->size);
+
+        av_buffer_unref(&avpkt->buf);
+        avpkt->buf = buf;
+        avpkt->data = buf->data;
+        avpkt->size = newlen;
+    }
+
+//    av_log(avctx, AV_LOG_INFO, "%s: PTS out=%"PRId64", size=%d, ret=%d\n", __func__, avpkt->pts, avpkt->size, ret);
+    capture->first_buf = 0;
+    return 0;
 }
 
 static av_cold int v4l2_encode_init(AVCodecContext *avctx)
@@ -340,6 +603,8 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
     uint32_t v4l2_fmt_output;
     int ret;
 
+    av_log(avctx, AV_LOG_INFO, " <<< %s: fmt=%d/%d\n", __func__, avctx->pix_fmt, avctx->sw_pix_fmt);
+
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
@@ -347,13 +612,17 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
     capture = &s->capture;
     output  = &s->output;
 
+    s->input_drm = (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME);
+
     /* common settings output/capture */
     output->height = capture->height = avctx->height;
     output->width = capture->width = avctx->width;
 
     /* output context */
     output->av_codec_id = AV_CODEC_ID_RAWVIDEO;
-    output->av_pix_fmt = avctx->pix_fmt;
+    output->av_pix_fmt = !s->input_drm ? avctx->pix_fmt :
+            avctx->sw_pix_fmt != AV_PIX_FMT_NONE ? avctx->sw_pix_fmt :
+            AV_PIX_FMT_YUV420P;
 
     /* capture context */
     capture->av_codec_id = avctx->codec_id;
@@ -372,7 +641,7 @@ static av_cold int v4l2_encode_init(AVCodecContext *avctx)
         v4l2_fmt_output = output->format.fmt.pix.pixelformat;
 
     pix_fmt_output = ff_v4l2_format_v4l2_to_avfmt(v4l2_fmt_output, AV_CODEC_ID_RAWVIDEO);
-    if (pix_fmt_output != avctx->pix_fmt) {
+    if (!s->input_drm && pix_fmt_output != avctx->pix_fmt) {
         const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt_output);
         av_log(avctx, AV_LOG_ERROR, "Encoder requires %s pixel format.\n", desc->name);
         return AVERROR(EINVAL);
