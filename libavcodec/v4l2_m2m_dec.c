@@ -169,96 +169,17 @@ static int v4l2_prepare_decoder(V4L2m2mContext *s)
     return 0;
 }
 
-static inline int64_t track_to_pts(AVCodecContext *avctx, unsigned int n)
-{
-    return (int64_t)n;
-}
-
-static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts)
-{
-    return (unsigned int)pts;
-}
-
-// FFmpeg requires us to propagate a number of vars from the coded pkt into
-// the decoded frame. The only thing that tracks like that in V4L2 stateful
-// is timestamp. PTS maps to timestamp for this decode. FFmpeg makes no
-// guarantees about PTS being unique or specified for every frame so replace
-// the supplied PTS with a simple incrementing number and keep a circular
-// buffer of all the things we want preserved (including the original PTS)
-// indexed by the tracking no.
 static void
-xlat_pts_in(AVCodecContext *const avctx, xlat_track_t *const x, AVPacket *const avpkt)
-{
-    int64_t track_pts;
-
-    // Avoid 0
-    if (++x->track_no == 0)
-        x->track_no = 1;
-
-    track_pts = track_to_pts(avctx, x->track_no);
-
-    av_log(avctx, AV_LOG_TRACE, "In PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt->pts, avpkt->dts, track_pts, x->track_no);
-    x->last_pkt_dts = avpkt->dts;
-    x->track_els[x->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
-        .discard          = 0,
-        .pending          = 1,
-        .pkt_size         = avpkt->size,
-        .pts              = avpkt->pts,
-        .dts              = avpkt->dts,
-        .reordered_opaque = avctx->reordered_opaque,
-        .pkt_pos          = avpkt->pos,
-        .pkt_duration     = avpkt->duration,
-        .track_pts        = track_pts
-    };
-    avpkt->pts = track_pts;
-}
-
-// Returns -1 if we should discard the frame
-static int
-xlat_pts_out(AVCodecContext *const avctx,
-             xlat_track_t * const x,
+set_best_effort_pts(AVCodecContext *const avctx,
              pts_stats_t * const ps,
              AVFrame *const frame)
 {
-    unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
-    V4L2m2mTrackEl *const t = x->track_els + n;
-    if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
-    {
-        av_log(avctx, AV_LOG_INFO, "Tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
-        frame->pts              = AV_NOPTS_VALUE;
-        frame->pkt_dts          = x->last_pkt_dts;
-        frame->reordered_opaque = x->last_opaque;
-        frame->pkt_pos          = -1;
-        frame->pkt_duration     = 0;
-        frame->pkt_size         = -1;
-    }
-    else if (!t->discard)
-    {
-        frame->pts              = t->pending ? t->pts : AV_NOPTS_VALUE;
-        frame->pkt_dts          = x->last_pkt_dts;
-        frame->reordered_opaque = t->reordered_opaque;
-        frame->pkt_pos          = t->pkt_pos;
-        frame->pkt_duration     = t->pkt_duration;
-        frame->pkt_size         = t->pkt_size;
-
-        x->last_opaque = x->track_els[n].reordered_opaque;
-        if (frame->pts != AV_NOPTS_VALUE)
-            x->last_pts = frame->pts;
-        t->pending = 0;
-    }
-    else
-    {
-        av_log(avctx, AV_LOG_DEBUG, "Discard frame (flushed): pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
-        return -1;
-    }
-
     pts_stats_add(ps, frame->pts);
 
     frame->best_effort_timestamp = pts_stats_guess(ps);
     frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
-    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 "/%"PRId64", DTS=%" PRId64 ", track=%"PRId64", n=%d\n",
-           frame->pts, frame->best_effort_timestamp, frame->pkt_dts, t->track_pts, n);
-    return 0;
+    av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 "/%"PRId64", DTS=%" PRId64 "\n",
+           frame->pts, frame->best_effort_timestamp, frame->pkt_dts);
 }
 
 static void
@@ -269,13 +190,6 @@ xlat_flush(xlat_track_t * const x)
         x->track_els[i].pending = 0;
         x->track_els[i].discard = 1;
     }
-    x->last_pts = AV_NOPTS_VALUE;
-}
-
-static void
-xlat_init(xlat_track_t * const x)
-{
-    memset(x, 0, sizeof(*x));
     x->last_pts = AV_NOPTS_VALUE;
 }
 
@@ -419,8 +333,6 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
             av_log(avctx, AV_LOG_ERROR, "Failed to get coded packet: err=%d\n", ret);
             return ret;
         }
-
-        xlat_pts_in(avctx, &s->xlat, &s->buf_pkt);
     }
 
     if (s->draining) {
@@ -542,49 +454,47 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 prefer_dq ? 5 :
                 src_rv == NQ_Q_FULL ? -1 : 0;
 
-            do {
-                // Dequeue frame will unref any previous contents of frame
-                // if it returns success so we don't need an explicit unref
-                // when discarding
-                // This returns AVERROR(EAGAIN) on timeout or if
-                // there is room in the input Q and timeout == -1
-                dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
+            // Dequeue frame will unref any previous contents of frame
+            // if it returns success so we don't need an explicit unref
+            // when discarding
+            // This returns AVERROR(EAGAIN) on timeout or if
+            // there is room in the input Q and timeout == -1
+            dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
 
-                // Failure due to no buffer in Q?
-                if (dst_rv == AVERROR(ENOSPC)) {
-                    // Wait & retry
-                    if ((dst_rv = qbuf_wait(avctx, &s->capture)) == 0) {
-                        dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
-                    }
+            // Failure due to no buffer in Q?
+            if (dst_rv == AVERROR(ENOSPC)) {
+                // Wait & retry
+                if ((dst_rv = qbuf_wait(avctx, &s->capture)) == 0) {
+                    dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
                 }
+            }
 
-                // Adjust dynamic pending threshold
-                if (dst_rv == 0) {
-                    if (--s->pending_hw < PENDING_HW_MIN)
-                        s->pending_hw = PENDING_HW_MIN;
+            // Adjust dynamic pending threshold
+            if (dst_rv == 0) {
+                if (--s->pending_hw < PENDING_HW_MIN)
+                    s->pending_hw = PENDING_HW_MIN;
+                s->pending_n = 0;
+
+                set_best_effort_pts(avctx, &s->pts_stat, frame);
+            }
+            else if (dst_rv == AVERROR(EAGAIN)) {
+                if (prefer_dq && ++s->pending_n > PENDING_N_THRESHOLD) {
+                    s->pending_hw = pending * 16 + PENDING_HW_OFFSET;
                     s->pending_n = 0;
                 }
-                else if (dst_rv == AVERROR(EAGAIN)) {
-                    if (prefer_dq && ++s->pending_n > PENDING_N_THRESHOLD) {
-                        s->pending_hw = pending * 16 + PENDING_HW_OFFSET;
-                        s->pending_n = 0;
-                    }
-                }
+            }
 
-                if (dst_rv == AVERROR(EAGAIN) && src_rv == NQ_DRAINING) {
-                    av_log(avctx, AV_LOG_WARNING, "Timeout in drain - assume EOF");
-                    dst_rv = AVERROR_EOF;
-                    s->capture.done = 1;
-                }
-                else if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
-                    av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",
-                           s->draining, s->capture.done);
-                else if (dst_rv && dst_rv != AVERROR(EAGAIN))
-                    av_log(avctx, AV_LOG_ERROR, "Packet dequeue failure: draining=%d, cap.done=%d, err=%d\n",
-                           s->draining, s->capture.done, dst_rv);
-
-                // Go again if we got a frame that we need to discard
-            } while (dst_rv == 0 && xlat_pts_out(avctx, &s->xlat, &s->pts_stat, frame));
+            if (dst_rv == AVERROR(EAGAIN) && src_rv == NQ_DRAINING) {
+                av_log(avctx, AV_LOG_WARNING, "Timeout in drain - assume EOF");
+                dst_rv = AVERROR_EOF;
+                s->capture.done = 1;
+            }
+            else if (dst_rv == AVERROR_EOF && (s->draining || s->capture.done))
+                av_log(avctx, AV_LOG_DEBUG, "Dequeue EOF: draining=%d, cap.done=%d\n",
+                       s->draining, s->capture.done);
+            else if (dst_rv && dst_rv != AVERROR(EAGAIN))
+                av_log(avctx, AV_LOG_ERROR, "Packet dequeue failure: draining=%d, cap.done=%d, err=%d\n",
+                       s->draining, s->capture.done, dst_rv);
         }
 
         ++i;
@@ -791,7 +701,6 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     if (ret < 0)
         return ret;
 
-    xlat_init(&s->xlat);
     pts_stats_init(&s->pts_stat, avctx, "decoder");
     s->pending_hw = PENDING_HW_MIN;
 
@@ -810,12 +719,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     output->av_codec_id = avctx->codec_id;
     output->av_pix_fmt  = AV_PIX_FMT_NONE;
     output->min_buf_size = max_coded_size(avctx);
-    output->no_pts_rescale = 1;
 
     capture->av_codec_id = AV_CODEC_ID_RAWVIDEO;
     capture->av_pix_fmt = avctx->pix_fmt;
     capture->min_buf_size = 0;
-    capture->no_pts_rescale = 1;
 
     /* the client requests the codec to generate DRM frames:
      *   - data[0] will therefore point to the returned AVDRMFrameDescriptor
