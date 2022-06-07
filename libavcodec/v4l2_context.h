@@ -92,9 +92,17 @@ typedef struct V4L2Context {
     int num_buffers;
 
     /**
+     * Buffer memory type V4L2_MEMORY_MMAP or V4L2_MEMORY_DMABUF
+     */
+    enum v4l2_memory buf_mem;
+
+    /**
      * Whether the stream has been started (VIDIOC_STREAMON has been sent).
      */
     int streamon;
+
+    /* 1st buffer after stream on */
+    int first_buf;
 
     /**
      *  Either no more buffers available or an unrecoverable error was notified
@@ -105,11 +113,10 @@ typedef struct V4L2Context {
     int flag_last;
 
     /**
-     * PTS rescale not wanted
-     * If the PTS is just a dummy frame count then rescale is
-     * actively harmful
+     * If NZ then when Qing frame/pkt use this rather than the
+     * "real" PTS
      */
-    int no_pts_rescale;
+    uint64_t track_ts;
 
     AVBufferRef *frames_ref;
     atomic_int q_count;
