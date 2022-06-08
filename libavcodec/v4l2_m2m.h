@@ -67,7 +67,6 @@ typedef struct pts_stats_s
 typedef struct xlat_track_s {
     unsigned int track_no;
     int64_t last_pts;
-    int64_t last_pkt_dts;
     int64_t last_opaque;
     V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
 } xlat_track_t;
