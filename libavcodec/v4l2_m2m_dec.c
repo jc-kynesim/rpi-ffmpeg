@@ -177,7 +177,13 @@ set_best_effort_pts(AVCodecContext *const avctx,
     pts_stats_add(ps, frame->pts);
 
     frame->best_effort_timestamp = pts_stats_guess(ps);
-    frame->pkt_dts               = frame->pts;  // We can't emulate what s/w does in a useful manner?
+    // If we can't guess from just PTS - try DTS
+    if (frame->best_effort_timestamp == AV_NOPTS_VALUE)
+        frame->best_effort_timestamp = frame->pkt_dts;
+
+    // We can't emulate what s/w does in a useful manner and using the
+    // "correct" answer seems to just confuse things.
+    frame->pkt_dts               = frame->pts;
     av_log(avctx, AV_LOG_TRACE, "Out PTS=%" PRId64 "/%"PRId64", DTS=%" PRId64 "\n",
            frame->pts, frame->best_effort_timestamp, frame->pkt_dts);
 }
