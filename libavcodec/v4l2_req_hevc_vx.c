@@ -15,8 +15,10 @@
 #elif HEVC_CTRLS_VERSION == 3
 #include "hevc-ctrls-v3.h"
 #elif HEVC_CTRLS_VERSION == 4
-// Include BEFORE there's any chance we try and get the system include
-#include "v4l2-controls-v4.h"
+#include <linux/v4l2-controls.h>
+#if !defined(V4L2_CID_STATELESS_HEVC_SPS)
+#include "hevc-ctrls-v4.h"
+#endif
 #else
 #error Unknown HEVC_CTRLS_VERSION
 #endif
