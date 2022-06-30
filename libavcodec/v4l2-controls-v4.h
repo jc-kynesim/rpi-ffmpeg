@@ -2044,18 +2044,18 @@ enum v4l2_stateless_hevc_start_code {
  *				in units of luma samples
  * @pic_height_in_luma_samples: specifies the height of each decoded picture
  *				in units of luma samples
- * @bit_depth_luma_minus8: specifies the bit depth of the samples of the
- *			   luma array
- * @bit_depth_chroma_minus8: specifies the bit depth of the samples of the
- *			     chroma arrays
- * @log2_max_pic_order_cnt_lsb_minus4: specifies the value of the variable
- *				       MaxPicOrderCntLsb
- * @sps_max_dec_pic_buffering_minus1: plus 1 specifies the maximum required
- *				      size of the decoded picture buffer for
- *				      the CVS
+ * @bit_depth_luma_minus8: this value plus 8specifies the bit depth of the
+ *                         samples of the luma array
+ * @bit_depth_chroma_minus8: this value plus 8 specifies the bit depth of the
+ *                           samples of the chroma arrays
+ * @log2_max_pic_order_cnt_lsb_minus4: this value plus 4 specifies the value of
+ *                                     the variable MaxPicOrderCntLsb
+ * @sps_max_dec_pic_buffering_minus1: this value plus 1 specifies the maximum
+ *                                    required size of the decoded picture
+ *                                    buffer for the codec video sequence
  * @sps_max_num_reorder_pics: indicates the maximum allowed number of pictures
  * @sps_max_latency_increase_plus1: not equal to 0 is used to compute the
- *				    value of SpsMaxLatencyPictures[i]
+ *				    value of SpsMaxLatencyPictures array
  * @log2_min_luma_coding_block_size_minus3: plus 3 specifies the minimum
  *					    luma coding block size
  * @log2_diff_max_min_luma_coding_block_size: specifies the difference between
@@ -2074,14 +2074,14 @@ enum v4l2_stateless_hevc_start_code {
  *					 depth for transform units of
  *					 coding units coded in intra
  *					 prediction mode
- * @pcm_sample_bit_depth_luma_minus1: specifies the number of bits used to
- *				      represent each of PCM sample values of the
- *				      luma component
- * @pcm_sample_bit_depth_chroma_minus1: specifies the number of bits used to
- *					represent each of PCM sample values of
- *					the chroma components
- * @log2_min_pcm_luma_coding_block_size_minus3: plus 3 specifies the minimum size
- *						of coding blocks
+ * @pcm_sample_bit_depth_luma_minus1: this value plus 1 specifies the number of
+ *                                    bits used to represent each of PCM sample
+ *                                    values of the luma component
+ * @pcm_sample_bit_depth_chroma_minus1: this value plus 1 specifies the number
+ *                                      of bits used to represent each of PCM
+ *                                      sample values of the chroma components
+ * @log2_min_pcm_luma_coding_block_size_minus3: this value plus 3 specifies the
+ *                                              minimum size of coding blocks
  * @log2_diff_max_min_pcm_luma_coding_block_size: specifies the difference between
  *						  the maximum and minimum size of
  *						  coding blocks
@@ -2090,8 +2090,9 @@ enum v4l2_stateless_hevc_start_code {
  * @num_long_term_ref_pics_sps: specifies the number of candidate long-term
  *				reference pictures that are specified in the SPS
  * @chroma_format_idc: specifies the chroma sampling
- * @sps_max_sub_layers_minus1: plus 1 specifies the maximum number of temporal
- *			       sub-layers
+ * @sps_max_sub_layers_minus1: this value plus 1 specifies the maximum number
+ *                             of temporal sub-layers
+ * @reserved: padding field. Should be zeroed by applications.
  * @flags: see V4L2_HEVC_SPS_FLAG_{}
  */
 struct v4l2_ctrl_hevc_sps {
@@ -2122,7 +2123,6 @@ struct v4l2_ctrl_hevc_sps {
 
 	__u8	reserved[6];
 	__u64	flags;
-	__u8	padding[24];
 };
 
 #define V4L2_HEVC_PPS_FLAG_DEPENDENT_SLICE_SEGMENT_ENABLED	(1ULL << 0)
@@ -2155,11 +2155,11 @@ struct v4l2_ctrl_hevc_sps {
  * @num_extra_slice_header_bits: specifies the number of extra slice header
  *				 bits that are present in the slice header RBSP
  *				 for coded pictures referring to the PPS.
- * @num_ref_idx_l0_default_active_minus1: specifies the inferred value of
- *					  num_ref_idx_l0_active_minus1
- * @num_ref_idx_l1_default_active_minus1: specifies the inferred value of
- *					  num_ref_idx_l1_active_minus1
- * @init_qp_minus26: plus 26 specifies the initial value of SliceQp Y for
+ * @num_ref_idx_l0_default_active_minus1: this value plus 1 specifies the
+ *                                        inferred value of num_ref_idx_l0_active_minus1
+ * @num_ref_idx_l1_default_active_minus1: this value plus 1 specifies the
+ *                                        inferred value of num_ref_idx_l1_active_minus1
+ * @init_qp_minus26: this value plus 26 specifies the initial value of SliceQp Y for
  *		     each slice referring to the PPS
  * @diff_cu_qp_delta_depth: specifies the difference between the luma coding
  *			    tree block size and the minimum luma coding block
@@ -2167,20 +2167,21 @@ struct v4l2_ctrl_hevc_sps {
  *			    and cu_qp_delta_sign_flag
  * @pps_cb_qp_offset: specify the offsets to the luma quantization parameter Cb
  * @pps_cr_qp_offset: specify the offsets to the luma quantization parameter Cr
- * @num_tile_columns_minus1: plus 1 specifies the number of tile columns
+ * @num_tile_columns_minus1: this value plus 1 specifies the number of tile columns
  *			     partitioning the picture
- * @num_tile_rows_minus1: plus 1 specifies the number of tile rows partitioning
+ * @num_tile_rows_minus1: this value plus 1 specifies the number of tile rows partitioning
  *			  the picture
- * @column_width_minus1: plus 1 specifies the width of the i-th tile column in
+ * @column_width_minus1: this value plus 1 specifies the width of the each tile column in
  *			 units of coding tree blocks
- * @row_height_minus1: plus 1 specifies the height of the i-th tile row in
+ * @row_height_minus1: this value plus 1 specifies the height of the each tile row in
  *		       units of coding tree blocks
  * @pps_beta_offset_div2: specify the default deblocking parameter offsets for
  *			  beta divided by 2
  * @pps_tc_offset_div2: specify the default deblocking parameter offsets for tC
  *			divided by 2
- * @log2_parallel_merge_level_minus2: plus 2 specifies the value of the variable
- *				      Log2ParMrgLevel
+ * @log2_parallel_merge_level_minus2: this value plus 2 specifies the value of
+ *                                    the variable Log2ParMrgLevel
+ * @reserved: padding field. Should be zeroed by applications.
  * @flags: see V4L2_HEVC_PPS_FLAG_{}
  */
 struct v4l2_ctrl_hevc_pps {
@@ -2199,10 +2200,8 @@ struct v4l2_ctrl_hevc_pps {
 	__s8	pps_beta_offset_div2;
 	__s8	pps_tc_offset_div2;
 	__u8	log2_parallel_merge_level_minus2;
-	__u8	reserved[9];
-
+	__u8	reserved;
 	__u64	flags;
-	__u8	padding[56];
 };
 
 #define V4L2_HEVC_DPB_ENTRY_LONG_TERM_REFERENCE	0x01
@@ -2229,6 +2228,7 @@ struct v4l2_ctrl_hevc_pps {
  * @timestamp: timestamp of the V4L2 capture buffer to use as reference.
  * @flags: long term flag for the reference frame
  * @field_pic: whether the reference is a field picture or a frame.
+ * @reserved: padding field. Should be zeroed by applications.
  * @pic_order_cnt_val: the picture order count of the current picture.
  */
 struct v4l2_hevc_dpb_entry {
@@ -2290,10 +2290,8 @@ struct v4l2_hevc_pred_weight_table {
 #define V4L2_HEVC_SLICE_PARAMS_FLAG_SLICE_LOOP_FILTER_ACROSS_SLICES_ENABLED (1ULL << 8)
 #define V4L2_HEVC_SLICE_PARAMS_FLAG_DEPENDENT_SLICE_SEGMENT	(1ULL << 9)
 
-#define V4L2_HEVC_SLICE_MAX_COUNT	600
-
 /**
- * v4l2_ctrl_hevc_slice_params - HEVC slice parameters
+ * struct v4l2_ctrl_hevc_slice_params - HEVC slice parameters
  *
  * This control is a dynamically sized 1-dimensional array,
  * V4L2_CTRL_FLAG_DYNAMIC_ARRAY flag must be set when using it.
@@ -2307,10 +2305,12 @@ struct v4l2_hevc_pred_weight_table {
  * @slice_type: see V4L2_HEVC_SLICE_TYPE_{}
  * @colour_plane_id: specifies the colour plane associated with the current slice
  * @slice_pic_order_cnt: specifies the picture order count
- * @num_ref_idx_l0_active_minus1: specifies the maximum reference index for reference
- *				  picture list 0 that may be used to decode the slice
- * @num_ref_idx_l1_active_minus1: specifies the maximum reference index for reference
- *				  picture list 1 that may be used to decode the slice
+ * @num_ref_idx_l0_active_minus1: this value plus 1 specifies the maximum
+ *                                reference index for reference picture list 0
+ *                                that may be used to decode the slice
+ * @num_ref_idx_l1_active_minus1: this value plus 1 specifies the maximum
+ *                                reference index for reference picture list 1
+ *                                that may be used to decode the slice
  * @collocated_ref_idx: specifies the reference index of the collocated picture used
  *			for temporal motion vector prediction
  * @five_minus_max_num_merge_cand: specifies the maximum number of merging
@@ -2327,6 +2327,7 @@ struct v4l2_hevc_pred_weight_table {
  * @slice_tc_offset_div2: specify the deblocking parameter offsets for tC divided by 2
  * @pic_struct: indicates whether a picture should be displayed as a frame or as one or
  *		more fields
+ * @reserved0: padding field. Should be zeroed by applications.
  * @slice_segment_addr: specifies the address of the first coding tree block in
  *			the slice segment
  * @ref_idx_l0: the list of L0 reference elements as indices in the DPB
@@ -2337,6 +2338,7 @@ struct v4l2_hevc_pred_weight_table {
  *				pictures set include in the SPS
  * @pred_weight_table: the prediction weight coefficients for inter-picture
  *		       prediction
+ * @reserved1: padding field. Should be zeroed by applications.
  * @flags: see V4L2_HEVC_SLICE_PARAMS_FLAG_{}
  */
 struct v4l2_ctrl_hevc_slice_params {
@@ -2381,7 +2383,6 @@ struct v4l2_ctrl_hevc_slice_params {
 
 	__u8	reserved1[2];
 	__u64	flags;
-	__u8	padding[40];
 };
 
 #define V4L2_HEVC_DECODE_PARAM_FLAG_IRAP_PIC		0x1
@@ -2407,6 +2408,7 @@ struct v4l2_ctrl_hevc_slice_params {
  * @poc_st_curr_after: provides the index of the short term after references
  *		       in DPB array
  * @poc_lt_curr: provides the index of the long term references in DPB array
+ * @reserved: padding field. Should be zeroed by applications.
  * @dpb: the decoded picture buffer, for meta-data about reference frames
  * @flags: see V4L2_HEVC_DECODE_PARAM_FLAG_{}
  */
@@ -2424,7 +2426,6 @@ struct v4l2_ctrl_hevc_decode_params {
 	__u8	reserved[4];
 	struct	v4l2_hevc_dpb_entry dpb[V4L2_HEVC_DPB_ENTRIES_NUM_MAX];
 	__u64	flags;
-	__u8	padding[56];
 };
 
 /**
