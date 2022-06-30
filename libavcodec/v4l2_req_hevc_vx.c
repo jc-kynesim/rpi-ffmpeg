@@ -6,8 +6,6 @@
 #include "internal.h"
 #include "thread.h"
 
-#include "v4l2_request_hevc.h"
-
 #if HEVC_CTRLS_VERSION == 1
 #include "hevc-ctrls-v1.h"
 
@@ -18,9 +16,36 @@
 #include "hevc-ctrls-v2.h"
 #elif HEVC_CTRLS_VERSION == 3
 #include "hevc-ctrls-v3.h"
+#elif HEVC_CTRLS_VERSION == 4
+#include <linux/v4l2-controls.h>
+#if !defined(V4L2_CID_STATELESS_HEVC_SPS)
+#include "hevc-ctrls-v4.h"
+#endif
 #else
 #error Unknown HEVC_CTRLS_VERSION
 #endif
+
+#ifndef V4L2_CID_STATELESS_HEVC_SPS
+#define V4L2_CID_STATELESS_HEVC_SPS                     V4L2_CID_MPEG_VIDEO_HEVC_SPS
+#define V4L2_CID_STATELESS_HEVC_PPS                     V4L2_CID_MPEG_VIDEO_HEVC_PPS
+#define V4L2_CID_STATELESS_HEVC_SLICE_PARAMS            V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS
+#define V4L2_CID_STATELESS_HEVC_SCALING_MATRIX          V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX
+#define V4L2_CID_STATELESS_HEVC_DECODE_PARAMS           V4L2_CID_MPEG_VIDEO_HEVC_DECODE_PARAMS
+#define V4L2_CID_STATELESS_HEVC_DECODE_MODE             V4L2_CID_MPEG_VIDEO_HEVC_DECODE_MODE
+#define V4L2_CID_STATELESS_HEVC_START_CODE              V4L2_CID_MPEG_VIDEO_HEVC_START_CODE
+
+#define V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED     V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED
+#define V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED     V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_FRAME_BASED
+#define V4L2_STATELESS_HEVC_START_CODE_NONE             V4L2_MPEG_VIDEO_HEVC_START_CODE_NONE
+#define V4L2_STATELESS_HEVC_START_CODE_ANNEX_B          V4L2_MPEG_VIDEO_HEVC_START_CODE_ANNEX_B
+#endif
+
+// Should be in videodev2 but we might not have a good enough one
+#ifndef V4L2_PIX_FMT_HEVC_SLICE
+#define V4L2_PIX_FMT_HEVC_SLICE v4l2_fourcc('S', '2', '6', '5') /* HEVC parsed slices */
+#endif
+
+#include "v4l2_request_hevc.h"
 
 #include "libavutil/hwcontext_drm.h"
 
@@ -259,9 +284,13 @@ fill_dpb_entries(const HEVCContext * const h, struct v4l2_hevc_dpb_entry * const
 #endif
             entry->field_pic = frame->frame->interlaced_frame;
 
+#if HEVC_CTRLS_VERSION <= 3
             /* TODO: Interleaved: Get the POC for each field. */
             entry->pic_order_cnt[0] = frame->poc;
             entry->pic_order_cnt[1] = frame->poc;
+#else
+            entry->pic_order_cnt_val = frame->poc;
+#endif
         }
     }
     return n;
@@ -287,8 +316,11 @@ static void fill_slice_params(const HEVCContext * const h,
 
     *slice_params = (struct v4l2_ctrl_hevc_slice_params) {
         .bit_size = bit_size,
+#if HEVC_CTRLS_VERSION <= 3
         .data_bit_offset = bit_offset,
-
+#else
+        .data_byte_offset = bit_offset / 8 + 1,
+#endif
         /* ISO/IEC 23008-2, ITU-T Rec. H.265: General slice segment header */
         .slice_segment_addr = sh->slice_segment_addr,
 
@@ -376,8 +408,10 @@ static void fill_slice_params(const HEVCContext * const h,
         av_log(NULL, AV_LOG_ERROR, "%s: Currently only 256 entry points are supported, but slice has %d entry points.\n", __func__, sh->num_entry_point_offsets);
     }
 
+#if HEVC_CTRLS_VERSION <= 3
     for (i = 0; i < slice_params->num_entry_point_offsets; i++)
         slice_params->entry_point_offset_minus1[i] = sh->entry_point_offset[i] - 1;
+#endif
 }
 
 #if HEVC_CTRLS_VERSION >= 2
@@ -761,30 +795,30 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
 
     struct v4l2_ext_control control[] = {
         {
-            .id = V4L2_CID_MPEG_VIDEO_HEVC_SPS,
+            .id = V4L2_CID_STATELESS_HEVC_SPS,
             .ptr = &controls->sps,
             .size = sizeof(controls->sps),
         },
         {
-            .id = V4L2_CID_MPEG_VIDEO_HEVC_PPS,
+            .id = V4L2_CID_STATELESS_HEVC_PPS,
             .ptr = &controls->pps,
             .size = sizeof(controls->pps),
         },
 #if HEVC_CTRLS_VERSION >= 2
         {
-            .id = V4L2_CID_MPEG_VIDEO_HEVC_DECODE_PARAMS,
+            .id = V4L2_CID_STATELESS_HEVC_DECODE_PARAMS,
             .ptr = dec,
             .size = sizeof(*dec),
         },
 #endif
         {
-            .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS,
+            .id = V4L2_CID_STATELESS_HEVC_SLICE_PARAMS,
             .ptr = slices + slice_no,
             .size = sizeof(*slices) * slice_count,
         },
         // Optional
         {
-            .id = V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX,
+            .id = V4L2_CID_STATELESS_HEVC_SCALING_MATRIX,
             .ptr = &controls->scaling_matrix,
             .size = sizeof(controls->scaling_matrix),
         },
@@ -1000,12 +1034,12 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
 
     // Check for var slice array
     struct v4l2_query_ext_ctrl qc[] = {
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS },
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SPS },
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_PPS },
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SCALING_MATRIX },
+        { .id = V4L2_CID_STATELESS_HEVC_SLICE_PARAMS },
+        { .id = V4L2_CID_STATELESS_HEVC_SPS },
+        { .id = V4L2_CID_STATELESS_HEVC_PPS },
+        { .id = V4L2_CID_STATELESS_HEVC_SCALING_MATRIX },
 #if HEVC_CTRLS_VERSION >= 2
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_DECODE_PARAMS },
+        { .id = V4L2_CID_STATELESS_HEVC_DECODE_PARAMS },
 #endif
     };
     // Order & size must match!
@@ -1042,12 +1076,13 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
 
     fill_sps(&ctrl_sps, sps);
 
-    if (mediabufs_set_ext_ctrl(ctx->mbufs, NULL, V4L2_CID_MPEG_VIDEO_HEVC_SPS, &ctrl_sps, sizeof(ctrl_sps))) {
+    if (mediabufs_set_ext_ctrl(ctx->mbufs, NULL, V4L2_CID_STATELESS_HEVC_SPS, &ctrl_sps, sizeof(ctrl_sps))) {
         av_log(avctx, AV_LOG_ERROR, "Failed to set initial SPS\n");
         return AVERROR(EINVAL);
     }
 
     ctx->multi_slice = (qc[0].flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) != 0;
+    av_log(avctx, AV_LOG_INFO, "%s SPS muti-slice\n", ctx->multi_slice ? "Has" : "No");
     return 0;
 }
 
@@ -1058,29 +1093,29 @@ set_controls(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
     int ret;
 
     struct v4l2_query_ext_ctrl querys[] = {
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_DECODE_MODE, },
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_START_CODE, },
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_SLICE_PARAMS, },
+        { .id = V4L2_CID_STATELESS_HEVC_DECODE_MODE, },
+        { .id = V4L2_CID_STATELESS_HEVC_START_CODE, },
+        { .id = V4L2_CID_STATELESS_HEVC_SLICE_PARAMS, },
     };
 
     struct v4l2_ext_control ctrls[] = {
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_DECODE_MODE, },
-        { .id = V4L2_CID_MPEG_VIDEO_HEVC_START_CODE, },
+        { .id = V4L2_CID_STATELESS_HEVC_DECODE_MODE, },
+        { .id = V4L2_CID_STATELESS_HEVC_START_CODE, },
     };
 
     mediabufs_ctl_query_ext_ctrls(ctx->mbufs, querys, FF_ARRAY_ELEMS(querys));
 
     ctx->decode_mode = querys[0].default_value;
 
-    if (ctx->decode_mode != V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_SLICE_BASED &&
-        ctx->decode_mode != V4L2_MPEG_VIDEO_HEVC_DECODE_MODE_FRAME_BASED) {
+    if (ctx->decode_mode != V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED &&
+        ctx->decode_mode != V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED) {
         av_log(avctx, AV_LOG_ERROR, "%s: unsupported decode mode, %d\n", __func__, ctx->decode_mode);
         return AVERROR(EINVAL);
     }
 
     ctx->start_code = querys[1].default_value;
-    if (ctx->start_code != V4L2_MPEG_VIDEO_HEVC_START_CODE_NONE &&
-        ctx->start_code != V4L2_MPEG_VIDEO_HEVC_START_CODE_ANNEX_B) {
+    if (ctx->start_code != V4L2_STATELESS_HEVC_START_CODE_NONE &&
+        ctx->start_code != V4L2_STATELESS_HEVC_START_CODE_ANNEX_B) {
         av_log(avctx, AV_LOG_ERROR, "%s: unsupported start code, %d\n", __func__, ctx->start_code);
         return AVERROR(EINVAL);
     }
