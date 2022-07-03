@@ -46,8 +46,6 @@
 #define V4L2_CTRL_FLAG_DYNAMIC_ARRAY	0x0800
 #endif
 
-#define MAX_SLICES 128
-
 #define VCAT(name, version) name##_v##version
 #define V2(n,v) VCAT(n, v)
 #define V(n) V2(n, HEVC_CTRLS_VERSION)
@@ -64,10 +62,9 @@ typedef struct V4L2RequestContextHEVC {
 
     unsigned int timestamp;  // ?? maybe uint64_t
 
-    int multi_slice;
     int decode_mode;
     int start_code;
-    int max_slices;
+    unsigned int max_slices;
 
     req_decode_q decode_q;
 
