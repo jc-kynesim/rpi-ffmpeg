@@ -840,18 +840,21 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     int bcount = get_bits_count(&h->HEVClc->gb);
     uint32_t boff = (ptr_from_index(buffer, bcount/8 + 1) - (buffer + bcount/8 + 1)) * 8 + bcount;
 
+    const unsigned int n = rd->num_slices;
+    const unsigned int block_start = (n / ctx->max_slices) * ctx->max_slices;
+
     int rv;
     struct slice_info * si;
 
     if ((rv = slice_add(rd)) != 0)
         return rv;
 
-    si = rd->slices + rd->num_slices - 1;
+    si = rd->slices + n;
     si->ptr = buffer;
     si->len = size;
 
-    if (ctx->multi_slice && rd->num_slices > 1) {
-        struct slice_info *const si0 = rd->slices;
+    if (n != block_start) {
+        struct slice_info *const si0 = rd->slices + block_start;
         const size_t offset = (buffer - si0->ptr);
         boff += offset * 8;
         size += offset;
@@ -859,11 +862,11 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
     }
 
 #if HEVC_CTRLS_VERSION >= 2
-    if (rd->num_slices == 1)
+    if (n == 0)
         fill_decode_params(h, &rd->dec);
-    fill_slice_params(h, &rd->dec, rd->slice_params + rd->num_slices - 1, size * 8, boff);
+    fill_slice_params(h, &rd->dec, rd->slice_params + n, size * 8, boff);
 #else
-    fill_slice_params(h, rd->slice_params + rd->num_slices - 1, size * 8, boff);
+    fill_slice_params(h, rd->slice_params + n, size * 8, boff);
 #endif
 
     return 0;
@@ -997,17 +1000,10 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
     }
 
     // Send as slices
-    if (ctx->multi_slice)
-    {
-        if ((rv = send_slice(avctx, rd, &rc, 0, rd->num_slices)) != 0)
+    for (i = 0; i < rd->num_slices; i += ctx->max_slices) {
+        const unsigned int e = FFMIN(rd->num_slices, i + ctx->max_slices);
+        if ((rv = send_slice(avctx, rd, &rc, i, e)) != 0)
             goto fail;
-    }
-    else
-    {
-        for (i = 0; i != rd->num_slices; ++i) {
-            if ((rv = send_slice(avctx, rd, &rc, i, i + 1)) != 0)
-                goto fail;
-        }
     }
 
     // Set the drm_prime desriptor
@@ -1081,8 +1077,6 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         return AVERROR(EINVAL);
     }
 
-    ctx->multi_slice = (qc[0].flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) != 0;
-    av_log(avctx, AV_LOG_INFO, "%s SPS muti-slice\n", ctx->multi_slice ? "Has" : "No");
     return 0;
 }
 
@@ -1120,11 +1114,10 @@ set_controls(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         return AVERROR(EINVAL);
     }
 
-    ctx->max_slices = querys[2].elems;
-    if (ctx->max_slices > MAX_SLICES) {
-        av_log(avctx, AV_LOG_ERROR, "%s: unsupported max slices, %d\n", __func__, ctx->max_slices);
-        return AVERROR(EINVAL);
-    }
+    ctx->max_slices = (!(querys[2].flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) ||
+                       querys[2].nr_of_dims != 1 || querys[2].dims[0] == 0) ?
+        1 : querys[2].dims[0];
+    av_log(avctx, AV_LOG_DEBUG, "%s: Max slices %d\n", __func__, ctx->max_slices);
 
     ctrls[0].value = ctx->decode_mode;
     ctrls[1].value = ctx->start_code;
