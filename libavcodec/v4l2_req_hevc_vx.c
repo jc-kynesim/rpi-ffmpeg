@@ -814,9 +814,9 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
 {
     int rv;
 #if HEVC_CTRLS_VERSION >= 2
-    unsigned int n = 4;
-#else
     unsigned int n = 3;
+#else
+    unsigned int n = 2;
 #endif
 
     struct v4l2_ext_control control[6] = {
@@ -837,12 +837,14 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
             .size = sizeof(*dec),
         },
 #endif
-        {
+    };
+
+    if (slices)
+        control[n++] = (struct v4l2_ext_control) {
             .id = V4L2_CID_STATELESS_HEVC_SLICE_PARAMS,
             .ptr = slices,
             .size = sizeof(*slices) * slice_count,
-        },
-    };
+        };
 
     if (controls->has_scaling)
         control[n++] = (struct v4l2_ext_control) {
@@ -865,6 +867,8 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
     return rv;
 }
 
+// This only works because we started out from a single coded frame buffer
+// that will remain intact until after end_frame
 static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
 {
     const HEVCContext * const h = avctx->priv_data;
@@ -889,6 +893,17 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *
             av_log(avctx, AV_LOG_ERROR, "Start code requested but missing %02x:%02x:%02x\n",
                    buffer[0], buffer[1], buffer[2]);
         }
+    }
+
+    if (ctx->decode_mode == V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED) {
+        if (rd->slices == NULL) {
+            if ((rd->slices = av_mallocz(sizeof(*rd->slices))) == NULL)
+                return AVERROR(ENOMEM);
+            rd->slices->ptr = buffer;
+            rd->num_slices = 1;
+        }
+        rd->slices->len = buffer - rd->slices->ptr + size;
+        return 0;
     }
 
     if ((rv = slice_add(rd)) != 0)
@@ -1169,27 +1184,35 @@ set_controls(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
     ctx->max_offsets = 0;
 #endif
 
-    ctx->start_code = V4L2_STATELESS_HEVC_START_CODE_ANNEX_B;
-
-    if (ctrl_valid(querys + 0, V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED))
-    {
+    if (querys[0].default_value == V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED ||
+        querys[0].default_value == V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED)
+        ctx->decode_mode = querys[0].default_value;
+    else if (ctrl_valid(querys + 0, V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED))
+        ctx->decode_mode = V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED;
+    else if (ctrl_valid(querys + 0, V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED))
         ctx->decode_mode = V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED;
-
-        // Prefer NONE as it doesn't require the slightly dodgy look
-        // backwards in our raw buffer
-        if (ctrl_valid(querys + 1, V4L2_STATELESS_HEVC_START_CODE_NONE))
-            ctx->start_code = V4L2_STATELESS_HEVC_START_CODE_NONE;
-        else if (ctrl_valid(querys + 1, V4L2_STATELESS_HEVC_START_CODE_ANNEX_B))
-            ctx->start_code = V4L2_STATELESS_HEVC_START_CODE_ANNEX_B;
-        else {
-            av_log(avctx, AV_LOG_ERROR, "%s: unsupported start code\n", __func__);
-            return AVERROR(EINVAL);
-        }
-    }
-    else
-    {
+    else {
         av_log(avctx, AV_LOG_ERROR, "%s: unsupported decode mode\n", __func__);
+        return AVERROR(EINVAL);
     }
+
+    if (querys[1].default_value == V4L2_STATELESS_HEVC_START_CODE_NONE ||
+        querys[1].default_value == V4L2_STATELESS_HEVC_START_CODE_ANNEX_B)
+        ctx->start_code = querys[1].default_value;
+    else if (ctrl_valid(querys + 1, V4L2_STATELESS_HEVC_START_CODE_ANNEX_B))
+        ctx->start_code = V4L2_STATELESS_HEVC_START_CODE_ANNEX_B;
+    else if (ctrl_valid(querys + 1, V4L2_STATELESS_HEVC_START_CODE_NONE))
+        ctx->start_code = V4L2_STATELESS_HEVC_START_CODE_NONE;
+    else {
+        av_log(avctx, AV_LOG_ERROR, "%s: unsupported start code\n", __func__);
+        return AVERROR(EINVAL);
+    }
+
+    // If we are in slice mode & START_CODE_NONE supported then pick that
+    // as it doesn't require the slightly dodgy look backwards in our raw buffer
+    if (ctx->decode_mode == V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED &&
+        ctrl_valid(querys + 1, V4L2_STATELESS_HEVC_START_CODE_NONE))
+        ctx->start_code = V4L2_STATELESS_HEVC_START_CODE_NONE;
 
     ctrls[0].value = ctx->decode_mode;
     ctrls[1].value = ctx->start_code;
