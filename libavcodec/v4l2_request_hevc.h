@@ -64,7 +64,8 @@ typedef struct V4L2RequestContextHEVC {
 
     int decode_mode;
     int start_code;
-    unsigned int max_slices;
+    unsigned int max_slices;    // 0 => not wanted (frame mode)
+    unsigned int max_offsets;   // 0 => not wanted
 
     req_decode_q decode_q;
 
