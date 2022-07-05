@@ -1082,6 +1082,12 @@ fail:
     return rv;
 }
 
+static inline int
+ctrl_valid(const struct v4l2_query_ext_ctrl * const c, const int64_t v)
+{
+    return v >= c->minimum && v <= c->maximum;
+}
+
 // Initial check & init
 static int
 probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
@@ -1094,6 +1100,7 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
     // Check for var slice array
     struct v4l2_query_ext_ctrl qc[] = {
         { .id = V4L2_CID_STATELESS_HEVC_SLICE_PARAMS },
+        { .id = V4L2_CID_STATELESS_HEVC_DECODE_MODE, },
         { .id = V4L2_CID_STATELESS_HEVC_SPS },
         { .id = V4L2_CID_STATELESS_HEVC_PPS },
         { .id = V4L2_CID_STATELESS_HEVC_SCALING_MATRIX },
@@ -1104,6 +1111,7 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
     // Order & size must match!
     static const size_t ctrl_sizes[] = {
         sizeof(struct v4l2_ctrl_hevc_slice_params),
+        sizeof(int32_t),
         sizeof(struct v4l2_ctrl_hevc_sps),
         sizeof(struct v4l2_ctrl_hevc_pps),
         sizeof(struct v4l2_ctrl_hevc_scaling_matrix),
@@ -1121,11 +1129,22 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         return AVERROR(EINVAL);
 #endif
 
-    if (mediabufs_ctl_query_ext_ctrls(ctx->mbufs, qc, noof_ctrls)) {
-        av_log(avctx, AV_LOG_DEBUG, "Probed V%d control missing\n", HEVC_CTRLS_VERSION);
+    mediabufs_ctl_query_ext_ctrls(ctx->mbufs, qc, noof_ctrls);
+    i = 0;
+#if HEVC_CTRLS_VERSION >= 4
+    // Skip slice check if no slice mode
+    if (qc[1].type != 0 && !ctrl_valid(qc + 1, V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED))
+        i = 1;
+#else
+    // Fail frame mode silently for anything prior to V4
+    if (qc[1].type == 0 || !ctrl_valid(qc + 1, V4L2_STATELESS_HEVC_DECODE_MODE_SLICE_BASED))
         return AVERROR(EINVAL);
-    }
-    for (i = 0; i != noof_ctrls; ++i) {
+#endif
+    for (; i != noof_ctrls; ++i) {
+        if (qc[i].type == 0) {
+            av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %#x missing\n", HEVC_CTRLS_VERSION, qc[i].id);
+            return AVERROR(EINVAL);
+        }
         if (ctrl_sizes[i] != (size_t)qc[i].elem_size) {
             av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %d size mismatch %zu != %zu\n",
                    HEVC_CTRLS_VERSION, i, ctrl_sizes[i], (size_t)qc[i].elem_size);
@@ -1141,12 +1160,6 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
     }
 
     return 0;
-}
-
-static inline int
-ctrl_valid(const struct v4l2_query_ext_ctrl * const c, const int64_t v)
-{
-    return v >= c->minimum && v <= c->maximum;
 }
 
 // Final init
