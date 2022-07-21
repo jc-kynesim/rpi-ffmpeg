@@ -752,8 +752,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      *       check the v4l2_get_drm_frame function.
      */
 
-    avctx->sw_pix_fmt = avctx->pix_fmt;
-    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+//    avctx->sw_pix_fmt = avctx->pix_fmt;
+    avctx->sw_pix_fmt = AV_PIX_FMT_NV12;
+//    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+    gf_pix_fmt = AV_PIX_FMT_DRM_PRIME;
     av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
            avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt),
            avctx->coded_width, avctx->coded_height,
@@ -761,6 +763,7 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
         avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+        capture->av_pix_fmt = avctx->sw_pix_fmt;
         s->output_drm = 1;
     }
     else {
@@ -896,8 +899,8 @@ static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
         .capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
         .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_CLEANUP, \
         .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
-                                                         AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_YUV420P, \
+                                                         AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_NONE}, \
         .hw_configs     = v4l2_m2m_hw_configs, \
         .wrapper_name   = "v4l2m2m", \
