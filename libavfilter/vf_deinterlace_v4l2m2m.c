@@ -523,10 +523,25 @@ static int deint_v4l2m2m_enqueue_buffer(V4L2Buffer *buf)
     return 0;
 }
 
-static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
+static int v4l2_buffer_export_drm(V4L2Buffer* avbuf, const uint32_t pixelformat)
 {
     struct v4l2_exportbuffer expbuf;
     int i, ret;
+    uint64_t mod = DRM_FORMAT_MOD_LINEAR;
+    uint32_t fmt = 0;
+
+    switch (pixelformat) {
+    case V4L2_PIX_FMT_NV12:
+        fmt = DRM_FORMAT_NV12;
+        break;
+    case V4L2_PIX_FMT_YUV420:
+        fmt = DRM_FORMAT_YUV420;
+        break;
+    default:
+        return AVERROR(EINVAL);
+    }
+
+    avbuf->drm_frame.layers[0].format = fmt;
 
     for (i = 0; i < avbuf->num_planes; i++) {
         memset(&expbuf, 0, sizeof(expbuf));
@@ -545,12 +560,12 @@ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
             /* drm frame */
             avbuf->drm_frame.objects[i].size = avbuf->buffer.m.planes[i].length;
             avbuf->drm_frame.objects[i].fd = expbuf.fd;
-            avbuf->drm_frame.objects[i].format_modifier = DRM_FORMAT_MOD_LINEAR;
+            avbuf->drm_frame.objects[i].format_modifier = mod;
         } else {
             /* drm frame */
             avbuf->drm_frame.objects[0].size = avbuf->buffer.length;
             avbuf->drm_frame.objects[0].fd = expbuf.fd;
-            avbuf->drm_frame.objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+            avbuf->drm_frame.objects[0].format_modifier = mod;
         }
     }
 
@@ -635,7 +650,7 @@ static int deint_v4l2m2m_allocate_buffers(V4L2Queue *queue)
             if (ret)
                 goto fail;
 
-            ret = v4l2_buffer_export_drm(buf);
+            ret = v4l2_buffer_export_drm(buf, multiplanar ? fmt->fmt.pix_mp.pixelformat : fmt->fmt.pix.pixelformat);
             if (ret)
                 goto fail;
         }
@@ -884,7 +899,6 @@ static void v4l2_free_buffer(void *opaque, uint8_t *unused)
 
 static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
 {
-    int av_pix_fmt = AV_PIX_FMT_YUV420P;
     AVDRMFrameDescriptor *drm_desc = &avbuf->drm_frame;
     AVDRMLayerDescriptor *layer;
 
@@ -901,20 +915,13 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
         layer->planes[i].pitch = avbuf->plane_info[i].bytesperline;
     }
 
-    switch (av_pix_fmt) {
-    case AV_PIX_FMT_YUYV422:
-
-        layer->format = DRM_FORMAT_YUYV;
+    switch (layer->format) {
+    case DRM_FORMAT_YUYV:
         layer->nb_planes = 1;
-
         break;
 
-    case AV_PIX_FMT_NV12:
-    case AV_PIX_FMT_NV21:
-
-        layer->format = av_pix_fmt == AV_PIX_FMT_NV12 ?
-            DRM_FORMAT_NV12 : DRM_FORMAT_NV21;
-
+    case DRM_FORMAT_NV12:
+    case DRM_FORMAT_NV21:
         if (avbuf->num_planes > 1)
             break;
 
@@ -926,10 +933,7 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf, int height)
         layer->planes[1].pitch = avbuf->plane_info[0].bytesperline;
         break;
 
-    case AV_PIX_FMT_YUV420P:
-
-        layer->format = DRM_FORMAT_YUV420;
-
+    case DRM_FORMAT_YUV420:
         if (avbuf->num_planes > 1)
             break;
 
@@ -984,7 +988,7 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
 
     atomic_fetch_add(&ctx->refcount, 1);
 
-    frame->data[0] = (uint8_t *)v4l2_get_drm_frame(avbuf, ctx->orig_height);
+    frame->data[0] = (uint8_t *)v4l2_get_drm_frame(avbuf,  ctx->orig_height);
     frame->format = AV_PIX_FMT_DRM_PRIME;
     if (ctx->hw_frames_ctx)
         frame->hw_frames_ctx = av_buffer_ref(ctx->hw_frames_ctx);

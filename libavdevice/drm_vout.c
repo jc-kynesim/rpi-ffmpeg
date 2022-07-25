@@ -245,12 +245,12 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
             }
         }
 
-#if 1 && TRACE_ALL
-        av_log(s, AV_LOG_DEBUG, "%dx%d, fmt: %x, boh=%d,%d,%d,%d, pitch=%d,%d,%d,%d,"
+#if 1
+        av_log(s, AV_LOG_INFO, "%dx%d, fmt: %s, boh=%d,%d,%d,%d, pitch=%d,%d,%d,%d,"
                " offset=%d,%d,%d,%d, mod=%llx,%llx,%llx,%llx\n",
                av_frame_cropped_width(frame),
                av_frame_cropped_height(frame),
-               desc->layers[0].format,
+               av_fourcc2str(desc->layers[0].format),
                bo_handles[0],
                bo_handles[1],
                bo_handles[2],
