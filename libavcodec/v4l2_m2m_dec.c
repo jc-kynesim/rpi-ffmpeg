@@ -46,6 +46,10 @@
 #define STATS_LAST_COUNT_MAX 64
 #define STATS_INTERVAL_MAX (1 << 30)
 
+#ifndef FF_API_BUFFER_SIZE_T
+#define FF_API_BUFFER_SIZE_T 1
+#endif
+
 static int64_t pts_stats_guess(const pts_stats_t * const stats)
 {
     if (stats->last_pts == AV_NOPTS_VALUE ||
@@ -272,8 +276,11 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
 
         for (i = 0; i < 256; ++i) {
             uint8_t * side_data;
+#if FF_API_BUFFER_SIZE_T
+            int side_size;
+#else
             size_t side_size;
-
+#endif
             ret = ff_decode_get_packet(avctx, &s->buf_pkt);
             if (ret != 0)
                 break;
@@ -284,7 +291,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
                 av_log(avctx, AV_LOG_DEBUG, "New extradata\n");
                 av_freep(&s->extdata_data);
                 if ((s->extdata_data = av_malloc(side_size ? side_size : 1)) == NULL) {
-                    av_log(avctx, AV_LOG_ERROR, "Failed to alloc %zd bytes of extra data\n", side_size);
+                    av_log(avctx, AV_LOG_ERROR, "Failed to alloc %d bytes of extra data\n", (int)side_size);
                     return AVERROR(ENOMEM);
                 }
                 memcpy(s->extdata_data, side_data, side_size);
