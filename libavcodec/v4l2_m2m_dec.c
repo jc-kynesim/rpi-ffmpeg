@@ -423,13 +423,15 @@ static int qbuf_wait(AVCodecContext * const avctx, V4L2Context * const ctx)
 // This is a min value - if it appears to be too small the threshold should
 // adjust dynamically.
 #define PENDING_HW_MIN      (3 * 16)
+// Avoid arbitrarily increasing numbers
+#define PENDING_HW_MAX      (17 * 16)
 // Offset to use when setting dynamically
 // Set to %16 == 15 to avoid the threshold changing immediately as we relax
 #define PENDING_HW_OFFSET   (PENDING_HW_MIN - 1)
 // Number of consecutive times we've failed to get a frame when we prefer it
 // before we increase the prefer threshold (5ms * N = max expected decode
 // time)
-#define PENDING_N_THRESHOLD 6
+#define PENDING_N_THRESHOLD 10
 
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
@@ -497,7 +499,8 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
             }
             else if (dst_rv == AVERROR(EAGAIN)) {
                 if (prefer_dq && ++s->pending_n > PENDING_N_THRESHOLD) {
-                    s->pending_hw = pending * 16 + PENDING_HW_OFFSET;
+                    s->pending_hw = FFMIN(PENDING_HW_MAX,
+                                          s->pending_hw + 16 + PENDING_HW_OFFSET);
                     s->pending_n = 0;
                 }
             }
