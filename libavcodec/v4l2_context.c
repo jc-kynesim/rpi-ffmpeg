@@ -819,14 +819,14 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
         ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc);
         if (ret)
             return AVERROR(EINVAL);
-
+#if 0
         if (priv->pix_fmt != AV_PIX_FMT_NONE) {
             if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt)) {
                 fdesc.index++;
                 continue;
             }
         }
-
+#endif
         pixfmt = ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO);
         ret = v4l2_try_raw_format(ctx, pixfmt);
         if (ret){

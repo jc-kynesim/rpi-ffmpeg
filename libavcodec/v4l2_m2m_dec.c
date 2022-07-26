@@ -752,22 +752,26 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      *       check the v4l2_get_drm_frame function.
      */
 
-//    avctx->sw_pix_fmt = avctx->pix_fmt;
-    avctx->sw_pix_fmt = AV_PIX_FMT_NV12;
-//    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
-    gf_pix_fmt = AV_PIX_FMT_DRM_PRIME;
-    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
-           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt),
+    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+    av_log(avctx, AV_LOG_INFO, "avctx requested=%d/%d (%s/%s) %dx%d; get_format requested=%d (%s); sw_fmt=%d (%s)\n",
+           avctx->pix_fmt,
+           avctx->sw_pix_fmt,
+           av_get_pix_fmt_name(avctx->pix_fmt),
+           av_get_pix_fmt_name(avctx->sw_pix_fmt),
            avctx->coded_width, avctx->coded_height,
-           gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
+           gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt),
+           priv->sw_pix_fmt, av_get_pix_fmt_name(priv->sw_pix_fmt));
 
     if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
         avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+        if (priv->sw_pix_fmt != AV_PIX_FMT_NONE)
+            avctx->sw_pix_fmt = priv->sw_pix_fmt;
         capture->av_pix_fmt = avctx->sw_pix_fmt;
         s->output_drm = 1;
     }
     else {
         capture->av_pix_fmt = gf_pix_fmt;
+        avctx->sw_pix_fmt = AV_PIX_FMT_NONE;
         s->output_drm = 0;
     }
 
@@ -787,6 +791,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_ERROR, "can't configure decoder\n");
         return ret;
     }
+    // Set swfmt to what we've actually found
+    avctx->sw_pix_fmt = capture->av_pix_fmt;
 
     if ((ret = v4l2_prepare_decoder(s)) < 0)
         return ret;
@@ -865,7 +871,7 @@ static const AVOption options[] = {
     V4L_M2M_DEFAULT_OPTS,
     { "num_capture_buffers", "Number of buffers in the capture context",
         OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 20}, 2, INT_MAX, FLAGS },
-    { "pixel_format", "Pixel format to be used by the decoder", OFFSET(pix_fmt), AV_OPT_TYPE_PIXEL_FMT, {.i64 = AV_PIX_FMT_NONE}, AV_PIX_FMT_NONE, AV_PIX_FMT_NB, FLAGS },
+    { "sw_pix_fmt", "Pixel format to be used by drm_prime frames", OFFSET(sw_pix_fmt), AV_OPT_TYPE_PIXEL_FMT, {.i64 = AV_PIX_FMT_NONE}, AV_PIX_FMT_NONE, AV_PIX_FMT_NB, FLAGS },
     { NULL},
 };
 
