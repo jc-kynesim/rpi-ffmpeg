@@ -133,7 +133,7 @@ typedef struct V4L2m2mPriv {
 
     int num_output_buffers;
     int num_capture_buffers;
-    enum AVPixelFormat pix_fmt;
+    enum AVPixelFormat sw_pix_fmt;
 } V4L2m2mPriv;
 
 /**

@@ -30,5 +30,7 @@
 enum AVPixelFormat ff_v4l2_format_v4l2_to_avfmt(uint32_t v4l2_fmt, enum AVCodecID avcodec);
 uint32_t ff_v4l2_format_avcodec_to_v4l2(enum AVCodecID avcodec);
 uint32_t ff_v4l2_format_avfmt_to_v4l2(enum AVPixelFormat avfmt);
+// Many formats have a singole & a multiplane form this will get the multiplane
+uint32_t ff_v4l2_format_avfmt_to_v4l2_alt(enum AVPixelFormat avfmt);
 
 #endif /* AVCODEC_V4L2_FMT_H*/
