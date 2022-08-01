@@ -1112,7 +1112,7 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
         ctx->orig_width = drm_desc->layers[0].planes[0].pitch;
         ctx->orig_height = drm_desc->layers[0].planes[1].offset / ctx->orig_width;
 
-        av_log(priv, AV_LOG_DEBUG, "%s: %dx%d (%d,%d)\n", __func__, ctx->width, ctx->height,
+        av_log(priv, AV_LOG_DEBUG, "%s: %dx%d (%td,%td)\n", __func__, ctx->width, ctx->height,
            drm_desc->layers[0].planes[0].pitch, drm_desc->layers[0].planes[1].offset);
 
         ret = deint_v4l2m2m_set_format(output, pixelformat, ctx->field_order, ctx->width, ctx->height, ctx->orig_width, drm_desc->layers[0].planes[1].offset);
