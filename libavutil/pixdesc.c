@@ -2395,12 +2395,24 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = 0,
     },
+    [AV_PIX_FMT_SAND64_16] = {
+        .name = "sand64_16",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 2, 0, 0, 16, 0, 15, 1 },        /* Y */
+            { 1, 4, 0, 0, 16, 3, 15, 1 },        /* U */
+            { 1, 4, 2, 0, 16, 3, 15, 3 },        /* V */
+        },
+        .flags = 0,
+    },
     [AV_PIX_FMT_RPI4_8] = {
-        .name = "rpi",
+        .name = "rpi4_8",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
     [AV_PIX_FMT_RPI4_10] = {
-        .name = "rpi",
+        .name = "rpi4_10",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
 };
