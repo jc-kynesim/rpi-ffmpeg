@@ -241,17 +241,42 @@ static void v4l2_set_color(V4L2Buffer *buf,
     }
 }
 
-static enum AVColorRange v4l2_get_color_range(V4L2Buffer *buf)
+static inline enum v4l2_quantization
+buf_quantization(const V4L2Buffer * const buf)
 {
-    enum v4l2_quantization qt;
-
-    qt = V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
+    return V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
         buf->context->format.fmt.pix_mp.quantization :
         buf->context->format.fmt.pix.quantization;
+}
 
-    switch (qt) {
-    case V4L2_QUANTIZATION_LIM_RANGE: return AVCOL_RANGE_MPEG;
-    case V4L2_QUANTIZATION_FULL_RANGE: return AVCOL_RANGE_JPEG;
+static inline enum v4l2_colorspace
+buf_colorspace(const V4L2Buffer * const buf)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
+        buf->context->format.fmt.pix_mp.colorspace :
+        buf->context->format.fmt.pix.colorspace;
+}
+
+static inline enum v4l2_ycbcr_encoding
+buf_ycbcr_enc(const V4L2Buffer * const buf)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
+        buf->context->format.fmt.pix_mp.ycbcr_enc:
+        buf->context->format.fmt.pix.ycbcr_enc;
+}
+
+static enum AVColorRange v4l2_get_color_range(V4L2Buffer *buf)
+{
+    switch (buf_quantization(buf)) {
+    case V4L2_QUANTIZATION_LIM_RANGE:
+        return AVCOL_RANGE_MPEG;
+    case V4L2_QUANTIZATION_FULL_RANGE:
+        return AVCOL_RANGE_JPEG;
+    case V4L2_QUANTIZATION_DEFAULT:
+        // If YUV (which we assume for all video decode) then, from the header
+        // comments, range is limited unless CS is JPEG
+        return buf_colorspace(buf) == V4L2_COLORSPACE_JPEG ?
+            AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
     default:
         break;
     }
@@ -275,29 +300,18 @@ static void v4l2_set_color_range(V4L2Buffer *buf, const enum AVColorRange avcr)
 
 static enum AVColorSpace v4l2_get_color_space(V4L2Buffer *buf)
 {
-    enum v4l2_ycbcr_encoding ycbcr;
-    enum v4l2_colorspace cs;
-
-    cs = V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
-        buf->context->format.fmt.pix_mp.colorspace :
-        buf->context->format.fmt.pix.colorspace;
-
-    ycbcr = V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
-        buf->context->format.fmt.pix_mp.ycbcr_enc:
-        buf->context->format.fmt.pix.ycbcr_enc;
-
-    switch(cs) {
-    case V4L2_COLORSPACE_SRGB: return AVCOL_SPC_RGB;
+    switch (buf_colorspace(buf)) {
+    case V4L2_COLORSPACE_JPEG:  // JPEG -> SRGB
+    case V4L2_COLORSPACE_SRGB:
+        return AVCOL_SPC_RGB;
     case V4L2_COLORSPACE_REC709: return AVCOL_SPC_BT709;
     case V4L2_COLORSPACE_470_SYSTEM_M: return AVCOL_SPC_FCC;
     case V4L2_COLORSPACE_470_SYSTEM_BG: return AVCOL_SPC_BT470BG;
     case V4L2_COLORSPACE_SMPTE170M: return AVCOL_SPC_SMPTE170M;
     case V4L2_COLORSPACE_SMPTE240M: return AVCOL_SPC_SMPTE240M;
     case V4L2_COLORSPACE_BT2020:
-        if (ycbcr == V4L2_YCBCR_ENC_BT2020_CONST_LUM)
-            return AVCOL_SPC_BT2020_CL;
-        else
-             return AVCOL_SPC_BT2020_NCL;
+        return buf_ycbcr_enc(buf) == V4L2_YCBCR_ENC_BT2020_CONST_LUM ?
+            AVCOL_SPC_BT2020_CL : AVCOL_SPC_BT2020_NCL;
     default:
         break;
     }
@@ -307,17 +321,9 @@ static enum AVColorSpace v4l2_get_color_space(V4L2Buffer *buf)
 
 static enum AVColorTransferCharacteristic v4l2_get_color_trc(V4L2Buffer *buf)
 {
-    enum v4l2_ycbcr_encoding ycbcr;
+    const enum v4l2_ycbcr_encoding ycbcr = buf_ycbcr_enc(buf);
     enum v4l2_xfer_func xfer;
-    enum v4l2_colorspace cs;
-
-    cs = V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
-        buf->context->format.fmt.pix_mp.colorspace :
-        buf->context->format.fmt.pix.colorspace;
-
-    ycbcr = V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
-        buf->context->format.fmt.pix_mp.ycbcr_enc:
-        buf->context->format.fmt.pix.ycbcr_enc;
+    const enum v4l2_colorspace cs = buf_colorspace(buf);
 
     xfer = V4L2_TYPE_IS_MULTIPLANAR(buf->buf.type) ?
         buf->context->format.fmt.pix_mp.xfer_func:
