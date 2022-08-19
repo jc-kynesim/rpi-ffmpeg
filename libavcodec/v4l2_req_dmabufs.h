@@ -18,6 +18,9 @@ static inline struct dmabuf_h * dmabuf_alloc(struct dmabufs_ctl * dbsc, size_t s
 }
 /* Create from existing fd - dups(fd) */
 struct dmabuf_h * dmabuf_import(int fd, size_t size);
+/* Import an MMAP - return NULL if mapptr = MAP_FAIL */
+struct dmabuf_h * dmabuf_import_mmap(void * mapptr, size_t size);
+
 void * dmabuf_map(struct dmabuf_h * const dh);
 
 /* flags from linux/dmabuf.h DMA_BUF_SYNC_xxx */
