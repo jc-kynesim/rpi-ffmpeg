@@ -144,6 +144,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const struct decdev * decdev;
     const uint32_t src_pix_fmt = V2(ff_v4l2_req_hevc, 1).src_pix_fmt_v4l2;  // Assuming constant for all APIs but avoiding V4L2 includes
     size_t src_size;
+    enum mediabufs_memory src_memtype;
+    enum mediabufs_memory dst_memtype;
 
     av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
@@ -174,8 +176,14 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
            decdev_media_path(decdev), decdev_video_path(decdev));
 
     if ((ctx->dbufs = dmabufs_ctl_new()) == NULL) {
-        av_log(avctx, AV_LOG_ERROR, "Unable to open dmabufs\n");
-        goto fail0;
+        av_log(avctx, AV_LOG_DEBUG, "Unable to open dmabufs - try mmap buffers\n");
+        src_memtype = MEDIABUFS_MEMORY_MMAP;
+        dst_memtype = MEDIABUFS_MEMORY_MMAP;
+    }
+    else {
+        av_log(avctx, AV_LOG_DEBUG, "Dmabufs opened - try dmabuf buffers\n");
+        src_memtype = MEDIABUFS_MEMORY_DMABUF;
+        dst_memtype = MEDIABUFS_MEMORY_DMABUF;
     }
 
     if ((ctx->pq = pollqueue_new()) == NULL) {
@@ -196,8 +204,9 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     // Ask for an initial bitbuf size of max size / 4
     // We will realloc if we need more
     // Must use sps->h/w as avctx contains cropped size
+retry_src_memtype:
     src_size = bit_buf_size(sps->width, sps->height, sps->bit_depth - 8);
-    if (mediabufs_src_resizable(ctx->mbufs))
+    if (src_memtype == MEDIABUFS_MEMORY_DMABUF && mediabufs_src_resizable(ctx->mbufs))
         src_size /= 4;
     // Kludge for conformance tests which break Annex A limits
     else if (src_size < 0x40000)
@@ -207,6 +216,15 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
                               sps->width, sps->height, src_size)) {
         char tbuf1[5];
         av_log(avctx, AV_LOG_ERROR, "Failed to set source format: %s %dx%d\n", strfourcc(tbuf1, src_pix_fmt), sps->width, sps->height);
+        goto fail4;
+    }
+
+    if (mediabufs_src_chk_memtype(ctx->mbufs, src_memtype)) {
+        if (src_memtype == MEDIABUFS_MEMORY_DMABUF) {
+            src_memtype = MEDIABUFS_MEMORY_MMAP;
+            goto retry_src_memtype;
+        }
+        av_log(avctx, AV_LOG_ERROR, "Failed to get src memory type\n");
         goto fail4;
     }
 
@@ -238,7 +256,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    if (mediabufs_src_pool_create(ctx->mbufs, ctx->dbufs, 6)) {
+    if (mediabufs_src_pool_create(ctx->mbufs, ctx->dbufs, 6, src_memtype)) {
         av_log(avctx, AV_LOG_ERROR, "Failed to create source pool\n");
         goto fail4;
     }
@@ -250,8 +268,17 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
                sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering,
                avctx->thread_count, avctx->extra_hw_frames);
 
+        if (mediabufs_dst_chk_memtype(ctx->mbufs, dst_memtype)) {
+            if (dst_memtype != MEDIABUFS_MEMORY_DMABUF) {
+                av_log(avctx, AV_LOG_ERROR, "Failed to get dst memory type\n");
+                goto fail4;
+            }
+            av_log(avctx, AV_LOG_DEBUG, "Dst DMABUF not supported - trying mmap\n");
+            dst_memtype = MEDIABUFS_MEMORY_MMAP;
+        }
+
         // extra_hw_frames is -1 if unset
-        if (mediabufs_dst_slots_create(ctx->mbufs, dst_slots, (avctx->extra_hw_frames > 0))) {
+        if (mediabufs_dst_slots_create(ctx->mbufs, dst_slots, (avctx->extra_hw_frames > 0), dst_memtype)) {
             av_log(avctx, AV_LOG_ERROR, "Failed to create destination slots\n");
             goto fail4;
         }
@@ -277,9 +304,10 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
 
-    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s\n",
+    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s\n",
            ctx->fns->name,
-           decdev_media_path(decdev), decdev_video_path(decdev));
+           decdev_media_path(decdev), decdev_video_path(decdev),
+           mediabufs_memory_name(src_memtype), mediabufs_memory_name(dst_memtype));
 
     return 0;
 
