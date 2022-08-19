@@ -36,6 +36,26 @@ static unsigned int total_bufs = 0;
 static size_t total_size = 0;
 #endif
 
+struct dmabuf_h * dmabuf_import_mmap(void * mapptr, size_t size)
+{
+    struct dmabuf_h *dh;
+
+    if (mapptr == MAP_FAILED)
+        return NULL;
+
+    dh = malloc(sizeof(*dh));
+    if (!dh)
+        return NULL;
+
+    *dh = (struct dmabuf_h) {
+        .fd = -1,
+        .size = size,
+        .mapptr = mapptr
+    };
+
+    return dh;
+}
+
 struct dmabuf_h * dmabuf_import(int fd, size_t size)
 {
     struct dmabuf_h *dh;
@@ -122,6 +142,8 @@ int dmabuf_sync(struct dmabuf_h * const dh, unsigned int flags)
     struct dma_buf_sync sync = {
         .flags = flags
     };
+    if (dh->fd == -1)
+        return 0;
     while (ioctl(dh->fd, DMA_BUF_IOCTL_SYNC, &sync) == -1) {
         const int err = errno;
         if (errno == EINTR)
