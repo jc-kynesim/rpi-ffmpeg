@@ -43,6 +43,7 @@ typedef enum media_buf_status {
     MEDIABUFS_ERROR_UNSUPPORTED_BUFFERTYPE,
     MEDIABUFS_ERROR_UNSUPPORTED_RT_FORMAT,
     MEDIABUFS_ERROR_ALLOCATION_FAILED,
+    MEDIABUFS_ERROR_UNSUPPORTED_MEMORY,
 } MediaBufsStatus;
 
 struct media_pool * media_pool_new(const char * const media_path,
@@ -70,6 +71,15 @@ struct qent_dst;
 struct dmabuf_h;
 struct dmabufs_ctl;
 
+// 1-1 mammping to V4L2 type - just defined separetely to avoid some include versioning difficulties
+enum mediabufs_memory {
+   MEDIABUFS_MEMORY_UNSET            = 0,
+   MEDIABUFS_MEMORY_MMAP             = 1,
+   MEDIABUFS_MEMORY_USERPTR          = 2,
+   MEDIABUFS_MEMORY_OVERLAY          = 3,
+   MEDIABUFS_MEMORY_DMABUF           = 4,
+};
+
 int qent_src_params_set(struct qent_src *const be, const struct timeval * timestamp);
 struct timeval qent_dst_timestamp_get(const struct qent_dst *const be_dst);
 
@@ -93,6 +103,8 @@ MediaBufsStatus qent_dst_import_fd(struct qent_dst *const be_dst,
                 unsigned int plane,
                 int fd, size_t size);
 
+const char * mediabufs_memory_name(const enum mediabufs_memory m);
+
 MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
                 struct media_request **const pmreq,
                 struct qent_src **const psrc_be,
@@ -106,7 +118,7 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc,
 // Create dst slots without alloc
 // If fixed true then qent_alloc will only get slots from this pool and will
 // block until a qent has been unrefed
-MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, const unsigned int n, const bool fixed);
+MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, const unsigned int n, const bool fixed, const enum mediabufs_memory memtype);
 
 MediaBufsStatus mediabufs_stream_on(struct mediabufs_ctl *const mbc);
 MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc);
@@ -140,7 +152,12 @@ MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
 
 MediaBufsStatus mediabufs_src_pool_create(struct mediabufs_ctl *const rw,
                   struct dmabufs_ctl * const dbsc,
-                  unsigned int n);
+                  unsigned int n,
+                  const enum mediabufs_memory memtype);
+
+// Want to have appropriate formats set first
+MediaBufsStatus mediabufs_src_chk_memtype(struct mediabufs_ctl *const mbc, const enum mediabufs_memory memtype);
+MediaBufsStatus mediabufs_dst_chk_memtype(struct mediabufs_ctl *const mbc, const enum mediabufs_memory memtype);
 
 #define MEDIABUFS_DRIVER_VERSION(a, b, c) (((a) << 16) | ((b) << 8) | (c))
 unsigned int mediabufs_ctl_driver_version(struct mediabufs_ctl *const mbc);
