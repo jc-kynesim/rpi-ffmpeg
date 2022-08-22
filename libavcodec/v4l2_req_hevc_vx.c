@@ -40,11 +40,6 @@
 #define V4L2_STATELESS_HEVC_START_CODE_ANNEX_B          V4L2_MPEG_VIDEO_HEVC_START_CODE_ANNEX_B
 #endif
 
-// Should be in videodev2 but we might not have a good enough one
-#ifndef V4L2_PIX_FMT_HEVC_SLICE
-#define V4L2_PIX_FMT_HEVC_SLICE v4l2_fourcc('S', '2', '6', '5') /* HEVC parsed slices */
-#endif
-
 #include "v4l2_request_hevc.h"
 
 #include "libavutil/hwcontext_drm.h"
