@@ -17,7 +17,7 @@
  */
 
 
-
+#include "config.h"
 #include "decode.h"
 #include "hevcdec.h"
 #include "hwconfig.h"
@@ -142,7 +142,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const HEVCSPS * const sps = h->ps.sps;
     int ret;
     const struct decdev * decdev;
-    const uint32_t src_pix_fmt = V2(ff_v4l2_req_hevc, 1).src_pix_fmt_v4l2;  // Assuming constant for all APIs but avoiding V4L2 includes
+    const uint32_t src_pix_fmt = V2(ff_v4l2_req_hevc, 4).src_pix_fmt_v4l2;  // Assuming constant for all APIs but avoiding V4L2 includes
     size_t src_size;
     enum mediabufs_memory src_memtype;
     enum mediabufs_memory dst_memtype;
@@ -232,6 +232,7 @@ retry_src_memtype:
         av_log(avctx, AV_LOG_DEBUG, "HEVC API version 4 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 4);
     }
+#if CONFIG_V4L2_REQ_HEVC_VX
     else if (V2(ff_v4l2_req_hevc, 3).probe(avctx, ctx) == 0) {
         av_log(avctx, AV_LOG_DEBUG, "HEVC API version 3 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 3);
@@ -244,6 +245,7 @@ retry_src_memtype:
         av_log(avctx, AV_LOG_DEBUG, "HEVC API version 1 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 1);
     }
+#endif
     else {
         av_log(avctx, AV_LOG_ERROR, "No HEVC version probed successfully\n");
         ret = AVERROR(EINVAL);
