@@ -733,6 +733,14 @@ static struct qent_base * qe_dequeue(struct buf_pool *const bp,
         return NULL;
     }
 
+    if (mp) {
+        unsigned int i;
+        for (i = 0; i != buffer.length; ++i)
+            dmabuf_len_set(be->dh[i], V4L2_TYPE_IS_CAPTURE(f->type) ? planes[i].bytesused : 0);
+    }
+    else
+        dmabuf_len_set(be->dh[0], V4L2_TYPE_IS_CAPTURE(f->type) ? buffer.length : 0);
+
     be->timestamp = buffer.timestamp;
     be->status = (buffer.flags & V4L2_BUF_FLAG_ERROR) ? QENT_ERROR : QENT_DONE;
     return be;
