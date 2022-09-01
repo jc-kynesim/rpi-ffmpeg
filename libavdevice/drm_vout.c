@@ -245,7 +245,7 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
             }
         }
 
-#if 1 && TRACE_ALL
+#if 1 || TRACE_ALL
         av_log(s, AV_LOG_DEBUG, "%dx%d, fmt: %x, boh=%d,%d,%d,%d, pitch=%d,%d,%d,%d,"
                " offset=%d,%d,%d,%d, mod=%llx,%llx,%llx,%llx\n",
                av_frame_cropped_width(frame),
