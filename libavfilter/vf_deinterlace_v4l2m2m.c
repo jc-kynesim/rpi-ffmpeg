@@ -122,8 +122,11 @@ typedef struct DeintV4L2M2MContextShared {
     int done;
     int width;
     int height;
+
+    // from options
     int output_width;
     int output_height;
+    enum AVPixelFormat output_format;
 
     int orig_width;
     int orig_height;
@@ -146,9 +149,21 @@ typedef struct DeintV4L2M2MContext {
 
     char * w_expr;
     char * h_expr;
+    char * output_format_string;;
+
     int force_original_aspect_ratio;
     int force_divisible_by;
 
+    char *colour_primaries_string;
+    char *colour_transfer_string;
+    char *colour_matrix_string;
+    int   colour_range;
+    char *chroma_location_string;
+
+    enum AVColorPrimaries colour_primaries;
+    enum AVColorTransferCharacteristic colour_transfer;
+    enum AVColorSpace colour_matrix;
+    enum AVChromaLocation chroma_location;
 } DeintV4L2M2MContext;
 
 static unsigned int pts_stats_interval(const pts_stats_t * const stats)
@@ -1199,11 +1214,13 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
     frame->height = ctx->output_height;
     frame->width = ctx->output_width;
 
-    // Not interlaced now
-    frame->interlaced_frame = 0;
-    frame->top_field_first = 0;
-    // Pkt duration halved
-    frame->pkt_duration /= 2;
+    if (ctx->filter_type == FILTER_V4L2_DEINTERLACE) {
+        // Not interlaced now
+        frame->interlaced_frame = 0;   // *** Fill in from dst buffer?
+        frame->top_field_first = 0;
+        // Pkt duration halved
+        frame->pkt_duration /= 2;
+    }
 
     if (avbuf->buffer.flags & V4L2_BUF_FLAG_ERROR) {
         av_log(ctx->logctx, AV_LOG_ERROR, "driver decode error\n");
@@ -1336,7 +1353,6 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
         }
 
         ret = do_s_fmt(output);
-//        ret = deint_v4l2m2m_set_format(output, pixelformat, ctx->field_order, ctx->width, ctx->height, ctx->orig_width, drm_desc->layers[0].planes[1].offset);
         if (ret) {
             av_log(avctx, AV_LOG_WARNING, "Failed to set source format\n");
             return ret;
@@ -1519,6 +1535,35 @@ static av_cold int common_v4l2m2m_init(AVFilterContext * const avctx, const filt
 
     atomic_init(&ctx->refcount, 1);
 
+    if (priv->output_format_string) {
+        ctx->output_format = av_get_pix_fmt(priv->output_format_string);
+        if (ctx->output_format == AV_PIX_FMT_NONE) {
+            av_log(avctx, AV_LOG_ERROR, "Invalid output format.\n");
+            return AVERROR(EINVAL);
+        }
+    } else {
+        // Use the input format once that is configured.
+        ctx->output_format = AV_PIX_FMT_NONE;
+    }
+
+#define STRING_OPTION(var_name, func_name, default_value) do { \
+        if (priv->var_name ## _string) { \
+            int var = av_ ## func_name ## _from_name(priv->var_name ## _string); \
+            if (var < 0) { \
+                av_log(avctx, AV_LOG_ERROR, "Invalid %s.\n", #var_name); \
+                return AVERROR(EINVAL); \
+            } \
+            priv->var_name = var; \
+        } else { \
+            priv->var_name = default_value; \
+        } \
+    } while (0)
+
+    STRING_OPTION(colour_primaries, color_primaries, AVCOL_PRI_UNSPECIFIED);
+    STRING_OPTION(colour_transfer,  color_transfer,  AVCOL_TRC_UNSPECIFIED);
+    STRING_OPTION(colour_matrix,    color_space,     AVCOL_SPC_UNSPECIFIED);
+    STRING_OPTION(chroma_location,  chroma_location, AVCHROMA_LOC_UNSPECIFIED);
+
     return 0;
 }
 
@@ -1557,6 +1602,36 @@ static const AVOption scale_v4l2m2m_options[] = {
       OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, .flags = FLAGS },
     { "h", "Output video height",
       OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, .flags = FLAGS },
+    { "format", "Output video format (software format of hardware frames)",
+      OFFSET(output_format_string), AV_OPT_TYPE_STRING, .flags = FLAGS },
+      // These colour properties match the ones of the same name in vf_scale.
+      { "out_color_matrix", "Output colour matrix coefficient set",
+      OFFSET(colour_matrix_string), AV_OPT_TYPE_STRING, { .str = NULL }, .flags = FLAGS },
+    { "out_range", "Output colour range",
+      OFFSET(colour_range), AV_OPT_TYPE_INT, { .i64 = AVCOL_RANGE_UNSPECIFIED },
+      AVCOL_RANGE_UNSPECIFIED, AVCOL_RANGE_JPEG, FLAGS, "range" },
+        { "full",    "Full range",
+          0, AV_OPT_TYPE_CONST, { .i64 = AVCOL_RANGE_JPEG }, 0, 0, FLAGS, "range" },
+        { "limited", "Limited range",
+          0, AV_OPT_TYPE_CONST, { .i64 = AVCOL_RANGE_MPEG }, 0, 0, FLAGS, "range" },
+        { "jpeg",    "Full range",
+          0, AV_OPT_TYPE_CONST, { .i64 = AVCOL_RANGE_JPEG }, 0, 0, FLAGS, "range" },
+        { "mpeg",    "Limited range",
+          0, AV_OPT_TYPE_CONST, { .i64 = AVCOL_RANGE_MPEG }, 0, 0, FLAGS, "range" },
+        { "tv",      "Limited range",
+          0, AV_OPT_TYPE_CONST, { .i64 = AVCOL_RANGE_MPEG }, 0, 0, FLAGS, "range" },
+        { "pc",      "Full range",
+          0, AV_OPT_TYPE_CONST, { .i64 = AVCOL_RANGE_JPEG }, 0, 0, FLAGS, "range" },
+    // These colour properties match the ones in the VAAPI scaler
+    { "out_color_primaries", "Output colour primaries",
+      OFFSET(colour_primaries_string), AV_OPT_TYPE_STRING,
+      { .str = NULL }, .flags = FLAGS },
+    { "out_color_transfer", "Output colour transfer characteristics",
+      OFFSET(colour_transfer_string),  AV_OPT_TYPE_STRING,
+      { .str = NULL }, .flags = FLAGS },
+    { "out_chroma_location", "Output chroma sample location",
+      OFFSET(chroma_location_string),  AV_OPT_TYPE_STRING,
+      { .str = NULL }, .flags = FLAGS },
     { "force_original_aspect_ratio", "decrease or increase w/h if necessary to keep the original AR", OFFSET(force_original_aspect_ratio), AV_OPT_TYPE_INT, { .i64 = 0}, 0, 2, FLAGS, "force_oar" },
     { "force_divisible_by", "enforce that the output resolution is divisible by a defined integer when force_original_aspect_ratio is used", OFFSET(force_divisible_by), AV_OPT_TYPE_INT, { .i64 = 1}, 1, 256, FLAGS },
     { NULL },
