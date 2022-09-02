@@ -486,7 +486,6 @@ do_s_fmt(V4L2Queue * const q)
         return AVERROR(EINVAL);
     }
 
-
     q->sel.target = V4L2_TYPE_IS_OUTPUT(q->sel.type) ? V4L2_SEL_TGT_CROP : V4L2_SEL_TGT_COMPOSE,
     q->sel.flags  = V4L2_TYPE_IS_OUTPUT(q->sel.type) ? V4L2_SEL_FLAG_LE : V4L2_SEL_FLAG_GE;
 
@@ -497,6 +496,121 @@ do_s_fmt(V4L2Queue * const q)
     }
 
     return 0;
+}
+
+static void
+set_fmt_color(struct v4l2_format *const fmt,
+               const enum AVColorPrimaries avcp,
+               const enum AVColorSpace avcs,
+               const enum AVColorTransferCharacteristic avxc)
+{
+    enum v4l2_ycbcr_encoding ycbcr = V4L2_YCBCR_ENC_DEFAULT;
+    enum v4l2_colorspace cs = V4L2_COLORSPACE_DEFAULT;
+    enum v4l2_xfer_func xfer = V4L2_XFER_FUNC_DEFAULT;
+
+    switch (avcp) {
+    case AVCOL_PRI_BT709:
+        cs = V4L2_COLORSPACE_REC709;
+        ycbcr = V4L2_YCBCR_ENC_709;
+        break;
+    case AVCOL_PRI_BT470M:
+        cs = V4L2_COLORSPACE_470_SYSTEM_M;
+        ycbcr = V4L2_YCBCR_ENC_601;
+        break;
+    case AVCOL_PRI_BT470BG:
+        cs = V4L2_COLORSPACE_470_SYSTEM_BG;
+        break;
+    case AVCOL_PRI_SMPTE170M:
+        cs = V4L2_COLORSPACE_SMPTE170M;
+        break;
+    case AVCOL_PRI_SMPTE240M:
+        cs = V4L2_COLORSPACE_SMPTE240M;
+        break;
+    case AVCOL_PRI_BT2020:
+        cs = V4L2_COLORSPACE_BT2020;
+        break;
+    case AVCOL_PRI_SMPTE428:
+    case AVCOL_PRI_SMPTE431:
+    case AVCOL_PRI_SMPTE432:
+    case AVCOL_PRI_EBU3213:
+    case AVCOL_PRI_RESERVED:
+    case AVCOL_PRI_FILM:
+    case AVCOL_PRI_UNSPECIFIED:
+    default:
+        break;
+    }
+
+    switch (avcs) {
+    case AVCOL_SPC_RGB:
+        cs = V4L2_COLORSPACE_SRGB;
+        break;
+    case AVCOL_SPC_BT709:
+        cs = V4L2_COLORSPACE_REC709;
+        break;
+    case AVCOL_SPC_FCC:
+        cs = V4L2_COLORSPACE_470_SYSTEM_M;
+        break;
+    case AVCOL_SPC_BT470BG:
+        cs = V4L2_COLORSPACE_470_SYSTEM_BG;
+        break;
+    case AVCOL_SPC_SMPTE170M:
+        cs = V4L2_COLORSPACE_SMPTE170M;
+        break;
+    case AVCOL_SPC_SMPTE240M:
+        cs = V4L2_COLORSPACE_SMPTE240M;
+        break;
+    case AVCOL_SPC_BT2020_CL:
+        cs = V4L2_COLORSPACE_BT2020;
+        ycbcr = V4L2_YCBCR_ENC_BT2020_CONST_LUM;
+        break;
+    case AVCOL_SPC_BT2020_NCL:
+        cs = V4L2_COLORSPACE_BT2020;
+        break;
+    default:
+        break;
+    }
+
+    switch (xfer) {
+    case AVCOL_TRC_BT709:
+        xfer = V4L2_XFER_FUNC_709;
+        break;
+    case AVCOL_TRC_IEC61966_2_1:
+        xfer = V4L2_XFER_FUNC_SRGB;
+        break;
+    case AVCOL_TRC_SMPTE240M:
+        xfer = V4L2_XFER_FUNC_SMPTE240M;
+        break;
+    case AVCOL_TRC_SMPTE2084:
+        xfer = V4L2_XFER_FUNC_SMPTE2084;
+        break;
+    default:
+        break;
+    }
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
+        fmt->fmt.pix_mp.colorspace = cs;
+        fmt->fmt.pix_mp.ycbcr_enc = ycbcr;
+        fmt->fmt.pix_mp.xfer_func = xfer;
+    } else {
+        fmt->fmt.pix.colorspace = cs;
+        fmt->fmt.pix.ycbcr_enc = ycbcr;
+        fmt->fmt.pix.xfer_func = xfer;
+    }
+}
+
+static void
+set_fmt_color_range(struct v4l2_format *const fmt, const enum AVColorRange avcr)
+{
+    const enum v4l2_quantization q =
+        avcr == AVCOL_RANGE_MPEG ? V4L2_QUANTIZATION_LIM_RANGE :
+        avcr == AVCOL_RANGE_JPEG ? V4L2_QUANTIZATION_FULL_RANGE :
+            V4L2_QUANTIZATION_DEFAULT;
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
+        fmt->fmt.pix_mp.quantization = q;
+    } else {
+        fmt->fmt.pix.quantization = q;
+    }
 }
 
 static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
@@ -584,6 +698,9 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
         pix->bytesperline = bpl;
     }
 
+    set_fmt_color(format, frame->color_primaries, frame->colorspace, frame->color_trc);
+    set_fmt_color_range(format, frame->color_range);
+
     q->sel.r.width = frame->width - (frame->crop_left + frame->crop_right);
     q->sel.r.height = frame->height - (frame->crop_top + frame->crop_bottom);
     q->sel.r.left = frame->crop_left;
@@ -593,66 +710,35 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
 }
 
 
-static int deint_v4l2m2m_set_format(V4L2Queue *queue, uint32_t pixelformat, uint32_t field, int width, int height, int pitch, int ysize)
+static int set_dst_format(DeintV4L2M2MContext * const priv, V4L2Queue *queue, uint32_t pixelformat, uint32_t field, int width, int height)
 {
-    struct v4l2_format *fmt        = &queue->format;
-    DeintV4L2M2MContextShared *ctx = queue->ctx;
-    int ret;
+    struct v4l2_format * const fmt   = &queue->format;
+    struct v4l2_selection *const sel = &queue->sel;
 
-    struct v4l2_selection sel = {
-        .type = fmt->type,
-        .target = V4L2_TYPE_IS_OUTPUT(fmt->type) ? V4L2_SEL_TGT_CROP_BOUNDS : V4L2_SEL_TGT_COMPOSE_BOUNDS,
-    };
+    memset(&fmt->fmt, 0, sizeof(fmt->fmt));
 
     // This works for most single object 4:2:0 types
     if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
         fmt->fmt.pix_mp.pixelformat = pixelformat;
         fmt->fmt.pix_mp.field = field;
         fmt->fmt.pix_mp.width = width;
-        fmt->fmt.pix_mp.height = ysize == 0 ? height : ysize / pitch;
-        fmt->fmt.pix_mp.plane_fmt[0].bytesperline = pitch;
-        fmt->fmt.pix_mp.plane_fmt[0].sizeimage = ysize + (ysize >> 1);
+        fmt->fmt.pix_mp.height = height;
     } else {
         fmt->fmt.pix.pixelformat = pixelformat;
         fmt->fmt.pix.field = field;
         fmt->fmt.pix.width = width;
         fmt->fmt.pix.height = height;
-        fmt->fmt.pix.bytesperline = pitch;
-        fmt->fmt.pix.sizeimage = ysize + (ysize >> 1);
     }
 
-    ret = ioctl(ctx->fd, VIDIOC_S_FMT, fmt);
-    if (ret) {
-        ret = AVERROR(errno);
-        av_log(ctx->logctx, AV_LOG_ERROR, "VIDIOC_S_FMT failed: %d\n", ret);
-        return ret;
-    }
+    set_fmt_color(fmt, priv->colour_primaries, priv->colour_matrix, priv->colour_transfer);
+    set_fmt_color_range(fmt, priv->colour_range);
 
-    if (pixelformat != fmt->fmt.pix.pixelformat) {
-        av_log(ctx->logctx, AV_LOG_ERROR, "Format not supported: %s; S_FMT returned %s\n", av_fourcc2str(pixelformat), av_fourcc2str(fmt->fmt.pix.pixelformat));
-        return AVERROR(EINVAL);
-    }
+    sel->r.width = width;
+    sel->r.height = height;
+    sel->r.left = 0;
+    sel->r.top = 0;
 
-    ret = ioctl(ctx->fd, VIDIOC_G_SELECTION, &sel);
-    if (ret) {
-        ret = AVERROR(errno);
-        av_log(ctx->logctx, AV_LOG_WARNING, "VIDIOC_G_SELECTION failed: %d\n", ret);
-    }
-
-    sel.r.width = width;
-    sel.r.height = height;
-    sel.r.left = 0;
-    sel.r.top = 0;
-    sel.target = V4L2_TYPE_IS_OUTPUT(fmt->type) ? V4L2_SEL_TGT_CROP : V4L2_SEL_TGT_COMPOSE,
-    sel.flags = V4L2_SEL_FLAG_LE;
-
-    ret = ioctl(ctx->fd, VIDIOC_S_SELECTION, &sel);
-    if (ret) {
-        ret = AVERROR(errno);
-        av_log(ctx->logctx, AV_LOG_WARNING, "VIDIOC_S_SELECTION failed: %d\n", ret);
-    }
-
-    return 0;
+    return do_s_fmt(queue);
 }
 
 static int deint_v4l2m2m_probe_device(DeintV4L2M2MContextShared *ctx, char *node)
@@ -1358,7 +1444,7 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
             return ret;
         }
 
-        ret = deint_v4l2m2m_set_format(capture, pixelformat, V4L2_FIELD_NONE, ctx->output_width, ctx->output_height, 0, 0);
+        ret = set_dst_format(priv, capture, pixelformat, V4L2_FIELD_NONE, ctx->output_width, ctx->output_height);
         if (ret) {
             av_log(avctx, AV_LOG_WARNING, "Failed to set destination format\n");
             return ret;
