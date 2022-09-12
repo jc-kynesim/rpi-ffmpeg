@@ -4310,10 +4310,13 @@ static int mov_write_isml_manifest(AVIOContext *pb, MOVMuxContext *mov, AVFormat
 
         param_write_string(pb, "trackName", track_name_buf);
 
+        av_log(pb, AV_LOG_INFO, "Write codec type %d.\n", track->par->codec_type);
+
         if (track->par->codec_type == AVMEDIA_TYPE_VIDEO) {
             if (track->par->codec_id == AV_CODEC_ID_H264) {
                 uint8_t *ptr;
                 int size = track->par->extradata_size;
+                av_log(pb, AV_LOG_INFO, "Write extradata - size %d.\n", size);
                 if (!ff_avc_write_annexb_extradata(track->par->extradata, &ptr,
                                                    &size)) {
                     param_write_hex(pb, "CodecPrivateData",
@@ -5619,6 +5622,8 @@ int ff_mov_write_packet(AVFormatContext *s, AVPacket *pkt)
         return AVERROR_PATCHWELCOME;
     }
 
+    av_log(s, AV_LOG_INFO, "extradata: len=%d, vos len=%d.\n", par->extradata_size, trk->vos_len);
+
     /* copy extradata if it exists */
     if (trk->vos_len == 0 && par->extradata_size > 0 &&
         !TAG_IS_AVCI(trk->tag) &&
@@ -5913,6 +5918,7 @@ static int mov_write_single_packet(AVFormatContext *s, AVPacket *pkt)
     if (trk->par->codec_id == AV_CODEC_ID_MP4ALS ||
             trk->par->codec_id == AV_CODEC_ID_AAC ||
             trk->par->codec_id == AV_CODEC_ID_AV1 ||
+            trk->par->codec_id == AV_CODEC_ID_H264 ||
             trk->par->codec_id == AV_CODEC_ID_FLAC) {
         buffer_size_t side_size;
         uint8_t *side = av_packet_get_side_data(pkt, AV_PKT_DATA_NEW_EXTRADATA, &side_size);

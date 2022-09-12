@@ -531,6 +531,9 @@ dequeue:
     if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
         return ret;
 
+    av_log(avctx, AV_LOG_INFO, "Data: %02x %02x %02x %02x %02x, len %d.\n",
+           avpkt->data[0], avpkt->data[1], avpkt->data[2], avpkt->data[3], avpkt->data[4], avpkt->size);
+
     if (capture->first_buf == 1) {
         uint8_t * data;
         const int len = avpkt->size;
@@ -564,11 +567,20 @@ dequeue:
 
         if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
             return ret;
+        av_log(avctx, AV_LOG_INFO, "Data: %02x %02x %02x %02x %02x, len %d.\n",
+               avpkt->data[0], avpkt->data[1], avpkt->data[2], avpkt->data[3], avpkt->data[4], avpkt->size);
     }
 
     // First frame must be key so mark as such even if encoder forgot
-    if (capture->first_buf == 2)
+    if (capture->first_buf == 2) {
         avpkt->flags |= AV_PKT_FLAG_KEY;
+        if (avctx->extradata_size > 0 && avctx->extradata) {
+            void * side = av_packet_new_side_data(avpkt,
+                                           AV_PKT_DATA_NEW_EXTRADATA,
+                                           avctx->extradata_size);
+            memcpy(side, avctx->extradata, avctx->extradata_size);
+        }
+    }
 
     // Add SPS/PPS to the start of every key frame if non-global headers
     if ((avpkt->flags & AV_PKT_FLAG_KEY) != 0 && s->extdata_size != 0) {
@@ -589,6 +601,7 @@ dequeue:
         avpkt->size = newlen;
     }
 
+    av_log(avctx, AV_LOG_INFO, "%s: extradata len: %d\n", __func__, avctx->extradata_size);
 //    av_log(avctx, AV_LOG_INFO, "%s: PTS out=%"PRId64", size=%d, ret=%d\n", __func__, avpkt->pts, avpkt->size, ret);
     capture->first_buf = 0;
     return 0;
