@@ -58,6 +58,9 @@
  * Info, Tracks, Chapters, Attachments, Tags (potentially twice) and Cues */
 #define MAX_SEEKHEAD_ENTRIES 7
 
+/* Reserved size for H264 headers if not extant at init time */
+#define MAX_H264_HEADER_SIZE 1024
+
 #define IS_SEEKABLE(pb, mkv) (((pb)->seekable & AVIO_SEEKABLE_NORMAL) && \
                               !(mkv)->is_live)
 
@@ -720,8 +723,12 @@ static int mkv_write_native_codecprivate(AVFormatContext *s, AVIOContext *pb,
     case AV_CODEC_ID_WAVPACK:
         return put_wv_codecpriv(dyn_cp, par);
     case AV_CODEC_ID_H264:
-        return ff_isom_write_avcc(dyn_cp, par->extradata,
-                                  par->extradata_size);
+        if (par->extradata_size)
+            return ff_isom_write_avcc(dyn_cp, par->extradata,
+                                      par->extradata_size);
+        else
+            put_ebml_void(pb, MAX_H264_HEADER_SIZE);
+        break;
     case AV_CODEC_ID_HEVC:
         return ff_isom_write_hvcc(dyn_cp, par->extradata,
                                   par->extradata_size, 0);
@@ -2233,7 +2240,9 @@ static int mkv_check_new_extra_data(AVFormatContext *s, const AVPacket *pkt)
         break;
     // FIXME: Remove the following once libaom starts propagating extradata during init()
     //        See https://bugs.chromium.org/p/aomedia/issues/detail?id=2012
+    // H264 V4L2 has a similar issue
     case AV_CODEC_ID_AV1:
+    case AV_CODEC_ID_H264:
         if (side_data_size && mkv->track.bc && !par->extradata_size) {
             AVIOContext *dyn_cp;
             uint8_t *codecpriv;
@@ -2241,7 +2250,10 @@ static int mkv_check_new_extra_data(AVFormatContext *s, const AVPacket *pkt)
             ret = avio_open_dyn_buf(&dyn_cp);
             if (ret < 0)
                 return ret;
-            ff_isom_write_av1c(dyn_cp, side_data, side_data_size);
+            if (par->codec_id == AV_CODEC_ID_H264)
+                ff_isom_write_avcc(dyn_cp, side_data, side_data_size);
+            else
+                ff_isom_write_av1c(dyn_cp, side_data, side_data_size);
             codecpriv_size = avio_get_dyn_buf(dyn_cp, &codecpriv);
             if ((ret = dyn_cp->error) < 0 ||
                 !codecpriv_size && (ret = AVERROR_INVALIDDATA)) {
@@ -2249,8 +2261,25 @@ static int mkv_check_new_extra_data(AVFormatContext *s, const AVPacket *pkt)
                 return ret;
             }
             avio_seek(mkv->track.bc, track->codecpriv_offset, SEEK_SET);
-            // Do not write the OBUs as we don't have space saved for them
-            put_ebml_binary(mkv->track.bc, MATROSKA_ID_CODECPRIVATE, codecpriv, 4);
+            if (par->codec_id == AV_CODEC_ID_H264) {
+                int filler;
+                // Up to 6 bytes for header and the filler must be at least 2
+                if (codecpriv_size > MAX_H264_HEADER_SIZE - 8) {
+                    av_log(s, AV_LOG_ERROR, "H264 header size %d > %d bytes\n", codecpriv_size, MAX_H264_HEADER_SIZE - 8);
+                    return AVERROR_INVALIDDATA;
+                }
+                put_ebml_binary(mkv->track.bc, MATROSKA_ID_CODECPRIVATE, codecpriv, codecpriv_size);
+                filler = MAX_H264_HEADER_SIZE - (avio_tell(mkv->track.bc) - track->codecpriv_offset);
+                if (filler < 2) {
+                    av_log(s, AV_LOG_ERROR, "Unexpected SPS/PPS filler length: %d\n", filler);
+                    return AVERROR_BUG;
+                }
+                put_ebml_void(mkv->track.bc, filler);
+            }
+            else {
+                // Do not write the OBUs as we don't have space saved for them
+                put_ebml_binary(mkv->track.bc, MATROSKA_ID_CODECPRIVATE, codecpriv, 4);
+            }
             ffio_free_dyn_buf(&dyn_cp);
             ret = ff_alloc_extradata(par, side_data_size);
             if (ret < 0)
