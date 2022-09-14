@@ -77,6 +77,10 @@
 
 #define IS_WEBM(mkv) (CONFIG_WEBM_MUXER && CONFIG_MATROSKA_MUXER ? \
                       ((mkv)->mode == MODE_WEBM) : CONFIG_WEBM_MUXER)
+
+/* Reserved size for H264 headers if not extant at init time */
+#define MAX_H264_HEADER_SIZE 1024
+
 #define IS_SEEKABLE(pb, mkv) (((pb)->seekable & AVIO_SEEKABLE_NORMAL) && \
                               !(mkv)->is_live)
 
@@ -1121,8 +1125,12 @@ static int mkv_assemble_native_codecprivate(AVFormatContext *s, AVIOContext *dyn
     case AV_CODEC_ID_WAVPACK:
         return put_wv_codecpriv(dyn_cp, extradata, extradata_size);
     case AV_CODEC_ID_H264:
-        return ff_isom_write_avcc(dyn_cp, extradata,
-                                  extradata_size);
+        if (par->extradata_size)
+            return ff_isom_write_avcc(dyn_cp, extradata,
+                                      extradata_size);
+        else
+            *size_to_reserve = MAX_H264_HEADER_SIZE;
+        break;
     case AV_CODEC_ID_HEVC:
         return ff_isom_write_hvcc(dyn_cp, extradata,
                                   extradata_size, 0);
@@ -2731,14 +2739,24 @@ static int mkv_check_new_extra_data(AVFormatContext *s, const AVPacket *pkt)
         }
         break;
 #endif
-    // FIXME: Remove the following once libaom starts propagating proper extradata during init()
-    //        See https://bugs.chromium.org/p/aomedia/issues/detail?id=2208
+    // FIXME: Remove the following once libaom starts propagating extradata during init()
+    //        See https://bugs.chromium.org/p/aomedia/issues/detail?id=2012
     case AV_CODEC_ID_AV1:
         if (side_data_size && mkv->track.bc && !par->extradata_size) {
             // If the reserved space doesn't suffice, only write
             // the first four bytes of the av1C.
             ret = mkv_update_codecprivate(s, mkv, side_data, side_data_size,
                                           par, mkv->track.bc, track, 4);
+            if (ret < 0)
+                return ret;
+        } else if (!par->extradata_size)
+            return AVERROR_INVALIDDATA;
+        break;
+    // H264 V4L2 has a similar issue
+    case AV_CODEC_ID_H264:
+        if (side_data_size && mkv->track.bc && !par->extradata_size) {
+            ret = mkv_update_codecprivate(s, mkv, side_data, side_data_size,
+                                          par, mkv->track.bc, track, 0);
             if (ret < 0)
                 return ret;
         } else if (!par->extradata_size)
