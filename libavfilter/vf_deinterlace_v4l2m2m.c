@@ -409,8 +409,6 @@ static int deint_v4l2m2m_prepare_context(DeintV4L2M2MContextShared *ctx)
     if (ret < 0)
         return ret;
 
-    fprintf(stderr, "%s: card=%s\n", __func__, cap.card);
-
     if (ctx->filter_type == FILTER_V4L2_SCALE &&
         strcmp("bcm2835-codec-isp", cap.card) != 0)
     {
