@@ -672,9 +672,10 @@ static av_cold int v4l2_encode_close(AVCodecContext *avctx)
 #define FLAGS AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 
 #define V4L_M2M_CAPTURE_OPTS \
-    V4L_M2M_DEFAULT_OPTS,\
+    { "num_output_buffers", "Number of buffers in the output context",\
+        OFFSET(num_output_buffers), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, FLAGS },\
     { "num_capture_buffers", "Number of buffers in the capture context", \
-        OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 4 }, 4, INT_MAX, FLAGS }
+        OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 8 }, 8, INT_MAX, FLAGS }
 
 static const AVOption mpeg4_options[] = {
     V4L_M2M_CAPTURE_OPTS,
