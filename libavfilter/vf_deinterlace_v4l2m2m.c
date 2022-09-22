@@ -1534,13 +1534,16 @@ static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
         ctx->output_height = ctx->height;
     }
 
-    av_log(priv, AV_LOG_DEBUG, "%s: %dx%d->%dx%d\n", __func__, ctx->width, ctx->height, ctx->output_width, ctx->output_height);
+    av_log(priv, AV_LOG_DEBUG, "%s: %dx%d->%dx%d FR: %d/%d->%d/%d\n", __func__,
+           ctx->width, ctx->height, ctx->output_width, ctx->output_height,
+           inlink->frame_rate.num, inlink->frame_rate.den, outlink->frame_rate.num, outlink->frame_rate.den);
 
     outlink->time_base           = inlink->time_base;
     outlink->w                   = ctx->output_width;
     outlink->h                   = ctx->output_height;
     outlink->format              = inlink->format;
-    outlink->frame_rate = (AVRational) {1, 0};  // Deny knowledge of frame rate
+    if (ctx->filter_type == FILTER_V4L2_DEINTERLACE && inlink->frame_rate.den != 0)
+        outlink->frame_rate = (AVRational){inlink->frame_rate.num * 2, inlink->frame_rate.den};
 
     if (inlink->sample_aspect_ratio.num)
         outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink->w, outlink->w * inlink->h}, inlink->sample_aspect_ratio);
