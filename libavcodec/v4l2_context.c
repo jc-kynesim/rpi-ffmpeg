@@ -1187,6 +1187,7 @@ fail_release:
 
 int ff_v4l2_context_init(V4L2Context* ctx)
 {
+    struct v4l2_queryctrl qctrl;
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     int ret;
 
@@ -1226,6 +1227,24 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         ret = AVERROR(errno);
         av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT failed: %s\n", ctx->name, av_err2str(ret));
         goto fail_unref_hwframes;
+    }
+
+    memset(&qctrl, 0, sizeof(qctrl));
+    qctrl.id = V4L2_CID_MIN_BUFFERS_FOR_OUTPUT;
+    if (ioctl(s->fd, VIDIOC_QUERYCTRL, &qctrl) != 0) {
+        ret = AVERROR(errno);
+        if (ret != AVERROR(EINVAL)) {
+            av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_QUERCTRL failed: %s\n", ctx->name, av_err2str(ret));
+            goto fail_unref_hwframes;
+        }
+        // Control unsupported - set default if wanted
+        if (ctx->num_buffers < 2)
+            ctx->num_buffers = 4;
+    }
+    else {
+        if (ctx->num_buffers < 2)
+            ctx->num_buffers = qctrl.minimum + 2;
+        ctx->num_buffers = av_clip(ctx->num_buffers, qctrl.minimum, qctrl.maximum);
     }
 
     ret = create_buffers(ctx, ctx->num_buffers, ctx->buf_mem);
