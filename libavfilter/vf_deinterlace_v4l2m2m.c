@@ -888,17 +888,19 @@ static int set_dst_format(DeintV4L2M2MContext * const priv, V4L2Queue *queue, ui
 
     memset(&fmt->fmt, 0, sizeof(fmt->fmt));
 
-    // This works for most single object 4:2:0 types
+    // Align w/h to 16 here in case there are alignment requirements at the next
+    // stage of the filter chain (also RPi deinterlace setup is bust and this
+    // fixes it)
     if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
         fmt->fmt.pix_mp.pixelformat = pixelformat;
         fmt->fmt.pix_mp.field = field;
-        fmt->fmt.pix_mp.width = width;
-        fmt->fmt.pix_mp.height = height;
+        fmt->fmt.pix_mp.width = FFALIGN(width, 16);
+        fmt->fmt.pix_mp.height = FFALIGN(height, 16);
     } else {
         fmt->fmt.pix.pixelformat = pixelformat;
         fmt->fmt.pix.field = field;
-        fmt->fmt.pix.width = width;
-        fmt->fmt.pix.height = height;
+        fmt->fmt.pix.width = FFALIGN(width, 16);
+        fmt->fmt.pix.height = FFALIGN(height, 16);
     }
 
     set_fmt_color(fmt, priv->colour_primaries, priv->colour_matrix, priv->colour_transfer);
