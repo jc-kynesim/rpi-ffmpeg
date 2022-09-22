@@ -456,9 +456,9 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         if (dst_rv != 0 && TRY_DQ(src_rv)) {
             // Pick a timeout depending on state
             const int t =
+                src_rv == NQ_Q_FULL ? -1 :
                 src_rv == NQ_DRAINING ? 300 :
-                prefer_dq ? 5 :
-                src_rv == NQ_Q_FULL ? -1 : 0;
+                prefer_dq ? 5 : 0;
 
             // Dequeue frame will unref any previous contents of frame
             // if it returns success so we don't need an explicit unref
