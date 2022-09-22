@@ -84,6 +84,7 @@ typedef struct V4L2Queue {
     struct v4l2_selection sel;
     int num_buffers;
     V4L2Buffer *buffers;
+    const char * name;
     DeintV4L2M2MContextShared *ctx;
 } V4L2Queue;
 
@@ -1792,8 +1793,10 @@ static av_cold int common_v4l2m2m_init(AVFilterContext * const avctx, const filt
     ctx->fd = -1;
     ctx->output.ctx = ctx;
     ctx->output.num_buffers = 8;
+    ctx->output.name = "OUTPUT";
     ctx->capture.ctx = ctx;
     ctx->capture.num_buffers = 12;
+    ctx->capture.name = "CAPTURE";
     ctx->done = 0;
     ctx->field_order = V4L2_FIELD_ANY;
 
