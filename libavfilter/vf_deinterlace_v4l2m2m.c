@@ -1563,7 +1563,7 @@ static int deint_v4l2m2m_query_formats(AVFilterContext *avctx)
 {
     static const enum AVPixelFormat pixel_formats[] = {
         AV_PIX_FMT_DRM_PRIME,
-        AV_PIX_FMT_YUV420P,
+//        AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NONE,
     };
 
