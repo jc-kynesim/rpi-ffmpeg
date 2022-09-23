@@ -218,4 +218,6 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const 
  */
 int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* f);
 
+void ff_v4l2_dq_all(V4L2Context *const ctx);
+
 #endif // AVCODEC_V4L2_CONTEXT_H
