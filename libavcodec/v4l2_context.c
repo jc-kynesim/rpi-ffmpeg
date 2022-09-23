@@ -707,17 +707,22 @@ clean_v4l2_buffer(V4L2Buffer * const avbuf)
     return avbuf;
 }
 
+void
+ff_v4l2_dq_all(V4L2Context *const ctx)
+{
+    V4L2Buffer * avbuf;
+    do {
+        get_qbuf(ctx, &avbuf, 0);
+    } while (avbuf);
+}
+
 static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 {
     int i;
 
     /* get back as many output buffers as possible */
-    if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
-        V4L2Buffer * avbuf;
-        do {
-            get_qbuf(ctx, &avbuf, 0);
-        } while (avbuf);
-    }
+    if (V4L2_TYPE_IS_OUTPUT(ctx->type))
+        ff_v4l2_dq_all(ctx);
 
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer * const avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
