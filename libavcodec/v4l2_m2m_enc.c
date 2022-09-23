@@ -421,6 +421,8 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
 
+    ff_v4l2_dq_all(output);
+
     // Signal EOF if needed
     if (!frame) {
         return ff_v4l2_context_enqueue_frame(output, frame);
@@ -492,6 +494,8 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     AVFrame *frame = s->frame;
     int ret;
 
+    ff_v4l2_dq_all(output);
+
     if (s->draining)
         goto dequeue;
 
@@ -528,7 +532,9 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     }
 
 dequeue:
-    if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
+    ret = ff_v4l2_context_dequeue_packet(capture, avpkt);
+    ff_v4l2_dq_all(output);
+    if (ret)
         return ret;
 
     if (capture->first_buf == 1) {
@@ -560,7 +566,9 @@ dequeue:
             s->extdata_size = len;
         }
 
-        if ((ret = ff_v4l2_context_dequeue_packet(capture, avpkt)) != 0)
+        ret = ff_v4l2_context_dequeue_packet(capture, avpkt);
+        ff_v4l2_dq_all(output);
+        if (ret)
             return ret;
     }
 
