@@ -46,10 +46,6 @@
 #define STATS_LAST_COUNT_MAX 64
 #define STATS_INTERVAL_MAX (1 << 30)
 
-#ifndef FF_API_BUFFER_SIZE_T
-#define FF_API_BUFFER_SIZE_T 1
-#endif
-
 static int64_t pts_stats_guess(const pts_stats_t * const stats)
 {
     if (stats->last_pts == AV_NOPTS_VALUE ||
@@ -180,11 +176,6 @@ set_best_effort_pts(AVCodecContext *const avctx,
 {
     pts_stats_add(ps, frame->pts);
 
-#if FF_API_PKT_PTS
-FF_DISABLE_DEPRECATION_WARNINGS
-    frame->pkt_pts = frame->pts;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     frame->best_effort_timestamp = pts_stats_guess(ps);
     // If we can't guess from just PTS - try DTS
     if (frame->best_effort_timestamp == AV_NOPTS_VALUE)
@@ -276,11 +267,8 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
 
         for (i = 0; i < 256; ++i) {
             uint8_t * side_data;
-#if FF_API_BUFFER_SIZE_T
-            int side_size;
-#else
             size_t side_size;
-#endif
+
             ret = ff_decode_get_packet(avctx, &s->buf_pkt);
             if (ret != 0)
                 break;
@@ -893,7 +881,7 @@ static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
         .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
         .caps_internal  = FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_CLEANUP, \
         .p.wrapper_name = "v4l2m2m", \
-        .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
+        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
                                                          AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_YUV420P, \
                                                          AV_PIX_FMT_NONE}, \
