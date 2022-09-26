@@ -704,15 +704,8 @@ static int egl_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
 static int egl_vout_write_frame(AVFormatContext *s, int stream_index, AVFrame **ppframe,
                           unsigned flags)
 {
-#if TRACE_ALL
-    av_log(s, AV_LOG_INFO, "%s: idx=%d, flags=%#x\n", __func__, stream_index, flags);
-#endif
-
-    /* egl_vout_write_header() should have accepted only supported formats */
-    if ((flags & AV_WRITE_UNCODED_FRAME_QUERY))
-        return 0;
-
-    return 0;
+    av_log(s, AV_LOG_ERROR, "%s: NIF: idx=%d, flags=%#x\n", __func__, stream_index, flags);
+    return AVERROR_PATCHWELCOME;
 }
 
 static int egl_vout_control_message(AVFormatContext *s, int type, void *data, size_t data_size)
