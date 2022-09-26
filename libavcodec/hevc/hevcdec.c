@@ -3886,8 +3886,13 @@ static int hevc_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     }
 
     ret    = decode_nal_units(s, avpkt->data, avpkt->size);
-    if (ret < 0)
+    if (ret < 0) {
+        // Ensure that hwaccel knows this frame is over
+        if (FF_HW_HAS_CB(avctx, abort_frame))
+            FF_HW_SIMPLE_CALL(avctx, abort_frame);
+
         return ret;
+    }
 
 do_output:
     if (av_container_fifo_read(s->output_fifo, frame, 0) >= 0) {
