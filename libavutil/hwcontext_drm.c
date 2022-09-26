@@ -296,7 +296,6 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
     if (av_rpi_is_sand_frame(map)) {
         // Preserve crop - later ffmpeg code assumes that we have in that it
         // overwrites any crop that we create with the old values
-        unsigned int stride2 = map->linesize[3];
         const unsigned int w = FFMIN(dst->width, map->width);
         const unsigned int h = FFMIN(dst->height, map->height);
 
