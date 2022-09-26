@@ -2221,6 +2221,17 @@ typedef struct AVHWAccel {
      * that avctx->hwaccel_priv_data is invalid.
      */
     int (*frame_params)(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx);
+
+    /**
+     * Called if parsing fails
+     *
+     * An error has occured, end_frame will not be called
+     * start_frame & decode_slice may or may not have been called
+     * Optional
+     *
+     * @param avctx the codec context
+     */
+    void (*abort_frame)(AVCodecContext *avctx);
 } AVHWAccel;
 
 /**
