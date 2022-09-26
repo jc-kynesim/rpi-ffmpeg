@@ -1299,7 +1299,6 @@ static const AVFilterPad deint_v4l2m2m_inputs[] = {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 static const AVFilterPad deint_v4l2m2m_outputs[] = {
@@ -1308,7 +1307,6 @@ static const AVFilterPad deint_v4l2m2m_outputs[] = {
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = deint_v4l2m2m_config_props,
     },
-    { NULL }
 };
 
 AVFilter ff_vf_deinterlace_v4l2m2m = {
