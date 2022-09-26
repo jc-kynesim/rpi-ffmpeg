@@ -2490,15 +2490,16 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
             { 1, 4, 2, 0, 16 },        /* V */
         },
         .flags = AV_PIX_FMT_FLAG_PLANAR,
+    },
     [AV_PIX_FMT_SAND128] = {
         .name = "sand128",
         .nb_components = 3,
         .log2_chroma_w = 1,
         .log2_chroma_h = 1,
         .comp = {
-            { 0, 1, 0, 0, 8, 0, 7, 1 },        /* Y */
-            { 1, 2, 0, 0, 8, 1, 7, 1 },        /* U */
-            { 1, 2, 1, 0, 8, 1, 7, 2 },        /* V */
+            { 0, 1, 0, 0, 8 },        /* Y */
+            { 1, 2, 0, 0, 8 },        /* U */
+            { 1, 2, 1, 0, 8 },        /* V */
         },
         .flags = 0,
     },
@@ -2508,9 +2509,9 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .log2_chroma_w = 1,
         .log2_chroma_h = 1,
         .comp = {
-            { 0, 2, 0, 0, 10, 0, 9, 1 },        /* Y */
-            { 1, 4, 0, 0, 10, 3, 9, 1 },        /* U */
-            { 1, 4, 2, 0, 10, 3, 9, 3 },        /* V */
+            { 0, 2, 0, 0, 10 },        /* Y */
+            { 1, 4, 0, 0, 10 },        /* U */
+            { 1, 4, 2, 0, 10 },        /* V */
         },
         .flags = 0,
     },
@@ -2520,9 +2521,9 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .log2_chroma_w = 1,
         .log2_chroma_h = 1,
         .comp = {
-            { 0, 2, 0, 0, 16, 0, 15, 1 },        /* Y */
-            { 1, 4, 0, 0, 16, 3, 15, 1 },        /* U */
-            { 1, 4, 2, 0, 16, 3, 15, 3 },        /* V */
+            { 0, 2, 0, 0, 16 },        /* Y */
+            { 1, 4, 0, 0, 16 },        /* U */
+            { 1, 4, 2, 0, 16 },        /* V */
         },
         .flags = 0,
     },
