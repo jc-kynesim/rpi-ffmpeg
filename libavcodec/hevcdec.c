@@ -3375,8 +3375,13 @@ static int hevc_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
 
     s->ref = NULL;
     ret    = decode_nal_units(s, avpkt->data, avpkt->size);
-    if (ret < 0)
+    if (ret < 0) {
+        // Ensure that hwaccel knows this frame is over
+        if (s->avctx->hwaccel && s->avctx->hwaccel->abort_frame)
+            s->avctx->hwaccel->abort_frame(s->avctx);
+
         return ret;
+    }
 
     if (avctx->hwaccel) {
         if (s->ref && (ret = avctx->hwaccel->end_frame(avctx)) < 0) {
