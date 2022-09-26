@@ -2749,7 +2749,13 @@ static int mkv_check_new_extra_data(AVFormatContext *s, const AVPacket *pkt)
         break;
     // H264 V4L2 has a similar issue
     case AV_CODEC_ID_H264:
-#error NIF - refix
+        if (side_data_size && mkv->track.bc && !par->extradata_size) {
+            ret = mkv_update_codecprivate(s, mkv, side_data, side_data_size,
+                                          par, mkv->track.bc, track, 0);
+            if (ret < 0)
+                return ret;
+        } else if (!par->extradata_size)
+            return AVERROR_INVALIDDATA;
         break;
     default:
         if (side_data_size)
