@@ -63,7 +63,7 @@ static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
     uint8_t * dst;
     int ret;
 
-    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+    if ((ret = ff_get_encode_buffer(avctx, pkt, size, 0)) < 0)
         return ret;
 
     dst = pkt->data;
@@ -86,7 +86,7 @@ static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
     uint8_t * dst;
     int ret;
 
-    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+    if ((ret = ff_get_encode_buffer(avctx, pkt, size, 0)) < 0)
         return ret;
 
     dst = pkt->data;
@@ -109,7 +109,7 @@ static int raw_sand30_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
     uint8_t * dst;
     int ret;
 
-    if ((ret = ff_alloc_packet2(avctx, pkt, size, size)) < 0)
+    if ((ret = ff_get_encode_buffer(avctx, pkt, size, 0)) < 0)
         return ret;
 
     dst = pkt->data;
