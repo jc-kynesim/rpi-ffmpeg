@@ -208,7 +208,6 @@ static const AVFilterPad avfilter_vf_unsand_outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO
     },
-    { NULL }
 };
 
 AVFilter ff_vf_unsand = {
@@ -218,12 +217,12 @@ AVFilter ff_vf_unsand = {
     .init          = init,
     .uninit        = uninit,
 
-    .query_formats = query_formats,
+    FILTER_QUERY_FUNC(query_formats),
 
     .priv_size     = sizeof(UnsandContext),
     .priv_class    = &unsand_class,
 
-    .inputs        = avfilter_vf_unsand_inputs,
-    .outputs       = avfilter_vf_unsand_outputs,
+    FILTER_INPUTS(avfilter_vf_unsand_inputs),
+    FILTER_OUTPUTS(avfilter_vf_unsand_outputs),
 };
 
