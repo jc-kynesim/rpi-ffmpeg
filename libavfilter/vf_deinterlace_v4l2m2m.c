@@ -1053,17 +1053,6 @@ static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
     return 0;
 }
 
-static int deint_v4l2m2m_query_formats(AVFilterContext *avctx)
-{
-    static const enum AVPixelFormat pixel_formats[] = {
-        AV_PIX_FMT_DRM_PRIME,
-        AV_PIX_FMT_YUV420P,
-        AV_PIX_FMT_NONE,
-    };
-
-    return ff_set_common_formats(avctx, ff_make_format_list(pixel_formats));
-}
-
 static uint32_t desc_pixelformat(const AVDRMFrameDescriptor * const drm_desc)
 {
     const int is_linear = (drm_desc->objects[0].format_modifier == DRM_FORMAT_MOD_LINEAR ||
@@ -1328,9 +1317,9 @@ AVFilter ff_vf_deinterlace_v4l2m2m = {
     .priv_size      = sizeof(DeintV4L2M2MContext),
     .init           = &deint_v4l2m2m_init,
     .uninit         = &deint_v4l2m2m_uninit,
-    .query_formats  = &deint_v4l2m2m_query_formats,
-    .inputs         = deint_v4l2m2m_inputs,
-    .outputs        = deint_v4l2m2m_outputs,
+    FILTER_INPUTS(deint_v4l2m2m_inputs),
+    FILTER_OUTPUTS(deint_v4l2m2m_outputs),
+    FILTER_SINGLE_SAMPLEFMT(AV_PIX_FMT_DRM_PRIME),
     .priv_class     = &deinterlace_v4l2m2m_class,
     .activate       = deint_v4l2m2m_activate,
 };
