@@ -54,9 +54,9 @@ if [ $MMAL ]; then
   RPI_LIBDIRS="-L$RPI_OPT_VC/lib"
   RPI_DEFINES="$RPI_DEFINES -D__VCCOREVER__=0x4000000"
   RPI_EXTRALIBS="-Wl,--start-group -lbcm_host -lmmal -lmmal_util -lmmal_core -lvcos -lvcsm -lvchostif -lvchiq_arm -Wl,--end-group"
-  RPIOPTS="--enable-mmal --enable-rpi"
+  RPIOPTS="--enable-mmal"
 else
-  RPIOPTS="--disable-mmal --enable-sand"
+  RPIOPTS="--disable-mmal"
 fi
 
 C=`lsb_release -sc`
@@ -89,6 +89,7 @@ $FFSRC/configure \
  $MCOPTS\
  --disable-stripping\
  --disable-thumb\
+ --enable-sand\
  --enable-v4l2-request\
  --enable-libdrm\
  --enable-vout-egl\
