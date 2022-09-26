@@ -3,6 +3,8 @@
 #include "decode.h"
 #include "hevcdec.h"
 #include "hwconfig.h"
+#include "internal.h"
+#include "thread.h"
 
 #if HEVC_CTRLS_VERSION == 1
 #include "hevc-ctrls-v1.h"

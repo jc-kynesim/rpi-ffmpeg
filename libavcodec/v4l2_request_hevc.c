@@ -21,6 +21,7 @@
 #include "decode.h"
 #include "hevcdec.h"
 #include "hwconfig.h"
+#include "internal.h"
 
 #include "v4l2_request_hevc.h"
 
