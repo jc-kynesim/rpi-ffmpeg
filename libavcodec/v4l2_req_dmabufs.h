@@ -1,6 +1,8 @@
 #ifndef DMABUFS_H
 #define DMABUFS_H
 
+#include <stddef.h>
+
 struct dmabufs_ctl;
 struct dmabuf_h;
 
