@@ -1,6 +1,8 @@
 #ifndef _DEVSCAN_H_
 #define _DEVSCAN_H_
 
+#include <stdint.h>
+
 struct devscan;
 struct decdev;
 enum v4l2_buf_type;

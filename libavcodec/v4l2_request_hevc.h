@@ -1,6 +1,7 @@
 #ifndef AVCODEC_V4L2_REQUEST_HEVC_H
 #define AVCODEC_V4L2_REQUEST_HEVC_H
 
+#include <stdint.h>
 #include <drm_fourcc.h>
 #include "v4l2_req_decode_q.h"
 
