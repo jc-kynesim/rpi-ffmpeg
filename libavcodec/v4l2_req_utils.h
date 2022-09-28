@@ -1,3 +1,7 @@
+#ifndef AVCODEC_V4L2_REQ_UTILS_H
+#define AVCODEC_V4L2_REQ_UTILS_H
+
+#include <stdint.h>
 #include "libavutil/log.h"
 
 #define request_log(...) av_log(NULL, AV_LOG_INFO, __VA_ARGS__)
@@ -20,3 +24,4 @@ static inline const char * strfourcc(char tbuf[5], uint32_t fcc) {
     return tbuf;
 }
 
+#endif
