@@ -46,6 +46,71 @@
 #define STATS_LAST_COUNT_MAX 64
 #define STATS_INTERVAL_MAX (1 << 30)
 
+#ifndef FF_API_BUFFER_SIZE_T
+#define FF_API_BUFFER_SIZE_T 1
+#endif
+
+#define DUMP_FAILED_EXTRADATA 0
+
+#if DUMP_FAILED_EXTRADATA
+static inline char hex1(unsigned int x)
+{
+    x &= 0xf;
+    return x <= 9 ? '0' + x : 'a' + x - 10;
+}
+
+static inline char * hex2(char * s, unsigned int x)
+{
+    *s++ = hex1(x >> 4);
+    *s++ = hex1(x);
+    return s;
+}
+
+static inline char * hex4(char * s, unsigned int x)
+{
+    s = hex2(s, x >> 8);
+    s = hex2(s, x);
+    return s;
+}
+
+static inline char * dash2(char * s)
+{
+    *s++ = '-';
+    *s++ = '-';
+    return s;
+}
+
+static void
+data16(char * s, const unsigned int offset, const uint8_t * m, const size_t len)
+{
+    size_t i;
+    s = hex4(s, offset);
+    m += offset;
+    for (i = 0; i != 8; ++i) {
+        *s++ = ' ';
+        s = len > i + offset ? hex2(s, *m++) : dash2(s);
+    }
+    *s++ = ' ';
+    *s++ = ':';
+    for (; i != 16; ++i) {
+        *s++ = ' ';
+        s = len > i + offset ? hex2(s, *m++) : dash2(s);
+    }
+    *s++ = 0;
+}
+
+static void
+log_dump(void * logctx, int lvl, const void * const data, const size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i += 16) {
+        char buf[80];
+        data16(buf, i, data, len);
+        av_log(logctx, lvl, "%s\n", buf);
+    }
+}
+#endif
+
 static int64_t pts_stats_guess(const pts_stats_t * const stats)
 {
     if (stats->last_pts == AV_NOPTS_VALUE ||
@@ -97,6 +162,98 @@ static void pts_stats_init(pts_stats_t * const stats, void * logctx, const char 
         .last_pts = AV_NOPTS_VALUE
     };
 }
+
+// If abdata == NULL then this just counts space required
+// Unpacks avcC if detected
+static int
+h264_xd_copy(const uint8_t * const extradata, const int extrasize, uint8_t * abdata)
+{
+    const uint8_t * const xdend = extradata + extrasize;
+    const uint8_t * p = extradata;
+    uint8_t * d = abdata;
+    unsigned int n;
+    unsigned int len;
+    const unsigned int hdrlen = 4;
+    unsigned int need_pps = 1;
+
+    if (extrasize < 8)
+        return AVERROR(EINVAL);
+
+    if (p[0] == 0 && p[1] == 0) {
+        // Assume a couple of leading zeros are good enough to indicate NAL
+        if (abdata)
+            memcpy(d, p, extrasize);
+        return extrasize;
+    }
+
+    // avcC starts with a 1
+    if (p[0] != 1)
+        return AVERROR(EINVAL);
+
+    p += 5;
+    n = *p++ & 0x1f;
+
+doxps:
+    while (n--) {
+        if (xdend - p < 2)
+            return AVERROR(EINVAL);
+        len = (p[0] << 8) | p[1];
+        p += 2;
+        if (xdend - p < (ptrdiff_t)len)
+            return AVERROR(EINVAL);
+        if (abdata) {
+            d[0] = 0;
+            d[1] = 0;
+            d[2] = 0;
+            d[3] = 1;
+            memcpy(d + 4, p, len);
+        }
+        d += len + hdrlen;
+        p += len;
+    }
+    if (need_pps) {
+        need_pps = 0;
+        if (p >= xdend)
+            return AVERROR(EINVAL);
+        n = *p++;
+        goto doxps;
+    }
+
+    return d - abdata;
+}
+
+static int
+copy_extradata(AVCodecContext * const avctx,
+               const void * const src_data, const int src_len,
+               void ** const pdst_data, size_t * const pdst_len)
+{
+    int len;
+
+    *pdst_len = 0;
+    av_freep(pdst_data);
+
+    if (avctx->codec_id == AV_CODEC_ID_H264)
+        len = h264_xd_copy(src_data, src_len, NULL);
+    else
+        len = src_len < 0 ? AVERROR(EINVAL) : src_len;
+
+    // Zero length is OK but we swant to stop - -ve is error val
+    if (len <= 0)
+        return len;
+
+    if ((*pdst_data = av_malloc(len + AV_INPUT_BUFFER_PADDING_SIZE)) == NULL)
+        return AVERROR(ENOMEM);
+
+    if (avctx->codec_id == AV_CODEC_ID_H264)
+        h264_xd_copy(src_data, src_len, *pdst_data);
+    else
+        memcpy(*pdst_data, src_data, len);
+    *pdst_len = len;
+
+    return 0;
+}
+
+
 
 static int check_output_streamon(AVCodecContext *const avctx, V4L2m2mContext *const s)
 {
@@ -277,13 +434,8 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
             side_data = av_packet_get_side_data(&s->buf_pkt, AV_PKT_DATA_NEW_EXTRADATA, &side_size);
             if (side_data) {
                 av_log(avctx, AV_LOG_DEBUG, "New extradata\n");
-                av_freep(&s->extdata_data);
-                if ((s->extdata_data = av_malloc(side_size ? side_size : 1)) == NULL) {
-                    av_log(avctx, AV_LOG_ERROR, "Failed to alloc %zd bytes of extra data\n", side_size);
-                    return AVERROR(ENOMEM);
-                }
-                memcpy(s->extdata_data, side_data, side_size);
-                s->extdata_size = side_size;
+                if ((ret = copy_extradata(avctx, side_data, (int)side_size, &s->extdata_data, &s->extdata_size)) < 0)
+                    av_log(avctx, AV_LOG_WARNING, "Failed to copy new extra data: %s\n", av_err2str(ret));
                 s->extdata_sent = 0;
             }
 
@@ -359,8 +511,6 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
         ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, NULL, 0);
     else if (s->extdata_data)
         ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, s->extdata_data, s->extdata_size);
-    else
-        ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, avctx->extradata, avctx->extradata_size);
 
     if (ret == AVERROR(EAGAIN)) {
         // Out of input buffers - keep packet
@@ -767,6 +917,15 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     ret = ff_v4l2_m2m_codec_init(priv);
     if (ret) {
         av_log(avctx, AV_LOG_ERROR, "can't configure decoder\n");
+        return ret;
+    }
+
+    if (avctx->extradata &&
+        (ret = copy_extradata(avctx, avctx->extradata, avctx->extradata_size, &s->extdata_data, &s->extdata_size)) != 0) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to copy extradata from context: %s\n", av_err2str(ret));
+#if DUMP_FAILED_EXTRADATA
+        log_dump(avctx, AV_LOG_INFO, avctx->extradata, avctx->extradata_size);
+#endif
         return ret;
     }
 
