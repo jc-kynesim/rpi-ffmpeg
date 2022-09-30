@@ -53,6 +53,13 @@
 #include <linux/const.h>
 #include <linux/types.h>
 
+#ifndef V4L2_CTRL_CLASS_CODEC_STATELESS
+#define V4L2_CTRL_CLASS_CODEC_STATELESS 0x00a40000	/* Stateless codecs controls */
+#endif
+#ifndef V4L2_CID_CODEC_STATELESS_BASE
+#define V4L2_CID_CODEC_STATELESS_BASE		(V4L2_CTRL_CLASS_CODEC_STATELESS | 0x900)
+#endif
+
 #define V4L2_PIX_FMT_HEVC_SLICE v4l2_fourcc('S', '2', '6', '5') /* HEVC parsed slices */
 
 #define V4L2_CID_STATELESS_HEVC_SPS		(V4L2_CID_CODEC_STATELESS_BASE + 400)
