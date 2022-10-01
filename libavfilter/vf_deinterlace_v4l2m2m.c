@@ -141,6 +141,8 @@ typedef struct DeintV4L2M2MContextShared {
     int output_height;
     enum AVPixelFormat output_format;
 
+    int has_enc_stop;
+
     int orig_width;
     int orig_height;
     atomic_uint refcount;
@@ -1475,6 +1477,10 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
         return AVERROR(EAGAIN);
     }
 
+    if (V4L2_TYPE_IS_CAPTURE(avbuf->buffer.type)) {
+        av_log(ctx->logctx, AV_LOG_INFO, "Bytesused=%d, Flags=%#x\n", avbuf->buffer.m.planes[0].bytesused, avbuf->buffer.flags);
+    }
+
     // Fill in PTS and anciliary info from src frame
     pts_track_get_frame(&ctx->track, avbuf->buffer.timestamp, frame);
 
@@ -1697,6 +1703,20 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
         else
             ctx->field_order = V4L2_FIELD_INTERLACED_BT;
 
+        {
+            struct v4l2_encoder_cmd ecmd = {
+                .cmd = V4L2_ENC_CMD_STOP
+            };
+            ctx->has_enc_stop = 0;
+            if (ioctl(ctx->fd, VIDIOC_TRY_ENCODER_CMD, &ecmd) == 0) {
+                av_log(ctx->logctx, AV_LOG_INFO, "Encode stop succeeded\n");
+                ctx->has_enc_stop = 1;
+            }
+            else {
+                av_log(ctx->logctx, AV_LOG_INFO, "Encode stop fail: %s\n", av_err2str(AVERROR(errno)));
+            }
+
+        }
     }
 
     ret = deint_v4l2m2m_enqueue_frame(output, in);
@@ -1730,6 +1750,20 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
     {
         AVFrame * frame = av_frame_alloc();
         int rv;
+        int drain = 0;
+
+        if (s->has_enc_stop && instatus) {
+            struct v4l2_encoder_cmd ecmd = {
+                .cmd = V4L2_ENC_CMD_STOP
+            };
+            if (ioctl(s->fd, VIDIOC_ENCODER_CMD, &ecmd) == 0) {
+                av_log(priv, AV_LOG_INFO, "Do Encode stop\n");
+                drain = 1;
+            }
+            else {
+                av_log(priv, AV_LOG_INFO, "Encode stop fail: %s\n", av_err2str(AVERROR(errno)));
+            }
+        }
 
 again:
         recycle_q(&s->output);
@@ -1740,7 +1774,7 @@ again:
             return AVERROR(ENOMEM);
         }
 
-        rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame, n > 4 ? 300 : 0);
+        rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame, drain ? -1 : n > 4 ? 300 : 0);
         if (rv != 0) {
             av_frame_free(&frame);
             if (rv != AVERROR(EAGAIN)) {
