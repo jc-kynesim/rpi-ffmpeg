@@ -6914,12 +6914,6 @@ fi
 check_func_headers "linux/media.h linux/videodev2.h" v4l2_timeval_to_ns
 check_cc hevc_v4l2_request linux/videodev2.h "int i = V4L2_PIX_FMT_HEVC_SLICE;"
 disable v4l2_req_hevc_vx
-if enabled hevc_v4l2request_hwaccel; then
-    enable v4l2_req_hevc_vx
-fi
-if enabled hevc_v4l2_request; then
-    disable v4l2_req_hevc_vx
-fi
 
 check_headers sys/videoio.h
 test_code cc sys/videoio.h "struct v4l2_frmsizeenum vfse; vfse.discrete.width = 0;" && enable_sanitized struct_v4l2_frmivalenum_discrete
@@ -7414,6 +7408,9 @@ check_deps $CONFIG_LIST       \
            $ALL_COMPONENTS    \
 
 enabled threads && ! enabled pthreads && ! enabled atomics_native && die "non pthread threading without atomics not supported, try adding --enable-pthreads or --cpu=i486 or higher if you are on x86"
+
+# Sub-feature of hevc_v4l2request_hwaccel - can only be set once deps are done
+enabled hevc_v4l2request_hwaccel && disabled hevc_v4l2_request && enable v4l2_req_hevc_vx
 
 case $target_os in
 haiku)
