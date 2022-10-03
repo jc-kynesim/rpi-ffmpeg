@@ -142,6 +142,9 @@ typedef struct DeintV4L2M2MContextShared {
     int drain_done;     // All frames drained that we are going to
     int64_t drain_pts;  // PTS associated with inline status
 
+    unsigned int frames_rx;
+    unsigned int frames_tx;
+
     // from options
     int output_width;
     int output_height;
@@ -1729,11 +1732,11 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
             };
             ctx->has_enc_stop = 0;
             if (ioctl(ctx->fd, VIDIOC_TRY_ENCODER_CMD, &ecmd) == 0) {
-                av_log(ctx->logctx, AV_LOG_INFO, "Encode stop succeeded\n");
+                av_log(ctx->logctx, AV_LOG_DEBUG, "Test encode stop succeeded\n");
                 ctx->has_enc_stop = 1;
             }
             else {
-                av_log(ctx->logctx, AV_LOG_INFO, "Encode stop fail: %s\n", av_err2str(AVERROR(errno)));
+                av_log(ctx->logctx, AV_LOG_DEBUG, "Test encode stop fail: %s\n", av_err2str(AVERROR(errno)));
             }
 
         }
@@ -1770,7 +1773,7 @@ ack_inlink(AVFilterContext * const avctx, DeintV4L2M2MContextShared *const s,
             .cmd = V4L2_ENC_CMD_STOP
         };
         if (ioctl(s->fd, VIDIOC_ENCODER_CMD, &ecmd) == 0) {
-            av_log(avctx->priv, AV_LOG_INFO, "Do Encode stop\n");
+            av_log(avctx->priv, AV_LOG_DEBUG, "Do Encode stop\n");
             s->drain_eos = 1;
         }
         else {
@@ -1801,10 +1804,9 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
     }
     else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
     {
-        AVFrame * frame;
+        AVFrame * frame = av_frame_alloc();
         int rv;
 
-        frame = av_frame_alloc();
         recycle_q(&s->output);
         n = count_enqueued(&s->output);
 
@@ -1817,12 +1819,12 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
         if (rv != 0) {
             av_frame_free(&frame);
             if (rv == AVERROR_EOF) {
-                av_log(priv, AV_LOG_INFO, "%s: --- DQ EOF\n", __func__);
+                av_log(priv, AV_LOG_DEBUG, "%s: --- DQ EOF\n", __func__);
                 s->drain_done = 1;
             }
             else if (rv == AVERROR(EAGAIN)) {
                 if (s->drain) {
-                    av_log(priv, AV_LOG_INFO, "%s: --- DQ empty - drain done\n", __func__);
+                    av_log(priv, AV_LOG_DEBUG, "%s: --- DQ empty - drain done\n", __func__);
                     s->drain_done = 1;
                 }
             }
@@ -1835,8 +1837,8 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
             frame->interlaced_frame = 0;
             // frame is always consumed by filter_frame - even on error despite
             // a somewhat confusing comment in the header
-            av_assert0(frame->format != AV_PIX_FMT_NONE);
             rv = ff_filter_frame(outlink, frame);
+            ++s->frames_tx;
 
             av_log(priv, AV_LOG_TRACE, "%s: Filtered: %s\n", __func__, av_err2str(rv));
             did_something = 1;
@@ -1847,7 +1849,7 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
 
     if (s->drain_done != 0) {
         ff_outlink_set_status(outlink, s->drain, s->drain_pts);
-        av_log(priv, AV_LOG_INFO, ">>> %s: Status done: %s\n", __func__, av_err2str(s->drain));
+        av_log(priv, AV_LOG_TRACE, ">>> %s: Status done: %s\n", __func__, av_err2str(s->drain));
         return 0;
     }
 
@@ -1871,6 +1873,7 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
             }
             break;
         }
+        ++s->frames_rx;
 
         rv = deint_v4l2m2m_filter_frame(inlink, frame);
         av_frame_free(&frame);
@@ -1970,6 +1973,8 @@ static void deint_v4l2m2m_uninit(AVFilterContext *avctx)
     DeintV4L2M2MContext *priv = avctx->priv;
     DeintV4L2M2MContextShared *ctx = priv->shared;
 
+    av_log(priv, AV_LOG_VERBOSE, "Frames Rx: %u, Frames Tx: %u\n",
+           ctx->frames_rx, ctx->frames_tx);
     ctx->done = 1;
     ctx->logctx = NULL;  // Log to NULL works, log to missing crashes
     pts_track_uninit(&ctx->track);
