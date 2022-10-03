@@ -94,6 +94,7 @@ typedef struct V4L2Buffer {
 typedef struct V4L2Queue {
     struct v4l2_format format;
     struct v4l2_selection sel;
+    int eos;
     int num_buffers;
     V4L2Buffer *buffers;
     const char * name;
@@ -132,9 +133,14 @@ typedef struct DeintV4L2M2MContextShared {
     filter_type_v4l2_t filter_type;
 
     int fd;
-    int done;
+    int done;   // fd closed - awating all refs dropped
     int width;
     int height;
+
+    int drain;          // EOS received (inlink status)
+    int drain_eos;      // EOS sent OK (may not be suported)
+    int drain_done;     // All frames drained that we are going to
+    int64_t drain_pts;  // PTS associated with inline status
 
     // from options
     int output_width;
@@ -406,6 +412,12 @@ static inline uint32_t
 fmt_pixelformat(const struct v4l2_format * const fmt)
 {
     return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.pixelformat : fmt->fmt.pix.pixelformat;
+}
+
+static inline uint32_t
+buf_bytesused0(const struct v4l2_buffer * const buf)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(buf->type) ? buf->m.planes[0].bytesused : buf->bytesused;
 }
 
 static void
@@ -1471,6 +1483,11 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
 
     av_log(ctx->logctx, AV_LOG_TRACE, "<<< %s\n", __func__);
 
+    if (queue->eos) {
+        av_log(ctx->logctx, AV_LOG_TRACE, ">>> %s: EOS\n", __func__);
+        return AVERROR_EOF;
+    }
+
     avbuf = deint_v4l2m2m_dequeue_buffer(queue, timeout);
     if (!avbuf) {
         av_log(ctx->logctx, AV_LOG_DEBUG, "%s: No buffer to dequeue (timeout=%d)\n", __func__, timeout);
@@ -1478,7 +1495,10 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
     }
 
     if (V4L2_TYPE_IS_CAPTURE(avbuf->buffer.type)) {
-        av_log(ctx->logctx, AV_LOG_INFO, "Bytesused=%d, Flags=%#x\n", avbuf->buffer.m.planes[0].bytesused, avbuf->buffer.flags);
+        if ((avbuf->buffer.flags & V4L2_BUF_FLAG_LAST) != 0)
+            queue->eos = 1;
+        if (buf_bytesused0(&avbuf->buffer) == 0)
+            return queue->eos ? AVERROR_EOF : AVERROR(EINVAL);
     }
 
     // Fill in PTS and anciliary info from src frame
@@ -1725,6 +1745,41 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     return ret;
 }
 
+static int
+ack_inlink(AVFilterContext * const avctx, DeintV4L2M2MContextShared *const s,
+           AVFilterLink * const inlink)
+{
+    int instatus;
+    int64_t inpts;
+
+    if (ff_inlink_acknowledge_status(inlink, &instatus, &inpts) <= 0)
+        return 0;
+
+    s->drain      = instatus;
+    s->drain_pts  = inpts;
+    s->drain_eos  = 0;
+    s->drain_done = 0;
+
+    if (s->field_order == V4L2_FIELD_ANY) {  // Not yet started
+        s->drain_done = 1;
+        return 1;
+    }
+
+    if (s->has_enc_stop) {
+        struct v4l2_encoder_cmd ecmd = {
+            .cmd = V4L2_ENC_CMD_STOP
+        };
+        if (ioctl(s->fd, VIDIOC_ENCODER_CMD, &ecmd) == 0) {
+            av_log(avctx->priv, AV_LOG_INFO, "Do Encode stop\n");
+            s->drain_eos = 1;
+        }
+        else {
+            av_log(avctx->priv, AV_LOG_WARNING, "Encode stop fail: %s\n", av_err2str(AVERROR(errno)));
+        }
+    }
+    return 1;
+}
+
 static int deint_v4l2m2m_activate(AVFilterContext *avctx)
 {
     DeintV4L2M2MContext * const priv = avctx->priv;
@@ -1733,39 +1788,23 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
     AVFilterLink * const inlink = avctx->inputs[0];
     int n = 0;
     int cn = 99;
-    int instatus = 0;
-    int64_t inpts = 0;
     int did_something = 0;
 
     av_log(priv, AV_LOG_TRACE, "<<< %s\n", __func__);
 
     FF_FILTER_FORWARD_STATUS_BACK_ALL(outlink, avctx);
 
-    ff_inlink_acknowledge_status(inlink, &instatus, &inpts);
+    ack_inlink(avctx, s, inlink);
 
     if (!ff_outlink_frame_wanted(outlink)) {
         av_log(priv, AV_LOG_TRACE, "%s: Not wanted out\n", __func__);
     }
     else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
     {
-        AVFrame * frame = av_frame_alloc();
+        AVFrame * frame;
         int rv;
-        int drain = 0;
 
-        if (s->has_enc_stop && instatus) {
-            struct v4l2_encoder_cmd ecmd = {
-                .cmd = V4L2_ENC_CMD_STOP
-            };
-            if (ioctl(s->fd, VIDIOC_ENCODER_CMD, &ecmd) == 0) {
-                av_log(priv, AV_LOG_INFO, "Do Encode stop\n");
-                drain = 1;
-            }
-            else {
-                av_log(priv, AV_LOG_INFO, "Encode stop fail: %s\n", av_err2str(AVERROR(errno)));
-            }
-        }
-
-again:
+        frame = av_frame_alloc();
         recycle_q(&s->output);
         n = count_enqueued(&s->output);
 
@@ -1774,10 +1813,20 @@ again:
             return AVERROR(ENOMEM);
         }
 
-        rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame, drain ? -1 : n > 4 ? 300 : 0);
+        rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame, s->drain_eos ? -1 : n > 4 ? 300 : 0);
         if (rv != 0) {
             av_frame_free(&frame);
-            if (rv != AVERROR(EAGAIN)) {
+            if (rv == AVERROR_EOF) {
+                av_log(priv, AV_LOG_INFO, "%s: --- DQ EOF\n", __func__);
+                s->drain_done = 1;
+            }
+            else if (rv == AVERROR(EAGAIN)) {
+                if (s->drain) {
+                    av_log(priv, AV_LOG_INFO, "%s: --- DQ empty - drain done\n", __func__);
+                    s->drain_done = 1;
+                }
+            }
+            else {
                 av_log(priv, AV_LOG_ERROR, ">>> %s: DQ fail: %s\n", __func__, av_err2str(rv));
                 return rv;
             }
@@ -1786,12 +1835,8 @@ again:
             frame->interlaced_frame = 0;
             // frame is always consumed by filter_frame - even on error despite
             // a somewhat confusing comment in the header
+            av_assert0(frame->format != AV_PIX_FMT_NONE);
             rv = ff_filter_frame(outlink, frame);
-
-            if (instatus != 0) {
-                av_log(priv, AV_LOG_TRACE, "%s: eof loop\n", __func__);
-                goto again;
-            }
 
             av_log(priv, AV_LOG_TRACE, "%s: Filtered: %s\n", __func__, av_err2str(rv));
             did_something = 1;
@@ -1800,16 +1845,16 @@ again:
         cn = count_enqueued(&s->capture);
     }
 
-    if (instatus != 0) {
-        ff_outlink_set_status(outlink, instatus, inpts);
-        av_log(priv, AV_LOG_TRACE, ">>> %s: Status done: %s\n", __func__, av_err2str(instatus));
+    if (s->drain_done != 0) {
+        ff_outlink_set_status(outlink, s->drain, s->drain_pts);
+        av_log(priv, AV_LOG_INFO, ">>> %s: Status done: %s\n", __func__, av_err2str(s->drain));
         return 0;
     }
 
     recycle_q(&s->output);
     n = count_enqueued(&s->output);
 
-    while (n < 6) {
+    while (n < 6 && !s->drain) {
         AVFrame * frame;
         int rv;
 
@@ -1820,6 +1865,10 @@ again:
 
         if (frame == NULL) {
             av_log(priv, AV_LOG_TRACE, "%s: No frame\n", __func__);
+            if (!ack_inlink(avctx, s, inlink)) {
+                ff_inlink_request_frame(inlink);
+                av_log(priv, AV_LOG_TRACE, "%s: req frame\n", __func__);
+            }
             break;
         }
 
@@ -1830,16 +1879,11 @@ again:
             return rv;
 
         av_log(priv, AV_LOG_TRACE, "%s: Q frame\n", __func__);
+        did_something = 1;
         ++n;
     }
 
-    if (n < 6) {
-        ff_inlink_request_frame(inlink);
-        did_something = 1;
-        av_log(priv, AV_LOG_TRACE, "%s: req frame\n", __func__);
-    }
-
-    if (n > 4 && ff_outlink_frame_wanted(outlink)) {
+    if ((n > 4 || s->drain) && ff_outlink_frame_wanted(outlink)) {
         ff_filter_set_ready(avctx, 1);
         did_something = 1;
         av_log(priv, AV_LOG_TRACE, "%s: ready\n", __func__);
