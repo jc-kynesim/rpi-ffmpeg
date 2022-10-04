@@ -128,6 +128,15 @@ typedef struct pts_track_s
     pts_track_el_t a[PTS_TRACK_SIZE];
 } pts_track_t;
 
+typedef enum drain_state_e
+{
+    DRAIN_NONE = 0,     // Not draining
+    DRAIN_TIMEOUT,      // Drain until normal timeout setup yields no frame
+    DRAIN_LAST,         // Drain with long timeout last_frame in received on output expected
+    DRAIN_EOS,          // Drain with long timeout EOS expected
+    DRAIN_DONE          // Drained
+} drain_state_t;
+
 typedef struct DeintV4L2M2MContextShared {
     void * logctx;  // For logging - will be NULL when done
     filter_type_v4l2_t filter_type;
@@ -138,8 +147,7 @@ typedef struct DeintV4L2M2MContextShared {
     int height;
 
     int drain;          // EOS received (inlink status)
-    int drain_eos;      // EOS sent OK (may not be suported)
-    int drain_done;     // All frames drained that we are going to
+    drain_state_t drain_state;
     int64_t drain_pts;  // PTS associated with inline status
 
     unsigned int frames_rx;
@@ -151,6 +159,9 @@ typedef struct DeintV4L2M2MContextShared {
     enum AVPixelFormat output_format;
 
     int has_enc_stop;
+    // We expect to get exactly the same number of frames out as we put in
+    // We can drain by matching input to output
+    int one_to_one;
 
     int orig_width;
     int orig_height;
@@ -189,6 +200,12 @@ typedef struct DeintV4L2M2MContext {
     enum AVColorSpace colour_matrix;
     enum AVChromaLocation chroma_location;
 } DeintV4L2M2MContext;
+
+
+static inline int drain_frame_expected(const drain_state_t d)
+{
+    return d == DRAIN_EOS || d == DRAIN_LAST;
+}
 
 // These just list the ones we know we can cope with
 static uint32_t
@@ -343,6 +360,13 @@ fail:
     dst->pts = AV_NOPTS_VALUE;
     dst->pkt_dts = AV_NOPTS_VALUE;
     return 0;
+}
+
+// We are only ever expecting in-order frames so nothing more clever is required
+static unsigned int
+pts_track_count(const pts_track_t * const trk)
+{
+    return (trk->n - trk->last_n) & (PTS_TRACK_SIZE - 1);
 }
 
 static struct timeval pts_track_add_frame(pts_track_t * const trk, const AVFrame * const src)
@@ -1760,21 +1784,21 @@ ack_inlink(AVFilterContext * const avctx, DeintV4L2M2MContextShared *const s,
 
     s->drain      = instatus;
     s->drain_pts  = inpts;
-    s->drain_eos  = 0;
-    s->drain_done = 0;
+    s->drain_state = DRAIN_TIMEOUT;
 
     if (s->field_order == V4L2_FIELD_ANY) {  // Not yet started
-        s->drain_done = 1;
-        return 1;
+        s->drain_state = DRAIN_DONE;
     }
-
-    if (s->has_enc_stop) {
+    else if (s->one_to_one) {
+        s->drain_state = DRAIN_LAST;
+    }
+    else if (s->has_enc_stop) {
         struct v4l2_encoder_cmd ecmd = {
             .cmd = V4L2_ENC_CMD_STOP
         };
         if (ioctl(s->fd, VIDIOC_ENCODER_CMD, &ecmd) == 0) {
             av_log(avctx->priv, AV_LOG_DEBUG, "Do Encode stop\n");
-            s->drain_eos = 1;
+            s->drain_state = DRAIN_EOS;
         }
         else {
             av_log(avctx->priv, AV_LOG_WARNING, "Encode stop fail: %s\n", av_err2str(AVERROR(errno)));
@@ -1815,17 +1839,18 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
             return AVERROR(ENOMEM);
         }
 
-        rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame, s->drain_eos ? -1 : n > 4 ? 300 : 0);
+        rv = deint_v4l2m2m_dequeue_frame(&s->capture, frame,
+                                         drain_frame_expected(s->drain_state) || n > 4 ? 300 : 0);
         if (rv != 0) {
             av_frame_free(&frame);
             if (rv == AVERROR_EOF) {
                 av_log(priv, AV_LOG_DEBUG, "%s: --- DQ EOF\n", __func__);
-                s->drain_done = 1;
+                s->drain_state = DRAIN_DONE;
             }
             else if (rv == AVERROR(EAGAIN)) {
-                if (s->drain) {
+                if (s->drain_state != DRAIN_NONE) {
                     av_log(priv, AV_LOG_DEBUG, "%s: --- DQ empty - drain done\n", __func__);
-                    s->drain_done = 1;
+                    s->drain_state = DRAIN_DONE;
                 }
             }
             else {
@@ -1842,12 +1867,17 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
 
             av_log(priv, AV_LOG_TRACE, "%s: Filtered: %s\n", __func__, av_err2str(rv));
             did_something = 1;
+
+            if (s->drain_state != DRAIN_NONE && pts_track_count(&s->track) == 0) {
+                av_log(priv, AV_LOG_DEBUG, "%s: --- DQ last - drain done\n", __func__);
+                s->drain_state = DRAIN_DONE;
+            }
         }
 
         cn = count_enqueued(&s->capture);
     }
 
-    if (s->drain_done != 0) {
+    if (s->drain_state == DRAIN_DONE) {
         ff_outlink_set_status(outlink, s->drain, s->drain_pts);
         av_log(priv, AV_LOG_TRACE, ">>> %s: Status done: %s\n", __func__, av_err2str(s->drain));
         return 0;
@@ -1965,7 +1995,18 @@ static av_cold int deint_v4l2m2m_init(AVFilterContext *avctx)
 
 static av_cold int scale_v4l2m2m_init(AVFilterContext *avctx)
 {
-    return common_v4l2m2m_init(avctx, FILTER_V4L2_SCALE);
+    int rv;
+    DeintV4L2M2MContext * priv;
+    DeintV4L2M2MContextShared * ctx;
+
+    if ((rv = common_v4l2m2m_init(avctx, FILTER_V4L2_SCALE)) != 0)
+        return rv;
+
+    priv = avctx->priv;
+    ctx = priv->shared;
+
+    ctx->one_to_one = 1;
+    return 0;
 }
 
 static void deint_v4l2m2m_uninit(AVFilterContext *avctx)
