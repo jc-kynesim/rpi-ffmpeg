@@ -72,7 +72,8 @@ xlat_pts_pkt_in(AVCodecContext *const avctx, xlat_track_t *const x, const AVPack
 
     track_pts = track_to_pts(avctx, x->track_no);
 
-    av_log(avctx, AV_LOG_TRACE, "In pkt PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt->pts, avpkt->dts, track_pts, x->track_no);
+    av_log(avctx, AV_LOG_TRACE, "In pkt PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=[%u]%u\n", avpkt->pts, avpkt->dts,
+           track_pts, x->track_no % FF_V4L2_M2M_TRACK_SIZE, x->track_no);
     x->track_els[x->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
         .discard          = 0,
         .pending          = 1,
