@@ -349,41 +349,54 @@ static void
 xlat_flush(xlat_track_t * const x)
 {
     unsigned int i;
+    // Do not reset track_no - this ensures that any frames left in the decoder
+    // that turn up later get discarded.
+
+    x->last_pts = AV_NOPTS_VALUE;
+    x->last_opaque = 0;
     for (i = 0; i != FF_V4L2_M2M_TRACK_SIZE; ++i) {
         x->track_els[i].pending = 0;
         x->track_els[i].discard = 1;
     }
-    x->last_pts = AV_NOPTS_VALUE;
+}
+
+static void
+xlat_init(xlat_track_t * const x)
+{
+    memset(x, 0, sizeof(*x));
+    xlat_flush(x);
 }
 
 static int
 xlat_pending(const xlat_track_t * const x)
 {
     unsigned int n = x->track_no % FF_V4L2_M2M_TRACK_SIZE;
-    unsigned int i;
-    int r = 0;
-    int64_t now = AV_NOPTS_VALUE;
+    int i;
+    const int64_t now = x->last_pts;
 
-    for (i = 0; i < 32; ++i, n = (n - 1) % FF_V4L2_M2M_TRACK_SIZE) {
+    for (i = 0; i < FF_V4L2_M2M_TRACK_SIZE; ++i, n = (n - 1) & (FF_V4L2_M2M_TRACK_SIZE - 1)) {
         const V4L2m2mTrackEl * const t = x->track_els + n;
 
+        // Discard only set on never-set or flushed entries
+        // So if we get here we've never successfully decoded a frame so allow
+        // more frames into the buffer before stalling
+        if (t->discard)
+            return i - 16;
+
+        // If we've got this frame out then everything before this point
+        // must have entered the decoder
         if (!t->pending)
+            break;
+
+        // If we've never seen a pts all we can do is count frames
+        if (now == AV_NOPTS_VALUE)
             continue;
 
-        if (now == AV_NOPTS_VALUE)
-            now = t->dts;
-
-        if (t->pts == AV_NOPTS_VALUE ||
-            ((now == AV_NOPTS_VALUE || t->pts <= now) &&
-             (x->last_pts == AV_NOPTS_VALUE || t->pts > x->last_pts)))
-            ++r;
+        if (t->dts != AV_NOPTS_VALUE && now >= t->dts)
+            break;
     }
 
-    // If we never get any ideas about PTS vs DTS allow a lot more buffer
-    if (now == AV_NOPTS_VALUE)
-        r -= 16;
-
-    return r;
+    return i;
 }
 
 static inline int stream_started(const V4L2m2mContext * const s) {
@@ -557,18 +570,6 @@ static int qbuf_wait(AVCodecContext * const avctx, V4L2Context * const ctx)
     return rv;
 }
 
-// Number of frames over what xlat_pending returns that we keep *16
-// This is a min value - if it appears to be too small the threshold should
-// adjust dynamically.
-#define PENDING_HW_MIN      (3 * 16)
-// Offset to use when setting dynamically
-// Set to %16 == 15 to avoid the threshold changing immediately as we relax
-#define PENDING_HW_OFFSET   (PENDING_HW_MIN - 1)
-// Number of consecutive times we've failed to get a frame when we prefer it
-// before we increase the prefer threshold (5ms * N = max expected decode
-// time)
-#define PENDING_N_THRESHOLD 6
-
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     V4L2m2mContext *const s = ((V4L2m2mPriv*)avctx->priv_data)->context;
@@ -578,8 +579,10 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
     do {
         const int pending = xlat_pending(&s->xlat);
-        const int prefer_dq = (pending > s->pending_hw / 16);
+        const int prefer_dq = (pending > 3);
         const int last_src_rv = src_rv;
+
+        av_log(avctx, AV_LOG_TRACE, "Pending=%d, src_rv=%d, req_pkt=%d\n", pending, src_rv, s->req_pkt);
 
         // Enqueue another pkt for decode if
         // (a) We don't have a lot of stuff in the buffer already OR
@@ -625,20 +628,8 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 }
             }
 
-            // Adjust dynamic pending threshold
-            if (dst_rv == 0) {
-                if (--s->pending_hw < PENDING_HW_MIN)
-                    s->pending_hw = PENDING_HW_MIN;
-                s->pending_n = 0;
-
+            if (dst_rv == 0)
                 set_best_effort_pts(avctx, &s->pts_stat, frame);
-            }
-            else if (dst_rv == AVERROR(EAGAIN)) {
-                if (prefer_dq && ++s->pending_n > PENDING_N_THRESHOLD) {
-                    s->pending_hw = pending * 16 + PENDING_HW_OFFSET;
-                    s->pending_n = 0;
-                }
-            }
 
             if (dst_rv == AVERROR(EAGAIN) && src_rv == NQ_DRAINING) {
                 av_log(avctx, AV_LOG_WARNING, "Timeout in drain - assume EOF");
@@ -857,8 +848,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     if (ret < 0)
         return ret;
 
+    xlat_init(&s->xlat);
     pts_stats_init(&s->pts_stat, avctx, "decoder");
-    s->pending_hw = PENDING_HW_MIN;
 
     capture = &s->capture;
     output = &s->output;
