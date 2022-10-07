@@ -354,11 +354,22 @@ static void
 xlat_flush(xlat_track_t * const x)
 {
     unsigned int i;
+    // Do not reset track_no - this ensures that any frames left in the decoder
+    // that turn up later get discarded.
+
+    x->last_pts = AV_NOPTS_VALUE;
+    x->last_opaque = 0;
     for (i = 0; i != FF_V4L2_M2M_TRACK_SIZE; ++i) {
         x->track_els[i].pending = 0;
         x->track_els[i].discard = 1;
     }
-    x->last_pts = AV_NOPTS_VALUE;
+}
+
+static void
+xlat_init(xlat_track_t * const x)
+{
+    memset(x, 0, sizeof(*x));
+    xlat_flush(x);
 }
 
 #if 0
@@ -604,18 +615,6 @@ static int qbuf_wait(AVCodecContext * const avctx, V4L2Context * const ctx)
     ff_mutex_unlock(&ctx->lock);
     return rv;
 }
-
-// Number of frames over what xlat_pending returns that we keep *16
-// This is a min value - if it appears to be too small the threshold should
-// adjust dynamically.
-#define PENDING_HW_MIN      (3 * 16)
-// Offset to use when setting dynamically
-// Set to %16 == 15 to avoid the threshold changing immediately as we relax
-#define PENDING_HW_OFFSET   (PENDING_HW_MIN - 1)
-// Number of consecutive times we've failed to get a frame when we prefer it
-// before we increase the prefer threshold (5ms * N = max expected decode
-// time)
-#define PENDING_N_THRESHOLD 6
 
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
@@ -895,9 +894,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     if (ret < 0)
         return ret;
 
-    xlat_flush(&s->xlat);
+    xlat_init(&s->xlat);
     pts_stats_init(&s->pts_stat, avctx, "decoder");
-    s->pending_hw = PENDING_HW_MIN;
 
     capture = &s->capture;
     output = &s->output;
