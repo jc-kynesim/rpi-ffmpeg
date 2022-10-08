@@ -372,53 +372,21 @@ xlat_init(xlat_track_t * const x)
     xlat_flush(x);
 }
 
-#if 0
 static int
 xlat_pending(const xlat_track_t * const x)
 {
     unsigned int n = x->track_no % FF_V4L2_M2M_TRACK_SIZE;
-    unsigned int i;
-    int r = 0;
-    int64_t now = AV_NOPTS_VALUE;
-
-    for (i = 0; i < 32; ++i, n = (n - 1) % FF_V4L2_M2M_TRACK_SIZE) {
-        const V4L2m2mTrackEl * const t = x->track_els + n;
-
-        if (!t->pending)
-            continue;
-
-        if (now == AV_NOPTS_VALUE)
-            now = t->dts;
-
-        if (t->pts == AV_NOPTS_VALUE ||
-            ((now == AV_NOPTS_VALUE || t->pts <= now) &&
-             (x->last_pts == AV_NOPTS_VALUE || t->pts > x->last_pts)))
-            ++r;
-    }
-
-    // If we never get any ideas about PTS vs DTS allow a lot more buffer
-    if (now == AV_NOPTS_VALUE)
-        r -= 16;
-
-    return r;
-}
-#else
-static int
-xlat_pending(const xlat_track_t * const x)
-{
-    unsigned int n = x->track_no % FF_V4L2_M2M_TRACK_SIZE;
-    unsigned int i;
-    int r = 0;
+    int i;
     const int64_t now = x->last_pts;
 
-    for (i = 0; i < FF_V4L2_M2M_TRACK_SIZE; ++i, n = (n - 1) % FF_V4L2_M2M_TRACK_SIZE) {
+    for (i = 0; i < FF_V4L2_M2M_TRACK_SIZE; ++i, n = (n - 1) & (FF_V4L2_M2M_TRACK_SIZE - 1)) {
         const V4L2m2mTrackEl * const t = x->track_els + n;
 
         // Discard only set on never-set or flushed entries
         // So if we get here we've never successfully decoded a frame so allow
         // more frames into the buffer before stalling
         if (t->discard)
-            return r - 16;
+            return i - 16;
 
         // If we've got this frame out then everything before this point
         // must have entered the decoder
@@ -426,21 +394,15 @@ xlat_pending(const xlat_track_t * const x)
             break;
 
         // If we've never seen a pts all we can do is count frames
-        if (now == AV_NOPTS_VALUE) {
-            ++r;
+        if (now == AV_NOPTS_VALUE)
             continue;
-        }
 
         if (t->dts != AV_NOPTS_VALUE && now >= t->dts)
             break;
-
-        if (t->pts == AV_NOPTS_VALUE || t->pts > now)
-            ++r;
     }
 
-    return r;
+    return i;
 }
-#endif
 
 static inline int stream_started(const V4L2m2mContext * const s) {
     return s->output.streamon;
