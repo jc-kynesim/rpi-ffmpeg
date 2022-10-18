@@ -420,16 +420,24 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
+    int rv;
+    int needs_slot = ff_v4l2_context_q_count(output) == output->num_buffers;
 
-    ff_v4l2_dq_all(output);
+    av_log(avctx, AV_LOG_TRACE, "<<< %s; needs_slot=%d\n", __func__, needs_slot);
 
-    // Signal EOF if needed
+    // Signal EOF if needed (doesn't need q slot)
     if (!frame) {
         return ff_v4l2_context_enqueue_frame(output, frame);
     }
 
+    if ((rv = ff_v4l2_dq_all(output, needs_slot? 500 : 0)) != 0) {
+        // We should be able to return AVERROR(EAGAIN) to indicate buffer
+        // exhaustion, but ffmpeg currently treats that as fatal.
+        av_log(avctx, AV_LOG_WARNING, "Failed to get buffer for src frame: %s\n", av_err2str(rv));
+        return rv;
+    }
+
     if (s->input_drm && !output->streamon) {
-        int rv;
         struct v4l2_format req_format = {.type = output->format.type};
 
         // Set format when we first get a buffer
@@ -494,7 +502,9 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     AVFrame *frame = s->frame;
     int ret;
 
-    ff_v4l2_dq_all(output);
+    av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
+
+    ff_v4l2_dq_all(output, 0);
 
     if (s->draining)
         goto dequeue;
@@ -532,10 +542,10 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     }
 
 dequeue:
-    ret = ff_v4l2_context_dequeue_packet(capture, avpkt);
-    ff_v4l2_dq_all(output);
+    ret = ff_v4l2_context_dequeue_packet(capture, avpkt, s->draining ? 300 : 0);
+    ff_v4l2_dq_all(output, 0);
     if (ret)
-        return ret;
+        return (s->draining && ret == AVERROR(EAGAIN)) ? AVERROR_EOF : ret;
 
     if (capture->first_buf == 1) {
         uint8_t * data;
@@ -566,8 +576,8 @@ dequeue:
             s->extdata_size = len;
         }
 
-        ret = ff_v4l2_context_dequeue_packet(capture, avpkt);
-        ff_v4l2_dq_all(output);
+        ret = ff_v4l2_context_dequeue_packet(capture, avpkt, 0);
+        ff_v4l2_dq_all(output, 0);
         if (ret)
             return ret;
     }

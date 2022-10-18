@@ -179,7 +179,7 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd);
  * @param[inout] pkt The AVPacket to dequeue to.
  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
  */
-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
+int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout);
 
 /**
  * Dequeues a buffer from a V4L2Context to an AVFrame.
@@ -218,7 +218,18 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const 
  */
 int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* f);
 
-void ff_v4l2_dq_all(V4L2Context *const ctx);
+/**
+ * Dequeue all buffers on this queue
+ *
+ * Used to recycle output buffers
+ *
+ * @param[in] ctx The V4L2Context to dequeue from.
+ * @param[in] timeout1 A timeout on dequeuing the 1st buffer, 
+ *       all others have a timeout of zero
+ * @return AVERROR(EAGAIN) if timeout1 non-zero then the return
+ *         of the first dequeue operation, 0 otherwise.
+ */
+int ff_v4l2_dq_all(V4L2Context *const ctx, int timeout1);
 
 /**
  * Returns the number of buffers currently queued
