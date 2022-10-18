@@ -621,6 +621,22 @@ dequeue:
         avpkt->data = buf->data;
         avpkt->size = newlen;
     }
+    else if (ff_v4l2_context_q_count(capture) < 2) {
+        // Avoid running out of capture buffers
+        // In most cases the buffers will be returned quickly in which case
+        // we don't copy and can use the v4l2 buffers directly but sometimes
+        // ffmpeg seems to hold onto all of them for a long time (.mkv
+        // creation?) so avoid deadlock in those cases.
+        AVBufferRef * const buf = av_buffer_alloc(avpkt->size + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (buf == NULL)
+            goto fail_no_mem;
+
+        memcpy(buf->data, avpkt->data, avpkt->size);
+        av_buffer_unref(&avpkt->buf);  // Will recycle the V4L2 buffer
+
+        avpkt->buf = buf;
+        avpkt->data = buf->data;
+    }
 
     capture->first_buf = 0;
     return 0;
