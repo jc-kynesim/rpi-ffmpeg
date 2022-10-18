@@ -220,4 +220,15 @@ int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* f);
 
 void ff_v4l2_dq_all(V4L2Context *const ctx);
 
+/**
+ * Returns the number of buffers currently queued
+ *
+ * @param[in] ctx The V4L2Context to evaluate
+ */
+static inline int
+ff_v4l2_context_q_count(const V4L2Context* const ctx)
+{
+    return atomic_load(&ctx->q_count);
+}
+
 #endif // AVCODEC_V4L2_CONTEXT_H
