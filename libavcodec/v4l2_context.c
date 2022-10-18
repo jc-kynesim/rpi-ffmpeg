@@ -578,6 +578,11 @@ get_event(V4L2m2mContext * const m)
     return 0;
 }
 
+static inline int
+dq_ok(const V4L2Context * const c)
+{
+    return c->streamon && atomic_load(&c->q_count) != 0;
+}
 
 // Get a buffer
 // If output then just gets the buffer in the expected way
@@ -613,13 +618,13 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         }
 
         // If capture && timeout == -1 then also wait for rx buffer free
-        if (is_cap && timeout == -1 && m->output.streamon && !m->draining)
+        if (is_cap && timeout == -1 && dq_ok(&m->output) && !m->draining)
             pfd.events |= poll_out;
 
         // If nothing Qed all we will get is POLLERR - avoid that
-        if ((pfd.events == poll_out && atomic_load(&m->output.q_count) == 0) ||
-            (pfd.events == poll_cap && atomic_load(&m->capture.q_count) == 0) ||
-            (pfd.events == (poll_cap | poll_out) && atomic_load(&m->capture.q_count) == 0 && atomic_load(&m->output.q_count) == 0)) {
+        if ((pfd.events == poll_out && !dq_ok(&m->output)) ||
+            (pfd.events == poll_cap && !dq_ok(&m->capture)) ||
+            (pfd.events == (poll_cap | poll_out) && !dq_ok(&m->capture) && !dq_ok(&m->output))) {
             av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s empty\n", ctx->name);
             return AVERROR(ENOSPC);
         }
