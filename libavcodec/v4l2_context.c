@@ -712,13 +712,19 @@ clean_v4l2_buffer(V4L2Buffer * const avbuf)
     return avbuf;
 }
 
-void
-ff_v4l2_dq_all(V4L2Context *const ctx)
+int
+ff_v4l2_dq_all(V4L2Context *const ctx, int timeout1)
 {
     V4L2Buffer * avbuf;
+    if (timeout1 != 0) {
+        int rv = get_qbuf(ctx, &avbuf, timeout1);
+        if (rv != 0)
+            return rv;
+    }
     do {
         get_qbuf(ctx, &avbuf, 0);
     } while (avbuf);
+    return 0;
 }
 
 static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
@@ -727,7 +733,7 @@ static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 
     /* get back as many output buffers as possible */
     if (V4L2_TYPE_IS_OUTPUT(ctx->type))
-        ff_v4l2_dq_all(ctx);
+        ff_v4l2_dq_all(ctx, 0);
 
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer * const avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
@@ -1047,7 +1053,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
    return 0;
 }
 
-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
+int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
     AVCodecContext *const avctx = s->avctx;
@@ -1055,7 +1061,7 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
     int rv;
 
     do {
-        if ((rv = get_qbuf(ctx, &avbuf, -1)) != 0)
+        if ((rv = get_qbuf(ctx, &avbuf, timeout)) != 0)
             return rv == AVERROR(ENOSPC) ? AVERROR(EAGAIN) : rv;  // Caller not currently expecting ENOSPC
         if ((rv = ff_v4l2_buffer_buf_to_avpkt(pkt, avbuf)) != 0)
             return rv;
