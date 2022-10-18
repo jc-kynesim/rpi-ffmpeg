@@ -427,6 +427,7 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 
     // Signal EOF if needed (doesn't need q slot)
     if (!frame) {
+        av_log(avctx, AV_LOG_TRACE, "--- %s: EOS\n", __func__);
         return ff_v4l2_context_enqueue_frame(output, frame);
     }
 
@@ -491,7 +492,12 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
         v4l2_set_ext_ctrl(s, MPEG_CID(FORCE_KEY_FRAME), 0, "force key frame", 1);
 #endif
 
-    return ff_v4l2_context_enqueue_frame(output, frame);
+    rv = ff_v4l2_context_enqueue_frame(output, frame);
+    if (rv) {
+        av_log(avctx, AV_LOG_ERROR, "Enqueue frame failed: %s\n", av_err2str(rv));
+    }
+
+    return rv;
 }
 
 static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
@@ -502,7 +508,8 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     AVFrame *frame = s->frame;
     int ret;
 
-    av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
+    av_log(avctx, AV_LOG_TRACE, "<<< %s: qlen out %d cap %d\n", __func__,
+           ff_v4l2_context_q_count(output), ff_v4l2_context_q_count(capture));
 
     ff_v4l2_dq_all(output, 0);
 
@@ -615,11 +622,11 @@ dequeue:
         avpkt->size = newlen;
     }
 
-//    av_log(avctx, AV_LOG_INFO, "%s: PTS out=%"PRId64", size=%d, ret=%d\n", __func__, avpkt->pts, avpkt->size, ret);
     capture->first_buf = 0;
     return 0;
 
 fail_no_mem:
+    av_log(avctx, AV_LOG_ERROR, "Rx pkt failed: No memory\n");
     ret = AVERROR(ENOMEM);
     av_packet_unref(avpkt);
     return ret;
