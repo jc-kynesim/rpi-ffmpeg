@@ -1812,10 +1812,7 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
 
     ack_inlink(avctx, s, inlink);
 
-    if (!ff_outlink_frame_wanted(outlink)) {
-        av_log(priv, AV_LOG_TRACE, "%s: Not wanted out\n", __func__);
-    }
-    else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
+    if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
     {
         AVFrame * frame = av_frame_alloc();
         int rv;
