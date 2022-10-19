@@ -1668,8 +1668,8 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     V4L2Queue *output              = &ctx->output;
     int ret;
 
-    av_log(priv, AV_LOG_DEBUG, "<<< %s: input pts: %"PRId64" (%"PRId64") field :%d interlaced: %d aspect:%d/%d\n",
-          __func__, in->pts, AV_NOPTS_VALUE, in->top_field_first, in->interlaced_frame, in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
+    av_log(priv, AV_LOG_DEBUG, "<<< %s: input pts: %"PRId64" dts: %"PRId64" field :%d interlaced: %d aspect:%d/%d\n",
+           __func__, in->pts, in->pkt_dts, in->top_field_first, in->interlaced_frame, in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
     av_log(priv, AV_LOG_DEBUG, "--- %s: in status in %d/ot %d; out status in %d/out %d\n", __func__,
            avctx->inputs[0]->status_in, avctx->inputs[0]->status_out, avctx->outputs[0]->status_in, avctx->outputs[0]->status_out);
 
