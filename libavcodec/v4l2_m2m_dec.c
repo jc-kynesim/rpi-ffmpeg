@@ -113,6 +113,8 @@ log_dump(void * logctx, int lvl, const void * const data, const size_t len)
 
 static int64_t pts_stats_guess(const pts_stats_t * const stats)
 {
+    if (stats->last_count <= 1)
+        return stats->last_pts;
     if (stats->last_pts == AV_NOPTS_VALUE ||
             stats->last_interval == 0 ||
             stats->last_count >= STATS_LAST_COUNT_MAX)
