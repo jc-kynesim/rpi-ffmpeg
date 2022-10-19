@@ -415,13 +415,17 @@ static int fmt_eq(const struct v4l2_format * const a, const struct v4l2_format *
     return 1;
 }
 
+static inline int q_full(const V4L2Context *const output)
+{
+    return ff_v4l2_context_q_count(output) == output->num_buffers;
+}
 
 static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
     int rv;
-    int needs_slot = ff_v4l2_context_q_count(output) == output->num_buffers;
+    const int needs_slot = q_full(output);
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s; needs_slot=%d\n", __func__, needs_slot);
 
@@ -549,8 +553,20 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     }
 
 dequeue:
-    ret = ff_v4l2_context_dequeue_packet(capture, avpkt, s->draining ? 300 : 0);
-    ff_v4l2_dq_all(output, 0);
+    // Dequeue a frame
+    for (;;) {
+        int t = q_full(output) ? -1 : s->draining ? 300 : 0;
+        int rv2;
+
+        // If output is full wait for either a packet or output to become not full
+        ret = ff_v4l2_context_dequeue_packet(capture, avpkt, t);
+
+        // If output was full retry packet dequeue
+        t = (ret != AVERROR(EAGAIN) || t != -1) ? 0 : 300;
+        rv2 = ff_v4l2_dq_all(output, t);
+        if (t == 0 || rv2 != 0)
+            break;
+    }
     if (ret)
         return (s->draining && ret == AVERROR(EAGAIN)) ? AVERROR_EOF : ret;
 
