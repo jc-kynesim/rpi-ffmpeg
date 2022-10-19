@@ -93,6 +93,7 @@ $FFSRC/configure \
  --enable-libdrm\
  --enable-vout-egl\
  --enable-vout-drm\
+ --enable-gpl\
  $SHARED_LIBS\
  $RPIOPTS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\
