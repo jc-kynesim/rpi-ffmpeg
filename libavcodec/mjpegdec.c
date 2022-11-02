@@ -1079,6 +1079,10 @@ static int ljpeg_decode_rgb_scan(MJpegDecodeContext *s, int nb_components, int p
         return AVERROR_INVALIDDATA;
     if (s->v_max != 1 || s->h_max != 1 || !s->lossless)
         return AVERROR_INVALIDDATA;
+    if (s->bayer) {
+        if (s->rct || s->pegasus_rct)
+            return AVERROR_INVALIDDATA;
+    }
 
 
     s->restart_count = s->restart_interval;
@@ -1195,6 +1199,8 @@ static int ljpeg_decode_rgb_scan(MJpegDecodeContext *s, int nb_components, int p
                 ptr[3*mb_x + 2] = buffer[mb_x][2] + ptr[3*mb_x + 1];
             }
         } else if (s->bayer) {
+            if (s->bits <= 8)
+                return AVERROR_PATCHWELCOME;
             if (nb_components == 1) {
                 /* Leave decoding to the TIFF/DNG decoder (see comment in ff_mjpeg_decode_sof) */
                 for (mb_x = 0; mb_x < width; mb_x++)
@@ -1929,6 +1935,8 @@ static int mjpeg_decode_app(MJpegDecodeContext *s)
         }
 
         len -= 9;
+        if (s->bayer)
+            goto out;
         if (s->got_picture)
             if (rgb != s->rgb || pegasus_rct != s->pegasus_rct) {
                 av_log(s->avctx, AV_LOG_WARNING, "Mismatching LJIF tag\n");
