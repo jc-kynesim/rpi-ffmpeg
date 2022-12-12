@@ -115,9 +115,11 @@ static int find_plane(struct AVFormatContext * const avctx,
 {
    drmModePlaneResPtr planes;
    drmModePlanePtr plane;
+   drmModeObjectPropertiesPtr props = NULL;
+   drmModePropertyPtr prop = NULL;
    unsigned int i;
    unsigned int j;
-   int ret = 0;
+   int ret = -1;
 
    planes = drmModeGetPlaneResources(drmfd);
    if (!planes)
@@ -154,11 +156,37 @@ static int find_plane(struct AVFormatContext * const avctx,
       break;
    }
 
-   if (i == planes->count_planes)
-      ret = -1;
+   if (i == planes->count_planes) {
+       ret = -1;
+       goto fail;
+   }
 
-   drmModeFreePlaneResources(planes);
-   return ret;
+    props = drmModeObjectGetProperties(drmfd, *pplane_id, DRM_MODE_OBJECT_PLANE);
+    if (!props)
+        goto fail;
+    for (i = 0; i != props->count_props; ++i) {
+        if (prop)
+            drmModeFreeProperty(prop);
+        prop = drmModeGetProperty(drmfd, props->props[i]);
+        if (!prop)
+            goto fail;
+        if (strcmp("zpos", prop->name) == 0) {
+            if (drmModeObjectSetProperty(drmfd, *pplane_id, DRM_MODE_OBJECT_PLANE, props->props[i], prop->values[1]) == 0)
+                av_log(avctx, AV_LOG_DEBUG, "ZPOS set to %d\n", (int)prop->values[1]);
+            else
+                av_log(avctx, AV_LOG_WARNING, "Failed to set ZPOS on DRM plane\n");
+            break;
+        }
+    }
+
+    ret = 0;
+fail:
+    if (props)
+        drmModeFreeObjectProperties(props);
+    if (prop)
+        drmModeFreeProperty(prop);
+    drmModeFreePlaneResources(planes);
+    return ret;
 }
 
 static void da_uninit(drm_display_env_t * const de, drm_aux_t * da)
