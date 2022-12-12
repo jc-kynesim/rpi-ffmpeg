@@ -828,28 +828,22 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
             return 0;
     }
 
-    for (;;) {
+    for (;; ++fdesc.index) {
         ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc);
         if (ret)
             return AVERROR(EINVAL);
 
         if (priv->pix_fmt != AV_PIX_FMT_NONE) {
-            if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt)) {
-                fdesc.index++;
+            if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt))
                 continue;
-            }
         }
 
         pixfmt = ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO);
         ret = v4l2_try_raw_format(ctx, pixfmt);
-        if (ret){
-            fdesc.index++;
-            continue;
+        if (ret == 0) {
+            *p = pixfmt;
+            return 0;
         }
-
-        *p = pixfmt;
-
-        return 0;
     }
 
     return AVERROR(EINVAL);
