@@ -596,7 +596,7 @@ static int drm_vout_init(struct AVFormatContext * s)
     sem_init(&de->q_sem_out, 0, 0);
     if (pthread_create(&de->q_thread, NULL, display_thread, s)) {
         rv = AVERROR(errno);
-        av_log(s, AV_LOG_ERROR, "Failed to creatye display thread: %s\n", av_err2str(rv));
+        av_log(s, AV_LOG_ERROR, "Failed to create display thread: %s\n", av_err2str(rv));
         goto fail_close;
     }
 
