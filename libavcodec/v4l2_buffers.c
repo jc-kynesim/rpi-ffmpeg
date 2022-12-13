@@ -379,7 +379,7 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
 
     for (int i = 0; i < avbuf->num_planes; i++) {
         layer->planes[i].object_index = i;
-        layer->planes[i].offset = 0;
+        layer->planes[i].offset = avbuf->plane_info[i].offset;
         layer->planes[i].pitch = avbuf->plane_info[i].bytesperline;
     }
 
@@ -934,6 +934,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
 
         if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
             avbuf->plane_info[i].length = avbuf->buf.m.planes[i].length;
+            avbuf->plane_info[i].offset = avbuf->buf.m.planes[i].data_offset;
 
             if (want_mmap)
                 avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.m.planes[i].length,
@@ -941,6 +942,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
                                                buf_to_m2mctx(avbuf)->fd, avbuf->buf.m.planes[i].m.mem_offset);
         } else {
             avbuf->plane_info[i].length = avbuf->buf.length;
+            avbuf->plane_info[i].offset = 0;
 
             if (want_mmap)
                 avbuf->plane_info[i].mm_addr = mmap(NULL, avbuf->buf.length,
