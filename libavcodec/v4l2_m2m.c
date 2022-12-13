@@ -278,7 +278,7 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
 
     av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Codec end\n");
 
-    if (av_codec_is_decoder(s->avctx->codec))
+    if (s->avctx && av_codec_is_decoder(s->avctx->codec))
         av_packet_unref(&s->buf_pkt);
 
     if (s->fd >= 0) {
