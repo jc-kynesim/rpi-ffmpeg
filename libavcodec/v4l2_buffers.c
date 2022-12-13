@@ -41,11 +41,16 @@
 #define USEC_PER_SEC 1000000
 static const AVRational v4l2_timebase = { 1, USEC_PER_SEC };
 
+static inline V4L2m2mContext *ctx_to_m2mctx(const V4L2Context *ctx)
+{
+    return V4L2_TYPE_IS_OUTPUT(ctx->type) ?
+        container_of(ctx, V4L2m2mContext, output) :
+        container_of(ctx, V4L2m2mContext, capture);
+}
+
 static inline V4L2m2mContext *buf_to_m2mctx(const V4L2Buffer * const buf)
 {
-    return V4L2_TYPE_IS_OUTPUT(buf->context->type) ?
-        container_of(buf->context, V4L2m2mContext, output) :
-        container_of(buf->context, V4L2m2mContext, capture);
+    return ctx_to_m2mctx(buf->context);
 }
 
 static inline AVCodecContext *logger(const V4L2Buffer * const buf)
@@ -883,6 +888,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
     int ret, i;
     V4L2Buffer * const avbuf = av_mallocz(sizeof(*avbuf));
     AVBufferRef * bufref;
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
 
     *pbufref = NULL;
     if (avbuf == NULL)
@@ -910,7 +916,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
         avbuf->buf.m.planes = avbuf->planes;
     }
 
-    ret = ioctl(buf_to_m2mctx(avbuf)->fd, VIDIOC_QUERYBUF, &avbuf->buf);
+    ret = ioctl(s->fd, VIDIOC_QUERYBUF, &avbuf->buf);
     if (ret < 0)
         goto fail;
 
@@ -969,10 +975,12 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
     }
 
     if (!V4L2_TYPE_IS_OUTPUT(ctx->type)) {
-        if (buf_to_m2mctx(avbuf)->output_drm) {
+        if (s->output_drm) {
             ret = v4l2_buffer_export_drm(avbuf);
-            if (ret)
-                    goto fail;
+            if (ret) {
+                av_log(logger(avbuf), AV_LOG_ERROR, "Failed to get exported drm handles\n");
+                goto fail;
+            }
         }
     }
 
