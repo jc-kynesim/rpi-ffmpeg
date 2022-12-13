@@ -66,7 +66,8 @@ typedef struct V4L2Buffer {
 
     /* keep track of the mmap address and mmap length */
     struct V4L2Plane_info {
-        int bytesperline;
+        size_t bytesperline;
+        size_t offset;
         void * mm_addr;
         size_t length;
     } plane_info[VIDEO_MAX_PLANES];
