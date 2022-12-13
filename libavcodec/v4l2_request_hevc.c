@@ -105,7 +105,7 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     mediabufs_ctl_unref(&ctx->mbufs);
     media_pool_delete(&ctx->mpool);
     pollqueue_unref(&ctx->pq);
-    dmabufs_ctl_delete(&ctx->dbufs);
+    dmabufs_ctl_unref(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
 
     decode_q_uninit(&ctx->decode_q);
@@ -324,7 +324,7 @@ fail3:
 fail2:
     pollqueue_unref(&ctx->pq);
 fail1:
-    dmabufs_ctl_delete(&ctx->dbufs);
+    dmabufs_ctl_unref(&ctx->dbufs);
 fail0:
     devscan_delete(&ctx->devscan);
     return ret;
