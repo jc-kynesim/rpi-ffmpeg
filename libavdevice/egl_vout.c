@@ -515,31 +515,6 @@ static int do_display(AVFormatContext *const s, egl_display_env_t *const de, AVF
         }
 
         da->fd = desc->objects[0].fd;
-
-#if 0
-        av_log(s, AV_LOG_INFO, "%dx%d, fmt: %x, boh=%d,%d,%d,%d, pitch=%d,%d,%d,%d,"
-               " offset=%d,%d,%d,%d, mod=%llx,%llx,%llx,%llx\n",
-               av_frame_cropped_width(frame),
-               av_frame_cropped_height(frame),
-               desc->layers[0].format,
-               bo_plane_handles[0],
-               bo_plane_handles[1],
-               bo_plane_handles[2],
-               bo_plane_handles[3],
-               pitches[0],
-               pitches[1],
-               pitches[2],
-               pitches[3],
-               offsets[0],
-               offsets[1],
-               offsets[2],
-               offsets[3],
-               (long long)modifiers[0],
-               (long long)modifiers[1],
-               (long long)modifiers[2],
-               (long long)modifiers[3]
-              );
-#endif
     }
 
     glClearColor(0.5, 0.5, 0.5, 0.5);
