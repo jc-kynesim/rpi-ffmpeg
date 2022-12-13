@@ -34,6 +34,7 @@
 #include "v4l2_context.h"
 #include "v4l2_fmt.h"
 #include "v4l2_m2m.h"
+#include "v4l2_req_dmabufs.h"
 
 static void
 xlat_init(xlat_track_t * const x)
@@ -75,7 +76,7 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
 
     s->capture.done = s->output.done = 0;
     s->capture.name = "capture";
-    s->capture.buf_mem = V4L2_MEMORY_MMAP;
+    s->capture.buf_mem = s->db_ctl != NULL ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     s->output.name = "output";
     s->output.buf_mem = s->input_drm ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     atomic_init(&s->refcount, 0);
@@ -94,12 +95,14 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
     if (v4l2_mplane_video(&cap)) {
         s->capture.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
         s->output.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+        s->output.format.type = s->output.type;
         return 0;
     }
 
     if (v4l2_splane_video(&cap)) {
         s->capture.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         s->output.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+        s->output.format.type = s->output.type;
         return 0;
     }
 
@@ -293,6 +296,7 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
 
     ff_v4l2_context_release(&s->output);
 
+    dmabufs_ctl_unref(&s->db_ctl);
     close(s->fd);
     s->fd = -1;
 
