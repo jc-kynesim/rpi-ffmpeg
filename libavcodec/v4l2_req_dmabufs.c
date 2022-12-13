@@ -31,6 +31,7 @@ struct dmabuf_fns {
 };
 
 struct dmabufs_ctl {
+    atomic_int ref_count;
     int fd;
     size_t page_size;
     void * v;
@@ -271,7 +272,7 @@ static void dmabufs_ctl_free(struct dmabufs_ctl * const dbsc)
     free(dbsc);
 }
 
-void dmabufs_ctl_delete(struct dmabufs_ctl ** const pDbsc)
+void dmabufs_ctl_unref(struct dmabufs_ctl ** const pDbsc)
 {
     struct dmabufs_ctl * const dbsc = *pDbsc;
 
@@ -279,7 +280,16 @@ void dmabufs_ctl_delete(struct dmabufs_ctl ** const pDbsc)
         return;
     *pDbsc = NULL;
 
+    if (atomic_fetch_sub(&dbsc->ref_count, 1) != 0)
+        return;
+
     dmabufs_ctl_free(dbsc);
+}
+
+struct dmabufs_ctl * dmabufs_ctl_ref(struct dmabufs_ctl * const dbsc)
+{
+    atomic_fetch_add(&dbsc->ref_count, 1);
+    return dbsc;
 }
 
 //-----------------------------------------------------------------------------
