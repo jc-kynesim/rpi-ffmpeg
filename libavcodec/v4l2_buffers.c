@@ -36,6 +36,7 @@
 #include "v4l2_context.h"
 #include "v4l2_buffers.h"
 #include "v4l2_m2m.h"
+#include "v4l2_req_dmabufs.h"
 #include "weak_link.h"
 
 #define USEC_PER_SEC 1000000
@@ -477,33 +478,46 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
     av_buffer_unref(&bufref);
 }
 
+static inline uint32_t ff_v4l2_buf_len(const struct v4l2_buffer * b, unsigned int i)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(b->type) ? b->m.planes[i].length : b->length;
+}
+
 static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
 {
-    struct v4l2_exportbuffer expbuf;
     int i, ret;
+    const V4L2m2mContext * const s = buf_to_m2mctx(avbuf);
 
     for (i = 0; i < avbuf->num_planes; i++) {
-        memset(&expbuf, 0, sizeof(expbuf));
+        int dma_fd = -1;
+        const uint32_t blen = ff_v4l2_buf_len(&avbuf->buf, i);
 
-        expbuf.index = avbuf->buf.index;
-        expbuf.type = avbuf->buf.type;
-        expbuf.plane = i;
-
-        ret = ioctl(buf_to_m2mctx(avbuf)->fd, VIDIOC_EXPBUF, &expbuf);
-        if (ret < 0)
-            return AVERROR(errno);
-
-        if (V4L2_TYPE_IS_MULTIPLANAR(avbuf->buf.type)) {
-            /* drm frame */
-            avbuf->drm_frame.objects[i].size = avbuf->buf.m.planes[i].length;
-            avbuf->drm_frame.objects[i].fd = expbuf.fd;
-            avbuf->drm_frame.objects[i].format_modifier = DRM_FORMAT_MOD_LINEAR;
-        } else {
-            /* drm frame */
-            avbuf->drm_frame.objects[0].size = avbuf->buf.length;
-            avbuf->drm_frame.objects[0].fd = expbuf.fd;
-            avbuf->drm_frame.objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
+        if (s->db_ctl != NULL) {
+            if ((avbuf->dmabuf[i] = dmabuf_alloc(s->db_ctl, blen)) == NULL)
+                return AVERROR(ENOMEM);
+            dma_fd = dmabuf_fd(avbuf->dmabuf[i]);
+            if (V4L2_TYPE_IS_MULTIPLANAR(avbuf->buf.type))
+                avbuf->buf.m.planes[i].m.fd = dma_fd;
+            else
+                avbuf->buf.m.fd = dma_fd;
         }
+        else {
+            struct v4l2_exportbuffer expbuf;
+            memset(&expbuf, 0, sizeof(expbuf));
+
+            expbuf.index = avbuf->buf.index;
+            expbuf.type = avbuf->buf.type;
+            expbuf.plane = i;
+
+            ret = ioctl(s->fd, VIDIOC_EXPBUF, &expbuf);
+            if (ret < 0)
+                return AVERROR(errno);
+            dma_fd = expbuf.fd;
+        }
+
+        avbuf->drm_frame.objects[i].size = blen;
+        avbuf->drm_frame.objects[i].fd = dma_fd;
+        avbuf->drm_frame.objects[i].format_modifier = DRM_FORMAT_MOD_LINEAR;
     }
 
     return 0;
@@ -870,9 +884,16 @@ static void v4l2_buffer_buffer_free(void *opaque, uint8_t *data)
             munmap(p->mm_addr, p->length);
     }
 
-    for (i = 0; i != FF_ARRAY_ELEMS(avbuf->drm_frame.objects); ++i) {
-        if (avbuf->drm_frame.objects[i].fd != -1)
-            close(avbuf->drm_frame.objects[i].fd);
+    if (avbuf->dmabuf[0] == NULL) {
+        for (i = 0; i != FF_ARRAY_ELEMS(avbuf->drm_frame.objects); ++i) {
+            if (avbuf->drm_frame.objects[i].fd != -1)
+                close(avbuf->drm_frame.objects[i].fd);
+        }
+    }
+    else {
+        for (i = 0; i != FF_ARRAY_ELEMS(avbuf->dmabuf); ++i) {
+            dmabuf_free(avbuf->dmabuf[i]);
+        }
     }
 
     av_buffer_unref(&avbuf->ref_buf);
