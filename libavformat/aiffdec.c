@@ -53,9 +53,9 @@ static enum AVCodecID aiff_codec_get_id(int bps)
 }
 
 /* returns the size of the found tag */
-static int get_tag(AVIOContext *pb, uint32_t * tag)
+static int64_t get_tag(AVIOContext *pb, uint32_t * tag)
 {
-    int size;
+    int64_t size;
 
     if (avio_feof(pb))
         return AVERROR(EIO);
@@ -63,16 +63,16 @@ static int get_tag(AVIOContext *pb, uint32_t * tag)
     *tag = avio_rl32(pb);
     size = avio_rb32(pb);
 
-    if (size < 0)
-        size = 0x7fffffff;
-
     return size;
 }
 
 /* Metadata string read */
-static void get_meta(AVFormatContext *s, const char *key, int size)
+static void get_meta(AVFormatContext *s, const char *key, int64_t size)
 {
-    uint8_t *str = av_malloc(size+1);
+    uint8_t *str = NULL;
+
+    if (size < SIZE_MAX)
+        str = av_malloc(size+1);
 
     if (str) {
         int res = avio_read(s->pb, str, size);
@@ -89,7 +89,7 @@ static void get_meta(AVFormatContext *s, const char *key, int size)
 }
 
 /* Returns the number of sound data frames or negative on error */
-static int get_aiff_header(AVFormatContext *s, int size,
+static int get_aiff_header(AVFormatContext *s, int64_t size,
                                     unsigned version)
 {
     AVIOContext *pb        = s->pb;
@@ -117,6 +117,9 @@ static int get_aiff_header(AVFormatContext *s, int size,
         sample_rate = val << exp;
     else
         sample_rate = (val + (1ULL<<(-exp-1))) >> -exp;
+    if (sample_rate <= 0)
+        return AVERROR_INVALIDDATA;
+
     par->sample_rate = sample_rate;
     if (size < 18)
         return AVERROR_INVALIDDATA;
@@ -179,8 +182,10 @@ static int get_aiff_header(AVFormatContext *s, int size,
         par->block_align = (av_get_bits_per_sample(par->codec_id) * par->channels) >> 3;
 
     if (aiff->block_duration) {
-        par->bit_rate = (int64_t)par->sample_rate * (par->block_align << 3) /
-                        aiff->block_duration;
+        par->bit_rate = av_rescale(par->sample_rate, par->block_align * 8LL,
+                                   aiff->block_duration);
+        if (par->bit_rate < 0)
+            par->bit_rate = 0;
     }
 
     /* Chunk is over */
@@ -205,7 +210,8 @@ static int aiff_probe(const AVProbeData *p)
 /* aiff input */
 static int aiff_read_header(AVFormatContext *s)
 {
-    int ret, size, filesize;
+    int ret;
+    int64_t filesize, size;
     int64_t offset = 0, position;
     uint32_t tag;
     unsigned version = AIFF_C_VERSION1;
@@ -216,7 +222,7 @@ static int aiff_read_header(AVFormatContext *s)
 
     /* check FORM header */
     filesize = get_tag(pb, &tag);
-    if (filesize < 0 || tag != MKTAG('F', 'O', 'R', 'M'))
+    if (filesize < 4 || tag != MKTAG('F', 'O', 'R', 'M'))
         return AVERROR_INVALIDDATA;
 
     /* AIFF data type */
@@ -243,10 +249,7 @@ static int aiff_read_header(AVFormatContext *s)
         if (size < 0)
             return size;
 
-        if (size >= 0x7fffffff - 8)
-            filesize = 0;
-        else
-            filesize -= size + 8;
+        filesize -= size + 8;
 
         switch (tag) {
         case MKTAG('C', 'O', 'M', 'M'):     /* Common chunk */
@@ -362,10 +365,12 @@ got_sound:
     if (!st->codecpar->block_align && st->codecpar->codec_id == AV_CODEC_ID_QCELP) {
         av_log(s, AV_LOG_WARNING, "qcelp without wave chunk, assuming full rate\n");
         st->codecpar->block_align = 35;
-    } else if (!st->codecpar->block_align) {
+    } else if (st->codecpar->block_align <= 0) {
         av_log(s, AV_LOG_ERROR, "could not find COMM tag or invalid block_align value\n");
         return -1;
     }
+    if (aiff->block_duration < 0)
+        return AVERROR_INVALIDDATA;
 
     /* Now positioned, get the sound data start and end */
     avpriv_set_pts_info(st, 64, 1, st->codecpar->sample_rate);
@@ -420,7 +425,7 @@ static int aiff_read_packet(AVFormatContext *s,
         pkt->flags &= ~AV_PKT_FLAG_CORRUPT;
     /* Only one stream in an AIFF file */
     pkt->stream_index = 0;
-    pkt->duration     = (res / st->codecpar->block_align) * aiff->block_duration;
+    pkt->duration     = (res / st->codecpar->block_align) * (int64_t) aiff->block_duration;
     return 0;
 }
 

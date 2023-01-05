@@ -79,6 +79,8 @@ typedef struct AVIContext {
     int stream_index;
     DVDemuxContext *dv_demux;
     int odml_depth;
+    int64_t odml_read;
+    int64_t odml_max_pos;
     int use_odml;
 #define MAX_ODML_DEPTH 1000
     int64_t dts_max;
@@ -165,7 +167,7 @@ static int get_riff(AVFormatContext *s, AVIOContext *pb)
     return 0;
 }
 
-static int read_odml_index(AVFormatContext *s, int frame_num)
+static int read_odml_index(AVFormatContext *s, int64_t frame_num)
 {
     AVIContext *avi     = s->priv_data;
     AVIOContext *pb     = s->pb;
@@ -185,7 +187,7 @@ static int read_odml_index(AVFormatContext *s, int frame_num)
 
     av_log(s, AV_LOG_TRACE,
             "longs_per_entry:%d index_type:%d entries_in_use:%d "
-            "chunk_id:%X base:%16"PRIX64" frame_num:%d\n",
+            "chunk_id:%X base:%16"PRIX64" frame_num:%"PRId64"\n",
             longs_per_entry,
             index_type,
             entries_in_use,
@@ -198,7 +200,7 @@ static int read_odml_index(AVFormatContext *s, int frame_num)
     st  = s->streams[stream_id];
     ast = st->priv_data;
 
-    if (index_sub_type)
+    if (index_sub_type || entries_in_use < 0)
         return AVERROR_INVALIDDATA;
 
     avio_rl32(pb);
@@ -219,11 +221,18 @@ static int read_odml_index(AVFormatContext *s, int frame_num)
     }
 
     for (i = 0; i < entries_in_use; i++) {
+        avi->odml_max_pos = FFMAX(avi->odml_max_pos, avio_tell(pb));
+
+        // If we read more than there are bytes then we must have been reading something twice
+        if (avi->odml_read > avi->odml_max_pos)
+            return AVERROR_INVALIDDATA;
+
         if (index_type) {
             int64_t pos = avio_rl32(pb) + base - 8;
             int len     = avio_rl32(pb);
             int key     = len >= 0;
             len &= 0x7FFFFFFF;
+            avi->odml_read += 8;
 
             av_log(s, AV_LOG_TRACE, "pos:%"PRId64", len:%X\n", pos, len);
 
@@ -241,11 +250,14 @@ static int read_odml_index(AVFormatContext *s, int frame_num)
         } else {
             int64_t offset, pos;
             int duration;
+            int ret;
+            avi->odml_read += 16;
+
             offset = avio_rl64(pb);
             avio_rl32(pb);       /* size */
             duration = avio_rl32(pb);
 
-            if (avio_feof(pb))
+            if (avio_feof(pb) || offset > INT64_MAX - 8)
                 return AVERROR_INVALIDDATA;
 
             pos = avio_tell(pb);
@@ -258,7 +270,7 @@ static int read_odml_index(AVFormatContext *s, int frame_num)
             if (avio_seek(pb, offset + 8, SEEK_SET) < 0)
                 return -1;
             avi->odml_depth++;
-            read_odml_index(s, frame_num);
+            ret = read_odml_index(s, frame_num);
             avi->odml_depth--;
             frame_num += duration;
 
@@ -266,7 +278,8 @@ static int read_odml_index(AVFormatContext *s, int frame_num)
                 av_log(s, AV_LOG_ERROR, "Failed to restore position after reading index\n");
                 return -1;
             }
-
+            if (ret < 0)
+                return ret;
         }
     }
     avi->index_loaded = 2;
@@ -856,6 +869,8 @@ static int avi_read_header(AVFormatContext *s)
                             memcpy(st->codecpar->extradata + st->codecpar->extradata_size - 9,
                                    "BottomUp", 9);
                     }
+                    if (st->codecpar->height == INT_MIN)
+                        return AVERROR_INVALIDDATA;
                     st->codecpar->height = FFABS(st->codecpar->height);
 
 //                    avio_skip(pb, size - 5 * 4);
@@ -1783,7 +1798,10 @@ static int avi_load_index(AVFormatContext *s)
         size = avio_rl32(pb);
         if (avio_feof(pb))
             break;
-        next = avio_tell(pb) + size + (size & 1);
+        next = avio_tell(pb);
+        if (next < 0 || next > INT64_MAX - size - (size & 1))
+            break;
+        next += size + (size & 1LL);
 
         if (tag == MKTAG('i', 'd', 'x', '1') &&
             avi_read_idx1(s, size) >= 0) {

@@ -206,7 +206,7 @@ void ff_subtitles_queue_finalize(void *log_ctx, FFDemuxSubtitlesQueue *q)
           q->sort == SUB_SORT_TS_POS ? cmp_pkt_sub_ts_pos
                                      : cmp_pkt_sub_pos_ts);
     for (i = 0; i < q->nb_subs; i++)
-        if (q->subs[i]->duration < 0 && i < q->nb_subs - 1)
+        if (q->subs[i]->duration < 0 && i < q->nb_subs - 1 && q->subs[i + 1]->pts - (uint64_t)q->subs[i]->pts <= INT64_MAX)
             q->subs[i]->duration = q->subs[i + 1]->pts - q->subs[i]->pts;
 
     if (!q->keep_duplicates)
@@ -418,6 +418,7 @@ ptrdiff_t ff_subtitles_read_line(FFTextReader *tr, char *buf, size_t size)
     size_t cur = 0;
     if (!size)
         return 0;
+    buf[0] = '\0';
     while (cur + 1 < size) {
         unsigned char c = ff_text_r8(tr);
         if (!c)

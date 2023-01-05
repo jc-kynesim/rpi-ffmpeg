@@ -294,6 +294,8 @@ static int mov_metadata_hmmt(MOVContext *c, AVIOContext *pb, unsigned len)
         int moment_time = avio_rb32(pb);
         avpriv_new_chapter(c->fc, i, av_make_q(1, 1000), moment_time, AV_NOPTS_VALUE, NULL);
     }
+    if (avio_feof(pb))
+        return AVERROR_INVALIDDATA;
     return 0;
 }
 
@@ -605,10 +607,12 @@ static int mov_read_dref(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     for (i = 0; i < entries; i++) {
         MOVDref *dref = &sc->drefs[i];
         uint32_t size = avio_rb32(pb);
-        int64_t next = avio_tell(pb) + size - 4;
+        int64_t next = avio_tell(pb);
 
-        if (size < 12)
+        if (size < 12 || next < 0 || next > INT64_MAX - size)
             return AVERROR_INVALIDDATA;
+
+        next += size - 4;
 
         dref->type = avio_rl32(pb);
         avio_rb32(pb); // version + flags
@@ -1940,6 +1944,8 @@ static int mov_read_glbl(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         // wrap a whole fiel atom inside of a glbl atom.
         unsigned size = avio_rb32(pb);
         unsigned type = avio_rl32(pb);
+        if (avio_feof(pb))
+            return AVERROR_INVALIDDATA;
         avio_seek(pb, -8, SEEK_CUR);
         if (type == MKTAG('f','i','e','l') && size == atom.size)
             return mov_read_default(c, pb, atom);
@@ -2547,6 +2553,10 @@ int ff_mov_read_stsd_entries(MOVContext *c, AVIOContext *pb, int entries)
             mov_parse_stsd_audio(c, pb, st, sc);
             if (st->codecpar->sample_rate < 0) {
                 av_log(c->fc, AV_LOG_ERROR, "Invalid sample rate %d\n", st->codecpar->sample_rate);
+                return AVERROR_INVALIDDATA;
+            }
+            if (st->codecpar->channels < 0) {
+                av_log(c->fc, AV_LOG_ERROR, "Invalid channels %d\n", st->codecpar->channels);
                 return AVERROR_INVALIDDATA;
             }
         } else if (st->codecpar->codec_type==AVMEDIA_TYPE_SUBTITLE){
@@ -3835,7 +3845,11 @@ static void mov_build_index(MOVContext *mov, AVStream *st)
         if ((empty_duration || start_time) && mov->time_scale > 0) {
             if (empty_duration)
                 empty_duration = av_rescale(empty_duration, sc->time_scale, mov->time_scale);
-            sc->time_offset = start_time - empty_duration;
+
+            if (av_sat_sub64(start_time, empty_duration) != start_time - (uint64_t)empty_duration)
+                av_log(mov->fc, AV_LOG_WARNING, "start_time - empty_duration is not representable\n");
+
+            sc->time_offset = start_time -  (uint64_t)empty_duration;
             sc->min_corrected_pts = start_time;
             if (!mov->advanced_editlist)
                 current_dts = -sc->time_offset;
@@ -4700,6 +4714,8 @@ static int mov_read_chap(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     for (i = 0; i < num && !pb->eof_reached; i++)
         c->chapter_tracks[i] = avio_rb32(pb);
 
+    c->nb_chapter_tracks = i;
+
     return 0;
 }
 
@@ -4984,6 +5000,8 @@ static int mov_read_trun(MOVContext *c, AVIOContext *pb, MOVAtom atom)
                 "size %u, distance %d, keyframe %d\n", st->index,
                 index_entry_pos, offset, dts, sample_size, distance, keyframe);
         distance++;
+        if (av_sat_add64(dts, sample_duration) != dts + (uint64_t)sample_duration)
+            return AVERROR_INVALIDDATA;
         dts += sample_duration;
         offset += sample_size;
         sc->data_size += sample_size;
@@ -5106,6 +5124,8 @@ static int mov_read_sidx(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     avio_rb16(pb); // reserved
 
     item_count = avio_rb16(pb);
+    if (item_count == 0)
+        return AVERROR_INVALIDDATA;
 
     for (i = 0; i < item_count; i++) {
         int index;
@@ -5124,7 +5144,9 @@ static int mov_read_sidx(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (frag_stream_info)
             frag_stream_info->sidx_pts = timestamp;
 
-        if (av_sat_add64(offset, size) != offset + size)
+        if (av_sat_add64(offset, size) != offset + (uint64_t)size ||
+            av_sat_add64(pts, duration) != pts + (uint64_t)duration
+        )
             return AVERROR_INVALIDDATA;
         offset += size;
         pts += duration;
@@ -5136,7 +5158,7 @@ static int mov_read_sidx(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
     // See if the remaining bytes are just an mfra which we can ignore.
     is_complete = offset == stream_size;
-    if (!is_complete && (pb->seekable & AVIO_SEEKABLE_NORMAL)) {
+    if (!is_complete && (pb->seekable & AVIO_SEEKABLE_NORMAL) && stream_size > 0 ) {
         int64_t ret;
         int64_t original_pos = avio_tell(pb);
         if (!c->have_read_mfra_size) {
@@ -5147,7 +5169,7 @@ static int mov_read_sidx(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             if ((ret = avio_seek(pb, original_pos, SEEK_SET)) < 0)
                 return ret;
         }
-        if (offset + c->mfra_size == stream_size)
+        if (offset == stream_size - c->mfra_size)
             is_complete = 1;
     }
 
@@ -5429,6 +5451,9 @@ static int mov_read_smdm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         av_log(c->fc, AV_LOG_WARNING, "Unsupported Mastering Display Metadata box version %d\n", version);
         return 0;
     }
+    if (sc->mastering)
+        return AVERROR_INVALIDDATA;
+
     avio_skip(pb, 3); /* flags */
 
     sc->mastering = av_mastering_display_metadata_alloc();
@@ -5464,7 +5489,7 @@ static int mov_read_mdcv(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
     sc = c->fc->streams[c->fc->nb_streams - 1]->priv_data;
 
-    if (atom.size < 24) {
+    if (atom.size < 24 || sc->mastering) {
         av_log(c->fc, AV_LOG_ERROR, "Invalid Mastering Display Color Volume box\n");
         return AVERROR_INVALIDDATA;
     }
@@ -5512,6 +5537,11 @@ static int mov_read_coll(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     }
     avio_skip(pb, 3); /* flags */
 
+    if (sc->coll){
+        av_log(c->fc, AV_LOG_WARNING, "Ignoring duplicate COLL\n");
+        return 0;
+    }
+
     sc->coll = av_content_light_metadata_alloc(&sc->coll_size);
     if (!sc->coll)
         return AVERROR(ENOMEM);
@@ -5534,6 +5564,11 @@ static int mov_read_clli(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     if (atom.size < 4) {
         av_log(c->fc, AV_LOG_ERROR, "Empty Content Light Level Info box\n");
         return AVERROR_INVALIDDATA;
+    }
+
+    if (sc->coll){
+        av_log(c->fc, AV_LOG_WARNING, "Ignoring duplicate CLLI/COLL\n");
+        return 0;
     }
 
     sc->coll = av_content_light_metadata_alloc(&sc->coll_size);
@@ -6107,6 +6142,8 @@ static int mov_read_senc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         }
         if (pb->eof_reached) {
             av_log(c->fc, AV_LOG_ERROR, "Hit EOF while reading senc\n");
+            if (ret >= 0)
+                av_encryption_info_free(encryption_index->encrypted_samples[i]);
             ret = AVERROR_INVALIDDATA;
         }
 
@@ -7045,6 +7082,8 @@ static int mov_read_default(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (a.size == 0) {
             a.size = atom.size - total_size + 8;
         }
+        if (a.size < 0)
+            break;
         a.size -= 8;
         if (a.size < 0)
             break;

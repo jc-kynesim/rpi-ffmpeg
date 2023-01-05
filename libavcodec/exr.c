@@ -418,7 +418,7 @@ static int huf_decode(VLC *vlc, GetByteContext *gb, int nbits, int run_sym,
 
     init_get_bits(&gbit, gb->buffer, nbits);
     while (get_bits_left(&gbit) > 0 && oe < no) {
-        uint16_t x = get_vlc2(&gbit, vlc->table, 12, 2);
+        uint16_t x = get_vlc2(&gbit, vlc->table, 12, 3);
 
         if (x == run_sym) {
             int run = get_bits(&gbit, 8);
@@ -1014,7 +1014,9 @@ static int dwa_uncompress(EXRContext *s, const uint8_t *src, int compressed_size
     dc_count = AV_RL64(src + 72);
     ac_compression = AV_RL64(src + 80);
 
-    if (compressed_size < 88LL + lo_size + ac_size + dc_size + rle_csize)
+    if (   compressed_size < (uint64_t)(lo_size | ac_size | dc_size | rle_csize) || compressed_size < 88LL + lo_size + ac_size + dc_size + rle_csize
+        || ac_count > (uint64_t)INT_MAX/2
+    )
         return AVERROR_INVALIDDATA;
 
     bytestream2_init(&gb, src + 88, compressed_size - 88);
@@ -1031,11 +1033,13 @@ static int dwa_uncompress(EXRContext *s, const uint8_t *src, int compressed_size
     }
 
     if (ac_size > 0) {
-        unsigned long dest_len = ac_count * 2LL;
+        unsigned long dest_len;
         GetByteContext agb = gb;
 
         if (ac_count > 3LL * td->xsize * s->scan_lines_per_block)
             return AVERROR_INVALIDDATA;
+
+        dest_len = ac_count * 2LL;
 
         av_fast_padded_malloc(&td->ac_data, &td->ac_size, dest_len);
         if (!td->ac_data)
@@ -1059,12 +1063,14 @@ static int dwa_uncompress(EXRContext *s, const uint8_t *src, int compressed_size
         bytestream2_skip(&gb, ac_size);
     }
 
-    if (dc_size > 0) {
-        unsigned long dest_len = dc_count * 2LL;
+    {
+        unsigned long dest_len;
         GetByteContext agb = gb;
 
-        if (dc_count > (6LL * td->xsize * td->ysize + 63) / 64)
+        if (dc_count != dc_w * dc_h * 3)
             return AVERROR_INVALIDDATA;
+
+        dest_len = dc_count * 2LL;
 
         av_fast_padded_malloc(&td->dc_data, &td->dc_size, FFALIGN(dest_len, 64) * 2);
         if (!td->dc_data)
@@ -1234,7 +1240,8 @@ static int decode_block(AVCodecContext *avctx, void *tdata,
         td->ysize = FFMIN(s->tile_attr.ySize, s->ydelta - tile_y * s->tile_attr.ySize);
         td->xsize = FFMIN(s->tile_attr.xSize, s->xdelta - tile_x * s->tile_attr.xSize);
 
-        if (td->xsize * (uint64_t)s->current_channel_offset > INT_MAX)
+        if (td->xsize * (uint64_t)s->current_channel_offset > INT_MAX ||
+            av_image_check_size2(td->xsize, td->ysize, s->avctx->max_pixels, AV_PIX_FMT_NONE, 0, s->avctx) < 0)
             return AVERROR_INVALIDDATA;
 
         td->channel_line_size = td->xsize * s->current_channel_offset;/* uncompress size of one line */
@@ -1258,7 +1265,8 @@ static int decode_block(AVCodecContext *avctx, void *tdata,
         td->ysize          = FFMIN(s->scan_lines_per_block, s->ymax - line + 1); /* s->ydelta - line ?? */
         td->xsize          = s->xdelta;
 
-        if (td->xsize * (uint64_t)s->current_channel_offset > INT_MAX)
+        if (td->xsize * (uint64_t)s->current_channel_offset > INT_MAX ||
+            av_image_check_size2(td->xsize, td->ysize, s->avctx->max_pixels, AV_PIX_FMT_NONE, 0, s->avctx) < 0)
             return AVERROR_INVALIDDATA;
 
         td->channel_line_size = td->xsize * s->current_channel_offset;/* uncompress size of one line */
@@ -1795,6 +1803,7 @@ static int decode_header(EXRContext *s, AVFrame *frame)
             ymax   = bytestream2_get_le32(gb);
 
             if (xmin > xmax || ymin > ymax ||
+                ymax == INT_MAX || xmax == INT_MAX ||
                 (unsigned)xmax - xmin >= INT_MAX ||
                 (unsigned)ymax - ymin >= INT_MAX) {
                 ret = AVERROR_INVALIDDATA;
@@ -1822,8 +1831,8 @@ static int decode_header(EXRContext *s, AVFrame *frame)
             dx = bytestream2_get_le32(gb);
             dy = bytestream2_get_le32(gb);
 
-            s->w = dx - sx + 1;
-            s->h = dy - sy + 1;
+            s->w = (unsigned)dx - sx + 1;
+            s->h = (unsigned)dy - sy + 1;
 
             continue;
         } else if ((var_size = check_header_variable(s, "lineOrder",
@@ -1938,9 +1947,12 @@ static int decode_header(EXRContext *s, AVFrame *frame)
                                                      "preview", 16)) >= 0) {
             uint32_t pw = bytestream2_get_le32(gb);
             uint32_t ph = bytestream2_get_le32(gb);
-            int64_t psize = 4LL * pw * ph;
+            uint64_t psize = pw * ph;
+            if (psize > INT64_MAX / 4)
+                return AVERROR_INVALIDDATA;
+            psize *= 4;
 
-            if (psize >= bytestream2_get_bytes_left(gb))
+            if ((int64_t)psize >= bytestream2_get_bytes_left(gb))
                 return AVERROR_INVALIDDATA;
 
             bytestream2_skip(gb, psize);

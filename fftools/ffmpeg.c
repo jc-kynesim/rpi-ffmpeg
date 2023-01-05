@@ -1974,6 +1974,9 @@ static void flush_encoders(void)
             AVPacket *pkt = ost->pkt;
             int pkt_size;
 
+            if (!pkt)
+                break;
+
             switch (enc->codec_type) {
             case AVMEDIA_TYPE_AUDIO:
                 desc   = "audio";
@@ -3489,12 +3492,7 @@ static int init_output_stream_encode(OutputStream *ost, AVFrame *frame)
             enc_ctx->bits_per_raw_sample = frame_bits_per_raw_sample;
         }
 
-        if (ost->top_field_first == 0) {
-            enc_ctx->field_order = AV_FIELD_BB;
-        } else if (ost->top_field_first == 1) {
-            enc_ctx->field_order = AV_FIELD_TT;
-        }
-
+        // Field order: autodetection
         if (frame) {
             if (enc_ctx->flags & (AV_CODEC_FLAG_INTERLACED_DCT | AV_CODEC_FLAG_INTERLACED_ME) &&
                 ost->top_field_first >= 0)
@@ -3507,6 +3505,13 @@ static int init_output_stream_encode(OutputStream *ost, AVFrame *frame)
                     enc_ctx->field_order = frame->top_field_first ? AV_FIELD_TB:AV_FIELD_BT;
             } else
                 enc_ctx->field_order = AV_FIELD_PROGRESSIVE;
+        }
+
+        // Field order: override
+        if (ost->top_field_first == 0) {
+            enc_ctx->field_order = AV_FIELD_BB;
+        } else if (ost->top_field_first == 1) {
+            enc_ctx->field_order = AV_FIELD_TT;
         }
 
         if (ost->forced_keyframes) {
@@ -3976,7 +3981,7 @@ static OutputStream *choose_output(void)
                 ost->st->index, ost->st->id, ost->initialized, ost->inputs_done, ost->finished);
 
         if (!ost->initialized && !ost->inputs_done)
-            return ost;
+            return ost->unavailable ? NULL : ost;
 
         if (!ost->finished && opts < opts_min) {
             opts_min = opts;

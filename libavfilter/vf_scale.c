@@ -493,18 +493,18 @@ static int config_props(AVFilterLink *outlink)
     if ((ret = scale_eval_dimensions(ctx)) < 0)
         goto fail;
 
-    ff_scale_adjust_dimensions(inlink, &scale->w, &scale->h,
+    outlink->w = scale->w;
+    outlink->h = scale->h;
+
+    ff_scale_adjust_dimensions(inlink, &outlink->w, &outlink->h,
                                scale->force_original_aspect_ratio,
                                scale->force_divisible_by);
 
-    if (scale->w > INT_MAX ||
-        scale->h > INT_MAX ||
-        (scale->h * inlink->w) > INT_MAX ||
-        (scale->w * inlink->h) > INT_MAX)
+    if (outlink->w > INT_MAX ||
+        outlink->h > INT_MAX ||
+        (outlink->h * inlink->w) > INT_MAX ||
+        (outlink->w * inlink->h) > INT_MAX)
         av_log(ctx, AV_LOG_ERROR, "Rescaled value for width or height is too big.\n");
-
-    outlink->w = scale->w;
-    outlink->h = scale->h;
 
     /* TODO: make algorithm configurable */
 
@@ -684,9 +684,9 @@ static int scale_frame(AVFilterLink *link, AVFrame *in, AVFrame **frame_out)
             goto scale;
 
         if (scale->eval_mode == EVAL_MODE_INIT) {
-            snprintf(buf, sizeof(buf)-1, "%d", outlink->w);
+            snprintf(buf, sizeof(buf) - 1, "%d", scale->w);
             av_opt_set(scale, "w", buf, 0);
-            snprintf(buf, sizeof(buf)-1, "%d", outlink->h);
+            snprintf(buf, sizeof(buf) - 1, "%d", scale->h);
             av_opt_set(scale, "h", buf, 0);
 
             ret = scale_parse_expr(ctx, NULL, &scale->w_pexpr, "width", scale->w_expr);
@@ -738,6 +738,18 @@ scale:
     av_frame_copy_props(out, in);
     out->width  = outlink->w;
     out->height = outlink->h;
+
+    // Sanity checks:
+    //   1. If the output is RGB, set the matrix coefficients to RGB.
+    //   2. If the output is not RGB and we've got the RGB/XYZ (identity)
+    //      matrix configured, unset the matrix.
+    //   In theory these should be in swscale itself as the AVFrame
+    //   based API gets in, so that not every swscale API user has
+    //   to go through duplicating such sanity checks.
+    if (av_pix_fmt_desc_get(out->format)->flags & AV_PIX_FMT_FLAG_RGB)
+        out->colorspace = AVCOL_SPC_RGB;
+    else if (out->colorspace == AVCOL_SPC_RGB)
+        out->colorspace = AVCOL_SPC_UNSPECIFIED;
 
     if (scale->output_is_pal)
         avpriv_set_systematic_pal2((uint32_t*)out->data[1], outlink->format == AV_PIX_FMT_PAL8 ? AV_PIX_FMT_BGR8 : outlink->format);

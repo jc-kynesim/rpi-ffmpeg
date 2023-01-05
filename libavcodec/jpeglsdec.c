@@ -67,7 +67,7 @@ int ff_jpegls_decode_lse(MJpegDecodeContext *s)
         s->t3     = get_bits(&s->gb, 16);
         s->reset  = get_bits(&s->gb, 16);
 
-        if(s->avctx->debug & FF_DEBUG_PICT_INFO) {
+        if (s->avctx->debug & FF_DEBUG_PICT_INFO) {
             av_log(s->avctx, AV_LOG_DEBUG, "Coding parameters maxval:%d T1:%d T2:%d T3:%d reset:%d\n",
                    s->maxval, s->t1, s->t2, s->t3, s->reset);
         }
@@ -96,7 +96,7 @@ int ff_jpegls_decode_lse(MJpegDecodeContext *s)
         else
             maxtab = 65530/wt - 1;
 
-        if(s->avctx->debug & FF_DEBUG_PICT_INFO) {
+        if (s->avctx->debug & FF_DEBUG_PICT_INFO) {
             av_log(s->avctx, AV_LOG_DEBUG, "LSE palette %d tid:%d wt:%d maxtab:%d\n", id, tid, wt, maxtab);
         }
         if (maxtab >= 256) {
@@ -122,7 +122,7 @@ int ff_jpegls_decode_lse(MJpegDecodeContext *s)
             s->avctx->pix_fmt = AV_PIX_FMT_PAL8;
             for (i=s->palette_index; i<=maxtab; i++) {
                 uint8_t k = i << shift;
-                pal[k] = 0;
+                pal[k] = wt < 4 ? 0xFF000000 : 0;
                 for (j=0; j<wt; j++) {
                     pal[k] |= get_bits(&s->gb, 8) << (8*(wt-j-1));
                 }
@@ -186,7 +186,7 @@ static inline int ls_get_code_runterm(GetBitContext *gb, JLSState *state,
     if (RItype)
         temp += state->N[Q] >> 1;
 
-    for (k = 0; (state->N[Q] << k) < temp; k++)
+    for (k = 0; ((unsigned)state->N[Q] << k) < temp; k++)
         ;
 
 #ifdef JLS_BROKEN
@@ -195,6 +195,8 @@ static inline int ls_get_code_runterm(GetBitContext *gb, JLSState *state,
 #endif
     ret = get_ur_golomb_jpegls(gb, k, state->limit - limit_add - 1,
                                state->qbpp);
+    if (ret < 0)
+        return -0x10000;
 
     /* decode mapped error */
     map = 0;
@@ -209,7 +211,7 @@ static inline int ls_get_code_runterm(GetBitContext *gb, JLSState *state,
         ret = ret >> 1;
     }
 
-    if(FFABS(ret) > 0xFFFF)
+    if (FFABS(ret) > 0xFFFF)
         return -0x10000;
     /* update state */
     state->A[Q] += FFABS(ret) - RItype;
@@ -476,19 +478,19 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near,
             for (i = 0; i < s->height; i++) {
                 switch(s->xfrm) {
                 case 1:
-                    for (x = off; x < w; x += 3) {
+                    for (x = off; x + 2 < w; x += 3) {
                         src[x  ] += src[x+1] + 128;
                         src[x+2] += src[x+1] + 128;
                     }
                     break;
                 case 2:
-                    for (x = off; x < w; x += 3) {
+                    for (x = off; x + 2 < w; x += 3) {
                         src[x  ] += src[x+1] + 128;
                         src[x+2] += ((src[x  ] + src[x+1])>>1) + 128;
                     }
                     break;
                 case 3:
-                    for (x = off; x < w; x += 3) {
+                    for (x = off; x + 2 < w; x += 3) {
                         int g = src[x+0] - ((src[x+2]+src[x+1])>>2) + 64;
                         src[x+0] = src[x+2] + g + 128;
                         src[x+2] = src[x+1] + g + 128;
@@ -496,7 +498,7 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near,
                     }
                     break;
                 case 4:
-                    for (x = off; x < w; x += 3) {
+                    for (x = off; x + 2 < w; x += 3) {
                         int r    = src[x+0] - ((                       359 * (src[x+2]-128) + 490) >> 8);
                         int g    = src[x+0] - (( 88 * (src[x+1]-128) - 183 * (src[x+2]-128) +  30) >> 8);
                         int b    = src[x+0] + ((454 * (src[x+1]-128)                        + 574) >> 8);
