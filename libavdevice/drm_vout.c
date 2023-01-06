@@ -34,6 +34,7 @@
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+#include <drm_fourcc.h>
 
 #define TRACE_ALL 0
 
@@ -69,7 +70,9 @@ typedef struct drm_display_env_s
     uint32_t con_id;
     struct drm_setup setup;
     enum AVPixelFormat avfmt;
+
     int show_all;
+    const char * drm_module;
 
     unsigned int ano;
     drm_aux_t aux[AUX_SIZE];
@@ -115,9 +118,11 @@ static int find_plane(struct AVFormatContext * const avctx,
 {
    drmModePlaneResPtr planes;
    drmModePlanePtr plane;
+   drmModeObjectPropertiesPtr props = NULL;
+   drmModePropertyPtr prop = NULL;
    unsigned int i;
    unsigned int j;
-   int ret = 0;
+   int ret = -1;
 
    planes = drmModeGetPlaneResources(drmfd);
    if (!planes)
@@ -154,11 +159,37 @@ static int find_plane(struct AVFormatContext * const avctx,
       break;
    }
 
-   if (i == planes->count_planes)
-      ret = -1;
+   if (i == planes->count_planes) {
+       ret = -1;
+       goto fail;
+   }
 
-   drmModeFreePlaneResources(planes);
-   return ret;
+    props = drmModeObjectGetProperties(drmfd, *pplane_id, DRM_MODE_OBJECT_PLANE);
+    if (!props)
+        goto fail;
+    for (i = 0; i != props->count_props; ++i) {
+        if (prop)
+            drmModeFreeProperty(prop);
+        prop = drmModeGetProperty(drmfd, props->props[i]);
+        if (!prop)
+            goto fail;
+        if (strcmp("zpos", prop->name) == 0) {
+            if (drmModeObjectSetProperty(drmfd, *pplane_id, DRM_MODE_OBJECT_PLANE, props->props[i], prop->values[1]) == 0)
+                av_log(avctx, AV_LOG_DEBUG, "ZPOS set to %d\n", (int)prop->values[1]);
+            else
+                av_log(avctx, AV_LOG_WARNING, "Failed to set ZPOS on DRM plane\n");
+            break;
+        }
+    }
+
+    ret = 0;
+fail:
+    if (props)
+        drmModeFreeObjectProperties(props);
+    if (prop)
+        drmModeFreeProperty(prop);
+    drmModeFreePlaneResources(planes);
+    return ret;
 }
 
 static void da_uninit(drm_display_env_t * const de, drm_aux_t * da)
@@ -221,6 +252,7 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
         uint32_t offsets[4] = {0};
         uint64_t modifiers[4] = {0};
         uint32_t bo_handles[4] = {0};
+        int has_mods = 0;
         int i, j, n;
 
         da->frame = frame;
@@ -230,6 +262,9 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
                 av_log(s, AV_LOG_WARNING, "drmPrimeFDToHandle[%d](%d) failed: %s\n", i, desc->objects[i].fd, ERRSTR);
                 return -1;
             }
+            if (desc->objects[i].format_modifier != DRM_FORMAT_MOD_LINEAR &&
+                desc->objects[i].format_modifier != DRM_FORMAT_MOD_INVALID)
+                has_mods = 1;
         }
 
         n = 0;
@@ -271,11 +306,13 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
 #endif
 
         if (drmModeAddFB2WithModifiers(de->drm_fd,
-                                         av_frame_cropped_width(frame),
-                                         av_frame_cropped_height(frame),
-                                         desc->layers[0].format, bo_handles,
-                                         pitches, offsets, modifiers,
-                                         &da->fb_handle, DRM_MODE_FB_MODIFIERS /** 0 if no mods */) != 0) {
+                                       av_frame_cropped_width(frame),
+                                       av_frame_cropped_height(frame),
+                                       desc->layers[0].format, bo_handles,
+                                       pitches, offsets,
+                                       has_mods ? modifiers : NULL,
+                                       &da->fb_handle,
+                                       has_mods ? DRM_MODE_FB_MODIFIERS : 0) != 0) {
             av_log(s, AV_LOG_WARNING, "drmModeAddFB2WithModifiers failed: %s\n", ERRSTR);
             return -1;
         }
@@ -541,7 +578,6 @@ static int drm_vout_init(struct AVFormatContext * s)
 {
     drm_display_env_t * const de = s->priv_data;
     int rv;
-    const char * drm_module = DRM_MODULE;
 
     av_log(s, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
@@ -550,10 +586,10 @@ static int drm_vout_init(struct AVFormatContext * s)
     de->setup = (struct drm_setup){0};
     de->q_terminate = 0;
 
-    if ((de->drm_fd = drmOpen(drm_module, NULL)) < 0)
+    if ((de->drm_fd = drmOpen(de->drm_module, NULL)) < 0)
     {
         rv = AVERROR(errno);
-        av_log(s, AV_LOG_ERROR, "Failed to drmOpen %s: %s\n", drm_module, av_err2str(rv));
+        av_log(s, AV_LOG_ERROR, "Failed to drmOpen %s: %s\n", de->drm_module, av_err2str(rv));
         return rv;
     }
 
@@ -568,7 +604,7 @@ static int drm_vout_init(struct AVFormatContext * s)
     sem_init(&de->q_sem_out, 0, 0);
     if (pthread_create(&de->q_thread, NULL, display_thread, s)) {
         rv = AVERROR(errno);
-        av_log(s, AV_LOG_ERROR, "Failed to creatye display thread: %s\n", av_err2str(rv));
+        av_log(s, AV_LOG_ERROR, "Failed to create display thread: %s\n", av_err2str(rv));
         goto fail_close;
     }
 
@@ -613,6 +649,7 @@ static void drm_vout_deinit(struct AVFormatContext * s)
 #define OFFSET(x) offsetof(drm_display_env_t, x)
 static const AVOption options[] = {
     { "show_all", "show all frames", OFFSET(show_all), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
+    { "drm_module", "drm_module name to use, default=" DRM_MODULE, OFFSET(drm_module), AV_OPT_TYPE_STRING, { .str = DRM_MODULE }, 0, 0, AV_OPT_FLAG_ENCODING_PARAM },
     { NULL }
 };
 

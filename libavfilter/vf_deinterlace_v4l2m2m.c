@@ -1679,8 +1679,8 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     V4L2Queue *output              = &ctx->output;
     int ret;
 
-    av_log(priv, AV_LOG_DEBUG, "<<< %s: input pts: %"PRId64" (%"PRId64") field :%d interlaced: %d aspect:%d/%d\n",
-          __func__, in->pts, AV_NOPTS_VALUE, in->top_field_first, in->interlaced_frame, in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
+    av_log(priv, AV_LOG_DEBUG, "<<< %s: input pts: %"PRId64" dts: %"PRId64" field :%d interlaced: %d aspect:%d/%d\n",
+           __func__, in->pts, in->pkt_dts, in->top_field_first, in->interlaced_frame, in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
     av_log(priv, AV_LOG_DEBUG, "--- %s: in status in %d/ot %d; out status in %d/out %d\n", __func__,
            avctx->inputs[0]->status_in, avctx->inputs[0]->status_out, avctx->outputs[0]->status_in, avctx->outputs[0]->status_out);
 
@@ -1823,10 +1823,7 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
 
     ack_inlink(avctx, s, inlink);
 
-    if (!ff_outlink_frame_wanted(outlink)) {
-        av_log(priv, AV_LOG_TRACE, "%s: Not wanted out\n", __func__);
-    }
-    else if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
+    if (s->field_order != V4L2_FIELD_ANY)  // Can't DQ if no setup!
     {
         AVFrame * frame = av_frame_alloc();
         int rv;

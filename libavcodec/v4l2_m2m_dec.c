@@ -41,6 +41,7 @@
 #include "v4l2_context.h"
 #include "v4l2_m2m.h"
 #include "v4l2_fmt.h"
+#include "v4l2_req_dmabufs.h"
 
 // Pick 64 for max last count - that is >1sec at 60fps
 #define STATS_LAST_COUNT_MAX 64
@@ -113,6 +114,8 @@ log_dump(void * logctx, int lvl, const void * const data, const size_t len)
 
 static int64_t pts_stats_guess(const pts_stats_t * const stats)
 {
+    if (stats->last_count <= 1)
+        return stats->last_pts;
     if (stats->last_pts == AV_NOPTS_VALUE ||
             stats->last_interval == 0 ||
             stats->last_count >= STATS_LAST_COUNT_MAX)
@@ -902,6 +905,20 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         s->output_drm = 0;
     }
 
+    s->db_ctl = NULL;
+    if (priv->dmabuf_alloc != NULL && strcmp(priv->dmabuf_alloc, "v4l2") != 0) {
+        if (strcmp(priv->dmabuf_alloc, "cma") == 0)
+            s->db_ctl = dmabufs_ctl_new();
+        else {
+            av_log(avctx, AV_LOG_ERROR, "Unknown dmabuf alloc method: '%s'\n", priv->dmabuf_alloc);
+            return AVERROR(EINVAL);
+        }
+        if (!s->db_ctl) {
+            av_log(avctx, AV_LOG_ERROR, "Can't open dmabuf provider '%s'\n", priv->dmabuf_alloc);
+            return AVERROR(ENOMEM);
+        }
+    }
+
     s->device_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
     if (!s->device_ref) {
         ret = AVERROR(ENOMEM);
@@ -1006,6 +1023,7 @@ static const AVOption options[] = {
     { "num_capture_buffers", "Number of buffers in the capture context",
         OFFSET(num_capture_buffers), AV_OPT_TYPE_INT, {.i64 = 20}, 2, INT_MAX, FLAGS },
     { "pixel_format", "Pixel format to be used by the decoder", OFFSET(pix_fmt), AV_OPT_TYPE_PIXEL_FMT, {.i64 = AV_PIX_FMT_NONE}, AV_PIX_FMT_NONE, AV_PIX_FMT_NB, FLAGS },
+    { "dmabuf_alloc", "Dmabuf alloc method", OFFSET(dmabuf_alloc), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, FLAGS },
     { NULL},
 };
 

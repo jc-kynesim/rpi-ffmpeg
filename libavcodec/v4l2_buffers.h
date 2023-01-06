@@ -42,6 +42,7 @@ enum V4L2Buffer_status {
  */
 struct V4L2Context;
 struct ff_weak_link_client;
+struct dmabuf_h;
 
 typedef struct V4L2Buffer {
     /* each buffer needs to have a reference to its context
@@ -62,7 +63,8 @@ typedef struct V4L2Buffer {
 
     /* keep track of the mmap address and mmap length */
     struct V4L2Plane_info {
-        int bytesperline;
+        size_t bytesperline;
+        size_t offset;
         void * mm_addr;
         size_t length;
     } plane_info[VIDEO_MAX_PLANES];
@@ -75,6 +77,7 @@ typedef struct V4L2Buffer {
 
     enum V4L2Buffer_status status;
 
+    struct dmabuf_h * dmabuf[VIDEO_MAX_PLANES]; // If externally alloced dmabufs - stash other info here
 } V4L2Buffer;
 
 /**

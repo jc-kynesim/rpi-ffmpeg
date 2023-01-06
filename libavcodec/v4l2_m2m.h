@@ -71,6 +71,8 @@ typedef struct xlat_track_s {
     V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
 } xlat_track_t;
 
+struct dmabufs_ctl;
+
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
     int fd;
@@ -124,6 +126,7 @@ typedef struct V4L2m2mContext {
     /* Quirks */
     unsigned int quirks;
 
+    struct dmabufs_ctl * db_ctl;
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv {
@@ -134,6 +137,7 @@ typedef struct V4L2m2mPriv {
 
     int num_output_buffers;
     int num_capture_buffers;
+    const char * dmabuf_alloc;
     enum AVPixelFormat pix_fmt;
 } V4L2m2mPriv;
 

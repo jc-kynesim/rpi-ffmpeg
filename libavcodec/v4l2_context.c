@@ -578,6 +578,11 @@ get_event(V4L2m2mContext * const m)
     return 0;
 }
 
+static inline int
+dq_ok(const V4L2Context * const c)
+{
+    return c->streamon && atomic_load(&c->q_count) != 0;
+}
 
 // Get a buffer
 // If output then just gets the buffer in the expected way
@@ -613,13 +618,13 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         }
 
         // If capture && timeout == -1 then also wait for rx buffer free
-        if (is_cap && timeout == -1 && m->output.streamon && !m->draining)
+        if (is_cap && timeout == -1 && dq_ok(&m->output) && !m->draining)
             pfd.events |= poll_out;
 
         // If nothing Qed all we will get is POLLERR - avoid that
-        if ((pfd.events == poll_out && atomic_load(&m->output.q_count) == 0) ||
-            (pfd.events == poll_cap && atomic_load(&m->capture.q_count) == 0) ||
-            (pfd.events == (poll_cap | poll_out) && atomic_load(&m->capture.q_count) == 0 && atomic_load(&m->output.q_count) == 0)) {
+        if ((pfd.events == poll_out && !dq_ok(&m->output)) ||
+            (pfd.events == poll_cap && !dq_ok(&m->capture)) ||
+            (pfd.events == (poll_cap | poll_out) && !dq_ok(&m->capture) && !dq_ok(&m->output))) {
             av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s empty\n", ctx->name);
             return AVERROR(ENOSPC);
         }
@@ -707,13 +712,19 @@ clean_v4l2_buffer(V4L2Buffer * const avbuf)
     return avbuf;
 }
 
-void
-ff_v4l2_dq_all(V4L2Context *const ctx)
+int
+ff_v4l2_dq_all(V4L2Context *const ctx, int timeout1)
 {
     V4L2Buffer * avbuf;
+    if (timeout1 != 0) {
+        int rv = get_qbuf(ctx, &avbuf, timeout1);
+        if (rv != 0)
+            return rv;
+    }
     do {
         get_qbuf(ctx, &avbuf, 0);
     } while (avbuf);
+    return 0;
 }
 
 static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
@@ -722,7 +733,7 @@ static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 
     /* get back as many output buffers as possible */
     if (V4L2_TYPE_IS_OUTPUT(ctx->type))
-        ff_v4l2_dq_all(ctx);
+        ff_v4l2_dq_all(ctx, 0);
 
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer * const avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
@@ -817,28 +828,22 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
             return 0;
     }
 
-    for (;;) {
+    for (;; ++fdesc.index) {
         ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc);
         if (ret)
             return AVERROR(EINVAL);
 
         if (priv->pix_fmt != AV_PIX_FMT_NONE) {
-            if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt)) {
-                fdesc.index++;
+            if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt))
                 continue;
-            }
         }
 
         pixfmt = ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO);
         ret = v4l2_try_raw_format(ctx, pixfmt);
-        if (ret){
-            fdesc.index++;
-            continue;
+        if (ret == 0) {
+            *p = pixfmt;
+            return 0;
         }
-
-        *p = pixfmt;
-
-        return 0;
     }
 
     return AVERROR(EINVAL);
@@ -1042,7 +1047,7 @@ int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
    return 0;
 }
 
-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
+int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
     AVCodecContext *const avctx = s->avctx;
@@ -1050,7 +1055,7 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
     int rv;
 
     do {
-        if ((rv = get_qbuf(ctx, &avbuf, -1)) != 0)
+        if ((rv = get_qbuf(ctx, &avbuf, timeout)) != 0)
             return rv == AVERROR(ENOSPC) ? AVERROR(EAGAIN) : rv;  // Caller not currently expecting ENOSPC
         if ((rv = ff_v4l2_buffer_buf_to_avpkt(pkt, avbuf)) != 0)
             return rv;

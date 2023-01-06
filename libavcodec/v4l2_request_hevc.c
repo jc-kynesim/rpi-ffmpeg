@@ -25,6 +25,7 @@
 #include "v4l2_request_hevc.h"
 
 #include "libavutil/hwcontext_drm.h"
+#include "libavutil/pixdesc.h"
 
 #include "v4l2_req_devscan.h"
 #include "v4l2_req_dmabufs.h"
@@ -103,7 +104,7 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     mediabufs_ctl_unref(&ctx->mbufs);
     media_pool_delete(&ctx->mpool);
     pollqueue_unref(&ctx->pq);
-    dmabufs_ctl_delete(&ctx->dbufs);
+    dmabufs_ctl_unref(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
 
     decode_q_uninit(&ctx->decode_q);
@@ -305,10 +306,11 @@ retry_src_memtype:
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
 
-    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s\n",
+    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s; swfmt=%s\n",
            ctx->fns->name,
            decdev_media_path(decdev), decdev_video_path(decdev),
-           mediabufs_memory_name(src_memtype), mediabufs_memory_name(dst_memtype));
+           mediabufs_memory_name(src_memtype), mediabufs_memory_name(dst_memtype),
+           av_get_pix_fmt_name(avctx->sw_pix_fmt));
 
     return 0;
 
@@ -321,7 +323,7 @@ fail3:
 fail2:
     pollqueue_unref(&ctx->pq);
 fail1:
-    dmabufs_ctl_delete(&ctx->dbufs);
+    dmabufs_ctl_unref(&ctx->dbufs);
 fail0:
     devscan_delete(&ctx->devscan);
     return ret;

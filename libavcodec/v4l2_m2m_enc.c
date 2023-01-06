@@ -415,21 +415,34 @@ static int fmt_eq(const struct v4l2_format * const a, const struct v4l2_format *
     return 1;
 }
 
+static inline int q_full(const V4L2Context *const output)
+{
+    return ff_v4l2_context_q_count(output) == output->num_buffers;
+}
 
 static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
 {
     V4L2m2mContext *s = ((V4L2m2mPriv*)avctx->priv_data)->context;
     V4L2Context *const output = &s->output;
+    int rv;
+    const int needs_slot = q_full(output);
 
-    ff_v4l2_dq_all(output);
+    av_log(avctx, AV_LOG_TRACE, "<<< %s; needs_slot=%d\n", __func__, needs_slot);
 
-    // Signal EOF if needed
+    // Signal EOF if needed (doesn't need q slot)
     if (!frame) {
+        av_log(avctx, AV_LOG_TRACE, "--- %s: EOS\n", __func__);
         return ff_v4l2_context_enqueue_frame(output, frame);
     }
 
+    if ((rv = ff_v4l2_dq_all(output, needs_slot? 500 : 0)) != 0) {
+        // We should be able to return AVERROR(EAGAIN) to indicate buffer
+        // exhaustion, but ffmpeg currently treats that as fatal.
+        av_log(avctx, AV_LOG_WARNING, "Failed to get buffer for src frame: %s\n", av_err2str(rv));
+        return rv;
+    }
+
     if (s->input_drm && !output->streamon) {
-        int rv;
         struct v4l2_format req_format = {.type = output->format.type};
 
         // Set format when we first get a buffer
@@ -483,7 +496,12 @@ static int v4l2_send_frame(AVCodecContext *avctx, const AVFrame *frame)
         v4l2_set_ext_ctrl(s, MPEG_CID(FORCE_KEY_FRAME), 0, "force key frame", 1);
 #endif
 
-    return ff_v4l2_context_enqueue_frame(output, frame);
+    rv = ff_v4l2_context_enqueue_frame(output, frame);
+    if (rv) {
+        av_log(avctx, AV_LOG_ERROR, "Enqueue frame failed: %s\n", av_err2str(rv));
+    }
+
+    return rv;
 }
 
 static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
@@ -494,7 +512,10 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     AVFrame *frame = s->frame;
     int ret;
 
-    ff_v4l2_dq_all(output);
+    av_log(avctx, AV_LOG_TRACE, "<<< %s: qlen out %d cap %d\n", __func__,
+           ff_v4l2_context_q_count(output), ff_v4l2_context_q_count(capture));
+
+    ff_v4l2_dq_all(output, 0);
 
     if (s->draining)
         goto dequeue;
@@ -532,10 +553,22 @@ static int v4l2_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     }
 
 dequeue:
-    ret = ff_v4l2_context_dequeue_packet(capture, avpkt);
-    ff_v4l2_dq_all(output);
+    // Dequeue a frame
+    for (;;) {
+        int t = q_full(output) ? -1 : s->draining ? 300 : 0;
+        int rv2;
+
+        // If output is full wait for either a packet or output to become not full
+        ret = ff_v4l2_context_dequeue_packet(capture, avpkt, t);
+
+        // If output was full retry packet dequeue
+        t = (ret != AVERROR(EAGAIN) || t != -1) ? 0 : 300;
+        rv2 = ff_v4l2_dq_all(output, t);
+        if (t == 0 || rv2 != 0)
+            break;
+    }
     if (ret)
-        return ret;
+        return (s->draining && ret == AVERROR(EAGAIN)) ? AVERROR_EOF : ret;
 
     if (capture->first_buf == 1) {
         uint8_t * data;
@@ -566,8 +599,8 @@ dequeue:
             s->extdata_size = len;
         }
 
-        ret = ff_v4l2_context_dequeue_packet(capture, avpkt);
-        ff_v4l2_dq_all(output);
+        ret = ff_v4l2_context_dequeue_packet(capture, avpkt, 0);
+        ff_v4l2_dq_all(output, 0);
         if (ret)
             return ret;
     }
@@ -604,12 +637,28 @@ dequeue:
         avpkt->data = buf->data;
         avpkt->size = newlen;
     }
+    else if (ff_v4l2_context_q_count(capture) < 2) {
+        // Avoid running out of capture buffers
+        // In most cases the buffers will be returned quickly in which case
+        // we don't copy and can use the v4l2 buffers directly but sometimes
+        // ffmpeg seems to hold onto all of them for a long time (.mkv
+        // creation?) so avoid deadlock in those cases.
+        AVBufferRef * const buf = av_buffer_alloc(avpkt->size + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (buf == NULL)
+            goto fail_no_mem;
 
-//    av_log(avctx, AV_LOG_INFO, "%s: PTS out=%"PRId64", size=%d, ret=%d\n", __func__, avpkt->pts, avpkt->size, ret);
+        memcpy(buf->data, avpkt->data, avpkt->size);
+        av_buffer_unref(&avpkt->buf);  // Will recycle the V4L2 buffer
+
+        avpkt->buf = buf;
+        avpkt->data = buf->data;
+    }
+
     capture->first_buf = 0;
     return 0;
 
 fail_no_mem:
+    av_log(avctx, AV_LOG_ERROR, "Rx pkt failed: No memory\n");
     ret = AVERROR(ENOMEM);
     av_packet_unref(avpkt);
     return ret;
