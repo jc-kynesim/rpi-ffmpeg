@@ -250,6 +250,211 @@ fail:
     return ret;
 }
 
+static const char * entity_type_to_str(const unsigned int etype, char tbuf[32])
+{
+    switch (etype) {
+        case MEDIA_ENT_F_UNKNOWN:
+            return "UNKNOWN";
+        case MEDIA_ENT_F_V4L2_SUBDEV_UNKNOWN:
+            return "V4L2_SUBDEV_UNKNOWN";
+        case MEDIA_ENT_F_IO_V4L:
+            return "IO_V4L";
+        case MEDIA_ENT_F_IO_VBI:
+            return "IO_VBI";
+        case MEDIA_ENT_F_IO_SWRADIO:
+            return "IO_SWRADIO";
+        case MEDIA_ENT_F_IO_DTV:
+            return "IO_DTV";
+        case MEDIA_ENT_F_DTV_DEMOD:
+            return "DTV_DEMOD";
+        case MEDIA_ENT_F_TS_DEMUX:
+            return "TS_DEMUX";
+        case MEDIA_ENT_F_DTV_CA:
+            return "DTV_CA";
+        case MEDIA_ENT_F_DTV_NET_DECAP:
+            return "DTV_NET_DECAP";
+#ifdef MEDIA_ENT_F_CONN_RF
+        case MEDIA_ENT_F_CONN_RF:
+            return "CONN_RF";
+#endif
+#ifdef MEDIA_ENT_F_CONN_SVIDEO
+        case MEDIA_ENT_F_CONN_SVIDEO:
+            return "CONN_SVIDEO";
+#endif
+#ifdef MEDIA_ENT_F_CONN_COMPOSITE
+        case MEDIA_ENT_F_CONN_COMPOSITE:
+            return "CONN_COMPOSITE";
+#endif
+        case MEDIA_ENT_F_CAM_SENSOR:
+            return "CAM_SENSOR";
+        case MEDIA_ENT_F_FLASH:
+            return "FLASH";
+        case MEDIA_ENT_F_LENS:
+            return "LENS";
+        case MEDIA_ENT_F_ATV_DECODER:
+            return "ATV_DECODER";
+        case MEDIA_ENT_F_TUNER:
+            return "TUNER";
+        case MEDIA_ENT_F_IF_VID_DECODER:
+            return "IF_VID_DECODER";
+        case MEDIA_ENT_F_IF_AUD_DECODER:
+            return "IF_AUD_DECODER";
+        case MEDIA_ENT_F_AUDIO_CAPTURE:
+            return "AUDIO_CAPTURE";
+        case MEDIA_ENT_F_AUDIO_PLAYBACK:
+            return "AUDIO_PLAYBACK";
+        case MEDIA_ENT_F_AUDIO_MIXER:
+            return "AUDIO_MIXER";
+        case MEDIA_ENT_F_PROC_VIDEO_COMPOSER:
+            return "PROC_VIDEO_COMPOSER";
+        case MEDIA_ENT_F_PROC_VIDEO_PIXEL_FORMATTER:
+            return "PROC_VIDEO_PIXEL_FORMATTER";
+        case MEDIA_ENT_F_PROC_VIDEO_PIXEL_ENC_CONV:
+            return "PROC_VIDEO_PIXEL_ENC_CONV";
+        case MEDIA_ENT_F_PROC_VIDEO_LUT:
+            return "PROC_VIDEO_LUT";
+        case MEDIA_ENT_F_PROC_VIDEO_SCALER:
+            return "PROC_VIDEO_SCALER";
+        case MEDIA_ENT_F_PROC_VIDEO_STATISTICS:
+            return "PROC_VIDEO_STATISTICS";
+        case MEDIA_ENT_F_PROC_VIDEO_ENCODER:
+            return "PROC_VIDEO_ENCODER";
+        case MEDIA_ENT_F_PROC_VIDEO_DECODER:
+            return "PROC_VIDEO_DECODER";
+        case MEDIA_ENT_F_PROC_VIDEO_ISP:
+            return "PROC_VIDEO_ISP";
+        case MEDIA_ENT_F_VID_MUX:
+            return "VID_MUX";
+        case MEDIA_ENT_F_VID_IF_BRIDGE:
+            return "VID_IF_BRIDGE";
+        case MEDIA_ENT_F_DV_DECODER:
+            return "DV_DECODER";
+        case MEDIA_ENT_F_DV_ENCODER:
+            return "DV_ENCODER";
+        default:
+            break;
+    }
+    if (tbuf != NULL)
+        snprintf(tbuf, 32, "type:%#x", etype);
+    return tbuf;
+}
+
+static const char * link_flags_type_to_str(const unsigned int lflags, char tbuf[32])
+{
+    switch (lflags & MEDIA_LNK_FL_LINK_TYPE) {
+        case MEDIA_LNK_FL_DATA_LINK:
+            return "DATA_LINK";
+        case MEDIA_LNK_FL_INTERFACE_LINK:
+            return "INTERFACE_LINK";
+        case MEDIA_LNK_FL_ANCILLARY_LINK:
+            return "ANCILLARY_LINK";
+        default:
+            break;
+    }
+    if (tbuf != NULL)
+        snprintf(tbuf, 32, "type:%#x", lflags & MEDIA_LNK_FL_LINK_TYPE);
+    return tbuf;
+}
+
+static const char * pad_flags_type_to_str(const unsigned int pflags, char tbuf[32])
+{
+    switch (pflags & (MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_SOURCE)) {
+        case MEDIA_PAD_FL_SINK:
+            return "SINK";
+        case MEDIA_PAD_FL_SOURCE:
+            return "SOURCE";
+        default:
+            break;
+    }
+    if (tbuf != NULL)
+        snprintf(tbuf, 32, "type:%#x", pflags & (MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_SOURCE));
+    return tbuf;
+}
+
+#define LINK_IS_DATA(link) (((link)->flags & MEDIA_LNK_FL_LINK_TYPE) == MEDIA_LNK_FL_DATA_LINK)
+#define LINK_IS_INTERFACE(link) (((link)->flags & MEDIA_LNK_FL_LINK_TYPE) == MEDIA_LNK_FL_INTERFACE_LINK)
+
+// Simple linear search - we could sort the arrays & chop
+static const struct media_v2_link *
+link_find_data_source(const struct media_v2_link * link,
+                      const unsigned int n, const uint32_t source_id)
+{
+    for (unsigned int i = 0; i != n; ++i, ++link) {
+        if (link->source_id == source_id && LINK_IS_DATA(link))
+            return link;
+    }
+    return NULL;
+}
+static const struct media_v2_link *
+link_find_data_sink(const struct media_v2_link * link,
+                    const unsigned int n, const uint32_t sink_id)
+{
+    for (unsigned int i = 0; i != n; ++i, ++link) {
+        if (link->sink_id == sink_id && LINK_IS_DATA(link))
+            return link;
+    }
+    return NULL;
+}
+static const struct media_v2_link *
+link_find_interface_entity(const struct media_v2_link * link,
+                    const unsigned int n, const uint32_t entity_id)
+{
+    for (unsigned int i = 0; i != n; ++i, ++link) {
+        if (link->sink_id == entity_id && LINK_IS_INTERFACE(link))
+            return link;
+    }
+    return NULL;
+}
+
+static const struct media_v2_pad *
+pad_find_id(const struct media_v2_pad  * pad, const unsigned int n, const uint32_t pad_id)
+{
+    for (unsigned int i = 0; i != n; ++i, ++pad) {
+        if (pad->id == pad_id)
+            return pad;
+    }
+    return NULL;
+}
+static const struct media_v2_interface *
+interface_find_id(const struct media_v2_interface * interface, const unsigned int n, const uint32_t if_id)
+{
+    for (unsigned int i = 0; i != n; ++i, ++interface) {
+        if (interface->id == if_id)
+            return interface;
+    }
+    return NULL;
+}
+
+static const struct media_v2_pad *
+pad_find_linked_pad(const struct media_v2_link links[const], const unsigned int n_links,
+                    const struct media_v2_pad pads[const], const unsigned int n_pads,
+                    const struct media_v2_pad * const pad1)
+{
+    const struct media_v2_link * link = NULL;
+    uint32_t id;
+
+    switch (pad1->flags & (MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_SOURCE)) {
+        case MEDIA_PAD_FL_SINK:
+            link = link_find_data_sink(links, n_links, pad1->id);
+            if (!link)
+                return NULL;
+            id = link->source_id;
+            break;
+        case MEDIA_PAD_FL_SOURCE:
+            link = link_find_data_source(links, n_links, pad1->id);
+            if (!link)
+                return NULL;
+            id = link->sink_id;
+            break;
+        default:
+            return NULL;
+    }
+    if (!link)
+        return NULL;
+
+    return pad_find_id(pads, n_pads, id);
+}
+
 static int probe_media_device(void * const dc,
                    struct udev_device *const device,
                    struct devscan *const scan)
@@ -259,6 +464,10 @@ static int probe_media_device(void * const dc,
     struct media_device_info device_info = { 0 };
     struct media_v2_topology topology = { 0 };
     struct media_v2_interface *interfaces = NULL;
+    struct media_v2_entity *entities = NULL;
+    struct media_v2_link *links = NULL;
+    struct media_v2_pad *pads = NULL;
+    uint32_t topology_version = 0;
     struct udev *udev = udev_device_get_udev(device);
     struct udev_device *video_device;
     dev_t devnum;
@@ -285,33 +494,99 @@ static int probe_media_device(void * const dc,
         goto fail;
     }
 
-    rv = ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
-    if (rv < 0) {
-        ret = -errno;
-        request_err(dc, "%s: get media topology failed, %s (%d)\n", __func__, strerror(-ret), -ret);
-        goto fail;
+    for (;;) {
+        rv = ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
+        if (rv < 0) {
+            ret = -errno;
+            request_err(dc, "%s: get media topology failed, %s (%d)\n", __func__, strerror(-ret), -ret);
+            goto fail;
+        }
+
+        if (topology.num_interfaces <= 0) {
+            request_err(dc, "%s: media device has no interfaces\n", __func__);
+            ret = -EINVAL;
+            goto fail;
+        }
+
+        if (interfaces && topology_version == topology.topology_version)
+            break;
+
+        free(interfaces);
+        free(entities);
+        free(links);
+        free(pads);
+
+        interfaces = calloc(topology.num_interfaces, sizeof(*interfaces));
+        entities = calloc(topology.num_entities, sizeof(*entities));
+        links = calloc(topology.num_links, sizeof(*links));
+        pads = calloc(topology.num_links, sizeof(*pads));
+        if (!interfaces || !entities || !links || !pads) {
+            request_err(dc, "%s: allocating media interface structs failed\n", __func__);
+            ret = -ENOMEM;
+            goto fail;
+        }
+
+        topology.ptr_interfaces = (__u64)(uintptr_t)interfaces;
+        topology.ptr_entities = (__u64)(uintptr_t)entities;
+        topology.ptr_links = (__u64)(uintptr_t)links;
+        topology.ptr_pads = (__u64)(uintptr_t)pads;
     }
 
-    if (topology.num_interfaces <= 0) {
-        request_err(dc, "%s: media device has no interfaces\n", __func__);
-        ret = -EINVAL;
-        goto fail;
+    {
+        for (uint32_t i = 0; i < topology.num_entities; ++i) {
+            char tnamebuf[32];
+            const struct media_v2_entity *e = entities + i;
+            request_info(dc, "%s: Entity id: %d, name '%s', type %s, flags %#x\n", __func__,
+                         e->id, e->name, entity_type_to_str(e->function, tnamebuf), e->flags);
+        }
+    }
+    {
+        for (uint32_t i = 0; i < topology.num_links; ++i) {
+            char tnamebuf[32];
+            const struct media_v2_link *e = links + i;
+            request_info(dc, "%s: Link id: %d, %d -> %d, type %s, flags %#x\n", __func__,
+                         e->id, e->source_id, e->sink_id, link_flags_type_to_str(e->flags, tnamebuf), e->flags);
+        }
+    }
+    {
+        for (uint32_t i = 0; i < topology.num_pads; ++i) {
+            char tnamebuf[32];
+            const struct media_v2_pad *e = pads + i;
+            request_info(dc, "%s: Pad id: %d, ent %d, type %s, flags %#x\n", __func__,
+                         e->id, e->entity_id, pad_flags_type_to_str(e->flags, tnamebuf), e->flags);
+        }
     }
 
-    interfaces = calloc(topology.num_interfaces, sizeof(*interfaces));
-    if (!interfaces) {
-        request_err(dc, "%s: allocating media interface struct failed\n", __func__);
-        ret = -ENOMEM;
-        goto fail;
+    for (uint32_t i = 0; i < topology.num_entities; ++i) {
+        const struct media_v2_entity *e = entities + i;
+        if (e->function != MEDIA_ENT_F_PROC_VIDEO_DECODER)
+            continue;
+        // Find pads attached to decoder
+        for (uint32_t j = 0; j < topology.num_pads; ++j) {
+            const struct media_v2_pad *p = pads + j;
+            const struct media_v2_pad *p2;
+            const struct media_v2_link *link2;
+            const struct media_v2_interface *interface;
+            if (p->entity_id != e->id)
+                continue;
+            // Find pad link
+            // Find pad at the other end of the link
+            p2 = pad_find_linked_pad(links, topology.num_links, pads, topology.num_pads, p);
+            if (!p2)
+                continue;
+            // Find interface link to pad->entity
+            link2 = link_find_interface_entity(links, topology.num_links, p2->entity_id);
+            if (!link2)
+                continue;
+            // Find interface
+            interface = interface_find_id(interfaces, topology.num_interfaces, link2->source_id);
+            if (!interface)
+                continue;
+            request_info(dc, "Found interface! id=%d\n", interface->id);
+        }
+
     }
 
-    topology.ptr_interfaces = (__u64)(uintptr_t)interfaces;
-    rv = ioctl(media_fd, MEDIA_IOC_G_TOPOLOGY, &topology);
-    if (rv < 0) {
-        ret = -errno;
-        request_err(dc, "%s: get media topology failed, %s (%d)\n", __func__, strerror(-ret), -ret);
-        goto fail;
-    }
 
     for (int i = 0; i < topology.num_interfaces; i++) {
         if (interfaces[i].intf_type != MEDIA_INTF_T_V4L_VIDEO)
@@ -334,6 +609,9 @@ static int probe_media_device(void * const dc,
 
 fail:
     free(interfaces);
+    free(entities);
+    free(links);
+    free(pads);
     if (media_fd != -1)
         close(media_fd);
     return ret;
