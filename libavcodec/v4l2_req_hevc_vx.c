@@ -112,9 +112,9 @@ static enum AVPixelFormat pixel_format_from_format(const struct v4l2_format *con
         return AV_PIX_FMT_NV12;
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
-        return AV_PIX_FMT_RPI4_8;
+        return AV_PIX_FMT_SAND128;
     case V4L2_PIX_FMT_NV12_10_COL128:
-        return AV_PIX_FMT_RPI4_10;
+        return AV_PIX_FMT_SAND128;
 #endif
     default:
         break;
