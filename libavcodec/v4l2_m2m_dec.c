@@ -622,7 +622,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
             const int t =
                 src_rv == NQ_Q_FULL ? -1 :
                 src_rv == NQ_DRAINING ? 300 :
-                prefer_dq ? 5 : 0;
+                prefer_dq ? (s->running ? 100 : 5) : 0;
 
             // Dequeue frame will unref any previous contents of frame
             // if it returns success so we don't need an explicit unref
@@ -637,6 +637,11 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 if ((dst_rv = qbuf_wait(avctx, &s->capture)) == 0) {
                     dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
                 }
+            }
+
+            if (s->running != (dst_rv == 0) && prefer_dq) {
+                s->running = (dst_rv == 0);
+                av_log(avctx, AV_LOG_VERBOSE, "%s running\n", s->running ? "Start" : "Stop");
             }
 
             if (dst_rv == 0)
@@ -1006,7 +1011,8 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
 
     // resend extradata
     s->extdata_sent = 0;
-    // clear EOS status vars
+    // clear status vars
+    s->running = 0;
     s->draining = 0;
     output->done = 0;
     capture->done = 0;

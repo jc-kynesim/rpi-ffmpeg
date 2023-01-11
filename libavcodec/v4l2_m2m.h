@@ -88,6 +88,7 @@ typedef struct V4L2m2mContext {
 
     /* null frame/packet received */
     int draining;
+    int running;
     AVPacket buf_pkt;
 
     /* Reference to self; only valid while codec is active. */
