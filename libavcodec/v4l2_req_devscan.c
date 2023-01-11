@@ -86,6 +86,131 @@ static int v4l2_query_capabilities(int video_fd, unsigned int *capabilities)
     return 0;
 }
 
+typedef struct ds_media_dev_s
+{
+    struct ds_media_dev_s * next;
+    char * path;
+} ds_media_dev_t;
+
+typedef struct ds_base_s
+{
+    struct udev *udev;
+    ds_media_dev_t * devs;
+} ds_base_t;
+
+
+static void
+ds_media_free(ds_media_dev_t * const dsm)
+{
+    if (!dsm)
+        return;
+    printf("*** free %s\n", dsm->path);
+    free(dsm->path);
+    free(dsm);
+}
+
+static ds_media_dev_t *
+ds_media_new(const char * path)
+{
+    ds_media_dev_t * dsm = calloc(1, sizeof(*dsm));
+    if (!dsm)
+        goto fail;
+    dsm->path = strdup(path);
+    if (!dsm->path)
+        goto fail;
+    printf("*** create %s\n", dsm->path);
+    return dsm;
+fail:
+    ds_media_free(dsm);
+    return NULL;
+}
+
+static int
+ds_base_update(ds_base_t * const dsb)
+{
+    int ret;
+    struct udev_enumerate *enumerate;
+    struct udev_list_entry *devices;
+    struct udev_list_entry *entry;
+    ds_media_dev_t **ppNext = &dsb->devs;
+
+    enumerate = udev_enumerate_new(dsb->udev);
+    if (!enumerate) {
+        request_err(NULL, "%s: allocating udev enumerator failed\n", __func__);
+        ret = -ENOMEM;
+        goto fail;
+    }
+
+    udev_enumerate_add_match_subsystem(enumerate, "media");
+    udev_enumerate_scan_devices(enumerate);
+
+    devices = udev_enumerate_get_list_entry(enumerate);
+    udev_list_entry_foreach(entry, devices) {
+        ds_media_dev_t * dsm = *ppNext;
+        const char *path = udev_list_entry_get_name(entry);
+        if (!path)
+            continue;
+        printf("--- Try %s\n", path);
+        while (dsm && strcmp(dsm->path, path) < 0) {
+            ds_media_dev_t *next = dsm->next;
+            ds_media_free(dsm);
+            *ppNext = dsm = next;
+        }
+        if (!dsm || strcmp(dsm->path, path) != 0) {
+            ds_media_dev_t * dsm2 = ds_media_new(path);
+            if (!dsm2) {
+                ret = -ENOMEM;
+                goto fail;
+            }
+            dsm2->next = dsm;
+            *ppNext = dsm2;
+            dsm = dsm2;
+        }
+        ppNext = &dsm->next;
+    }
+    while (*ppNext) {
+        ds_media_dev_t * dsm = *ppNext;
+        *ppNext = dsm->next;
+        ds_media_free(dsm);
+    }
+
+    ret = 0;
+
+fail:
+    if (enumerate)
+        udev_enumerate_unref(enumerate);
+    return ret;
+}
+
+static void
+ds_base_free(ds_base_t * const dsb)
+{
+    if (!dsb)
+        return;
+    while (dsb->devs) {
+        ds_media_dev_t *const dsm = dsb->devs;
+        dsb->devs = dsm->next;
+        ds_media_free(dsm);
+    }
+    if (dsb->udev)
+        udev_unref(dsb->udev);
+    free(dsb);
+}
+
+static ds_base_t *
+ds_base_new(void)
+{
+    ds_base_t * dsb = calloc(1, sizeof(*dsb));
+    if (!dsb)
+        goto fail;
+    if (!(dsb->udev = udev_new()))
+        goto fail;
+    return dsb;
+fail:
+    ds_base_free(dsb);
+    return NULL;
+}
+
 static int devscan_add(struct devscan *const scan,
                        enum v4l2_buf_type src_type,
                        uint32_t src_fmt_v4l2,
@@ -681,6 +806,16 @@ int devscan_build(void * const dc, struct devscan **pscan)
                  scan->env.mname, scan->env.vname);
         *pscan = scan;
         return 0;
+    }
+
+    {
+        ds_base_t * dsb = ds_base_new();
+        printf("--- New\n");
+        ds_base_update(dsb);
+        printf("--- U2\n");
+        ds_base_update(dsb);
+        printf("--- Free\n");
+        ds_base_free(dsb);
     }
 
     udev = udev_new();

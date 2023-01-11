@@ -77,7 +77,7 @@ if __name__ == '__main__':
     args = argp.parse_args()
 
     runtest("ATest", args.ffmpeg, ["-v", "verbose", "-no_cvt_hw", "-an", "-c:v", "h264_v4l2m2m", "-i",
-                                   "/home/johncox/server/TestMedia/Sony/jellyfish-10-mbps-hd-h264.mkv",
-#                                    "/home/jc/rpi/streams/jellyfish-3-mbps-hd-h264.mkv",
+#                                   "/home/johncox/server/TestMedia/Sony/jellyfish-10-mbps-hd-h264.mkv",
+                                    "/home/jc/rpi/streams/jellyfish-3-mbps-hd-h264.mkv",
                                    "-c:v", "h264_v4l2m2m", "-b:v", "2M"], ".mkv",
             [valid_regex(r'Output stream #0:0 \(video\): 900 frames encoded; 900 packets muxed')])
