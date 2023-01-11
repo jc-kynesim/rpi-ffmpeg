@@ -240,7 +240,7 @@ copy_extradata(AVCodecContext * const avctx,
     else
         len = src_len < 0 ? AVERROR(EINVAL) : src_len;
 
-    // Zero length is OK but we swant to stop - -ve is error val
+    // Zero length is OK but we want to stop - -ve is error val
     if (len <= 0)
         return len;
 
@@ -525,7 +525,7 @@ static int try_enqueue_src(AVCodecContext * const avctx, V4L2m2mContext * const 
 
     if (s->extdata_sent)
         ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, NULL, 0);
-    else if (s->extdata_data)
+    else
         ret = ff_v4l2_context_enqueue_packet(&s->output, &s->buf_pkt, s->extdata_data, s->extdata_size);
 
     if (ret == AVERROR(EAGAIN)) {
