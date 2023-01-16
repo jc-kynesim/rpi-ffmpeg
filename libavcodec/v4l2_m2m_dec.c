@@ -582,7 +582,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
     do {
         const int pending = xlat_pending(&s->xlat);
-        const int prefer_dq = (pending > 3);
+        const int prefer_dq = (pending > 4);
         const int last_src_rv = src_rv;
 
         av_log(avctx, AV_LOG_TRACE, "Pending=%d, src_rv=%d, req_pkt=%d\n", pending, src_rv, s->req_pkt);
@@ -611,10 +611,14 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         // (b) enqueue returned a status indicating that decode should be attempted
         if (dst_rv != 0 && TRY_DQ(src_rv)) {
             // Pick a timeout depending on state
+            // The pending count isn't completely reliable so it is good enough
+            // hint that we want a frame but not good enough to require it in
+            // all cases; however if it has got > 31 that exceeds its margin of
+            // error so require a frame to prevent ridiculous levels of latency
             const int t =
                 src_rv == NQ_Q_FULL ? -1 :
                 src_rv == NQ_DRAINING ? 300 :
-                prefer_dq ? 5 : 0;
+                prefer_dq ? (s->running && pending > 31 ? 100 : 5) : 0;
 
             // Dequeue frame will unref any previous contents of frame
             // if it returns success so we don't need an explicit unref
@@ -631,8 +635,13 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
                 }
             }
 
-            if (dst_rv == 0)
+            if (dst_rv == 0) {
                 set_best_effort_pts(avctx, &s->pts_stat, frame);
+                if (!s->running) {
+                    s->running = 1;
+                    av_log(avctx, AV_LOG_VERBOSE, "Decode running\n");
+                }
+            }
 
             if (dst_rv == AVERROR(EAGAIN) && src_rv == NQ_DRAINING) {
                 av_log(avctx, AV_LOG_WARNING, "Timeout in drain - assume EOF");
@@ -998,7 +1007,8 @@ static void v4l2_decode_flush(AVCodecContext *avctx)
 
     // resend extradata
     s->extdata_sent = 0;
-    // clear EOS status vars
+    // clear status vars
+    s->running = 0;
     s->draining = 0;
     output->done = 0;
     capture->done = 0;
