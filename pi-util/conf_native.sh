@@ -91,10 +91,9 @@ $FFSRC/configure \
  --disable-thumb\
  --enable-v4l2-request\
  --enable-libdrm\
- --enable-epoxy\
- --enable-libudev\
  --enable-vout-egl\
  --enable-vout-drm\
+ --enable-gpl\
  $SHARED_LIBS\
  $RPIOPTS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\

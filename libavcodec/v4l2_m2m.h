@@ -67,10 +67,11 @@ typedef struct pts_stats_s
 typedef struct xlat_track_s {
     unsigned int track_no;
     int64_t last_pts;
-    int64_t last_pkt_dts;
     int64_t last_opaque;
     V4L2m2mTrackEl track_els[FF_V4L2_M2M_TRACK_SIZE];
 } xlat_track_t;
+
+struct dmabufs_ctl;
 
 typedef struct V4L2m2mContext {
     char devname[PATH_MAX];
@@ -100,10 +101,11 @@ typedef struct V4L2m2mContext {
     /* generate DRM frames */
     int output_drm;
 
+    /* input frames are drmprime */
+    int input_drm;
+
     /* Frame tracking */
     xlat_track_t xlat;
-    int pending_hw;
-    int pending_n;
 
     pts_stats_t pts_stat;
 
@@ -112,11 +114,16 @@ typedef struct V4L2m2mContext {
 
     /* Ext data sent */
     int extdata_sent;
+    /* Ext data sent in packet - overrides ctx */
+    void * extdata_data;
+    size_t extdata_size;
 
-#define FF_V4L2_QUIRK_REINIT_ALWAYS     1
+#define FF_V4L2_QUIRK_REINIT_ALWAYS             1
+#define FF_V4L2_QUIRK_ENUM_FRAMESIZES_BROKEN    2
     /* Quirks */
     unsigned int quirks;
 
+    struct dmabufs_ctl * db_ctl;
 } V4L2m2mContext;
 
 typedef struct V4L2m2mPriv {
@@ -127,6 +134,7 @@ typedef struct V4L2m2mPriv {
 
     int num_output_buffers;
     int num_capture_buffers;
+    const char * dmabuf_alloc;
     enum AVPixelFormat pix_fmt;
 } V4L2m2mPriv;
 

@@ -90,9 +90,17 @@ typedef struct V4L2Context {
     int num_buffers;
 
     /**
+     * Buffer memory type V4L2_MEMORY_MMAP or V4L2_MEMORY_DMABUF
+     */
+    enum v4l2_memory buf_mem;
+
+    /**
      * Whether the stream has been started (VIDIOC_STREAMON has been sent).
      */
     int streamon;
+
+    /* 1st buffer after stream on */
+    int first_buf;
 
     /**
      *  Either no more buffers available or an unrecoverable error was notified
@@ -103,11 +111,10 @@ typedef struct V4L2Context {
     int flag_last;
 
     /**
-     * PTS rescale not wanted
-     * If the PTS is just a dummy frame count then rescale is
-     * actively harmful
+     * If NZ then when Qing frame/pkt use this rather than the
+     * "real" PTS
      */
-    int no_pts_rescale;
+    uint64_t track_ts;
 
     AVBufferRef *frames_ref;
     atomic_int q_count;
@@ -170,7 +177,7 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd);
  * @param[inout] pkt The AVPacket to dequeue to.
  * @return 0 in case of success, AVERROR(EAGAIN) if no buffer was ready, another negative error in case of error.
  */
-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt);
+int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout);
 
 /**
  * Dequeues a buffer from a V4L2Context to an AVFrame.
@@ -208,5 +215,29 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt, const 
  * @return 0 in case of success, a negative error otherwise.
  */
 int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* f);
+
+/**
+ * Dequeue all buffers on this queue
+ *
+ * Used to recycle output buffers
+ *
+ * @param[in] ctx The V4L2Context to dequeue from.
+ * @param[in] timeout1 A timeout on dequeuing the 1st buffer, 
+ *       all others have a timeout of zero
+ * @return AVERROR(EAGAIN) if timeout1 non-zero then the return
+ *         of the first dequeue operation, 0 otherwise.
+ */
+int ff_v4l2_dq_all(V4L2Context *const ctx, int timeout1);
+
+/**
+ * Returns the number of buffers currently queued
+ *
+ * @param[in] ctx The V4L2Context to evaluate
+ */
+static inline int
+ff_v4l2_context_q_count(const V4L2Context* const ctx)
+{
+    return atomic_load(&ctx->q_count);
+}
 
 #endif // AVCODEC_V4L2_CONTEXT_H

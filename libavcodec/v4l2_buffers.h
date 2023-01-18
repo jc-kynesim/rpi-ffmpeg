@@ -42,6 +42,7 @@ enum V4L2Buffer_status {
  */
 struct V4L2Context;
 struct ff_weak_link_client;
+struct dmabuf_h;
 
 typedef struct V4L2Buffer {
     /* each buffer needs to have a reference to its context
@@ -55,10 +56,15 @@ typedef struct V4L2Buffer {
 
     /* DRM descriptor */
     AVDRMFrameDescriptor drm_frame;
+    /* For DRM_PRIME encode - need to keep a ref to the source buffer till we
+     * are done
+     */
+    AVBufferRef * ref_buf;
 
     /* keep track of the mmap address and mmap length */
     struct V4L2Plane_info {
-        int bytesperline;
+        size_t bytesperline;
+        size_t offset;
         void * mm_addr;
         size_t length;
     } plane_info[VIDEO_MAX_PLANES];
@@ -71,6 +77,7 @@ typedef struct V4L2Buffer {
 
     enum V4L2Buffer_status status;
 
+    struct dmabuf_h * dmabuf[VIDEO_MAX_PLANES]; // If externally alloced dmabufs - stash other info here
 } V4L2Buffer;
 
 /**
@@ -106,8 +113,9 @@ int ff_v4l2_buffer_buf_to_avpkt(AVPacket *pkt, V4L2Buffer *buf);
  */
 int ff_v4l2_buffer_avpkt_to_buf(const AVPacket *pkt, V4L2Buffer *out);
 
-int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
-                                    const void *extdata, size_t extlen);
+int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket * const pkt, V4L2Buffer * const out,
+                                    const void *extdata, size_t extlen,
+                                    const int64_t timestamp);
 
 /**
  * Extracts the data from an AVFrame to a V4L2Buffer
@@ -117,7 +125,7 @@ int ff_v4l2_buffer_avpkt_to_buf_ext(const AVPacket *pkt, V4L2Buffer *out,
  *
  * @returns 0 in case of success, a negative AVERROR code otherwise
  */
-int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out);
+int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out, const int64_t track_ts);
 
 /**
  * Initializes a V4L2Buffer
@@ -127,7 +135,7 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out);
  *
  * @returns 0 in case of success, a negative AVERROR code otherwise
  */
-int ff_v4l2_buffer_initialize(AVBufferRef **avbuf, int index, struct V4L2Context *ctx);
+int ff_v4l2_buffer_initialize(AVBufferRef **avbuf, int index, struct V4L2Context *ctx, enum v4l2_memory mem);
 
 /**
  * Enqueues a V4L2Buffer
@@ -137,6 +145,13 @@ int ff_v4l2_buffer_initialize(AVBufferRef **avbuf, int index, struct V4L2Context
  * @returns 0 in case of success, a negative AVERROR code otherwise
  */
 int ff_v4l2_buffer_enqueue(V4L2Buffer* avbuf);
+
+static inline void
+ff_v4l2_buffer_set_avail(V4L2Buffer* const avbuf)
+{
+    avbuf->status = V4L2BUF_AVAILABLE;
+    av_buffer_unref(&avbuf->ref_buf);
+}
 
 
 #endif // AVCODEC_V4L2_BUFFERS_H

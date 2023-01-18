@@ -707,11 +707,10 @@ endfunc
 // VC-1 in-loop deblocking filter for 4 pixel pairs at boundary of vertically-neighbouring blocks
 // On entry:
 //   x0 -> top-left pel of lower block
-//   w1 = row stride, bytes
+//   x1 = row stride, bytes
 //   w2 = PQUANT bitstream parameter
 function ff_vc1_v_loop_filter4_neon, export=1
         sub             x3, x0, w1, sxtw #2
-        sxtw            x1, w1                  // technically, stride is signed int
         ldr             d0, .Lcoeffs
         ld1             {v1.s}[0], [x0], x1     // P5
         ld1             {v2.s}[0], [x3], x1     // P1
@@ -780,11 +779,10 @@ endfunc
 // VC-1 in-loop deblocking filter for 4 pixel pairs at boundary of horizontally-neighbouring blocks
 // On entry:
 //   x0 -> top-left pel of right block
-//   w1 = row stride, bytes
+//   x1 = row stride, bytes
 //   w2 = PQUANT bitstream parameter
 function ff_vc1_h_loop_filter4_neon, export=1
         sub             x3, x0, #4              // where to start reading
-        sxtw            x1, w1                  // technically, stride is signed int
         ldr             d0, .Lcoeffs
         ld1             {v1.8b}, [x3], x1
         sub             x0, x0, #1              // where to start writing
@@ -854,11 +852,10 @@ endfunc
 // VC-1 in-loop deblocking filter for 8 pixel pairs at boundary of vertically-neighbouring blocks
 // On entry:
 //   x0 -> top-left pel of lower block
-//   w1 = row stride, bytes
+//   x1 = row stride, bytes
 //   w2 = PQUANT bitstream parameter
 function ff_vc1_v_loop_filter8_neon, export=1
         sub             x3, x0, w1, sxtw #2
-        sxtw            x1, w1                  // technically, stride is signed int
         ldr             d0, .Lcoeffs
         ld1             {v1.8b}, [x0], x1       // P5
         movi            v2.2d, #0x0000ffff00000000
@@ -932,11 +929,10 @@ endfunc
 // VC-1 in-loop deblocking filter for 8 pixel pairs at boundary of horizontally-neighbouring blocks
 // On entry:
 //   x0 -> top-left pel of right block
-//   w1 = row stride, bytes
+//   x1 = row stride, bytes
 //   w2 = PQUANT bitstream parameter
 function ff_vc1_h_loop_filter8_neon, export=1
         sub             x3, x0, #4              // where to start reading
-        sxtw            x1, w1                  // technically, stride is signed int
         ldr             d0, .Lcoeffs
         ld1             {v1.8b}, [x3], x1       // P1[0], P2[0]...
         sub             x0, x0, #1              // where to start writing
@@ -1041,11 +1037,10 @@ endfunc
 // VC-1 in-loop deblocking filter for 16 pixel pairs at boundary of vertically-neighbouring blocks
 // On entry:
 //   x0 -> top-left pel of lower block
-//   w1 = row stride, bytes
+//   x1 = row stride, bytes
 //   w2 = PQUANT bitstream parameter
 function ff_vc1_v_loop_filter16_neon, export=1
         sub             x3, x0, w1, sxtw #2
-        sxtw            x1, w1                  // technically, stride is signed int
         ldr             d0, .Lcoeffs
         ld1             {v1.16b}, [x0], x1      // P5
         movi            v2.2d, #0x0000ffff00000000
@@ -1173,11 +1168,10 @@ endfunc
 // VC-1 in-loop deblocking filter for 16 pixel pairs at boundary of horizontally-neighbouring blocks
 // On entry:
 //   x0 -> top-left pel of right block
-//   w1 = row stride, bytes
+//   x1 = row stride, bytes
 //   w2 = PQUANT bitstream parameter
 function ff_vc1_h_loop_filter16_neon, export=1
         sub             x3, x0, #4              // where to start reading
-        sxtw            x1, w1                  // technically, stride is signed int
         ldr             d0, .Lcoeffs
         ld1             {v1.8b}, [x3], x1       // P1[0], P2[0]...
         sub             x0, x0, #1              // where to start writing

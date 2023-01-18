@@ -1,6 +1,7 @@
 #ifndef AVCODEC_V4L2_REQUEST_HEVC_H
 #define AVCODEC_V4L2_REQUEST_HEVC_H
 
+#include <stdint.h>
 #include <drm_fourcc.h>
 #include "v4l2_req_decode_q.h"
 
@@ -45,8 +46,6 @@
 #define V4L2_CTRL_FLAG_DYNAMIC_ARRAY	0x0800
 #endif
 
-#define MAX_SLICES 128
-
 #define VCAT(name, version) name##_v##version
 #define V2(n,v) VCAT(n, v)
 #define V(n) V2(n, HEVC_CTRLS_VERSION)
@@ -63,10 +62,10 @@ typedef struct V4L2RequestContextHEVC {
 
     unsigned int timestamp;  // ?? maybe uint64_t
 
-    int multi_slice;
     int decode_mode;
     int start_code;
-    int max_slices;
+    unsigned int max_slices;    // 0 => not wanted (frame mode)
+    unsigned int max_offsets;   // 0 => not wanted
 
     req_decode_q decode_q;
 
@@ -97,5 +96,7 @@ typedef struct v4l2_req_decode_fns {
 
 extern const v4l2_req_decode_fns V2(ff_v4l2_req_hevc, 1);
 extern const v4l2_req_decode_fns V2(ff_v4l2_req_hevc, 2);
+extern const v4l2_req_decode_fns V2(ff_v4l2_req_hevc, 3);
+extern const v4l2_req_decode_fns V2(ff_v4l2_req_hevc, 4);
 
 #endif

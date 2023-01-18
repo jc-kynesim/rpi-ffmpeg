@@ -35,6 +35,15 @@
 #include "v4l2_context.h"
 #include "v4l2_fmt.h"
 #include "v4l2_m2m.h"
+#include "v4l2_req_dmabufs.h"
+
+static void
+xlat_init(xlat_track_t * const x)
+{
+    memset(x, 0, sizeof(*x));
+    x->last_pts = AV_NOPTS_VALUE;
+}
+
 
 static inline int v4l2_splane_video(struct v4l2_capability *cap)
 {
@@ -68,7 +77,9 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
 
     s->capture.done = s->output.done = 0;
     s->capture.name = "capture";
+    s->capture.buf_mem = s->db_ctl != NULL ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     s->output.name = "output";
+    s->output.buf_mem = s->input_drm ? V4L2_MEMORY_DMABUF : V4L2_MEMORY_MMAP;
     atomic_init(&s->refcount, 0);
     sem_init(&s->refsync, 0, 0);
 
@@ -85,12 +96,14 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
     if (v4l2_mplane_video(&cap)) {
         s->capture.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
         s->output.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+        s->output.format.type = s->output.type;
         return 0;
     }
 
     if (v4l2_splane_video(&cap)) {
         s->capture.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         s->output.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+        s->output.format.type = s->output.type;
         return 0;
     }
 
@@ -323,6 +336,9 @@ static void v4l2_m2m_destroy_context(void *opaque, uint8_t *context)
     if (s->fd != -1)
         close(s->fd);
 
+    av_packet_unref(&s->buf_pkt);
+    av_freep(&s->extdata_data);
+
     av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Context destroyed\n");
 
     av_free(s);
@@ -338,7 +354,7 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
 
     av_log(s->avctx, AV_LOG_DEBUG, "V4L2 Codec end\n");
 
-    if (av_codec_is_decoder(s->avctx->codec))
+    if (s->avctx && av_codec_is_decoder(s->avctx->codec))
         av_packet_unref(&s->buf_pkt);
 
     if (s->fd >= 0) {
@@ -353,6 +369,7 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
 
     ff_v4l2_context_release(&s->output);
 
+    dmabufs_ctl_unref(&s->db_ctl);
     close(s->fd);
     s->fd = -1;
 
@@ -404,28 +421,33 @@ int ff_v4l2_m2m_codec_init(V4L2m2mPriv *priv)
     return v4l2_configure_contexts(s);
 }
 
-int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **s)
+int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **pps)
 {
-    *s = av_mallocz(sizeof(V4L2m2mContext));
-    if (!*s)
+    V4L2m2mContext * const s = av_mallocz(sizeof(V4L2m2mContext));
+
+    *pps = NULL;
+    if (!s)
         return AVERROR(ENOMEM);
 
-    priv->context_ref = av_buffer_create((uint8_t *) *s, sizeof(V4L2m2mContext),
+    priv->context_ref = av_buffer_create((uint8_t *)s, sizeof(*s),
                                          &v4l2_m2m_destroy_context, NULL, 0);
     if (!priv->context_ref) {
-        av_freep(s);
+        av_free(s);
         return AVERROR(ENOMEM);
     }
 
     /* assign the context */
-    priv->context = *s;
-    (*s)->priv = priv;
+    priv->context = s;
+    s->priv = priv;
 
     /* populate it */
-    priv->context->capture.num_buffers = priv->num_capture_buffers;
-    priv->context->output.num_buffers  = priv->num_output_buffers;
-    priv->context->self_ref = priv->context_ref;
-    priv->context->fd = -1;
+    s->capture.num_buffers = priv->num_capture_buffers;
+    s->output.num_buffers  = priv->num_output_buffers;
+    s->self_ref = priv->context_ref;
+    s->fd = -1;
 
+    xlat_init(&s->xlat);
+
+    *pps = s;
     return 0;
 }

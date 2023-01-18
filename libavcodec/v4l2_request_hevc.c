@@ -17,7 +17,7 @@
  */
 
 
-
+#include "config.h"
 #include "decode.h"
 #include "hevcdec.h"
 #include "hwconfig.h"
@@ -25,6 +25,7 @@
 #include "v4l2_request_hevc.h"
 
 #include "libavutil/hwcontext_drm.h"
+#include "libavutil/pixdesc.h"
 
 #include "v4l2_req_devscan.h"
 #include "v4l2_req_dmabufs.h"
@@ -103,7 +104,7 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     mediabufs_ctl_unref(&ctx->mbufs);
     media_pool_delete(&ctx->mpool);
     pollqueue_unref(&ctx->pq);
-    dmabufs_ctl_delete(&ctx->dbufs);
+    dmabufs_ctl_unref(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
 
     decode_q_uninit(&ctx->decode_q);
@@ -141,8 +142,10 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const HEVCSPS * const sps = h->ps.sps;
     int ret;
     const struct decdev * decdev;
-    const uint32_t src_pix_fmt = V2(ff_v4l2_req_hevc, 1).src_pix_fmt_v4l2;  // Assuming constant for all APIs but avoiding V4L2 includes
+    const uint32_t src_pix_fmt = V2(ff_v4l2_req_hevc, 4).src_pix_fmt_v4l2;  // Assuming constant for all APIs but avoiding V4L2 includes
     size_t src_size;
+    enum mediabufs_memory src_memtype;
+    enum mediabufs_memory dst_memtype;
 
     av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
@@ -173,8 +176,14 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
            decdev_media_path(decdev), decdev_video_path(decdev));
 
     if ((ctx->dbufs = dmabufs_ctl_new()) == NULL) {
-        av_log(avctx, AV_LOG_ERROR, "Unable to open dmabufs\n");
-        goto fail0;
+        av_log(avctx, AV_LOG_DEBUG, "Unable to open dmabufs - try mmap buffers\n");
+        src_memtype = MEDIABUFS_MEMORY_MMAP;
+        dst_memtype = MEDIABUFS_MEMORY_MMAP;
+    }
+    else {
+        av_log(avctx, AV_LOG_DEBUG, "Dmabufs opened - try dmabuf buffers\n");
+        src_memtype = MEDIABUFS_MEMORY_DMABUF;
+        dst_memtype = MEDIABUFS_MEMORY_DMABUF;
     }
 
     if ((ctx->pq = pollqueue_new()) == NULL) {
@@ -195,8 +204,9 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     // Ask for an initial bitbuf size of max size / 4
     // We will realloc if we need more
     // Must use sps->h/w as avctx contains cropped size
+retry_src_memtype:
     src_size = bit_buf_size(sps->width, sps->height, sps->bit_depth - 8);
-    if (mediabufs_src_resizable(ctx->mbufs))
+    if (src_memtype == MEDIABUFS_MEMORY_DMABUF && mediabufs_src_resizable(ctx->mbufs))
         src_size /= 4;
     // Kludge for conformance tests which break Annex A limits
     else if (src_size < 0x40000)
@@ -209,7 +219,25 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    if (V2(ff_v4l2_req_hevc, 2).probe(avctx, ctx) == 0) {
+    if (mediabufs_src_chk_memtype(ctx->mbufs, src_memtype)) {
+        if (src_memtype == MEDIABUFS_MEMORY_DMABUF) {
+            src_memtype = MEDIABUFS_MEMORY_MMAP;
+            goto retry_src_memtype;
+        }
+        av_log(avctx, AV_LOG_ERROR, "Failed to get src memory type\n");
+        goto fail4;
+    }
+
+    if (V2(ff_v4l2_req_hevc, 4).probe(avctx, ctx) == 0) {
+        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 4 probed successfully\n");
+        ctx->fns = &V2(ff_v4l2_req_hevc, 4);
+    }
+#if CONFIG_V4L2_REQ_HEVC_VX
+    else if (V2(ff_v4l2_req_hevc, 3).probe(avctx, ctx) == 0) {
+        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 3 probed successfully\n");
+        ctx->fns = &V2(ff_v4l2_req_hevc, 3);
+    }
+    else if (V2(ff_v4l2_req_hevc, 2).probe(avctx, ctx) == 0) {
         av_log(avctx, AV_LOG_DEBUG, "HEVC API version 2 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 2);
     }
@@ -217,6 +245,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_DEBUG, "HEVC API version 1 probed successfully\n");
         ctx->fns = &V2(ff_v4l2_req_hevc, 1);
     }
+#endif
     else {
         av_log(avctx, AV_LOG_ERROR, "No HEVC version probed successfully\n");
         ret = AVERROR(EINVAL);
@@ -229,7 +258,7 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         goto fail4;
     }
 
-    if (mediabufs_src_pool_create(ctx->mbufs, ctx->dbufs, 6)) {
+    if (mediabufs_src_pool_create(ctx->mbufs, ctx->dbufs, 6, src_memtype)) {
         av_log(avctx, AV_LOG_ERROR, "Failed to create source pool\n");
         goto fail4;
     }
@@ -241,8 +270,17 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
                sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering,
                avctx->thread_count, avctx->extra_hw_frames);
 
+        if (mediabufs_dst_chk_memtype(ctx->mbufs, dst_memtype)) {
+            if (dst_memtype != MEDIABUFS_MEMORY_DMABUF) {
+                av_log(avctx, AV_LOG_ERROR, "Failed to get dst memory type\n");
+                goto fail4;
+            }
+            av_log(avctx, AV_LOG_DEBUG, "Dst DMABUF not supported - trying mmap\n");
+            dst_memtype = MEDIABUFS_MEMORY_MMAP;
+        }
+
         // extra_hw_frames is -1 if unset
-        if (mediabufs_dst_slots_create(ctx->mbufs, dst_slots, (avctx->extra_hw_frames > 0))) {
+        if (mediabufs_dst_slots_create(ctx->mbufs, dst_slots, (avctx->extra_hw_frames > 0), dst_memtype)) {
             av_log(avctx, AV_LOG_ERROR, "Failed to create destination slots\n");
             goto fail4;
         }
@@ -268,9 +306,11 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
 
-    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s\n",
+    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s; swfmt=%s\n",
            ctx->fns->name,
-           decdev_media_path(decdev), decdev_video_path(decdev));
+           decdev_media_path(decdev), decdev_video_path(decdev),
+           mediabufs_memory_name(src_memtype), mediabufs_memory_name(dst_memtype),
+           av_get_pix_fmt_name(avctx->sw_pix_fmt));
 
     return 0;
 
@@ -283,7 +323,7 @@ fail3:
 fail2:
     pollqueue_unref(&ctx->pq);
 fail1:
-    dmabufs_ctl_delete(&ctx->dbufs);
+    dmabufs_ctl_unref(&ctx->dbufs);
 fail0:
     devscan_delete(&ctx->devscan);
     return ret;

@@ -1,11 +1,14 @@
 #ifndef DMABUFS_H
 #define DMABUFS_H
 
+#include <stddef.h>
+
 struct dmabufs_ctl;
 struct dmabuf_h;
 
 struct dmabufs_ctl * dmabufs_ctl_new(void);
-void dmabufs_ctl_delete(struct dmabufs_ctl ** const pdbsc);
+void dmabufs_ctl_unref(struct dmabufs_ctl ** const pdbsc);
+struct dmabufs_ctl * dmabufs_ctl_ref(struct dmabufs_ctl * const dbsc);
 
 // Need not preserve old contents
 // On NULL return old buffer is freed
@@ -16,6 +19,9 @@ static inline struct dmabuf_h * dmabuf_alloc(struct dmabufs_ctl * dbsc, size_t s
 }
 /* Create from existing fd - dups(fd) */
 struct dmabuf_h * dmabuf_import(int fd, size_t size);
+/* Import an MMAP - return NULL if mapptr = MAP_FAIL */
+struct dmabuf_h * dmabuf_import_mmap(void * mapptr, size_t size);
+
 void * dmabuf_map(struct dmabuf_h * const dh);
 
 /* flags from linux/dmabuf.h DMA_BUF_SYNC_xxx */

@@ -43,6 +43,158 @@ struct v4l2_format_update {
     int update_avfmt;
 };
 
+
+static inline int64_t track_to_pts(AVCodecContext *avctx, unsigned int n)
+{
+    return (int64_t)n;
+}
+
+static inline unsigned int pts_to_track(AVCodecContext *avctx, const int64_t pts)
+{
+    return (unsigned int)pts;
+}
+
+// FFmpeg requires us to propagate a number of vars from the coded pkt into
+// the decoded frame. The only thing that tracks like that in V4L2 stateful
+// is timestamp. PTS maps to timestamp for this decode. FFmpeg makes no
+// guarantees about PTS being unique or specified for every frame so replace
+// the supplied PTS with a simple incrementing number and keep a circular
+// buffer of all the things we want preserved (including the original PTS)
+// indexed by the tracking no.
+static int64_t
+xlat_pts_pkt_in(AVCodecContext *const avctx, xlat_track_t *const x, const AVPacket *const avpkt)
+{
+    int64_t track_pts;
+
+    // Avoid 0
+    if (++x->track_no == 0)
+        x->track_no = 1;
+
+    track_pts = track_to_pts(avctx, x->track_no);
+
+    av_log(avctx, AV_LOG_TRACE, "In pkt PTS=%" PRId64 ", DTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", avpkt->pts, avpkt->dts, track_pts, x->track_no);
+    x->track_els[x->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
+        .discard          = 0,
+        .pending          = 1,
+        .pkt_size         = avpkt->size,
+        .pts              = avpkt->pts,
+        .dts              = avpkt->dts,
+        .reordered_opaque = avctx->reordered_opaque,
+        .pkt_pos          = avpkt->pos,
+        .pkt_duration     = avpkt->duration,
+        .track_pts        = track_pts
+    };
+    return track_pts;
+}
+
+static int64_t
+xlat_pts_frame_in(AVCodecContext *const avctx, xlat_track_t *const x, const AVFrame *const frame)
+{
+    int64_t track_pts;
+
+    // Avoid 0
+    if (++x->track_no == 0)
+        x->track_no = 1;
+
+    track_pts = track_to_pts(avctx, x->track_no);
+
+    av_log(avctx, AV_LOG_TRACE, "In frame PTS=%" PRId64 ", track=%" PRId64 ", n=%u\n", frame->pts, track_pts, x->track_no);
+    x->track_els[x->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
+        .discard          = 0,
+        .pending          = 1,
+        .pkt_size         = 0,
+        .pts              = frame->pts,
+        .dts              = AV_NOPTS_VALUE,
+        .reordered_opaque = frame->reordered_opaque,
+        .pkt_pos          = frame->pkt_pos,
+        .pkt_duration     = frame->pkt_duration,
+        .track_pts        = track_pts
+    };
+    return track_pts;
+}
+
+
+// Returns -1 if we should discard the frame
+static int
+xlat_pts_frame_out(AVCodecContext *const avctx,
+             xlat_track_t * const x,
+             AVFrame *const frame)
+{
+    unsigned int n = pts_to_track(avctx, frame->pts) % FF_V4L2_M2M_TRACK_SIZE;
+    V4L2m2mTrackEl *const t = x->track_els + n;
+    if (frame->pts == AV_NOPTS_VALUE || frame->pts != t->track_pts)
+    {
+        av_log(avctx, frame->pts == AV_NOPTS_VALUE ? AV_LOG_DEBUG : AV_LOG_WARNING,
+               "Frame tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
+        frame->pts              = AV_NOPTS_VALUE;
+        frame->pkt_dts          = AV_NOPTS_VALUE;
+        frame->reordered_opaque = x->last_opaque;
+        frame->pkt_pos          = -1;
+        frame->pkt_duration     = 0;
+        frame->pkt_size         = -1;
+    }
+    else if (!t->discard)
+    {
+        frame->pts              = t->pending ? t->pts : AV_NOPTS_VALUE;
+        frame->pkt_dts          = t->dts;
+        frame->reordered_opaque = t->reordered_opaque;
+        frame->pkt_pos          = t->pkt_pos;
+        frame->pkt_duration     = t->pkt_duration;
+        frame->pkt_size         = t->pkt_size;
+
+        x->last_opaque = x->track_els[n].reordered_opaque;
+        if (frame->pts != AV_NOPTS_VALUE)
+            x->last_pts = frame->pts;
+        t->pending = 0;
+    }
+    else
+    {
+        av_log(avctx, AV_LOG_DEBUG, "Discard frame (flushed): pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
+        return -1;
+    }
+
+    av_log(avctx, AV_LOG_TRACE, "Out frame PTS=%" PRId64 "/%"PRId64", DTS=%" PRId64 ", track=%"PRId64", n=%d\n",
+           frame->pts, frame->best_effort_timestamp, frame->pkt_dts, t->track_pts, n);
+    return 0;
+}
+
+// Returns -1 if we should discard the frame
+static int
+xlat_pts_pkt_out(AVCodecContext *const avctx,
+             xlat_track_t * const x,
+             AVPacket *const pkt)
+{
+    unsigned int n = pts_to_track(avctx, pkt->pts) % FF_V4L2_M2M_TRACK_SIZE;
+    V4L2m2mTrackEl *const t = x->track_els + n;
+    if (pkt->pts == AV_NOPTS_VALUE || pkt->pts != t->track_pts)
+    {
+        av_log(avctx, pkt->pts == AV_NOPTS_VALUE ? AV_LOG_DEBUG : AV_LOG_WARNING,
+               "Pkt tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", pkt->pts, n, t->track_pts);
+        pkt->pts                = AV_NOPTS_VALUE;
+    }
+    else if (!t->discard)
+    {
+        pkt->pts                = t->pending ? t->pts : AV_NOPTS_VALUE;
+
+        x->last_opaque = x->track_els[n].reordered_opaque;
+        if (pkt->pts != AV_NOPTS_VALUE)
+            x->last_pts = pkt->pts;
+        t->pending = 0;
+    }
+    else
+    {
+        av_log(avctx, AV_LOG_DEBUG, "Discard packet (flushed): pts=%" PRId64 ", track[%d]=%" PRId64 "\n", pkt->pts, n, t->track_pts);
+        return -1;
+    }
+
+    // * Would like something much better than this...xlat(offset + out_count)?
+    pkt->dts = pkt->pts;
+    av_log(avctx, AV_LOG_TRACE, "Out pkt PTS=%" PRId64 ", track=%"PRId64", n=%d\n",
+           pkt->pts, t->track_pts, n);
+    return 0;
+}
+
+
 static inline V4L2m2mContext *ctx_to_m2mctx(const V4L2Context *ctx)
 {
     return V4L2_TYPE_IS_OUTPUT(ctx->type) ?
@@ -353,12 +505,14 @@ dq_buf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
     atomic_fetch_sub(&ctx->q_count, 1);
 
     avbuf = (V4L2Buffer *)ctx->bufrefs[buf.index]->data;
-    avbuf->status = V4L2BUF_AVAILABLE;
+    ff_v4l2_buffer_set_avail(avbuf);
     avbuf->buf = buf;
     if (is_mp) {
         memcpy(avbuf->planes, planes, sizeof(planes));
         avbuf->buf.m.planes = avbuf->planes;
     }
+    // Done with any attached buffer
+    av_buffer_unref(&avbuf->ref_buf);
 
     if (V4L2_TYPE_IS_CAPTURE(ctx->type)) {
         // Zero length cap buffer return == EOS
@@ -424,6 +578,11 @@ get_event(V4L2m2mContext * const m)
     return 0;
 }
 
+static inline int
+dq_ok(const V4L2Context * const c)
+{
+    return c->streamon && atomic_load(&c->q_count) != 0;
+}
 
 // Get a buffer
 // If output then just gets the buffer in the expected way
@@ -459,13 +618,13 @@ get_qbuf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf, const int timeout
         }
 
         // If capture && timeout == -1 then also wait for rx buffer free
-        if (is_cap && timeout == -1 && m->output.streamon && !m->draining)
+        if (is_cap && timeout == -1 && dq_ok(&m->output) && !m->draining)
             pfd.events |= poll_out;
 
         // If nothing Qed all we will get is POLLERR - avoid that
-        if ((pfd.events == poll_out && atomic_load(&m->output.q_count) == 0) ||
-            (pfd.events == poll_cap && atomic_load(&m->capture.q_count) == 0) ||
-            (pfd.events == (poll_cap | poll_out) && atomic_load(&m->capture.q_count) == 0 && atomic_load(&m->output.q_count) == 0)) {
+        if ((pfd.events == poll_out && !dq_ok(&m->output)) ||
+            (pfd.events == poll_cap && !dq_ok(&m->capture)) ||
+            (pfd.events == (poll_cap | poll_out) && !dq_ok(&m->capture) && !dq_ok(&m->output))) {
             av_log(avctx, AV_LOG_TRACE, "V4L2 poll %s empty\n", ctx->name);
             return AVERROR(ENOSPC);
         }
@@ -553,17 +712,28 @@ clean_v4l2_buffer(V4L2Buffer * const avbuf)
     return avbuf;
 }
 
+int
+ff_v4l2_dq_all(V4L2Context *const ctx, int timeout1)
+{
+    V4L2Buffer * avbuf;
+    if (timeout1 != 0) {
+        int rv = get_qbuf(ctx, &avbuf, timeout1);
+        if (rv != 0)
+            return rv;
+    }
+    do {
+        get_qbuf(ctx, &avbuf, 0);
+    } while (avbuf);
+    return 0;
+}
+
 static V4L2Buffer* v4l2_getfree_v4l2buf(V4L2Context *ctx)
 {
     int i;
 
     /* get back as many output buffers as possible */
-    if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
-        V4L2Buffer * avbuf;
-        do {
-            get_qbuf(ctx, &avbuf, 0);
-        } while (avbuf);
-    }
+    if (V4L2_TYPE_IS_OUTPUT(ctx->type))
+        ff_v4l2_dq_all(ctx, 0);
 
     for (i = 0; i < ctx->num_buffers; i++) {
         V4L2Buffer * const avbuf = (V4L2Buffer *)ctx->bufrefs[i]->data;
@@ -658,28 +828,22 @@ static int v4l2_get_raw_format(V4L2Context* ctx, enum AVPixelFormat *p)
             return 0;
     }
 
-    for (;;) {
+    for (;; ++fdesc.index) {
         ret = ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc);
         if (ret)
             return AVERROR(EINVAL);
 
         if (priv->pix_fmt != AV_PIX_FMT_NONE) {
-            if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt)) {
-                fdesc.index++;
+            if (fdesc.pixelformat != ff_v4l2_format_avfmt_to_v4l2(priv->pix_fmt))
                 continue;
-            }
         }
 
         pixfmt = ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO);
         ret = v4l2_try_raw_format(ctx, pixfmt);
-        if (ret){
-            fdesc.index++;
-            continue;
+        if (ret == 0) {
+            *p = pixfmt;
+            return 0;
         }
-
-        *p = pixfmt;
-
-        return 0;
     }
 
     return AVERROR(EINVAL);
@@ -733,7 +897,7 @@ static void flush_all_buffers_status(V4L2Context* const ctx)
     for (i = 0; i < ctx->num_buffers; ++i) {
         struct V4L2Buffer * const buf = (struct V4L2Buffer *)ctx->bufrefs[i]->data;
         if (buf->status == V4L2BUF_IN_DRIVER)
-            buf->status = V4L2BUF_AVAILABLE;
+            ff_v4l2_buffer_set_avail(buf);
     }
     atomic_store(&ctx->q_count, 0);
 }
@@ -765,7 +929,7 @@ static int stuff_all_buffers(AVCodecContext * avctx, V4L2Context* ctx)
 int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
 {
     int type = ctx->type;
-    int ret;
+    int ret = 0;
     AVCodecContext * const avctx = logger(ctx);
 
     // Avoid doing anything if there is nothing we can do
@@ -777,8 +941,7 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
     if (cmd == VIDIOC_STREAMON && !V4L2_TYPE_IS_OUTPUT(ctx->type))
         stuff_all_buffers(avctx, ctx);
 
-    ret = ioctl(ctx_to_m2mctx(ctx)->fd, cmd, &type);
-    if (ret < 0) {
+    if (ioctl(ctx_to_m2mctx(ctx)->fd, cmd, &type) < 0) {
         const int err = errno;
         av_log(avctx, AV_LOG_ERROR, "%s set status %d (%s) failed: err=%d\n", ctx->name,
                cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF", err);
@@ -788,6 +951,8 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
     {
         if (cmd == VIDIOC_STREAMOFF)
             flush_all_buffers_status(ctx);
+        else
+            ctx->first_buf = 1;
 
         ctx->streamon = (cmd == VIDIOC_STREAMON);
         av_log(avctx, AV_LOG_DEBUG, "%s set status %d (%s) OK\n", ctx->name,
@@ -804,23 +969,27 @@ int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
 
 int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* frame)
 {
-    V4L2m2mContext *s = ctx_to_m2mctx(ctx);
+    V4L2m2mContext *const s = ctx_to_m2mctx(ctx);
+    AVCodecContext *const avctx = s->avctx;
+    int64_t track_ts;
     V4L2Buffer* avbuf;
     int ret;
 
     if (!frame) {
         ret = v4l2_stop_encode(ctx);
         if (ret)
-            av_log(logger(ctx), AV_LOG_ERROR, "%s stop_encode\n", ctx->name);
+            av_log(avctx, AV_LOG_ERROR, "%s stop_encode\n", ctx->name);
         s->draining= 1;
         return 0;
     }
 
     avbuf = v4l2_getfree_v4l2buf(ctx);
     if (!avbuf)
-        return AVERROR(ENOMEM);
+        return AVERROR(EAGAIN);
 
-    ret = ff_v4l2_buffer_avframe_to_buf(frame, avbuf);
+    track_ts = xlat_pts_frame_in(avctx, &s->xlat, frame);
+
+    ret = ff_v4l2_buffer_avframe_to_buf(frame, avbuf, track_ts);
     if (ret)
         return ret;
 
@@ -831,14 +1000,16 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
                                    const void * extdata, size_t extlen)
 {
     V4L2m2mContext *s = ctx_to_m2mctx(ctx);
+    AVCodecContext *const avctx = s->avctx;
     V4L2Buffer* avbuf;
     int ret;
+    int64_t track_ts;
 
     if (!pkt->size) {
         ret = v4l2_stop_decode(ctx);
         // Log but otherwise ignore stop failure
         if (ret)
-            av_log(logger(ctx), AV_LOG_ERROR, "%s stop_decode failed: err=%d\n", ctx->name, ret);
+            av_log(avctx, AV_LOG_ERROR, "%s stop_decode failed: err=%d\n", ctx->name, ret);
         s->draining = 1;
         return 0;
     }
@@ -847,7 +1018,9 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
     if (!avbuf)
         return AVERROR(EAGAIN);
 
-    ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen);
+    track_ts = xlat_pts_pkt_in(avctx, &s->xlat, pkt);
+
+    ret = ff_v4l2_buffer_avpkt_to_buf_ext(pkt, avbuf, extdata, extlen, track_ts);
     if (ret == AVERROR(ENOMEM))
         av_log(logger(ctx), AV_LOG_ERROR, "Buffer overflow in %s: pkt->size=%d > buf->length=%d\n",
                __func__, pkt->size, avbuf->planes[0].length);
@@ -859,24 +1032,36 @@ int ff_v4l2_context_enqueue_packet(V4L2Context* ctx, const AVPacket* pkt,
 
 int ff_v4l2_context_dequeue_frame(V4L2Context* ctx, AVFrame* frame, int timeout)
 {
+    V4L2m2mContext *s = ctx_to_m2mctx(ctx);
+    AVCodecContext *const avctx = s->avctx;
     V4L2Buffer *avbuf;
     int rv;
 
-    if ((rv = get_qbuf(ctx, &avbuf, timeout)) != 0)
-        return rv;
+    do {
+        if ((rv = get_qbuf(ctx, &avbuf, timeout)) != 0)
+            return rv;
+        if ((rv = ff_v4l2_buffer_buf_to_avframe(frame, avbuf)) != 0)
+            return rv;
+    } while (xlat_pts_frame_out(avctx, &s->xlat, frame) != 0);
 
-    return ff_v4l2_buffer_buf_to_avframe(frame, avbuf);
+   return 0;
 }
 
-int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt)
+int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout)
 {
+    V4L2m2mContext *s = ctx_to_m2mctx(ctx);
+    AVCodecContext *const avctx = s->avctx;
     V4L2Buffer *avbuf;
     int rv;
 
-    if ((rv = get_qbuf(ctx, &avbuf, -1)) != 0)
-        return rv == AVERROR(ENOSPC) ? AVERROR(EAGAIN) : rv;  // Caller not currently expecting ENOSPC
+    do {
+        if ((rv = get_qbuf(ctx, &avbuf, timeout)) != 0)
+            return rv == AVERROR(ENOSPC) ? AVERROR(EAGAIN) : rv;  // Caller not currently expecting ENOSPC
+        if ((rv = ff_v4l2_buffer_buf_to_avpkt(pkt, avbuf)) != 0)
+            return rv;
+    } while (xlat_pts_pkt_out(avctx, &s->xlat, pkt) != 0);
 
-    return ff_v4l2_buffer_buf_to_avpkt(pkt, avbuf);
+    return 0;
 }
 
 int ff_v4l2_context_get_format(V4L2Context* ctx, int probe)
@@ -952,7 +1137,7 @@ void ff_v4l2_context_release(V4L2Context* ctx)
 }
 
 
-static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers)
+static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers, const enum v4l2_memory mem)
 {
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     struct v4l2_requestbuffers req;
@@ -963,7 +1148,7 @@ static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers
 
     memset(&req, 0, sizeof(req));
     req.count = req_buffers;
-    req.memory = V4L2_MEMORY_MMAP;
+    req.memory = mem;
     req.type = ctx->type;
     while ((ret = ioctl(s->fd, VIDIOC_REQBUFS, &req)) == -1) {
         if (errno != EINTR) {
@@ -987,7 +1172,7 @@ static int create_buffers(V4L2Context* const ctx, const unsigned int req_buffers
     }
 
     for (i = 0; i < ctx->num_buffers; i++) {
-        ret = ff_v4l2_buffer_initialize(&ctx->bufrefs[i], i, ctx);
+        ret = ff_v4l2_buffer_initialize(&ctx->bufrefs[i], i, ctx, mem);
         if (ret) {
             av_log(logger(ctx), AV_LOG_ERROR, "%s buffer[%d] initialization (%s)\n", ctx->name, i, av_err2str(ret));
             goto fail_release;
@@ -1012,6 +1197,7 @@ fail_release:
 
 int ff_v4l2_context_init(V4L2Context* ctx)
 {
+    struct v4l2_queryctrl qctrl;
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
     int ret;
 
@@ -1053,7 +1239,25 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         goto fail_unref_hwframes;
     }
 
-    ret = create_buffers(ctx, ctx->num_buffers);
+    memset(&qctrl, 0, sizeof(qctrl));
+    qctrl.id = V4L2_CID_MIN_BUFFERS_FOR_OUTPUT;
+    if (ioctl(s->fd, VIDIOC_QUERYCTRL, &qctrl) != 0) {
+        ret = AVERROR(errno);
+        if (ret != AVERROR(EINVAL)) {
+            av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_QUERCTRL failed: %s\n", ctx->name, av_err2str(ret));
+            goto fail_unref_hwframes;
+        }
+        // Control unsupported - set default if wanted
+        if (ctx->num_buffers < 2)
+            ctx->num_buffers = 4;
+    }
+    else {
+        if (ctx->num_buffers < 2)
+            ctx->num_buffers = qctrl.minimum + 2;
+        ctx->num_buffers = av_clip(ctx->num_buffers, qctrl.minimum, qctrl.maximum);
+    }
+
+    ret = create_buffers(ctx, ctx->num_buffers, ctx->buf_mem);
     if (ret < 0)
         goto fail_unref_hwframes;
 
