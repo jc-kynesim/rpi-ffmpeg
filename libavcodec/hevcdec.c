@@ -340,6 +340,19 @@ static void export_stream_params(HEVCContext *s, const HEVCSPS *sps)
 
     ff_set_sar(avctx, sps->vui.sar);
 
+    if (sps->chroma_format_idc == 1) {
+        avctx->chroma_sample_location = sps->vui.chroma_loc_info_present_flag ?
+            sps->vui.chroma_sample_loc_type_top_field + 1 :
+            AVCHROMA_LOC_LEFT;
+    }
+    else if (sps->chroma_format_idc == 2 ||
+             sps->chroma_format_idc == 3) {
+        avctx->chroma_sample_location = AVCHROMA_LOC_TOPLEFT;;
+    }
+    else {
+        avctx->chroma_sample_location = AVCHROMA_LOC_UNSPECIFIED;
+    }
+
     if (sps->vui.video_signal_type_present_flag)
         avctx->color_range = sps->vui.video_full_range_flag ? AVCOL_RANGE_JPEG
                                                             : AVCOL_RANGE_MPEG;
@@ -402,6 +415,7 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + \
                      CONFIG_HEVC_D3D11VA_HWACCEL * 2 + \
                      CONFIG_HEVC_NVDEC_HWACCEL + \
+                     CONFIG_HEVC_V4L2REQUEST_HWACCEL + \
                      CONFIG_HEVC_VAAPI_HWACCEL + \
                      CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL + \
                      CONFIG_HEVC_VDPAU_HWACCEL)
@@ -429,6 +443,9 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
         *fmt++ = AV_PIX_FMT_VIDEOTOOLBOX;
 #endif
+#if CONFIG_HEVC_V4L2REQUEST_HWACCEL
+        *fmt++ = AV_PIX_FMT_DRM_PRIME;
+#endif
         break;
     case AV_PIX_FMT_YUV420P10:
 #if CONFIG_HEVC_DXVA2_HWACCEL
@@ -449,6 +466,9 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #endif
 #if CONFIG_HEVC_NVDEC_HWACCEL
         *fmt++ = AV_PIX_FMT_CUDA;
+#endif
+#if CONFIG_HEVC_V4L2REQUEST_HWACCEL
+        *fmt++ = AV_PIX_FMT_DRM_PRIME;
 #endif
         break;
     case AV_PIX_FMT_YUV444P:
@@ -503,6 +523,16 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps,
 
     if (!sps)
         return 0;
+
+    // If hwaccel then we don't need all the s/w decode helper arrays
+    if (s->avctx->hwaccel) {
+        export_stream_params(s, sps);
+
+        s->avctx->pix_fmt = pix_fmt;
+        s->ps.sps = sps;
+        s->ps.vps = (HEVCVPS*) s->ps.vps_list[s->ps.sps->vps_id]->data;
+        return 0;
+    }
 
     ret = pic_arrays_init(s, sps);
     if (ret < 0)
@@ -3008,11 +3038,13 @@ static int hevc_frame_start(HEVCContext *s)
                            ((s->ps.sps->height >> s->ps.sps->log2_min_cb_size) + 1);
     int ret;
 
-    memset(s->horizontal_bs, 0, s->bs_width * s->bs_height);
-    memset(s->vertical_bs,   0, s->bs_width * s->bs_height);
-    memset(s->cbf_luma,      0, s->ps.sps->min_tb_width * s->ps.sps->min_tb_height);
-    memset(s->is_pcm,        0, (s->ps.sps->min_pu_width + 1) * (s->ps.sps->min_pu_height + 1));
-    memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
+    if (s->horizontal_bs) {
+        memset(s->horizontal_bs, 0, s->bs_width * s->bs_height);
+        memset(s->vertical_bs,   0, s->bs_width * s->bs_height);
+        memset(s->cbf_luma,      0, s->ps.sps->min_tb_width * s->ps.sps->min_tb_height);
+        memset(s->is_pcm,        0, (s->ps.sps->min_pu_width + 1) * (s->ps.sps->min_pu_height + 1));
+        memset(s->tab_slice_address, -1, pic_size_in_ctb * sizeof(*s->tab_slice_address));
+    }
 
     s->is_decoded        = 0;
     s->first_nal_type    = s->nal_unit_type;
@@ -3504,8 +3536,13 @@ static int hevc_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
 
     s->ref = NULL;
     ret    = decode_nal_units(s, avpkt->data, avpkt->size);
-    if (ret < 0)
+    if (ret < 0) {
+        // Ensure that hwaccel knows this frame is over
+        if (s->avctx->hwaccel && s->avctx->hwaccel->abort_frame)
+            s->avctx->hwaccel->abort_frame(s->avctx);
+
         return ret;
+    }
 
     if (avctx->hwaccel) {
         if (s->ref && (ret = avctx->hwaccel->end_frame(avctx)) < 0) {
@@ -3555,15 +3592,19 @@ static int hevc_ref_frame(HEVCContext *s, HEVCFrame *dst, HEVCFrame *src)
         dst->needs_fg = 1;
     }
 
-    dst->tab_mvf_buf = av_buffer_ref(src->tab_mvf_buf);
-    if (!dst->tab_mvf_buf)
-        goto fail;
-    dst->tab_mvf = src->tab_mvf;
+    if (src->tab_mvf_buf) {
+        dst->tab_mvf_buf = av_buffer_ref(src->tab_mvf_buf);
+        if (!dst->tab_mvf_buf)
+            goto fail;
+        dst->tab_mvf = src->tab_mvf;
+    }
 
-    dst->rpl_tab_buf = av_buffer_ref(src->rpl_tab_buf);
-    if (!dst->rpl_tab_buf)
-        goto fail;
-    dst->rpl_tab = src->rpl_tab;
+    if (src->rpl_tab_buf) {
+        dst->rpl_tab_buf = av_buffer_ref(src->rpl_tab_buf);
+        if (!dst->rpl_tab_buf)
+            goto fail;
+        dst->rpl_tab = src->rpl_tab;
+    }
 
     dst->rpl_buf = av_buffer_ref(src->rpl_buf);
     if (!dst->rpl_buf)
@@ -3896,6 +3937,9 @@ const FFCodec ff_hevc_decoder = {
 #endif
 #if CONFIG_HEVC_NVDEC_HWACCEL
                                HWACCEL_NVDEC(hevc),
+#endif
+#if CONFIG_HEVC_V4L2REQUEST_HWACCEL
+                               HWACCEL_V4L2REQUEST(hevc),
 #endif
 #if CONFIG_HEVC_VAAPI_HWACCEL
                                HWACCEL_VAAPI(hevc),

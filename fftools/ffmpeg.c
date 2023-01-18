@@ -1953,8 +1953,8 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_ref
                        av_channel_layout_compare(&ifilter->ch_layout, &frame->ch_layout);
         break;
     case AVMEDIA_TYPE_VIDEO:
-        need_reinit |= ifilter->width  != frame->width ||
-                       ifilter->height != frame->height;
+        need_reinit |= ifilter->width  != av_frame_cropped_width(frame) ||
+                       ifilter->height != av_frame_cropped_height(frame);
         break;
     }
 
@@ -1964,6 +1964,9 @@ static int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_ref
     if (!!ifilter->hw_frames_ctx != !!frame->hw_frames_ctx ||
         (ifilter->hw_frames_ctx && ifilter->hw_frames_ctx->data != frame->hw_frames_ctx->data))
         need_reinit = 1;
+
+    if (no_cvt_hw && fg->graph)
+        need_reinit = 0;
 
     if (sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DISPLAYMATRIX)) {
         if (!ifilter->displaymatrix || memcmp(sd->data, ifilter->displaymatrix, sizeof(int32_t) * 9))
@@ -2220,8 +2223,7 @@ static int decode_video(InputStream *ist, AVPacket *pkt, int *got_output, int64_
         decoded_frame->top_field_first = ist->top_field_first;
 
     ist->frames_decoded++;
-
-    if (ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
+    if (!no_cvt_hw && ist->hwaccel_retrieve_data && decoded_frame->format == ist->hwaccel_pix_fmt) {
         err = ist->hwaccel_retrieve_data(ist->dec_ctx, decoded_frame);
         if (err < 0)
             goto fail;
@@ -2418,7 +2420,12 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
         case AVMEDIA_TYPE_VIDEO:
             ret = decode_video    (ist, repeating ? NULL : avpkt, &got_output, &duration_pts, !pkt,
                                    &decode_failed);
-            if (!repeating || !pkt || got_output) {
+            // Pi: Do not inc dts if no_cvt_hw set
+            // V4L2 H264 decode has long latency and sometimes spits out a long
+            // stream of output without input. In this case incrementing DTS is wrong.
+            // There may be cases where the condition as written is correct so only
+            // "fix" in the cases which cause problems
+            if (!repeating || !pkt || (got_output && !no_cvt_hw)) {
                 if (pkt && pkt->duration) {
                     duration_dts = av_rescale_q(pkt->duration, ist->st->time_base, AV_TIME_BASE_Q);
                 } else if(ist->dec_ctx->framerate.num != 0 && ist->dec_ctx->framerate.den != 0) {
@@ -2564,12 +2571,15 @@ static enum AVPixelFormat get_format(AVCodecContext *s, const enum AVPixelFormat
             break;
 
         if (ist->hwaccel_id == HWACCEL_GENERIC ||
-            ist->hwaccel_id == HWACCEL_AUTO) {
+            ist->hwaccel_id == HWACCEL_AUTO ||
+            no_cvt_hw) {
             for (i = 0;; i++) {
                 config = avcodec_get_hw_config(s->codec, i);
                 if (!config)
                     break;
-                if (!(config->methods &
+                if (no_cvt_hw && (config->methods & AV_CODEC_HW_CONFIG_METHOD_INTERNAL))
+                    av_log(s, AV_LOG_DEBUG, "no_cvt_hw so trying pix_fmt %d with codec internal hwaccel\n", *p);
+                else if (!(config->methods &
                       AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX))
                     continue;
                 if (config->pix_fmt == *p)
