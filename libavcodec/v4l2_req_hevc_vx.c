@@ -110,8 +110,10 @@ static enum AVPixelFormat pixel_format_from_format(const struct v4l2_format *con
         return AV_PIX_FMT_NV12;
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
+    case V4L2_PIX_FMT_BCM_NV12_COL128:
         return AV_PIX_FMT_RPI4_8;
     case V4L2_PIX_FMT_NV12_10_COL128:
+    case V4L2_PIX_FMT_BCM_NV12_10_COL128:
         return AV_PIX_FMT_RPI4_10;
 #endif
     default:
@@ -707,55 +709,65 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     unsigned int height;
     unsigned int bpl;
     uint32_t pixelformat;
+    unsigned int sizeimage;
+    uint64_t mod = DRM_FORMAT_MOD_LINEAR;
 
     if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
         width       = format->fmt.pix_mp.width;
         height      = format->fmt.pix_mp.height;
         pixelformat = format->fmt.pix_mp.pixelformat;
         bpl         = format->fmt.pix_mp.plane_fmt[0].bytesperline;
+        sizeimage   = format->fmt.pix_mp.plane_fmt[0].sizeimage;
     }
     else {
         width       = format->fmt.pix.width;
         height      = format->fmt.pix.height;
         pixelformat = format->fmt.pix.pixelformat;
         bpl         = format->fmt.pix.bytesperline;
+        sizeimage   = format->fmt.pix.sizeimage;
     }
 
     switch (pixelformat) {
     case V4L2_PIX_FMT_NV12:
         layer->format = DRM_FORMAT_NV12;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
         layer->format = DRM_FORMAT_NV12;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
+        bpl = (width + 127) & ~127;
         break;
     case V4L2_PIX_FMT_NV12_10_COL128:
         layer->format = DRM_FORMAT_P030;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
+        bpl = ((width + 95) / 96) * 128;
+        break;
+    case V4L2_PIX_FMT_BCM_NV12_COL128:
+        layer->format = DRM_FORMAT_NV12;
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(sizeimage/bpl);
+        break;
+    case V4L2_PIX_FMT_BCM_NV12_10_COL128:
+        layer->format = DRM_FORMAT_P030;
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(sizeimage/bpl);
         break;
 #endif
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     case V4L2_PIX_FMT_SUNXI_TILED_NV12:
         layer->format = DRM_FORMAT_NV12;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_ALLWINNER_TILED;
+        mod = DRM_FORMAT_MOD_ALLWINNER_TILED;
         break;
 #endif
 #if defined(V4L2_PIX_FMT_NV15) && defined(DRM_FORMAT_NV15)
     case V4L2_PIX_FMT_NV15:
         layer->format = DRM_FORMAT_NV15;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #endif
     case V4L2_PIX_FMT_NV16:
         layer->format = DRM_FORMAT_NV16;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #if defined(V4L2_PIX_FMT_NV20) && defined(DRM_FORMAT_NV20)
     case V4L2_PIX_FMT_NV20:
         layer->format = DRM_FORMAT_NV20;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #endif
     default:
@@ -765,6 +777,7 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     desc->nb_objects = 1;
     desc->objects[0].fd = -1;
     desc->objects[0].size = 0;
+    desc->objects[0].format_modifier = mod;
 
     desc->nb_layers = 1;
     layer->nb_planes = 2;
@@ -772,26 +785,12 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     layer->planes[0].object_index = 0;
     layer->planes[0].offset = 0;
     layer->planes[0].pitch = bpl;
-#if CONFIG_SAND
-    if (pixelformat == V4L2_PIX_FMT_NV12_COL128) {
-        layer->planes[1].object_index = 0;
+    layer->planes[1].object_index = 0;
+    if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128)
         layer->planes[1].offset = height * 128;
-        layer->planes[0].pitch = width;
-        layer->planes[1].pitch = width;
-    }
-    else if (pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
-        layer->planes[1].object_index = 0;
-        layer->planes[1].offset = height * 128;
-        layer->planes[0].pitch = width * 2; // Lies but it keeps DRM import happy
-        layer->planes[1].pitch = width * 2;
-    }
     else
-#endif
-    {
-        layer->planes[1].object_index = 0;
         layer->planes[1].offset = layer->planes[0].pitch * height;
-        layer->planes[1].pitch = layer->planes[0].pitch;
-    }
+    layer->planes[1].pitch = layer->planes[0].pitch;
 
     return 0;
 }

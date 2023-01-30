@@ -121,14 +121,20 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
     AVCodecContext *const avctx = v;
     const HEVCContext *const h = avctx->priv_data;
 
+    av_log(NULL, AV_LOG_INFO, "Try fmt: %s\n", av_fourcc2str(fmtdesc->pixelformat));
+
     if (h->ps.sps->bit_depth == 8) {
-        if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128 ||
+        if (
+//            fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128 ||
+            fmtdesc->pixelformat == V4L2_PIX_FMT_BCM_NV12_COL128 ||
             fmtdesc->pixelformat == V4L2_PIX_FMT_NV12) {
             return 1;
         }
     }
     else if (h->ps.sps->bit_depth == 10) {
-        if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+        if (
+//            fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128 ||
+            fmtdesc->pixelformat == V4L2_PIX_FMT_BCM_NV12_10_COL128) {
             return 1;
         }
     }

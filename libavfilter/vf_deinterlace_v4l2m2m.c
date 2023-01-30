@@ -71,6 +71,14 @@
 #define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
 #endif
 
+#ifndef V4L2_PIX_FMT_BCM_NV12_10_COL128
+#define V4L2_PIX_FMT_BCM_NV12_10_COL128 v4l2_fourcc('B', 'N', '3', '0')
+#endif
+
+#ifndef V4L2_PIX_FMT_BCM_NV12_COL128
+#define V4L2_PIX_FMT_BCM_NV12_COL128 v4l2_fourcc('B', 'N', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+#endif
+
 typedef struct V4L2Queue V4L2Queue;
 typedef struct DeintV4L2M2MContextShared DeintV4L2M2MContextShared;
 
@@ -237,6 +245,7 @@ fmt_v4l2_to_av(const uint32_t pixfmt)
         return AV_PIX_FMT_NV12;
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
+    case V4L2_PIX_FMT_BCM_NV12_COL128:
         return AV_PIX_FMT_RPI4_8;
 #endif
     default:
@@ -421,6 +430,12 @@ static inline uint32_t
 fmt_bpl(const struct v4l2_format * const fmt, const unsigned int plane_n)
 {
     return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.plane_fmt[plane_n].bytesperline : fmt->fmt.pix.bytesperline;
+}
+
+static inline uint32_t
+fmt_sizeimage(const struct v4l2_format * const fmt, const unsigned int plane_n)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(fmt->type) ? fmt->fmt.pix_mp.plane_fmt[plane_n].sizeimage : fmt->fmt.pix.sizeimage;
 }
 
 static inline uint32_t
@@ -854,6 +869,7 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
     uint32_t w = 0;
     uint32_t h = 0;
     uint32_t bpl = src->layers[0].planes[0].pitch;
+    uint32_t sizeimage = 0;
 
     // We really don't expect multiple layers
     // All formats that we currently cope with are single object
@@ -884,10 +900,17 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
             else if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
                 if (src->layers[0].nb_planes != 2)
                     break;
+#if 0
                 pix_fmt = V4L2_PIX_FMT_NV12_COL128;
                 w = bpl;
                 h = src->layers[0].planes[1].offset / 128;
                 bpl = fourcc_mod_broadcom_param(mod);
+#else
+                pix_fmt = V4L2_PIX_FMT_BCM_NV12_COL128;
+                w = bpl;
+                h = src->layers[0].planes[1].offset / 128;
+                sizeimage = bpl * fourcc_mod_broadcom_param(mod);
+#endif
             }
 #endif
             break;
@@ -919,6 +942,7 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
         pix->height = h;
         pix->pixelformat = pix_fmt;
         pix->plane_fmt[0].bytesperline = bpl;
+        pix->plane_fmt[0].sizeimage = sizeimage;
         pix->num_planes = 1;
     }
     else {
@@ -928,6 +952,7 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
         pix->height = h;
         pix->pixelformat = pix_fmt;
         pix->bytesperline = bpl;
+        pix->sizeimage = sizeimage;
     }
 
     set_fmt_color(format, frame->color_primaries, frame->colorspace, frame->color_trc);
@@ -1126,7 +1151,7 @@ static int v4l2_buffer_export_drm(V4L2Queue * const q, V4L2Buffer * const avbuf)
 #if CONFIG_SAND
         case V4L2_PIX_FMT_NV12_COL128:
             mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl0);
-            layer->format = V4L2_PIX_FMT_NV12;
+            layer->format = DRM_FORMAT_NV12;
 
             if (avbuf->num_planes > 1)
                 break;
@@ -1134,9 +1159,24 @@ static int v4l2_buffer_export_drm(V4L2Queue * const q, V4L2Buffer * const avbuf)
             layer->nb_planes = 2;
             layer->planes[1].object_index = 0;
             layer->planes[1].offset = height * 128;
-            layer->planes[0].pitch = fmt_width(fmt);
+            layer->planes[0].pitch = (fmt_width(fmt) + 127) & ~127;
             layer->planes[1].pitch = layer->planes[0].pitch;
             break;
+
+        case V4L2_PIX_FMT_BCM_NV12_COL128:
+            mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(fmt_sizeimage(fmt, 0) / bpl0);
+            layer->format = DRM_FORMAT_NV12;
+
+            if (avbuf->num_planes > 1)
+                break;
+
+            layer->nb_planes = 2;
+            layer->planes[1].object_index = 0;
+            layer->planes[1].offset = height * 128;
+            layer->planes[0].pitch = bpl0;
+            layer->planes[1].pitch = layer->planes[0].pitch;
+            break;
+
 #endif
 
         case DRM_FORMAT_NV12:

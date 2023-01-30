@@ -67,6 +67,14 @@
 #define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
 #endif
 
+#ifndef V4L2_PIX_FMT_BCM_NV12_10_COL128
+#define V4L2_PIX_FMT_BCM_NV12_10_COL128 v4l2_fourcc('B', 'N', '3', '0')
+#endif
+
+#ifndef V4L2_PIX_FMT_BCM_NV12_COL128
+#define V4L2_PIX_FMT_BCM_NV12_COL128 v4l2_fourcc('B', 'N', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+#endif
+
 static inline void v4l2_set_timeperframe(V4L2m2mContext *s, unsigned int num, unsigned int den)
 {
     struct v4l2_streamparm parm = { 0 };
@@ -311,6 +319,7 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
     uint32_t w = 0;
     uint32_t h = 0;
     uint32_t bpl = src->layers[0].planes[0].pitch;
+    uint32_t sizeimage = 0;
 
     // We really don't expect multiple layers
     // All formats that we currently cope with are single object
@@ -340,10 +349,17 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
             else if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
                 if (src->layers[0].nb_planes != 2)
                     break;
+#if 0
                 pix_fmt = V4L2_PIX_FMT_NV12_COL128;
                 w = bpl;
                 h = src->layers[0].planes[1].offset / 128;
                 bpl = fourcc_mod_broadcom_param(mod);
+#else
+                pix_fmt = V4L2_PIX_FMT_BCM_NV12_COL128;
+                w = bpl;
+                h = src->layers[0].planes[1].offset / 128;
+                sizeimage = bpl * fourcc_mod_broadcom_param(mod);
+#endif
             }
             break;
 
@@ -352,7 +368,7 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
                 if (src->layers[0].nb_planes != 2)
                     break;
                 pix_fmt =  V4L2_PIX_FMT_NV12_10_COL128;
-                w = bpl / 2;  // Matching lie to how we construct this
+                w = (bpl / 128) * 96;
                 h = src->layers[0].planes[1].offset / 128;
                 bpl = fourcc_mod_broadcom_param(mod);
             }
@@ -372,6 +388,7 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
         pix->height = h;
         pix->pixelformat = pix_fmt;
         pix->plane_fmt[0].bytesperline = bpl;
+        pix->plane_fmt[0].sizeimage = sizeimage;
         pix->num_planes = 1;
     }
     else {
@@ -381,6 +398,7 @@ static int avdrm_to_v4l2(struct v4l2_format * const format, const AVFrame * cons
         pix->height = h;
         pix->pixelformat = pix_fmt;
         pix->bytesperline = bpl;
+        pix->sizeimage = sizeimage;
     }
 
     return 0;
