@@ -782,13 +782,12 @@ avprofile_to_v4l2(const enum AVCodecID codec_id, const int avprofile)
 
 // This check mirrors Chrome's profile check by testing to see if the profile
 // exists as a possible value for the V4L2 profile control
-// Seems a bit hacky and possibly prone to failure but nothing better is
-// obvious
 static int
 check_profile(AVCodecContext *const avctx, V4L2m2mContext *const s)
 {
     struct v4l2_queryctrl query_ctrl;
     struct v4l2_querymenu query_menu;
+    uint32_t profile_id;
 
     // An unset profile is almost certainly zero - do not reject
     if (avctx->profile == 0) {
@@ -798,18 +797,24 @@ check_profile(AVCodecContext *const avctx, V4L2m2mContext *const s)
 
     memset(&query_ctrl, 0, sizeof(query_ctrl));
     switch (avctx->codec_id) {
+        case AV_CODEC_ID_MPEG2VIDEO:
+            profile_id = V4L2_CID_MPEG_VIDEO_MPEG2_PROFILE;
+            break;
+        case AV_CODEC_ID_MPEG4:
+            profile_id = V4L2_CID_MPEG_VIDEO_MPEG4_PROFILE;
+            break;
         case AV_CODEC_ID_H264:
-            query_ctrl.id = V4L2_CID_MPEG_VIDEO_H264_PROFILE;
+            profile_id = V4L2_CID_MPEG_VIDEO_H264_PROFILE;
             break;
         case AV_CODEC_ID_VP8:
-            query_ctrl.id = V4L2_CID_MPEG_VIDEO_VP8_PROFILE;
+            profile_id = V4L2_CID_MPEG_VIDEO_VP8_PROFILE;
             break;
         case AV_CODEC_ID_VP9:
-            query_ctrl.id = V4L2_CID_MPEG_VIDEO_VP9_PROFILE;
+            profile_id = V4L2_CID_MPEG_VIDEO_VP9_PROFILE;
             break;
 #ifdef V4L2_CID_MPEG_VIDEO_AV1_PROFILE
         case AV_CODEC_ID_AV1:
-            query_ctrl.id = V4L2_CID_MPEG_VIDEO_AV1_PROFILE;
+            profile_id = V4L2_CID_MPEG_VIDEO_AV1_PROFILE;
             break;
 #endif
         default:
@@ -817,49 +822,26 @@ check_profile(AVCodecContext *const avctx, V4L2m2mContext *const s)
             return 0;
     }
 
-    if (ioctl(s->fd, VIDIOC_QUERYCTRL, &query_ctrl) == 0) {
+    query_ctrl = (struct v4l2_queryctrl){.id = profile_id};
+    if (ioctl(s->fd, VIDIOC_QUERYCTRL, &query_ctrl) != 0) {
+        av_log(avctx, AV_LOG_VERBOSE, "Query profile ctrl (%#x) not supported: assume OK\n", query_ctrl.id);
+    }
+    else {
         av_log(avctx, AV_LOG_DEBUG, "%s: Control supported: %#x\n", __func__, query_ctrl.id);
 
-        memset(&query_menu, 0, sizeof(query_menu));
-        query_menu.id = query_ctrl.id;
-        query_menu.index = avprofile_to_v4l2(avctx->codec_id, avctx->profile);
+        query_menu = (struct v4l2_querymenu){
+            .id = query_ctrl.id,
+            .index = avprofile_to_v4l2(avctx->codec_id, avctx->profile),
+        };
 
-        if (query_menu.index <= query_ctrl.maximum && query_menu.index >= query_ctrl.minimum) {
-            if (ioctl(s->fd, VIDIOC_QUERYMENU, &query_menu) == 0) {
-                return 0;
-            }
+        if (query_menu.index > query_ctrl.maximum ||
+            query_menu.index < query_ctrl.minimum ||
+            ioctl(s->fd, VIDIOC_QUERYMENU, &query_menu) != 0) {
+            return AVERROR(ENOENT);
         }
-        return AVERROR(ENOENT);
     }
 
-    av_log(avctx, AV_LOG_VERBOSE, "Query profile ctrl (%#x) not supported: use defaults\n", query_ctrl.id);
-
-    switch (avctx->codec_id) {
-        case AV_CODEC_ID_H264:
-            switch (avctx->profile) {
-                case FF_PROFILE_H264_BASELINE:
-                case FF_PROFILE_H264_CONSTRAINED_BASELINE:
-                case FF_PROFILE_H264_MAIN:
-                case FF_PROFILE_H264_HIGH:
-                    return 0;
-                default:
-                    break;
-            }
-            break;
-        case AV_CODEC_ID_VP8:
-            return 0;
-        case AV_CODEC_ID_VP9:
-            if (avctx->profile == FF_PROFILE_VP9_0)
-                return 0;
-            break;
-        case AV_CODEC_ID_AV1:
-            if (avctx->profile == FF_PROFILE_AV1_MAIN)
-                return 0;
-            break;
-        default:
-            break;
-    }
-    return AVERROR(ENOENT);
+    return 0;
 };
 
 static int
