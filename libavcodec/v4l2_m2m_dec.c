@@ -21,6 +21,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config.h"
+
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 
@@ -42,6 +44,13 @@
 #include "v4l2_m2m.h"
 #include "v4l2_fmt.h"
 #include "v4l2_req_dmabufs.h"
+
+#if CONFIG_H264_DECODER
+#include "h264_parse.h"
+#endif
+#if CONFIG_HEVC_DECODER
+#include "hevc_parse.h"
+#endif
 
 // Pick 64 for max last count - that is >1sec at 60fps
 #define STATS_LAST_COUNT_MAX 64
@@ -956,6 +965,78 @@ static uint32_t max_coded_size(const AVCodecContext * const avctx)
     return size + (1 << 16);
 }
 
+static void
+parse_extradata(AVCodecContext *avctx)
+{
+    if (!avctx->extradata || !avctx->extradata_size)
+        return;
+
+    switch (avctx->codec_id) {
+#if CONFIG_H264_DECODER
+        case AV_CODEC_ID_H264:
+        {
+            H264ParamSets ps = {{NULL}};
+            int is_avc = 0;
+            int nal_length_size = 0;
+            int ret;
+
+            ret = ff_h264_decode_extradata(avctx->extradata, avctx->extradata_size,
+                                           &ps, &is_avc, &nal_length_size,
+                                           avctx->err_recognition, avctx);
+            if (ret > 0) {
+                const SPS * sps = NULL;
+                unsigned int i;
+                for (i = 0; i != MAX_SPS_COUNT; ++i) {
+                    if (ps.sps_list[i]) {
+                        sps = (const SPS *)ps.sps_list[i]->data;
+                        break;
+                    }
+                }
+                if (sps) {
+                    avctx->profile = ff_h264_get_profile(sps);
+                    avctx->level = sps->level_idc;
+                }
+            }
+            ff_h264_ps_uninit(&ps);
+            break;
+        }
+#endif
+#if CONFIG_HEVC_DECODER
+        case AV_CODEC_ID_HEVC:
+        {
+            HEVCParamSets ps = {{NULL}};
+            HEVCSEI sei = {{{{0}}}};
+            int is_nalff = 0;
+            int nal_length_size = 0;
+            int ret;
+
+            ret = ff_hevc_decode_extradata(avctx->extradata, avctx->extradata_size,
+                                           &ps, &sei, &is_nalff, &nal_length_size,
+                                           avctx->err_recognition, 0, avctx);
+            if (ret > 0) {
+                const HEVCSPS * sps = NULL;
+                unsigned int i;
+                for (i = 0; i != HEVC_MAX_SPS_COUNT; ++i) {
+                    if (ps.sps_list[i]) {
+                        sps = (const HEVCSPS *)ps.sps_list[i]->data;
+                        break;
+                    }
+                }
+                if (sps) {
+                    avctx->profile = sps->ptl.general_ptl.profile_idc;
+                    avctx->level   = sps->ptl.general_ptl.level_idc;
+                }
+            }
+            ff_hevc_ps_uninit(&ps);
+            ff_hevc_reset_sei(&sei);
+            break;
+        }
+#endif
+        default:
+            break;
+    }
+}
+
 static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 {
     V4L2Context *capture, *output;
@@ -976,7 +1057,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         avctx->ticks_per_frame = 2;
     }
 
-    av_log(avctx, AV_LOG_INFO, "level=%d\n", avctx->level);
+    parse_extradata(avctx);
+
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
