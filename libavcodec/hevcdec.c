@@ -380,20 +380,9 @@ static void export_stream_params(HEVCContext *s, const HEVCSPS *sps)
     }
 }
 
-static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
+static void possible_formats(const enum AVPixelFormat pix_fmt, enum AVPixelFormat * fmt)
 {
-#define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + \
-                     CONFIG_HEVC_D3D11VA_HWACCEL * 2 + \
-                     CONFIG_HEVC_NVDEC_HWACCEL + \
-                     CONFIG_HEVC_V4L2REQUEST_HWACCEL + \
-                     CONFIG_HEVC_VAAPI_HWACCEL + \
-                     CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL + \
-                     CONFIG_HEVC_RPI4_8_HWACCEL + \
-                     CONFIG_HEVC_RPI4_10_HWACCEL + \
-                     CONFIG_HEVC_VDPAU_HWACCEL)
-    enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmt = pix_fmts;
-
-    switch (sps->pix_fmt) {
+    switch (pix_fmt) {
     case AV_PIX_FMT_YUV420P:
     case AV_PIX_FMT_YUVJ420P:
 #if CONFIG_HEVC_RPI4_8_HWACCEL
@@ -469,8 +458,24 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
         break;
     }
 
-    *fmt++ = sps->pix_fmt;
+    *fmt++ = pix_fmt;
     *fmt = AV_PIX_FMT_NONE;
+}
+
+static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
+{
+#define HWACCEL_MAX (CONFIG_HEVC_DXVA2_HWACCEL + \
+                     CONFIG_HEVC_D3D11VA_HWACCEL * 2 + \
+                     CONFIG_HEVC_NVDEC_HWACCEL + \
+                     CONFIG_HEVC_V4L2REQUEST_HWACCEL + \
+                     CONFIG_HEVC_VAAPI_HWACCEL + \
+                     CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL + \
+                     CONFIG_HEVC_RPI4_8_HWACCEL + \
+                     CONFIG_HEVC_RPI4_10_HWACCEL + \
+                     CONFIG_HEVC_VDPAU_HWACCEL)
+    enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmt = pix_fmts;
+
+    possible_formats(sps->pix_fmt, fmt);
 
     return ff_thread_get_format(s->avctx, pix_fmts);
 }
@@ -3563,10 +3568,22 @@ static av_cold int hevc_decode_init(AVCodecContext *avctx)
 
     if (!avctx->internal->is_copy) {
         if (avctx->extradata_size > 0 && avctx->extradata) {
+            const enum AVPixelFormat req_fmt = avctx->pix_fmt;
+            enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmt = pix_fmts;
+
             ret = hevc_decode_extradata(s, avctx->extradata, avctx->extradata_size, 1);
             if (ret < 0) {
                 hevc_decode_free(avctx);
                 return ret;
+            }
+
+            possible_formats(avctx->pix_fmt, fmt);
+            for (; *fmt != avctx->pix_fmt; ++fmt) {
+                if (*fmt == req_fmt) {
+                    avctx->sw_pix_fmt = avctx->pix_fmt;
+                    avctx->pix_fmt = req_fmt;
+                    break;
+                }
             }
         }
     }
