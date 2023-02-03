@@ -386,6 +386,50 @@ static av_cold int h264_decode_end(AVCodecContext *avctx)
 
 static AVOnce h264_vlc_init = AV_ONCE_INIT;
 
+static enum AVPixelFormat
+map_pixel_format_yuv(const int bpp, const int jpeg, const int cfmt)
+{
+    // 8-bit has "J" formats - nothing else does
+    static const enum AVPixelFormat a[][2][4] = {
+        {{AV_PIX_FMT_GRAY8,  AV_PIX_FMT_YUV420P,    AV_PIX_FMT_YUV422P,    AV_PIX_FMT_YUV444P},
+         {AV_PIX_FMT_GRAY8,  AV_PIX_FMT_YUVJ420P,   AV_PIX_FMT_YUVJ422P,   AV_PIX_FMT_YUVJ444P}},
+        {{AV_PIX_FMT_GRAY9,  AV_PIX_FMT_YUV420P9,   AV_PIX_FMT_YUV422P9,   AV_PIX_FMT_YUV444P9},
+         {AV_PIX_FMT_GRAY9,  AV_PIX_FMT_YUV420P9,   AV_PIX_FMT_YUV422P9,   AV_PIX_FMT_YUV444P9}},
+        {{AV_PIX_FMT_GRAY10, AV_PIX_FMT_YUV420P10,  AV_PIX_FMT_YUV422P10,  AV_PIX_FMT_YUV444P10},
+         {AV_PIX_FMT_GRAY10, AV_PIX_FMT_YUV420P10,  AV_PIX_FMT_YUV422P10,  AV_PIX_FMT_YUV444P10}},
+        {{AV_PIX_FMT_NONE,   AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE},
+         {AV_PIX_FMT_NONE,   AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE}},
+        {{AV_PIX_FMT_GRAY12, AV_PIX_FMT_YUV420P12,  AV_PIX_FMT_YUV422P12,  AV_PIX_FMT_YUV444P12},
+         {AV_PIX_FMT_GRAY12, AV_PIX_FMT_YUV420P12,  AV_PIX_FMT_YUV422P12,  AV_PIX_FMT_YUV444P12}},
+        {{AV_PIX_FMT_NONE,   AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE},
+         {AV_PIX_FMT_NONE,   AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE}},
+        {{AV_PIX_FMT_GRAY14, AV_PIX_FMT_YUV420P14,  AV_PIX_FMT_YUV422P14,  AV_PIX_FMT_YUV444P14},
+         {AV_PIX_FMT_GRAY14, AV_PIX_FMT_YUV420P14,  AV_PIX_FMT_YUV422P14,  AV_PIX_FMT_YUV444P14}},
+        {{AV_PIX_FMT_NONE,   AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE},
+         {AV_PIX_FMT_NONE,   AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE,       AV_PIX_FMT_NONE}},
+        {{AV_PIX_FMT_GRAY16, AV_PIX_FMT_YUV420P16,  AV_PIX_FMT_YUV422P16,  AV_PIX_FMT_YUV444P16},
+         {AV_PIX_FMT_GRAY16, AV_PIX_FMT_YUV420P16,  AV_PIX_FMT_YUV422P16,  AV_PIX_FMT_YUV444P16}},
+    };
+    return bpp < 8 || bpp >= FF_ARRAY_ELEMS(a) + 8 || cfmt < 0 || cfmt >= FF_ARRAY_ELEMS(a[0][0]) ?
+        AV_PIX_FMT_NONE :
+        a[bpp - 8][!!jpeg][cfmt];
+}
+
+static enum AVPixelFormat
+map_pixel_format_rgb(const int bpp)
+{
+    static const enum AVPixelFormat a[] = {
+        AV_PIX_FMT_GBRP,   AV_PIX_FMT_GBRP9,
+        AV_PIX_FMT_GBRP10, AV_PIX_FMT_NONE,
+        AV_PIX_FMT_GBRP12, AV_PIX_FMT_NONE,
+        AV_PIX_FMT_GBRP14, AV_PIX_FMT_NONE,
+        AV_PIX_FMT_GBRP16,
+    };
+    return bpp < 8 || bpp >= FF_ARRAY_ELEMS(a) + 8 ?
+        AV_PIX_FMT_NONE :
+        a[bpp - 8];
+}
+
 static av_cold int h264_decode_init(AVCodecContext *avctx)
 {
     H264Context *h = avctx->priv_data;
@@ -411,6 +455,8 @@ static av_cold int h264_decode_init(AVCodecContext *avctx)
 
     if (!avctx->internal->is_copy) {
         if (avctx->extradata_size > 0 && avctx->extradata) {
+            unsigned int i;
+
             ret = ff_h264_decode_extradata(avctx->extradata, avctx->extradata_size,
                                            &h->ps, &h->is_avc, &h->nal_length_size,
                                            avctx->err_recognition, avctx);
@@ -423,6 +469,27 @@ static av_cold int h264_decode_init(AVCodecContext *avctx)
                }
                ret = 0;
            }
+
+            for (i = 0; i != FF_ARRAY_ELEMS(h->ps.sps_list); ++i) {
+                const AVBufferRef * const buf = h->ps.sps_list[i];
+                if (buf != NULL) {
+                    const SPS *sps = (const SPS *)buf->data;
+                    avctx->pix_fmt = sps->chroma_format_idc == 3 &&
+                            sps->video_signal_type_present_flag &&
+                            sps->colour_description_present_flag &&
+                            sps->colorspace == AVCOL_SPC_RGB ?
+                        map_pixel_format_rgb(sps->bit_depth_chroma) :
+                        map_pixel_format_yuv(sps->bit_depth_chroma,
+                            (sps->video_signal_type_present_flag && sps->full_range > 0),
+                            sps->chroma_format_idc == 0 ? 1 : sps->chroma_format_idc);
+                    avctx->profile = ff_h264_get_profile(sps);
+                    avctx->level = sps->level_idc;
+
+                    av_log(avctx, AV_LOG_VERBOSE, "Set %s Profile %d, Level %d from SPS",
+                           av_get_pix_fmt_name(avctx->pix_fmt), sps->profile_idc, sps->level_idc);
+                    break;
+                }
+            }
         }
     }
 
