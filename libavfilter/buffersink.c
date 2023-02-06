@@ -62,6 +62,11 @@ typedef struct BufferSinkContext {
     int sample_rates_size;
 
     AVFrame *peeked_frame;
+
+    union {
+        av_buffersink_alloc_video_frame * video;
+    } alloc_cb;
+    void * alloc_v;
 } BufferSinkContext;
 
 #define NB_ITEMS(list) (list ## _size / sizeof(*list))
@@ -153,6 +158,44 @@ int attribute_align_arg av_buffersink_get_samples(AVFilterContext *ctx,
 {
     return get_frame_internal(ctx, frame, 0, nb_samples);
 }
+
+static AVFrame * alloc_video_buffer(AVFilterLink *link, int w, int h)
+{
+    AVFilterContext * const ctx = link->dst;
+    BufferSinkContext * const bs = ctx->priv;
+    return bs->alloc_cb.video ? bs->alloc_cb.video(ctx, bs->alloc_v, w, h) :
+        ff_default_get_video_buffer(link, w, h);
+}
+
+int av_buffersink_set_alloc_video_frame(AVFilterContext *ctx, av_buffersink_alloc_video_frame * cb, void * v)
+{
+    BufferSinkContext * const bs = ctx->priv;
+    bs->alloc_cb.video = cb;
+    bs->alloc_v = v;
+    return 0;
+}
+
+#if FF_API_BUFFERSINK_ALLOC
+AVBufferSinkParams *av_buffersink_params_alloc(void)
+{
+    static const int pixel_fmts[] = { AV_PIX_FMT_NONE };
+    AVBufferSinkParams *params = av_malloc(sizeof(AVBufferSinkParams));
+    if (!params)
+        return NULL;
+
+    params->pixel_fmts = pixel_fmts;
+    return params;
+}
+
+AVABufferSinkParams *av_abuffersink_params_alloc(void)
+{
+    AVABufferSinkParams *params = av_mallocz(sizeof(AVABufferSinkParams));
+
+    if (!params)
+        return NULL;
+    return params;
+}
+#endif
 
 static av_cold int common_init(AVFilterContext *ctx)
 {
@@ -381,6 +424,7 @@ static const AVFilterPad avfilter_vsink_buffer_inputs[] = {
     {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
+        .get_buffer = {.video = alloc_video_buffer},
     },
 };
 
