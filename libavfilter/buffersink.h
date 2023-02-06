@@ -166,6 +166,9 @@ int av_buffersink_get_frame(AVFilterContext *ctx, AVFrame *frame);
  */
 int av_buffersink_get_samples(AVFilterContext *ctx, AVFrame *frame, int nb_samples);
 
+typedef AVFrame * av_buffersink_alloc_video_frame(AVFilterContext * ctx, void * v, int w, int h);
+int av_buffersink_set_alloc_video_frame(AVFilterContext *ctx, av_buffersink_alloc_video_frame * cb, void * v);
+
 /**
  * @}
  */
