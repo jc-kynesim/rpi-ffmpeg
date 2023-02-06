@@ -62,6 +62,11 @@ typedef struct BufferSinkContext {
     int sample_rates_size;
 
     AVFrame *peeked_frame;
+
+    union {
+        AVBuffersinkAllocVideoFrameFunc video;
+    } alloc_cb;
+    void * alloc_v;
 } BufferSinkContext;
 
 #define NB_ITEMS(list) (list ## _size / sizeof(*list))
@@ -152,6 +157,21 @@ int attribute_align_arg av_buffersink_get_samples(AVFilterContext *ctx,
                                                   AVFrame *frame, int nb_samples)
 {
     return get_frame_internal(ctx, frame, 0, nb_samples);
+}
+
+static AVFrame *alloc_video_buffer(AVFilterLink *link, int w, int h)
+{
+    AVFilterContext *const ctx = link->dst;
+    BufferSinkContext *const buf = ctx->priv;
+    return buf->alloc_cb.video ? buf->alloc_cb.video(ctx, buf->alloc_v, w, h) :
+                                 ff_default_get_video_buffer(link, w, h);
+}
+
+void av_buffersink_set_alloc_video_frame(AVFilterContext *ctx, AVBuffersinkAllocVideoFrameFunc cb, void *v)
+{
+    BufferSinkContext *const buf = ctx->priv;
+    buf->alloc_cb.video = cb;
+    buf->alloc_v = v;
 }
 
 static av_cold int common_init(AVFilterContext *ctx)
@@ -381,6 +401,7 @@ static const AVFilterPad avfilter_vsink_buffer_inputs[] = {
     {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
+        .get_buffer = {.video = alloc_video_buffer},
     },
 };
 
