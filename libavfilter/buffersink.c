@@ -84,6 +84,11 @@ typedef struct BufferSinkContext {
     unsigned          nb_channel_layouts;
 
     AVFrame *peeked_frame;
+
+    union {
+        av_buffersink_alloc_video_frame * video;
+    } alloc_cb;
+    void * alloc_v;
 } BufferSinkContext;
 
 int attribute_align_arg av_buffersink_get_frame(AVFilterContext *ctx, AVFrame *frame)
@@ -157,6 +162,22 @@ int attribute_align_arg av_buffersink_get_samples(AVFilterContext *ctx,
                                                   AVFrame *frame, int nb_samples)
 {
     return get_frame_internal(ctx, frame, 0, nb_samples);
+}
+
+static AVFrame * alloc_video_buffer(AVFilterLink *link, int w, int h)
+{
+    AVFilterContext * const ctx = link->dst;
+    BufferSinkContext * const bs = ctx->priv;
+    return bs->alloc_cb.video ? bs->alloc_cb.video(ctx, bs->alloc_v, w, h) :
+        ff_default_get_video_buffer(link, w, h);
+}
+
+int av_buffersink_set_alloc_video_frame(AVFilterContext *ctx, av_buffersink_alloc_video_frame * cb, void * v)
+{
+    BufferSinkContext * const bs = ctx->priv;
+    bs->alloc_cb.video = cb;
+    bs->alloc_v = v;
+    return 0;
 }
 
 static av_cold int common_init(AVFilterContext *ctx)
@@ -544,6 +565,14 @@ static const AVOption abuffersink_options[] = {
 AVFILTER_DEFINE_CLASS(buffersink);
 AVFILTER_DEFINE_CLASS(abuffersink);
 
+static const AVFilterPad avfilter_vsink_buffer_inputs[] = {
+    {
+        .name = "default",
+        .type = AVMEDIA_TYPE_VIDEO,
+        .get_buffer = {.video = alloc_video_buffer},
+    },
+};
+
 const FFFilter ff_vsink_buffer = {
     .p.name        = "buffersink",
     .p.description = NULL_IF_CONFIG_SMALL("Buffer video frames, and make them available to the end of the filter graph."),
@@ -553,7 +582,7 @@ const FFFilter ff_vsink_buffer = {
     .init          = init_video,
     .uninit        = uninit,
     .activate      = activate,
-    FILTER_INPUTS(ff_video_default_filterpad),
+    FILTER_INPUTS(avfilter_vsink_buffer_inputs),
     FILTER_QUERY_FUNC2(vsink_query_formats),
 };
 
