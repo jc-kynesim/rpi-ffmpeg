@@ -351,7 +351,14 @@ static int config_props(AVFilterLink *link)
 
     yadif->csp = av_pix_fmt_desc_get(link->format);
     yadif->filter = filter;
-    if (yadif->csp->comp[0].depth > 8) {
+    ff_bwdif_init_filter_line(s, yadif->csp->comp[0].depth);
+
+    return 0;
+}
+
+av_cold void ff_bwdif_init_filter_line(BWDIFContext *s, int bit_depth)
+{
+    if (bit_depth > 8) {
         s->filter_intra = filter_intra_16bit;
         s->filter_line  = filter_line_c_16bit;
         s->filter_edge  = filter_edge_16bit;
@@ -361,10 +368,9 @@ static int config_props(AVFilterLink *link)
         s->filter_edge  = filter_edge;
     }
 
-    if (ARCH_X86)
-        ff_bwdif_init_x86(s);
-
-    return 0;
+#if ARCH_X86
+    ff_bwdif_init_x86(s, bit_depth);
+#endif
 }
 
 
