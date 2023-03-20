@@ -72,6 +72,14 @@
 #define CHECK_CU(x) FF_CUDA_CHECK_DL(cuda_cu, cu, x)
 #endif
 
+// Sometimes missing definitions
+#ifndef VK_EXT_VIDEO_DECODE_H264_EXTENSION_NAME
+#define VK_EXT_VIDEO_DECODE_H264_EXTENSION_NAME "VK_EXT_video_decode_h264"
+#endif
+#ifndef VK_EXT_VIDEO_DECODE_H265_EXTENSION_NAME
+#define VK_EXT_VIDEO_DECODE_H265_EXTENSION_NAME "VK_EXT_video_decode_h265"
+#endif
+
 typedef struct VulkanDevicePriv {
     /**
      * The public AVVulkanDeviceContext. See hwcontext_vulkan.h for it.
