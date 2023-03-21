@@ -792,7 +792,7 @@ check_profile(AVCodecContext *const avctx, V4L2m2mContext *const s)
 
     // An unset profile is almost certainly zero or -99 - do not reject
     if (avctx->profile <= 0) {
-        av_log(avctx, AV_LOG_VERBOSE, "Profile <= 0 - check skipped\n");
+        av_log(avctx, AV_LOG_VERBOSE, "Profile %d <= 0 - check skipped\n", avctx->profile);
         return 0;
     }
 
