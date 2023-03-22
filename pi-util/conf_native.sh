@@ -33,18 +33,28 @@ RPI_LIBDIRS=
 RPI_DEFINES=
 RPI_EXTRALIBS=
 
-if [ "$MC" == "arm64" ]; then
-  echo "M/C aarch64"
-  A=aarch64-linux-gnu
-  B=arm64
-elif [ "$MC" == "armhf" ]; then
-  echo "M/C armv7"
-  A=arm-linux-gnueabihf
-  B=armv7
-  MCOPTS="--arch=armv6t2 --cpu=cortex-a7"
-  RPI_DEFINES=-mfpu=neon-vfpv4
+# uname -m gives kernel type which may not have the same
+# 32/64bitness as userspace :-( getconf shoudl provide the answer
+# but use uname to check we are on the right processor
+MC=`uname -m`
+LB=`getconf LONG_BIT`
+if [ "$MC" == "armv7l" ] || [ "$MC" == "aarch64" ]; then
+  if [ "$LB" == "32" ]; then
+    echo "M/C armv7"
+    A=arm-linux-gnueabihf
+    B=armv7
+    MCOPTS="--arch=armv6t2 --cpu=cortex-a7"
+    RPI_DEFINES=-mfpu=neon-vfpv4
+  elif [ "$LB" == "64" ]; then
+    echo "M/C aarch64"
+    A=aarch64-linux-gnu
+    B=arm64
+  else
+    echo "Unknown LONG_BIT name: $LB"
+    exit 1
+  fi
 else
-  echo Unexpected architecture $MC
+  echo "Unknown machine name: $MC"
   exit 1
 fi
 
