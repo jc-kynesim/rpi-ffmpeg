@@ -66,6 +66,12 @@ void ff_shuffle_bytes_3102_neon(const uint8_t *src, uint8_t *dst, int src_size);
 void ff_shuffle_bytes_2013_neon(const uint8_t *src, uint8_t *dst, int src_size);
 void ff_shuffle_bytes_2130_neon(const uint8_t *src, uint8_t *dst, int src_size);
 void ff_shuffle_bytes_1203_neon(const uint8_t *src, uint8_t *dst, int src_size);
+void ff_bgr24toyv12_aarch64(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, const int32_t *rgb2yuv);
+void ff_rgb24toyv12_aarch64(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, const int32_t *rgb2yuv);
 
 void ff_uyvytoyuv422_neon(uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
                           const uint8_t *src, int width, int height,
@@ -100,5 +106,7 @@ av_cold void rgb2rgb_init_aarch64(void)
         uyvytoyuv420       = ff_uyvytoyuv420_neon;
         yuyvtoyuv422       = ff_yuyvtoyuv422_neon;
         yuyvtoyuv420       = ff_yuyvtoyuv420_neon;
+        ff_rgb24toyv12 = ff_rgb24toyv12_aarch64;
+        ff_bgr24toyv12 = ff_bgr24toyv12_aarch64;
     }
 }
