@@ -57,6 +57,12 @@ void ff_interleave_bytes_neon(const uint8_t *src1, const uint8_t *src2,
 void ff_deinterleave_bytes_neon(const uint8_t *src, uint8_t *dst1, uint8_t *dst2,
                                 int width, int height, int srcStride,
                                 int dst1Stride, int dst2Stride);
+void ff_bgr24toyv12_aarch64(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv);
+void ff_rgb24toyv12_aarch64(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv);
 
 av_cold void rgb2rgb_init_aarch64(void)
 {
@@ -66,5 +72,7 @@ av_cold void rgb2rgb_init_aarch64(void)
         ff_rgb24toyv12  = rgb24toyv12;
         interleaveBytes = ff_interleave_bytes_neon;
         deinterleaveBytes = ff_deinterleave_bytes_neon;
+        ff_rgb24toyv12 = ff_rgb24toyv12_aarch64;
+        ff_bgr24toyv12 = ff_bgr24toyv12_aarch64;
     }
 }

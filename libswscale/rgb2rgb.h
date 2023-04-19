@@ -79,6 +79,9 @@ void    rgb12to15(const uint8_t *src, uint8_t *dst, int src_size);
 void ff_rgb24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
                       uint8_t *vdst, int width, int height, int lumStride,
                       int chromStride, int srcStride, int32_t *rgb2yuv);
+void ff_bgr24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                      uint8_t *vdst, int width, int height, int lumStride,
+                      int chromStride, int srcStride, int32_t *rgb2yuv);
 
 /**
  * Height should be a multiple of 2 and width should be a multiple of 16.
@@ -126,6 +129,26 @@ extern void (*ff_rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, 
                               int width, int height,
                               int lumStride, int chromStride, int srcStride,
                               int32_t *rgb2yuv);
+extern void (*ff_bgr24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                              int width, int height,
+                              int lumStride, int chromStride, int srcStride,
+                              int32_t *rgb2yuv);
+extern void (*ff_rgbxtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
+extern void (*ff_bgrxtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
+extern void (*ff_xrgbtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
+extern void (*ff_xbgrtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
 extern void (*planar2x)(const uint8_t *src, uint8_t *dst, int width, int height,
                         int srcStride, int dstStride);
 
