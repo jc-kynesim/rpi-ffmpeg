@@ -646,13 +646,14 @@ static inline void uyvytoyv12_c(const uint8_t *src, uint8_t *ydst,
  * others are ignored in the C version.
  * FIXME: Write HQ version.
  */
-void ff_rgb24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+static void rgb24toyv12_x(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
                    uint8_t *vdst, int width, int height, int lumStride,
-                   int chromStride, int srcStride, int32_t *rgb2yuv)
+                   int chromStride, int srcStride, int32_t *rgb2yuv,
+                   const uint8_t x[9])
 {
-    int32_t ry = rgb2yuv[RY_IDX], gy = rgb2yuv[GY_IDX], by = rgb2yuv[BY_IDX];
-    int32_t ru = rgb2yuv[RU_IDX], gu = rgb2yuv[GU_IDX], bu = rgb2yuv[BU_IDX];
-    int32_t rv = rgb2yuv[RV_IDX], gv = rgb2yuv[GV_IDX], bv = rgb2yuv[BV_IDX];
+    int32_t ry = rgb2yuv[x[0]], gy = rgb2yuv[x[1]], by = rgb2yuv[x[2]];
+    int32_t ru = rgb2yuv[x[3]], gu = rgb2yuv[x[4]], bu = rgb2yuv[x[5]];
+    int32_t rv = rgb2yuv[x[6]], gv = rgb2yuv[x[7]], bv = rgb2yuv[x[8]];
     int y;
     const int chromWidth = width >> 1;
 
@@ -705,6 +706,30 @@ void ff_rgb24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
         ydst += lumStride;
         src  += srcStride;
     }
+}
+
+void ff_rgb24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv)
+{
+    static const uint8_t x[9] = {
+        RY_IDX, GY_IDX, BY_IDX,
+        RU_IDX, GU_IDX, BU_IDX,
+        RV_IDX, GV_IDX, BV_IDX,
+    };
+    rgb24toyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x);
+}
+
+void ff_bgr24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv)
+{
+    static const uint8_t x[9] = {
+         BY_IDX, GY_IDX, RY_IDX,
+         BU_IDX, GU_IDX, RU_IDX,
+         BV_IDX, GV_IDX, RV_IDX,
+    };
+    rgb24toyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x);
 }
 
 static void interleaveBytes_c(const uint8_t *src1, const uint8_t *src2,
@@ -980,6 +1005,7 @@ static av_cold void rgb2rgb_init_c(void)
     yuy2toyv12         = yuy2toyv12_c;
     planar2x           = planar2x_c;
     ff_rgb24toyv12     = ff_rgb24toyv12_c;
+    ff_bgr24toyv12     = ff_bgr24toyv12_c;
     interleaveBytes    = interleaveBytes_c;
     deinterleaveBytes  = deinterleaveBytes_c;
     vu9_to_vu12        = vu9_to_vu12_c;
