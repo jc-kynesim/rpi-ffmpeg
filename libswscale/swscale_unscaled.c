@@ -1654,6 +1654,23 @@ static int bgr24ToYv12Wrapper(SwsContext *c, const uint8_t *src[],
     return srcSliceH;
 }
 
+static int rgb24ToYv12Wrapper(SwsContext *c, const uint8_t *src[],
+                              int srcStride[], int srcSliceY, int srcSliceH,
+                              uint8_t *dst[], int dstStride[])
+{
+    ff_bgr24toyv12(
+        src[0],
+        dst[0] +  srcSliceY       * dstStride[0],
+        dst[1] + (srcSliceY >> 1) * dstStride[1],
+        dst[2] + (srcSliceY >> 1) * dstStride[2],
+        c->srcW, srcSliceH,
+        dstStride[0], dstStride[1], srcStride[0],
+        c->input_rgb2yuv_table);
+    if (dst[3])
+        fillPlane(dst[3], dstStride[3], c->srcW, srcSliceH, srcSliceY, 255);
+    return srcSliceH;
+}
+
 static int yvu9ToYv12Wrapper(SwsContext *c, const uint8_t *src[],
                              int srcStride[], int srcSliceY, int srcSliceH,
                              uint8_t *dst[], int dstStride[])
@@ -2037,6 +2054,11 @@ void ff_get_unscaled_swscale(SwsContext *c)
         (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P) &&
         !(flags & SWS_ACCURATE_RND) && !(dstW&1))
         c->convert_unscaled = bgr24ToYv12Wrapper;
+    /* rgb24toYV12 */
+    if (srcFormat == AV_PIX_FMT_RGB24 &&
+        (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P) &&
+        !(flags & SWS_ACCURATE_RND) && !(dstW&1))
+        c->convert_unscaled = rgb24ToYv12Wrapper;
 
     /* RGB/BGR -> RGB/BGR (no dither needed forms) */
     if (isAnyRGB(srcFormat) && isAnyRGB(dstFormat) && findRgbConvFn(c)
