@@ -9,6 +9,7 @@ RPI_KEEPS=""
 
 NOSHARED=
 MMAL=
+USR_PREFIX=
 
 while [ "$1" != "" ] ; do
     case $1 in
@@ -18,8 +19,14 @@ while [ "$1" != "" ] ; do
 	--mmal)
 	    MMAL=1
 	    ;;
+	--usr)
+	    USR_PREFIX=/usr
+	    ;;
 	*)
-	    echo "Usage $0: [--noshared] [--mmal]"
+	    echo "Usage $0: [--noshared] [--mmal] [--usr]"
+	    echo "  noshared  Build static libs and executable - good for testing"
+	    echo "  mmal      Build mmal decoders"
+	    echo "  usr       Set install prefix to /usr [default=<build-dir>/install]"
 	    exit 1
 	    ;;
     esac
@@ -82,7 +89,9 @@ else
   OUT=$BUILDBASE/$B-$C-$V-shared-rel
 fi
 
-USR_PREFIX=$OUT/install
+if [ ! $USR_PREFIX ]; then
+  USR_PREFIX=$OUT/install
+fi
 LIB_PREFIX=$USR_PREFIX/lib/$A
 INC_PREFIX=$USR_PREFIX/include/$A
 
@@ -113,6 +122,7 @@ $FFSRC/configure \
  --extra-libs="$RPI_EXTRALIBS"\
  --extra-version="rpi"
 
+echo "Configured into $OUT"
 
 # gcc option for getting asm listing
 # -Wa,-ahls
