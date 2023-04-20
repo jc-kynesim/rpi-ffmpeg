@@ -679,6 +679,19 @@ static void rgb24toyv12_x(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
             Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) + 16;
             ydst[2 * i + 1] = Y;
         }
+        if ((width & 1) != 0) {
+            unsigned int b = src[6 * i + 0];
+            unsigned int g = src[6 * i + 1];
+            unsigned int r = src[6 * i + 2];
+
+            unsigned int Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) +  16;
+            unsigned int V = ((rv * r + gv * g + bv * b) >> RGB2YUV_SHIFT) + 128;
+            unsigned int U = ((ru * r + gu * g + bu * b) >> RGB2YUV_SHIFT) + 128;
+
+            udst[i]     = U;
+            vdst[i]     = V;
+            ydst[2 * i] = Y;
+        }
         ydst += lumStride;
         src  += srcStride;
 
@@ -700,6 +713,15 @@ static void rgb24toyv12_x(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
 
             Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) + 16;
             ydst[2 * i + 1] = Y;
+        }
+        if ((width & 1) != 0) {
+            unsigned int b = src[6 * i + 0];
+            unsigned int g = src[6 * i + 1];
+            unsigned int r = src[6 * i + 2];
+
+            unsigned int Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) + 16;
+
+            ydst[2 * i] = Y;
         }
         udst += chromStride;
         vdst += chromStride;
@@ -767,6 +789,19 @@ static void rgbxtoyv12_x(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
             Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) + 16;
             ydst[2 * i + 1] = Y;
         }
+        if ((width & 1) != 0) {
+            unsigned int b = src[8 * i + 2];
+            unsigned int g = src[8 * i + 1];
+            unsigned int r = src[8 * i + 0];
+
+            unsigned int Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) +  16;
+            unsigned int V = ((rv * r + gv * g + bv * b) >> RGB2YUV_SHIFT) + 128;
+            unsigned int U = ((ru * r + gu * g + bu * b) >> RGB2YUV_SHIFT) + 128;
+
+            udst[i]     = U;
+            vdst[i]     = V;
+            ydst[2 * i] = Y;
+        }
         ydst += lumStride;
         src  += srcStride;
 
@@ -788,6 +823,15 @@ static void rgbxtoyv12_x(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
 
             Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) + 16;
             ydst[2 * i + 1] = Y;
+        }
+        if ((width & 1) != 0) {
+            unsigned int b = src[8 * i + 2];
+            unsigned int g = src[8 * i + 1];
+            unsigned int r = src[8 * i + 0];
+
+            unsigned int Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) + 16;
+
+            ydst[2 * i] = Y;
         }
         udst += chromStride;
         vdst += chromStride;
