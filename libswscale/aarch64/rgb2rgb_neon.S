@@ -77,3 +77,184 @@ function ff_interleave_bytes_neon, export=1
 0:
         ret
 endfunc
+
+// void ff_rgb24toyv12_aarch64(
+//              const uint8_t *src,             // x0
+//              uint8_t *ydst,                  // x1
+//              uint8_t *udst,                  // x2
+//              uint8_t *vdst,                  // x3
+//              int width,                      // w4
+//              int height,                     // w5
+//              int lumStride,                  // w6
+//              int chromStride,                // w7
+//              int srcStr,                     // [sp, #0]
+//              int32_t *rgb2yuv);              // [sp, #8]
+
+function ff_rgb24toyv12_aarch64, export=1
+        ldr             x15, [sp, #8]
+        ld1             {v3.s}[2], [x15], #4
+        ld1             {v3.s}[1], [x15], #4
+        ld1             {v3.s}[0], [x15], #4
+        ld1             {v4.s}[2], [x15], #4
+        ld1             {v4.s}[1], [x15], #4
+        ld1             {v4.s}[0], [x15], #4
+        ld1             {v5.s}[2], [x15], #4
+        ld1             {v5.s}[1], [x15], #4
+        ld1             {v5.s}[0], [x15]
+        b               99f
+endfunc
+
+// void ff_bgr24toyv12_aarch64(
+//              const uint8_t *src,             // x0
+//              uint8_t *ydst,                  // x1
+//              uint8_t *udst,                  // x2
+//              uint8_t *vdst,                  // x3
+//              int width,                      // w4
+//              int height,                     // w5
+//              int lumStride,                  // w6
+//              int chromStride,                // w7
+//              int srcStr,                     // [sp, #0]
+//              int32_t *rgb2yuv);              // [sp, #8]
+
+function ff_bgr24toyv12_aarch64, export=1
+        ldr             x15, [sp, #8]
+        ld3             {v3.s, v4.s, v5.s}[0], [x15], #12
+        ld3             {v3.s, v4.s, v5.s}[1], [x15], #12
+        ld3             {v3.s, v4.s, v5.s}[2], [x15]
+99:
+        ldr             w14, [sp, #0]
+        movi            v18.8b, #128
+        uxtl            v17.8h, v18.8b
+
+        // Even line - YUV
+1:
+        mov             x10, x0
+        mov             x11, x1
+        mov             x12, x2
+        mov             x13, x3
+        mov             w9,  w4
+
+0:
+        ld3             {v0.16b, v1.16b, v2.16b}, [x10], #48
+
+        uxtl2           v20.8h, v0.16b
+        uxtl2           v21.8h, v1.16b
+        uxtl2           v22.8h, v2.16b
+
+        uxtl            v0.8h, v0.8b
+        uxtl            v1.8h, v1.8b
+        uxtl            v2.8h, v2.8b
+        // Y0
+        smull           v6.4s, v0.4h, v3.h[0]
+        smull2          v7.4s, v0.8h, v3.h[0]
+        smlal           v6.4s, v1.4h, v4.h[0]
+        smlal2          v7.4s, v1.8h, v4.h[0]
+        smlal           v6.4s, v2.4h, v5.h[0]
+        smlal2          v7.4s, v2.8h, v5.h[0]
+        shrn            v6.4h, v6.4s, #12
+        shrn2           v6.8h, v7.4s, #12
+        add             v6.8h, v6.8h, v17.8h     // +128 (>> 3 = 16)
+        uqrshrn         v16.8b, v6.8h, #3
+        // Y1
+        smull           v6.4s, v20.4h, v3.h[0]
+        smull2          v7.4s, v20.8h, v3.h[0]
+        smlal           v6.4s, v21.4h, v4.h[0]
+        smlal2          v7.4s, v21.8h, v4.h[0]
+        smlal           v6.4s, v22.4h, v5.h[0]
+        smlal2          v7.4s, v22.8h, v5.h[0]
+        shrn            v6.4h, v6.4s, #12
+        shrn2           v6.8h, v7.4s, #12
+        add             v6.8h, v6.8h, v17.8h
+        uqrshrn2        v16.16b, v6.8h, #3
+        // Y0/Y1
+        st1             {v16.16b}, [x11], #16
+
+        uzp1            v0.8h, v0.8h, v20.8h
+        uzp1            v1.8h, v1.8h, v21.8h
+        uzp1            v2.8h, v2.8h, v22.8h
+
+        // U
+        // Vector subscript *2 as we loaded into S but are only using H
+        smull           v6.4s, v0.4h, v3.h[2]
+        smull2          v7.4s, v0.8h, v3.h[2]
+        smlal           v6.4s, v1.4h, v4.h[2]
+        smlal2          v7.4s, v1.8h, v4.h[2]
+        smlal           v6.4s, v2.4h, v5.h[2]
+        smlal2          v7.4s, v2.8h, v5.h[2]
+        shrn            v6.4h, v6.4s, #14
+        shrn2           v6.8h, v7.4s, #14
+        sqrshrn         v6.8b, v6.8h, #1
+        add             v6.8b, v6.8b, v18.8b     // +128
+        st1             {v6.8b}, [x12], #8
+
+        // V
+        smull           v6.4s, v0.4h, v3.h[4]
+        smull2          v7.4s, v0.8h, v3.h[4]
+        smlal           v6.4s, v1.4h, v4.h[4]
+        smlal2          v7.4s, v1.8h, v4.h[4]
+        smlal           v6.4s, v2.4h, v5.h[4]
+        smlal2          v7.4s, v2.8h, v5.h[4]
+        shrn            v6.4h, v6.4s, #14
+        shrn2           v6.8h, v7.4s, #14
+        sqrshrn         v6.8b, v6.8h, #1
+        add             v6.8b, v6.8b, v18.8b     // +128
+        st1             {v6.8b}, [x13], #8
+
+        subs            w9, w9, #16
+        b.gt            0b
+
+        // Odd line - Y only
+
+        add             x0, x0, w14, SXTX
+        add             x1, x1, w6, SXTX
+        mov             x10, x0
+        mov             x11, x1
+        mov             w9,  w4
+
+0:
+        ld3             {v0.16b, v1.16b, v2.16b}, [x10], #48
+
+        uxtl2           v20.8h, v0.16b
+        uxtl2           v21.8h, v1.16b
+        uxtl2           v22.8h, v2.16b
+
+        uxtl            v0.8h, v0.8b
+        uxtl            v1.8h, v1.8b
+        uxtl            v2.8h, v2.8b
+        // Y0
+        smull           v6.4s, v0.4h, v3.h[0]
+        smull2          v7.4s, v0.8h, v3.h[0]
+        smlal           v6.4s, v1.4h, v4.h[0]
+        smlal2          v7.4s, v1.8h, v4.h[0]
+        smlal           v6.4s, v2.4h, v5.h[0]
+        smlal2          v7.4s, v2.8h, v5.h[0]
+        shrn            v6.4h, v6.4s, #12
+        shrn2           v6.8h, v7.4s, #12
+        add             v6.8h, v6.8h, v17.8h
+        uqrshrn         v16.8b, v6.8h, #3
+        // Y1
+        smull           v6.4s, v20.4h, v3.h[0]
+        smull2          v7.4s, v20.8h, v3.h[0]
+        smlal           v6.4s, v21.4h, v4.h[0]
+        smlal2          v7.4s, v21.8h, v4.h[0]
+        smlal           v6.4s, v22.4h, v5.h[0]
+        smlal2          v7.4s, v22.8h, v5.h[0]
+        shrn            v6.4h, v6.4s, #12
+        shrn2           v6.8h, v7.4s, #12
+        add             v6.8h, v6.8h, v17.8h
+        uqrshrn2        v16.16b, v6.8h, #3
+        // Y0/Y1
+        st1             {v16.16b}, [x11], #16
+
+        subs            w9, w9, #16
+        b.gt            0b
+
+        add             x0, x0, w14, SXTX
+        add             x1, x1, w6, SXTX
+        add             x2, x2, w7, SXTX
+        add             x3, x3, w7, SXTX
+        subs            w5, w5, #2
+        b.gt            1b
+
+        ret
+endfunc
