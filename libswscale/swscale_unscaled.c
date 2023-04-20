@@ -2062,7 +2062,6 @@ void ff_get_unscaled_swscale(SwsContext *c)
     const enum AVPixelFormat dstFormat = c->dstFormat;
     const int flags = c->flags;
     const int dstH = c->dstH;
-    const int dstW = c->dstW;
     int needsDither;
 
     needsDither = isAnyRGB(dstFormat) &&
@@ -2120,12 +2119,12 @@ void ff_get_unscaled_swscale(SwsContext *c)
     /* bgr24toYV12 */
     if (srcFormat == AV_PIX_FMT_BGR24 &&
         (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P) &&
-        !(flags & SWS_ACCURATE_RND) && !(dstW&1))
+        !(flags & SWS_ACCURATE_RND))
         c->convert_unscaled = bgr24ToYv12Wrapper;
     /* rgb24toYV12 */
     if (srcFormat == AV_PIX_FMT_RGB24 &&
         (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P) &&
-        !(flags & SWS_ACCURATE_RND) && !(dstW&1))
+        !(flags & SWS_ACCURATE_RND))
         c->convert_unscaled = rgb24ToYv12Wrapper;
 
     /* bgrxtoYV12 */
@@ -2136,17 +2135,17 @@ void ff_get_unscaled_swscale(SwsContext *c)
     /* rgbx24toYV12 */
     if (((srcFormat == AV_PIX_FMT_RGBA && dstFormat == AV_PIX_FMT_YUV420P) ||
          (srcFormat == AV_PIX_FMT_RGB0 && (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P))) &&
-        !(flags & SWS_ACCURATE_RND) && !(dstW&1))
+        !(flags & SWS_ACCURATE_RND))
         c->convert_unscaled = rgbxToYv12Wrapper;
     /* xbgrtoYV12 */
     if (((srcFormat == AV_PIX_FMT_ABGR && dstFormat == AV_PIX_FMT_YUV420P) ||
          (srcFormat == AV_PIX_FMT_0BGR && (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P))) &&
-        !(flags & SWS_ACCURATE_RND) && !(dstW&1))
+        !(flags & SWS_ACCURATE_RND))
         c->convert_unscaled = xbgrToYv12Wrapper;
     /* xrgb24toYV12 */
     if (((srcFormat == AV_PIX_FMT_ARGB && dstFormat == AV_PIX_FMT_YUV420P) ||
          (srcFormat == AV_PIX_FMT_0RGB && (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P))) &&
-        !(flags & SWS_ACCURATE_RND) && !(dstW&1))
+        !(flags & SWS_ACCURATE_RND))
         c->convert_unscaled = xrgbToYv12Wrapper;
 
     /* RGB/BGR -> RGB/BGR (no dither needed forms) */
