@@ -23,6 +23,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdarg.h>
+#include <time.h>
 
 #undef HAVE_AV_CONFIG_H
 #include "libavutil/cpu.h"
@@ -97,6 +98,15 @@ struct Results {
     uint64_t ssdA;
     uint32_t crc;
 };
+
+static int time_rep = 0;
+
+static uint64_t utime(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_nsec / 1000 + (uint64_t)ts.tv_sec * 1000000;
+}
 
 // test by ref -> src -> dst -> out & compare out against ref
 // ref & out are YV12
@@ -213,13 +223,24 @@ static int doTest(const uint8_t * const ref[4], int refStride[4], int w, int h,
         goto end;
     }
 
-    printf(" %s %dx%d -> %s %3dx%3d flags=%2d",
+    printf(" %s %4dx%4d -> %s %4dx%4d flags=%2d",
            desc_src->name, srcW, srcH,
            desc_dst->name, dstW, dstH,
            flags);
     fflush(stdout);
 
     sws_scale(dstContext, (const uint8_t * const*)src, srcStride, 0, srcH, dst, dstStride);
+
+    if (time_rep != 0)
+    {
+        const uint64_t now = utime();
+        uint64_t done;
+        for (i = 1; i != time_rep; ++i) {
+            sws_scale(dstContext, (const uint8_t * const*)src, srcStride, 0, srcH, dst, dstStride);
+        }
+        done = utime();
+        printf(" T=%7"PRId64"us ", done-now);
+    }
 
     for (i = 0; i < 4 && dstStride[i]; i++)
         crc = av_crc(av_crc_get_table(AV_CRC_32_IEEE), crc, dst[i],
@@ -496,7 +517,14 @@ int main(int argc, char **argv)
             char * p = NULL;
             H = strtoul(arg2, &p, 0);
             if (!H || *p) {
-                fprintf(stderr, "bad height '%s' (H=%d, *p=%d)\n", arg2, H, *p);
+                fprintf(stderr, "bad height '%s'\n", arg2);
+                return -1;
+            }
+        } else if (!strcmp(argv[i], "-t")) {
+            char * p = NULL;
+            time_rep = (int)strtol(arg2, &p, 0);
+            if (*p) {
+                fprintf(stderr, "bad time repetitions '%s'\n", arg2);
                 return -1;
             }
         } else if (!strcmp(argv[i], "-p")) {
