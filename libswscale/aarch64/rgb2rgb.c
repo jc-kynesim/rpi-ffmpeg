@@ -44,8 +44,9 @@ void ff_rgb24toyv12_aarch64(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
 
 static inline int chkw(const int width, const int lumStride, const int chromStride)
 {
-    const int aw = FFALIGN(width, 16);
-    return aw <= FFABS(lumStride) && aw <= FFABS(chromStride) * 2;
+//    const int aw = FFALIGN(width, 16);
+//    return aw <= FFABS(lumStride) && aw <= FFABS(chromStride) * 2;
+    return 1;
 }
 
 static void rgb24toyv12_check(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
