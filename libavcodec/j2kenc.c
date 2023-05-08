@@ -658,11 +658,10 @@ static void encode_cblk(Jpeg2000EncoderContext *s, Jpeg2000T1Context *t1, Jpeg20
 
     if (max == 0){
         cblk->nonzerobits = 0;
-        bpno = 0;
     } else{
         cblk->nonzerobits = av_log2(max) + 1 - NMSEDEC_FRACBITS;
-        bpno = cblk->nonzerobits - 1;
     }
+    bpno = cblk->nonzerobits - 1;
 
     cblk->data[0] = 0;
     ff_mqc_initenc(&t1->mqc, cblk->data + 1);
@@ -1007,6 +1006,7 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     int tileno, ret;
     Jpeg2000EncoderContext *s = avctx->priv_data;
     uint8_t *chunkstart, *jp2cstart, *jp2hstart;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
     if ((ret = ff_alloc_packet2(avctx, pkt, avctx->width*avctx->height*9 + AV_INPUT_BUFFER_MIN_SIZE, 0)) < 0)
         return ret;
@@ -1059,7 +1059,7 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
         bytestream_put_byte(&s->buf, 1);
         bytestream_put_byte(&s->buf, 0);
         bytestream_put_byte(&s->buf, 0);
-        if (avctx->pix_fmt == AV_PIX_FMT_RGB24 || avctx->pix_fmt == AV_PIX_FMT_PAL8) {
+        if ((desc->flags & AV_PIX_FMT_FLAG_RGB) || avctx->pix_fmt == AV_PIX_FMT_PAL8) {
             bytestream_put_be32(&s->buf, 16);
         } else if (s->ncomponents == 1) {
             bytestream_put_be32(&s->buf, 17);
@@ -1155,7 +1155,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     if (avctx->pix_fmt == AV_PIX_FMT_PAL8 && (s->pred != FF_DWT97_INT || s->format != CODEC_JP2)) {
         av_log(s->avctx, AV_LOG_WARNING, "Forcing lossless jp2 for pal8\n");
-        s->pred = FF_DWT97_INT;
+        s->pred = 1;
         s->format = CODEC_JP2;
     }
 
@@ -1233,7 +1233,7 @@ static const AVOption options[] = {
     { "tile_height",   "Tile Height",       OFFSET(tile_height),   AV_OPT_TYPE_INT,   { .i64 = 256         }, 1,     1<<30,           VE, },
     { "pred",          "DWT Type",          OFFSET(pred),          AV_OPT_TYPE_INT,   { .i64 = 0           }, 0,         1,           VE, "pred"        },
     { "dwt97int",      NULL,                0,                     AV_OPT_TYPE_CONST, { .i64 = 0           }, INT_MIN, INT_MAX,       VE, "pred"        },
-    { "dwt53",         NULL,                0,                     AV_OPT_TYPE_CONST, { .i64 = 0           }, INT_MIN, INT_MAX,       VE, "pred"        },
+    { "dwt53",         NULL,                0,                     AV_OPT_TYPE_CONST, { .i64 = 1           }, INT_MIN, INT_MAX,       VE, "pred"        },
 
     { NULL }
 };
