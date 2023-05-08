@@ -24,6 +24,8 @@ There are a few choices here
          paths being confused and therefore running the wrong code,  Shared
          is what is needed, in most cases, when building for use by other
          programs.
+ --usr   Set install dir to /usr (i.e. system default) rather than in
+         <builddir>/install
 
 So for a static build
 ---------------------
@@ -37,23 +39,29 @@ You can now run ffmpeg directly from where it was built
 For a shared build
 ------------------
 
+There are two choices here
+
 $ pi-util/conf_native.sh
-
-You will normally want an install target if shared. Note that the script has
-set this up to be generated in out/<builddir>/install, you don't have to worry
-about overwriting your system libs.
-
 $ make -j8 -C out/<builddir> install
 
+This sets the install prefix to <builddir>/install and is probably what you
+want if you don't want to overwrite the system files.
+
 You can now set LD_LIBRARY_PATH appropriately and run ffmpeg from where it was
-built or install the image on the system - you have to be careful to get rid
-of all other ffmpeg libs or confusion may result.  There is a little script
-that wipes all other versions - obviously use with care!
+built. You can copy the contents of <build dir>/install to /usr and that mostly
+works. The only downside is that paths in pkgconfig end up being set to the
+install directory in your build directory which may be less than ideal when
+building other packages.
 
+The alternative if you just want to replace the system libs is:
+
+$ pi-util/conf_native.sh --usr
+$ make -j8 -C out/<builddir>
 $ sudo pi-util/clean_usr_libs.sh
+$ sudo make -j8 -C out/<builddir> install
 
-Then simply copying from the install to /usr works
-
-$ sudo cp -r out/<builddir>/install/* /usr
-
+The clean_usr_libs.sh step wipes any existing libs & includes (for all
+architectures) from the system which helps avoid confusion when running other
+progs as you can be sure you're not running old code which is unfortunately
+easy to do otherwise.
 

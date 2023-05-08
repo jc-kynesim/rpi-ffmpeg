@@ -9,6 +9,7 @@ RPI_KEEPS=""
 
 NOSHARED=
 MMAL=
+USR_PREFIX=
 
 while [ "$1" != "" ] ; do
     case $1 in
@@ -18,8 +19,14 @@ while [ "$1" != "" ] ; do
 	--mmal)
 	    MMAL=1
 	    ;;
+	--usr)
+	    USR_PREFIX=/usr
+	    ;;
 	*)
-	    echo "Usage $0: [--noshared] [--mmal]"
+	    echo "Usage $0: [--noshared] [--mmal] [--usr]"
+	    echo "  noshared  Build static libs and executable - good for testing"
+	    echo "  mmal      Build mmal decoders"
+	    echo "  usr       Set install prefix to /usr [default=<build-dir>/install]"
 	    exit 1
 	    ;;
     esac
@@ -33,18 +40,28 @@ RPI_LIBDIRS=
 RPI_DEFINES=
 RPI_EXTRALIBS=
 
-if [ "$MC" == "arm64" ]; then
-  echo "M/C aarch64"
-  A=aarch64-linux-gnu
-  B=arm64
-elif [ "$MC" == "armhf" ]; then
-  echo "M/C armv7"
-  A=arm-linux-gnueabihf
-  B=armv7
-  MCOPTS="--arch=armv6t2 --cpu=cortex-a7"
-  RPI_DEFINES=-mfpu=neon-vfpv4
+# uname -m gives kernel type which may not have the same
+# 32/64bitness as userspace :-( getconf shoudl provide the answer
+# but use uname to check we are on the right processor
+MC=`uname -m`
+LB=`getconf LONG_BIT`
+if [ "$MC" == "armv7l" ] || [ "$MC" == "aarch64" ]; then
+  if [ "$LB" == "32" ]; then
+    echo "M/C armv7"
+    A=arm-linux-gnueabihf
+    B=armv7
+    MCOPTS="--arch=armv6t2 --cpu=cortex-a7"
+    RPI_DEFINES=-mfpu=neon-vfpv4
+  elif [ "$LB" == "64" ]; then
+    echo "M/C aarch64"
+    A=aarch64-linux-gnu
+    B=arm64
+  else
+    echo "Unknown LONG_BIT name: $LB"
+    exit 1
+  fi
 else
-  echo Unexpected architecture $MC
+  echo "Unknown machine name: $MC"
   exit 1
 fi
 
@@ -72,7 +89,9 @@ else
   OUT=$BUILDBASE/$B-$C-$V-shared-rel
 fi
 
-USR_PREFIX=$OUT/install
+if [ ! $USR_PREFIX ]; then
+  USR_PREFIX=$OUT/install
+fi
 LIB_PREFIX=$USR_PREFIX/lib/$A
 INC_PREFIX=$USR_PREFIX/include/$A
 
@@ -103,6 +122,7 @@ $FFSRC/configure \
  --extra-libs="$RPI_EXTRALIBS"\
  --extra-version="rpi"
 
+echo "Configured into $OUT"
 
 # gcc option for getting asm listing
 # -Wa,-ahls
