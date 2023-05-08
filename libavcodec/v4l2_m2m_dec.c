@@ -21,6 +21,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config.h"
+
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
 
@@ -42,6 +44,13 @@
 #include "v4l2_m2m.h"
 #include "v4l2_fmt.h"
 #include "v4l2_req_dmabufs.h"
+
+#if CONFIG_H264_DECODER
+#include "h264_parse.h"
+#endif
+#if CONFIG_HEVC_DECODER
+#include "hevc_parse.h"
+#endif
 
 // Pick 64 for max last count - that is >1sec at 60fps
 #define STATS_LAST_COUNT_MAX 64
@@ -723,6 +732,127 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 }
 #endif
 
+static uint32_t
+avprofile_to_v4l2(const enum AVCodecID codec_id, const int avprofile)
+{
+    switch (codec_id) {
+        case AV_CODEC_ID_H264:
+            switch (avprofile) {
+                case FF_PROFILE_H264_BASELINE:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE;
+                case FF_PROFILE_H264_CONSTRAINED_BASELINE:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE;
+                case FF_PROFILE_H264_MAIN:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_MAIN;
+                case FF_PROFILE_H264_EXTENDED:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_EXTENDED;
+                case FF_PROFILE_H264_HIGH:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_HIGH;
+                case FF_PROFILE_H264_HIGH_10:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_10;
+                case FF_PROFILE_H264_HIGH_10_INTRA:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_10_INTRA;
+                case FF_PROFILE_H264_MULTIVIEW_HIGH:
+                case FF_PROFILE_H264_HIGH_422:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_422;
+                case FF_PROFILE_H264_HIGH_422_INTRA:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_422_INTRA;
+                case FF_PROFILE_H264_STEREO_HIGH:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_STEREO_HIGH;
+                case FF_PROFILE_H264_HIGH_444_PREDICTIVE:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_444_PREDICTIVE;
+                case FF_PROFILE_H264_HIGH_444_INTRA:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_444_INTRA;
+                case FF_PROFILE_H264_CAVLC_444:
+                    return V4L2_MPEG_VIDEO_H264_PROFILE_CAVLC_444_INTRA;
+                case FF_PROFILE_H264_HIGH_444:
+                default:
+                    break;
+//                    V4L2_MPEG_VIDEO_H264_PROFILE_SCALABLE_BASELINE		= 12,
+//                    V4L2_MPEG_VIDEO_H264_PROFILE_SCALABLE_HIGH		= 13,
+//                    V4L2_MPEG_VIDEO_H264_PROFILE_SCALABLE_HIGH_INTRA	= 14,
+//                    V4L2_MPEG_VIDEO_H264_PROFILE_MULTIVIEW_HIGH		= 16,
+//                    V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_HIGH		= 17,
+            }
+            break;
+        case AV_CODEC_ID_MPEG2VIDEO:
+        case AV_CODEC_ID_MPEG4:
+        case AV_CODEC_ID_VC1:
+        case AV_CODEC_ID_VP8:
+        case AV_CODEC_ID_VP9:
+        case AV_CODEC_ID_AV1:
+            // Most profiles are a simple number that matches the V4L2 enum
+            return avprofile;
+        default:
+            break;
+    }
+    return ~(uint32_t)0;
+}
+
+// This check mirrors Chrome's profile check by testing to see if the profile
+// exists as a possible value for the V4L2 profile control
+static int
+check_profile(AVCodecContext *const avctx, V4L2m2mContext *const s)
+{
+    struct v4l2_queryctrl query_ctrl;
+    struct v4l2_querymenu query_menu;
+    uint32_t profile_id;
+
+    // An unset profile is almost certainly zero or -99 - do not reject
+    if (avctx->profile <= 0) {
+        av_log(avctx, AV_LOG_VERBOSE, "Profile %d <= 0 - check skipped\n", avctx->profile);
+        return 0;
+    }
+
+    memset(&query_ctrl, 0, sizeof(query_ctrl));
+    switch (avctx->codec_id) {
+        case AV_CODEC_ID_MPEG2VIDEO:
+            profile_id = V4L2_CID_MPEG_VIDEO_MPEG2_PROFILE;
+            break;
+        case AV_CODEC_ID_MPEG4:
+            profile_id = V4L2_CID_MPEG_VIDEO_MPEG4_PROFILE;
+            break;
+        case AV_CODEC_ID_H264:
+            profile_id = V4L2_CID_MPEG_VIDEO_H264_PROFILE;
+            break;
+        case AV_CODEC_ID_VP8:
+            profile_id = V4L2_CID_MPEG_VIDEO_VP8_PROFILE;
+            break;
+        case AV_CODEC_ID_VP9:
+            profile_id = V4L2_CID_MPEG_VIDEO_VP9_PROFILE;
+            break;
+#ifdef V4L2_CID_MPEG_VIDEO_AV1_PROFILE
+        case AV_CODEC_ID_AV1:
+            profile_id = V4L2_CID_MPEG_VIDEO_AV1_PROFILE;
+            break;
+#endif
+        default:
+            av_log(avctx, AV_LOG_VERBOSE, "Can't map profile for codec id %d; profile check skipped\n", avctx->codec_id);
+            return 0;
+    }
+
+    query_ctrl = (struct v4l2_queryctrl){.id = profile_id};
+    if (ioctl(s->fd, VIDIOC_QUERYCTRL, &query_ctrl) != 0) {
+        av_log(avctx, AV_LOG_VERBOSE, "Query profile ctrl (%#x) not supported: assume OK\n", query_ctrl.id);
+    }
+    else {
+        av_log(avctx, AV_LOG_DEBUG, "%s: Control supported: %#x\n", __func__, query_ctrl.id);
+
+        query_menu = (struct v4l2_querymenu){
+            .id = query_ctrl.id,
+            .index = avprofile_to_v4l2(avctx->codec_id, avctx->profile),
+        };
+
+        if (query_menu.index > query_ctrl.maximum ||
+            query_menu.index < query_ctrl.minimum ||
+            ioctl(s->fd, VIDIOC_QUERYMENU, &query_menu) != 0) {
+            return AVERROR(ENOENT);
+        }
+    }
+
+    return 0;
+};
+
 static int
 check_size(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
@@ -843,6 +973,78 @@ static uint32_t max_coded_size(const AVCodecContext * const avctx)
     return size + (1 << 16);
 }
 
+static void
+parse_extradata(AVCodecContext *avctx)
+{
+    if (!avctx->extradata || !avctx->extradata_size)
+        return;
+
+    switch (avctx->codec_id) {
+#if CONFIG_H264_DECODER
+        case AV_CODEC_ID_H264:
+        {
+            H264ParamSets ps = {{NULL}};
+            int is_avc = 0;
+            int nal_length_size = 0;
+            int ret;
+
+            ret = ff_h264_decode_extradata(avctx->extradata, avctx->extradata_size,
+                                           &ps, &is_avc, &nal_length_size,
+                                           avctx->err_recognition, avctx);
+            if (ret > 0) {
+                const SPS * sps = NULL;
+                unsigned int i;
+                for (i = 0; i != MAX_SPS_COUNT; ++i) {
+                    if (ps.sps_list[i]) {
+                        sps = (const SPS *)ps.sps_list[i]->data;
+                        break;
+                    }
+                }
+                if (sps) {
+                    avctx->profile = ff_h264_get_profile(sps);
+                    avctx->level = sps->level_idc;
+                }
+            }
+            ff_h264_ps_uninit(&ps);
+            break;
+        }
+#endif
+#if CONFIG_HEVC_DECODER
+        case AV_CODEC_ID_HEVC:
+        {
+            HEVCParamSets ps = {{NULL}};
+            HEVCSEI sei = {{{{0}}}};
+            int is_nalff = 0;
+            int nal_length_size = 0;
+            int ret;
+
+            ret = ff_hevc_decode_extradata(avctx->extradata, avctx->extradata_size,
+                                           &ps, &sei, &is_nalff, &nal_length_size,
+                                           avctx->err_recognition, 0, avctx);
+            if (ret > 0) {
+                const HEVCSPS * sps = NULL;
+                unsigned int i;
+                for (i = 0; i != HEVC_MAX_SPS_COUNT; ++i) {
+                    if (ps.sps_list[i]) {
+                        sps = (const HEVCSPS *)ps.sps_list[i]->data;
+                        break;
+                    }
+                }
+                if (sps) {
+                    avctx->profile = sps->ptl.general_ptl.profile_idc;
+                    avctx->level   = sps->ptl.general_ptl.level_idc;
+                }
+            }
+            ff_hevc_ps_uninit(&ps);
+            ff_hevc_reset_sei(&sei);
+            break;
+        }
+#endif
+        default:
+            break;
+    }
+}
+
 static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 {
     V4L2Context *capture, *output;
@@ -863,7 +1065,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         avctx->ticks_per_frame = 2;
     }
 
-    av_log(avctx, AV_LOG_INFO, "level=%d\n", avctx->level);
+    parse_extradata(avctx);
+
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
@@ -963,6 +1166,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     if ((ret = check_size(avctx, s)) != 0)
         return ret;
 
+    if ((ret = check_profile(avctx, s)) != 0) {
+        av_log(avctx, AV_LOG_WARNING, "Profile %d not supported by decode\n", avctx->profile);
+        return ret;
+    }
     return 0;
 }
 
