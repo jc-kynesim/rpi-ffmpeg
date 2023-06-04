@@ -115,6 +115,7 @@ typedef struct V4L2m2mContext {
 
     /* req pkt */
     int req_pkt;
+    int reorder_size;
 
     /* Ext data sent */
     int extdata_sent;
