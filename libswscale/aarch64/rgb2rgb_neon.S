@@ -203,11 +203,11 @@ function ff_bgr24toyv12_aarch64, export=1
         shrn            v26.4h, v26.4s, #12
         shrn2           v26.8h, v27.4s, #12
         add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        uqrshrn         v26.8b, v26.8h, #3
+        sqrshrun        v26.8b, v26.8h, #3
         shrn            v28.4h, v28.4s, #12
         shrn2           v28.8h, v29.4s, #12
         add             v28.8h, v28.8h, v6.8h
-        uqrshrn2        v26.16b, v28.8h, #3
+        sqrshrun2       v26.16b, v28.8h, #3
         // Y0/Y1
 
         // U
@@ -282,11 +282,11 @@ function ff_bgr24toyv12_aarch64, export=1
         shrn            v26.4h, v26.4s, #12
         shrn2           v26.8h, v27.4s, #12
         add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        uqrshrn         v26.8b, v26.8h, #3
+        sqrshrun        v26.8b, v26.8h, #3
         shrn            v28.4h, v28.4s, #12
         shrn2           v28.8h, v29.4s, #12
         add             v28.8h, v28.8h, v6.8h
-        uqrshrn2        v26.16b, v28.8h, #3
+        sqrshrun2       v26.16b, v28.8h, #3
         // Y0/Y1
 
         // U
@@ -416,11 +416,11 @@ function ff_bgr24toyv12_aarch64, export=1
         shrn            v26.4h, v26.4s, #12
         shrn2           v26.8h, v27.4s, #12
         add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        uqrshrn         v26.8b, v26.8h, #3
+        sqrshrun        v26.8b, v26.8h, #3
         shrn            v28.4h, v28.4s, #12
         shrn2           v28.8h, v29.4s, #12
         add             v28.8h, v28.8h, v6.8h
-        uqrshrn2        v26.16b, v28.8h, #3
+        sqrshrun2       v26.16b, v28.8h, #3
         // Y0/Y1
 
         subs            w9, w9, #16
@@ -464,11 +464,11 @@ function ff_bgr24toyv12_aarch64, export=1
         shrn            v26.4h, v26.4s, #12
         shrn2           v26.8h, v27.4s, #12
         add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        uqrshrn         v26.8b, v26.8h, #3
+        sqrshrun        v26.8b, v26.8h, #3
         shrn            v28.4h, v28.4s, #12
         shrn2           v28.8h, v29.4s, #12
         add             v28.8h, v28.8h, v6.8h
-        uqrshrn2        v26.16b, v28.8h, #3
+        sqrshrun2       v26.16b, v28.8h, #3
         // Y0/Y1
 
         // Here:
