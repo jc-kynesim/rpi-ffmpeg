@@ -74,10 +74,10 @@ typedef struct ThreadData {
         int temporal_diff1 =(FFABS(prev[mrefs] - c) + FFABS(prev[prefs] - e)) >> 1; \
         int temporal_diff2 =(FFABS(next[mrefs] - c) + FFABS(next[prefs] - e)) >> 1; \
         int diff = FFMAX3(temporal_diff0 >> 1, temporal_diff1, temporal_diff2); \
- \
+ {/*\
         if (!diff) { \
             dst[0] = d; \
-        } else {
+        } else {*/
 
 #define SPAT_CHECK() \
             int b = ((prev2[mrefs2] + next2[mrefs2]) >> 1) - c; \
@@ -89,15 +89,16 @@ typedef struct ThreadData {
             diff = FFMAX3(diff, min, -max);
 
 #define FILTER_LINE() \
+            int i1, i2; \
             SPAT_CHECK() \
-            if (FFABS(c - e) > temporal_diff0) { \
-                interpol = (((coef_hf[0] * (prev2[0] + next2[0]) \
+            /*if (FFABS(c - e) > temporal_diff0)*/ { \
+                i1 = (((coef_hf[0] * (prev2[0] + next2[0]) \
                     - coef_hf[1] * (prev2[mrefs2] + next2[mrefs2] + prev2[prefs2] + next2[prefs2]) \
                     + coef_hf[2] * (prev2[mrefs4] + next2[mrefs4] + prev2[prefs4] + next2[prefs4])) >> 2) \
                     + coef_lf[0] * (c + e) - coef_lf[1] * (cur[mrefs3] + cur[prefs3])) >> 13; \
-            } else { \
-                interpol = (coef_sp[0] * (c + e) - coef_sp[1] * (cur[mrefs3] + cur[prefs3])) >> 13; \
-            }
+            } /*else*/ { \
+                i2 = (coef_sp[0] * (c + e) - coef_sp[1] * (cur[mrefs3] + cur[prefs3])) >> 13; \
+            }interpol = FFABS(c - e) > temporal_diff0 ? i1:i2;\
 
 #define FILTER_EDGE() \
             if (spat) { \
@@ -111,7 +112,7 @@ typedef struct ThreadData {
             else if (interpol < d - diff) \
                 interpol = d - diff; \
  \
-            dst[0] = av_clip(interpol, 0, clip_max); \
+            dst[0] = !diff ? d : av_clip(interpol, 0, clip_max); \
         } \
  \
         dst++; \
@@ -122,7 +123,7 @@ typedef struct ThreadData {
         next2++; \
     }
 
-static void filter_intra(void *dst1, void *cur1, int w, int prefs, int mrefs,
+static void __attribute__((optimize("tree-vectorize"))) filter_intra(void *restrict dst1, void *restrict cur1, int w, int prefs, int mrefs,
                          int prefs3, int mrefs3, int parity, int clip_max)
 {
     uint8_t *dst = dst1;
@@ -132,7 +133,7 @@ static void filter_intra(void *dst1, void *cur1, int w, int prefs, int mrefs,
     FILTER_INTRA()
 }
 
-static void filter_line_c(void *dst1, void *prev1, void *cur1, void *next1,
+static void __attribute__((optimize("tree-vectorize"))) filter_line_c(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
                           int w, int prefs, int mrefs, int prefs2, int mrefs2,
                           int prefs3, int mrefs3, int prefs4, int mrefs4,
                           int parity, int clip_max)
@@ -150,7 +151,7 @@ static void filter_line_c(void *dst1, void *prev1, void *cur1, void *next1,
     FILTER2()
 }
 
-static void filter_edge(void *dst1, void *prev1, void *cur1, void *next1,
+static void __attribute__((optimize("tree-vectorize"))) filter_edge(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
                         int w, int prefs, int mrefs, int prefs2, int mrefs2,
                         int parity, int clip_max, int spat)
 {
@@ -167,7 +168,7 @@ static void filter_edge(void *dst1, void *prev1, void *cur1, void *next1,
     FILTER2()
 }
 
-static void filter_intra_16bit(void *dst1, void *cur1, int w, int prefs, int mrefs,
+static void __attribute__((optimize("tree-vectorize"))) filter_intra_16bit(void *restrict dst1, void *restrict cur1, int w, int prefs, int mrefs,
                                int prefs3, int mrefs3, int parity, int clip_max)
 {
     uint16_t *dst = dst1;
@@ -177,7 +178,7 @@ static void filter_intra_16bit(void *dst1, void *cur1, int w, int prefs, int mre
     FILTER_INTRA()
 }
 
-static void filter_line_c_16bit(void *dst1, void *prev1, void *cur1, void *next1,
+static void __attribute__((optimize("tree-vectorize"))) filter_line_c_16bit(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
                                 int w, int prefs, int mrefs, int prefs2, int mrefs2,
                                 int prefs3, int mrefs3, int prefs4, int mrefs4,
                                 int parity, int clip_max)
@@ -195,7 +196,7 @@ static void filter_line_c_16bit(void *dst1, void *prev1, void *cur1, void *next1
     FILTER2()
 }
 
-static void filter_edge_16bit(void *dst1, void *prev1, void *cur1, void *next1,
+static void __attribute__((optimize("tree-vectorize"))) filter_edge_16bit(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
                               int w, int prefs, int mrefs, int prefs2, int mrefs2,
                               int parity, int clip_max, int spat)
 {
