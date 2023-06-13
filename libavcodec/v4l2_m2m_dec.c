@@ -1024,8 +1024,8 @@ parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
                 if (sps) {
                     avctx->profile = ff_h264_get_profile(sps);
                     avctx->level = sps->level_idc;
+                    s->reorder_size = sps->num_reorder_frames;
                 }
-                s->reorder_size = sps->num_reorder_frames;
             }
             ff_h264_ps_uninit(&ps);
             break;
