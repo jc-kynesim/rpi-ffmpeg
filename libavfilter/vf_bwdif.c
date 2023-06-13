@@ -166,49 +166,45 @@ static void __attribute__((optimize("tree-vectorize"))) filter_line_c(void *rest
 #define next2 next
 
         for (x = 0; x < w; x++) {
-            int diff;
-            int d;
+            int diff0;
+            int d0;
             int temporal_diff0;
-
-            int b;
-            int f;
 
             int i1, i2;
             int p4, p3, p2, p1, c0, m1, m2, m3, m4;
 
-
             m4 = prev2[mrefs4] + next2[mrefs4];  // 2
+            p4 = prev2[prefs4] + next2[prefs4];
+            i1 = coef_hf[2] * (m4 + p4);
             m3 = cur[mrefs3];                    // 1
+            p3 = cur[prefs3];
+            i1 += -coef_lf[1] * 4 * (m3 + p3);
             m2 = prev2[mrefs2] + next2[mrefs2];  // 2
+            p2 = prev2[prefs2] + next2[prefs2];  // 2
+            i1 += -coef_hf[1] * (m2 + p2);
             m1 = cur[mrefs];                     // 1
-            b = (m2 >> 1) - m1;                  // 1
-            c0 = prev2[0] + next2[0];            // 2
-            i1 = coef_hf[0] * c0;                // 4
-            d  = c0 >> 1;                        // 1
-            temporal_diff0 = FFABS(prev2[0] - next2[0]); // 1
             p1 = cur[prefs];                     // 1
+            c0 = prev2[0] + next2[0];            // 2
+            i1 += coef_hf[0] * c0;                // 4
+            d0  = c0 >> 1;                        // 1
+            temporal_diff0 = FFABS(prev2[0] - next2[0]); // 1
             i1 += coef_lf[0] * 4 * (m1 + p1);    // -
             {
-                int temporal_diff1 =(FFABS(prev[mrefs] - m1) + FFABS(prev[prefs] - p1)) >> 1;
-                int temporal_diff2 =(FFABS(next[mrefs] - m1) + FFABS(next[prefs] - p1)) >> 1;
-                diff = FFMAX3(temporal_diff0 >> 1, temporal_diff1, temporal_diff2); // 1
+                int t1 =(FFABS(prev[mrefs] - m1) + FFABS(prev[prefs] - p1)) >> 1;
+                int t2 =(FFABS(next[mrefs] - m1) + FFABS(next[prefs] - p1)) >> 1;
+                diff0 = FFMAX3(temporal_diff0 >> 1, t1, t2); // 1
             }
-            p2 = prev2[prefs2] + next2[prefs2];  // 2
-            f = (p2 >> 1) - p1;                  // 1
             {
-                int dc = d - m1;
-                int de = d - p1;
+                int b = (m2 >> 1) - m1;                  // 1
+                int f = (p2 >> 1) - p1;                  // 1
+                int dc = d0 - m1;
+                int de = d0 - p1;
                 int sp_max = FFMAX(de, dc);
                 int sp_min = FFMIN(de, dc);
                 sp_max = FFMAX(sp_max, FFMIN(b,f));
                 sp_min = FFMIN(sp_min, FFMAX(b,f));
-                diff = FFMAX3(diff, sp_min, -sp_max);
+                diff0 = FFMAX3(diff0, sp_min, -sp_max);
             }
-            i1 += -coef_hf[1] * (m2 + p2);
-            p3 = cur[prefs3];
-            i1 += -coef_lf[1] * 4 * (m3 + p3);
-            p4 = prev2[prefs4] + next2[prefs4];
-            i1 += coef_hf[2] * (m4 + p4);
 
             i1 >>= 15;
 
@@ -217,10 +213,10 @@ static void __attribute__((optimize("tree-vectorize"))) filter_line_c(void *rest
 
             interpol = FFABS(m1 - p1) > temporal_diff0 ? i1:i2;
 
-            if (interpol > d + diff)
-                interpol = d + diff;
-            else if (interpol < d - diff)
-                interpol = d - diff;
+            if (interpol > d0 + diff0)
+                interpol = d0 + diff0;
+            else if (interpol < d0 - diff0)
+                interpol = d0 - diff0;
 
             dst[0] = av_clip_uint8(interpol);
 
@@ -231,6 +227,129 @@ static void __attribute__((optimize("tree-vectorize"))) filter_line_c(void *rest
 #undef prev2
 #undef next2
         }
+    }
+}
+static void __attribute__((optimize("tree-vectorize"))) filter_line2_c(void *restrict dst1, int d_stride,
+                          void *restrict prev1, void *restrict cur1, void *restrict next1,
+                          int w, int prefs, int mrefs, int prefs2, int mrefs2,
+                          int prefs3, int mrefs3, int prefs4, int mrefs4,
+                          int parity, int clip_max)
+{
+    if (parity) {
+        filter_line_c(dst1, prev1, cur1, next1, w,
+                      prefs, mrefs, prefs2, mrefs2, prefs3, mrefs3, prefs4, mrefs4, 1, clip_max);
+        filter_line_c((uint8_t*)dst1 + d_stride * 2, (uint8_t*)prev1 + prefs2, (uint8_t*)cur1 + prefs2, (uint8_t*)next1 + prefs2, w,
+                      prefs, mrefs, prefs2, mrefs2, prefs3, mrefs3, prefs4, mrefs4, 1, clip_max);
+    }
+    else {
+        uint8_t * restrict dst   = dst1;
+        const uint8_t * prev  = prev1;
+        const uint8_t * cur   = cur1;
+        const uint8_t * next  = next1;
+        int x;
+#define prev2 cur
+#define next2 next
+
+        for (x = 0; x < w; x++) {
+            int diff0, diff2;
+            int d0, d2;
+            int temporal_diff0, temporal_diff2;
+
+            int i1, i2;
+            int j1, j2;
+            int p6, p5, p4, p3, p2, p1, c0, m1, m2, m3, m4;
+
+            c0 = prev2[0] + next2[0];            // c0 = v20,v26
+            d0  = c0 >> 1;                       // d0 = v21
+            temporal_diff0 = FFABS(prev2[0] - next2[0]); // td0 = v9
+            i1 = coef_hf[0] * c0;                // -
+            m4 = prev2[mrefs4] + next2[mrefs4];  // m4 = v3,v4
+            p4 = prev2[prefs4] + next2[prefs4];  // p4 = v5,v6, (p4 >> 1) = v23
+            j1 = -coef_hf[1] * (c0 + p4);        // (-c0:v20,v26*)
+            i1 += coef_hf[2] * (m4 + p4);        // (-m4:v3,v4) (-p4:v5,v6) i1 = v3,v4,v7,v8
+            m3 = cur[mrefs3];                    // m3 = v5
+            p3 = cur[prefs3];                    // p3 = v10, [f2=v23]
+            i1 -= coef_lf[1] * 4 * (m3 + p3);   // -
+            m2 = prev2[mrefs2] + next2[mrefs2];  // m2 = v11,v12, (m2 >> 1) = v22
+            p6 = prev2[prefs4 + prefs2] + next2[prefs4 + prefs2];  // p6=v0,v1
+            j1 += coef_hf[2] * (m2 + p6);        // (-p6:v0*,v1*), j1 = v13,v14,v15,v16
+            p2 = prev2[prefs2] + next2[prefs2];  // p2 = v17,v18
+            temporal_diff2 = FFABS(prev2[prefs2] - next2[prefs2]); // td2 = v6
+            j1 += coef_hf[0] * p2;               // -
+            d2  = p2 >> 1;                       // d2 = v19
+            i1 -= coef_hf[1] * (m2 + p2);        // (-m2:v11,v12)
+            m1 = cur[mrefs];                     // m1 = v11, [b0=v22]
+            p5 = cur[prefs3 + prefs2];           // p5=v2
+            j1 -= coef_lf[1] * 4 * (m1 + p5);    // -
+            p1 = cur[prefs];                     // p1 = v12
+            j2 = (coef_sp[0] * (p1 + p3) - coef_sp[1] * (m1 + p5)) >> 13; // (-p5:v2) j2=v2
+            i2 = (coef_sp[0] * (m1 + p1) - coef_sp[1] * (m3 + p3)) >> 13; // (-m3:v5) i2=v5
+            {
+                int t1 =(FFABS(prev[mrefs] - m1) + FFABS(prev[prefs] - p1)) >> 1;
+                int t2 =(FFABS(next[mrefs] - m1) + FFABS(next[prefs] - p1)) >> 1;
+                diff0 = FFMAX3(temporal_diff0 >> 1, t1, t2); // diff0=v24
+            }
+            {
+                int t1 =(FFABS(prev[prefs] - p1) + FFABS(prev[prefs3] - p3)) >> 1;
+                int t2 =(FFABS(next[prefs] - p1) + FFABS(next[prefs3] - p3)) >> 1;
+                diff2 = FFMAX3(temporal_diff2 >> 1, t1, t2); // diff2=v25
+            }
+            i1 += coef_lf[0] * 4 * (m1 + p1);    // -
+            j1 += coef_lf[0] * 4 * (p1 + p3);    // -
+            {
+                int b = (m2 >> 1) - m1;           // [v22]
+                int f = d2 - p1;                  // 1
+                int dc = d0 - m1;
+                int de = d0 - p1;
+                int sp_max = FFMAX(de, dc);
+                int sp_min = FFMIN(de, dc);
+                sp_max = FFMAX(sp_max, FFMIN(b,f));
+                sp_min = FFMIN(sp_min, FFMAX(b,f));
+                diff0 = FFMAX3(diff0, sp_min, -sp_max);
+            }
+            {
+                int b = d0 - p1;                  // 1
+                int f = (p4 >> 1) - p3;           // [v23]
+                int dc = d2 - p1;
+                int de = d2 - p3;
+                int sp_max = FFMAX(de, dc);
+                int sp_min = FFMIN(de, dc);
+                sp_max = FFMAX(sp_max, FFMIN(b,f));
+                sp_min = FFMIN(sp_min, FFMAX(b,f));
+                diff2 = FFMAX3(diff2, sp_min, -sp_max);
+            }
+
+            i1 >>= 15;
+            j1 >>= 15;
+
+
+
+            {
+                int interpol = FFABS(p1 - p3) > temporal_diff2 ? j1:j2;
+                if (interpol > d2 + diff2)
+                    interpol = d2 + diff2;
+                else if (interpol < d2 - diff2)
+                    interpol = d2 - diff2;
+                dst[d_stride * 2] = av_clip_uint8(interpol);
+            }
+            {
+                int interpol = FFABS(m1 - p1) > temporal_diff0 ? i1:i2;
+
+                if (interpol > d0 + diff0)
+                    interpol = d0 + diff0;
+                else if (interpol < d0 - diff0)
+                    interpol = d0 - diff0;
+
+                dst[0] = av_clip_uint8(interpol);
+            }
+
+            dst++;
+            cur++;
+            prev++;
+            next++;
+        }
+#undef prev2
+#undef next2
     }
 }
 #else
@@ -347,6 +466,16 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
                                refs << 1, -(refs << 1),
                                td->parity ^ td->tff, clip_max,
                                (y < 2) || ((y + 3) > td->h) ? 0 : 1);
+#if 1
+            } else if (y + 2 < slice_end && ((y + 7) <= td->h)) {
+                filter_line2_c(dst, td->frame->linesize[td->plane], prev, cur, next, td->w,
+                               refs, -refs, refs << 1, -(refs << 1),
+                               3 * refs, -3 * refs, refs << 2, -(refs << 2),
+                               td->parity ^ td->tff, clip_max);
+                memcpy(&td->frame->data[td->plane][(y + 1) * td->frame->linesize[td->plane]],
+                       &yadif->cur->data[td->plane][(y + 1) * linesize], td->w * df);
+                y += 2;
+#endif
             } else {
                 s->filter_line(dst, prev, cur, next, td->w,
                                refs, -refs, refs << 1, -(refs << 1),
