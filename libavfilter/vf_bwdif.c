@@ -351,9 +351,12 @@ static int config_props(AVFilterLink *link)
         s->filter_edge  = filter_edge;
     }
 
+    if (yadif->useasm != 0)
+    {
 #if ARCH_X86
-    ff_bwdif_init_x86(s);
+        ff_bwdif_init_x86(s);
 #endif
+    }
 
     return 0;
 }
@@ -378,6 +381,7 @@ static const AVOption bwdif_options[] = {
     CONST("all",        "deinterlace all frames",                       YADIF_DEINT_ALL,        "deint"),
     CONST("interlaced", "only deinterlace frames marked as interlaced", YADIF_DEINT_INTERLACED, "deint"),
 
+    {"useasm", "use asm functions (default true)", OFFSET(useasm), AV_OPT_TYPE_INT, {.i64=1}, 0, 2, FLAGS, NULL },
     { NULL }
 };
 

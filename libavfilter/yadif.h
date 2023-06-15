@@ -53,6 +53,7 @@ typedef struct YADIFContext {
     int mode;           ///< YADIFMode
     int parity;         ///< YADIFParity
     int deint;          ///< YADIFDeint
+    int useasm;         ///< Use any asm code
 
     int frame_pending;
 
