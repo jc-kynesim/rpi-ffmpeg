@@ -35,8 +35,17 @@ typedef struct BWDIFContext {
     void (*filter_edge)(void *dst, void *prev, void *cur, void *next,
                         int w, int prefs, int mrefs, int prefs2, int mrefs2,
                         int parity, int clip_max, int spat);
+    void (*filter_line4)(void *dst, int dstride,
+                         const void *prev, const void *cur, const void *next, int prefs,
+                         int w, int parity, int clip_max);
 } BWDIFContext;
 
+void ff_bwdif_filter_line_c(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
+                          int w, int prefs, int mrefs, int prefs2, int mrefs2,
+                          int prefs3, int mrefs3, int prefs4, int mrefs4,
+                          int parity, int clip_max);
+
 void ff_bwdif_init_x86(BWDIFContext *bwdif);
+void ff_bwdif_init_aarch64(AVFilterContext *ctx);
 
 #endif /* AVFILTER_BWDIF_H */

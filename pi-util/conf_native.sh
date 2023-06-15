@@ -10,6 +10,9 @@ RPI_KEEPS=""
 NOSHARED=
 MMAL=
 USR_PREFIX=
+DO_MAKE=
+DO_INSTALL=
+INSTALL_SUDO=
 
 while [ "$1" != "" ] ; do
     case $1 in
@@ -20,13 +23,23 @@ while [ "$1" != "" ] ; do
 	    MMAL=1
 	    ;;
 	--usr)
+	    INSTALL_SUDO=1
 	    USR_PREFIX=/usr
+	    ;;
+	--make)
+	    DO_MAKE=1
+	    ;;
+        --install)
+	    DO_MAKE=1
+	    DO_INSTALL=1
 	    ;;
 	*)
 	    echo "Usage $0: [--noshared] [--mmal] [--usr]"
 	    echo "  noshared  Build static libs and executable - good for testing"
 	    echo "  mmal      Build mmal decoders"
 	    echo "  usr       Set install prefix to /usr [default=<build-dir>/install]"
+	    echo "  make      Make after configure"
+	    echo "  install   Make & install after configure - does sudo on install if --usr"
 	    exit 1
 	    ;;
     esac
@@ -123,6 +136,22 @@ $FFSRC/configure \
  --extra-version="rpi"
 
 echo "Configured into $OUT"
+
+if [ $DO_MAKE ]; then
+  echo "Making..."
+  make -j8
+  echo "Made"
+fi
+if [ $DO_INSTALL ]; then
+  echo "Installing..."
+  if [ $INSTALL_SUDO ]; then
+    sudo make -j8 install
+  else
+    make -j8 install
+  fi
+  echo "Installed"
+fi
+
 
 # gcc option for getting asm listing
 # -Wa,-ahls

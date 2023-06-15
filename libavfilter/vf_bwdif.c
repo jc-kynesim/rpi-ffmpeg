@@ -38,6 +38,10 @@
 #include "video.h"
 #include "bwdif.h"
 
+#include <time.h>
+#define OPT_TEST 0
+#define OPT_NEW  0
+
 /*
  * Filter coefficients coef_lf and coef_hf taken from BBC PH-2071 (Weston 3 Field Deinterlacer).
  * Used when there is spatial and temporal interpolation.
@@ -133,7 +137,101 @@ static void __attribute__((optimize("tree-vectorize"))) filter_intra(void *restr
     FILTER_INTRA()
 }
 
-static void __attribute__((optimize("tree-vectorize"))) filter_line_c(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
+#if OPT_NEW
+void __attribute__((optimize("tree-vectorize"))) ff_bwdif_filter_line_c(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
+                          int w, int prefs, int mrefs, int prefs2, int mrefs2,
+                          int prefs3, int mrefs3, int prefs4, int mrefs4,
+                          int parity, int clip_max)
+{
+    if (parity) {
+        uint8_t * restrict dst   = dst1;
+        const uint8_t * prev  = prev1;
+        const uint8_t * cur   = cur1;
+        const uint8_t * next  = next1;
+        const uint8_t * prev2 = prev;
+        const uint8_t * next2 = cur;
+        int interpol, x;
+
+        FILTER1()
+        FILTER_LINE()
+        FILTER2()
+    }
+    else {
+        uint8_t * restrict dst   = dst1;
+        const uint8_t * prev  = prev1;
+        const uint8_t * cur   = cur1;
+        const uint8_t * next  = next1;
+        int interpol, x;
+#define prev2 cur
+#define next2 next
+
+        for (x = 0; x < w; x++) {
+            int diff0;
+            int d0;
+            int temporal_diff0;
+
+            int i1, i2;
+            int p4, p3, p2, p1, c0, m1, m2, m3, m4;
+
+            m4 = prev2[mrefs4] + next2[mrefs4];  // 2
+            p4 = prev2[prefs4] + next2[prefs4];
+            i1 = coef_hf[2] * (m4 + p4);
+            m3 = cur[mrefs3];                    // 1
+            p3 = cur[prefs3];
+            i1 += -coef_lf[1] * 4 * (m3 + p3);
+            m2 = prev2[mrefs2] + next2[mrefs2];  // 2
+            p2 = prev2[prefs2] + next2[prefs2];  // 2
+            i1 += -coef_hf[1] * (m2 + p2);
+            m1 = cur[mrefs];                     // 1
+            p1 = cur[prefs];                     // 1
+            c0 = prev2[0] + next2[0];            // 2
+            i1 += coef_hf[0] * c0;                // 4
+            d0  = c0 >> 1;                        // 1
+            temporal_diff0 = FFABS(prev2[0] - next2[0]); // 1
+            i1 += coef_lf[0] * 4 * (m1 + p1);    // -
+            {
+                int t1 =(FFABS(prev[mrefs] - m1) + FFABS(prev[prefs] - p1)) >> 1;
+                int t2 =(FFABS(next[mrefs] - m1) + FFABS(next[prefs] - p1)) >> 1;
+                diff0 = FFMAX3(temporal_diff0 >> 1, t1, t2); // 1
+            }
+            {
+                int b = (m2 >> 1) - m1;                  // 1
+                int f = (p2 >> 1) - p1;                  // 1
+                int dc = d0 - m1;
+                int de = d0 - p1;
+                int sp_max = FFMAX(de, dc);
+                int sp_min = FFMIN(de, dc);
+                sp_max = FFMAX(sp_max, FFMIN(b,f));
+                sp_min = FFMIN(sp_min, FFMAX(b,f));
+                diff0 = FFMAX3(diff0, sp_min, -sp_max);
+            }
+
+            i1 >>= 15;
+
+            i2 = (coef_sp[0] * (m1 + p1) - coef_sp[1] * (m3 + p3)) >> 13;
+
+
+            interpol = FFABS(m1 - p1) > temporal_diff0 ? i1:i2;
+
+            if (interpol > d0 + diff0)
+                interpol = d0 + diff0;
+            else if (interpol < d0 - diff0)
+                interpol = d0 - diff0;
+
+            dst[0] = av_clip_uint8(interpol);
+
+            dst++;
+            cur++;
+            prev++;
+            next++;
+#undef prev2
+#undef next2
+        }
+    }
+}
+
+#else
+void __attribute__((optimize("tree-vectorize"))) ff_bwdif_filter_line_c(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
                           int w, int prefs, int mrefs, int prefs2, int mrefs2,
                           int prefs3, int mrefs3, int prefs4, int mrefs4,
                           int parity, int clip_max)
@@ -149,6 +247,32 @@ static void __attribute__((optimize("tree-vectorize"))) filter_line_c(void *rest
     FILTER1()
     FILTER_LINE()
     FILTER2()
+}
+#endif
+
+#define NEXT_LINE()\
+    dst += d_stride; \
+    prev += prefs; \
+    cur  += prefs; \
+    next += prefs;
+
+// ***** Temp
+static void __attribute__((optimize("tree-vectorize"))) filter_line4_c(void *restrict dst1, int d_stride,
+                          const void *restrict prev1, const void *restrict cur1, const void *restrict next1, int prefs,
+                          int w, int parity, int clip_max)
+{
+    uint8_t * restrict dst  = dst1;
+    const uint8_t * restrict prev = prev1;
+    const uint8_t * restrict cur  = cur1;
+    const uint8_t * restrict next = next1;
+
+    ff_bwdif_filter_line_c(dst, (void*)prev, (void*)cur, (void*)next, w,
+                           prefs, -prefs, prefs * 2, - prefs * 2, prefs * 3, -prefs * 3, prefs * 4, -prefs * 4, parity, clip_max);
+    NEXT_LINE();
+    memcpy(dst, cur, w);
+    NEXT_LINE();
+    ff_bwdif_filter_line_c(dst, (void*)prev, (void*)cur, (void*)next, w,
+                           prefs, -prefs, prefs * 2, - prefs * 2, prefs * 3, -prefs * 3, prefs * 4, -prefs * 4, parity, clip_max);
 }
 
 static void __attribute__((optimize("tree-vectorize"))) filter_edge(void *restrict dst1, void *restrict prev1, void *restrict cur1, void *restrict next1,
@@ -245,6 +369,10 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
                                refs << 1, -(refs << 1),
                                td->parity ^ td->tff, clip_max,
                                (y < 2) || ((y + 3) > td->h) ? 0 : 1);
+            } else if (s->filter_line4 && y + 2 < slice_end && ((y + 7) <= td->h)) {
+                s->filter_line4(dst, td->frame->linesize[td->plane], prev, cur, next, refs, td->w,
+                               td->parity ^ td->tff, clip_max);
+                y += 2;
             } else {
                 s->filter_line(dst, prev, cur, next, td->w,
                                refs, -refs, refs << 1, -(refs << 1),
@@ -258,6 +386,19 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
     }
     return 0;
 }
+
+#if OPT_TEST
+static unsigned int test_frames = 0;
+static uint64_t cum_time = 0;
+static uint64_t min_delta = 99999999;
+static uint64_t max_delta = 0;
+static uint64_t utime(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_nsec / 1000 + (uint64_t)ts.tv_sec * 1000000;
+}
+#endif
 
 static void filter(AVFilterContext *ctx, AVFrame *dstpic,
                    int parity, int tff)
@@ -279,9 +420,23 @@ static void filter(AVFilterContext *ctx, AVFrame *dstpic,
         td.w     = w;
         td.h     = h;
         td.plane = i;
-
+#if OPT_TEST
+        {
+            const uint64_t now = utime();
+            uint64_t delta;
+            filter_slice(ctx, &td, 0, 1);
+            delta = utime() - now;
+            ++test_frames;
+            cum_time += delta;
+            if (min_delta > delta)
+                min_delta = delta;
+            if (max_delta < delta)
+                max_delta = delta;
+        }
+#else
         ff_filter_execute(ctx, filter_slice, &td, NULL,
                           FFMIN(h, ff_filter_get_nb_threads(ctx)));
+#endif
     }
     if (yadif->current_field == YADIF_FIELD_END) {
         yadif->current_field = YADIF_FIELD_NORMAL;
@@ -298,6 +453,11 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_frame_free(&yadif->prev);
     av_frame_free(&yadif->cur );
     av_frame_free(&yadif->next);
+#if OPT_TEST
+    av_log(ctx, AV_LOG_INFO, "Stats: Avg:%"PRIu64", Max:%"PRIu64", Min:%"PRIu64"\n",
+           test_frames == 0 ? (uint64_t)0 : cum_time / test_frames,
+           max_delta, min_delta);
+#endif
 }
 
 static const enum AVPixelFormat pix_fmts[] = {
@@ -341,20 +501,25 @@ static int config_props(AVFilterLink *link)
 
     yadif->csp = av_pix_fmt_desc_get(link->format);
     yadif->filter = filter;
+    s->filter_line4 = 0;
     if (yadif->csp->comp[0].depth > 8) {
         s->filter_intra = filter_intra_16bit;
         s->filter_line  = filter_line_c_16bit;
         s->filter_edge  = filter_edge_16bit;
     } else {
         s->filter_intra = filter_intra;
-        s->filter_line  = filter_line_c;
+        s->filter_line  = ff_bwdif_filter_line_c;
         s->filter_edge  = filter_edge;
+        if (yadif->useasm == 0)
+            s->filter_line4 = filter_line4_c;
     }
 
     if (yadif->useasm != 0)
     {
 #if ARCH_X86
         ff_bwdif_init_x86(s);
+#elif ARCH_AARCH64
+        ff_bwdif_init_aarch64(ctx);
 #endif
     }
 
@@ -381,7 +546,7 @@ static const AVOption bwdif_options[] = {
     CONST("all",        "deinterlace all frames",                       YADIF_DEINT_ALL,        "deint"),
     CONST("interlaced", "only deinterlace frames marked as interlaced", YADIF_DEINT_INTERLACED, "deint"),
 
-    {"useasm", "use asm functions (default true)", OFFSET(useasm), AV_OPT_TYPE_INT, {.i64=1}, 0, 2, FLAGS, NULL },
+    {"useasm", "use asm functions (default true)", OFFSET(useasm), AV_OPT_TYPE_INT, {.i64=1}, 0, 3, FLAGS, NULL },
     { NULL }
 };
 
