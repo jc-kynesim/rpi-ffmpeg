@@ -24,6 +24,22 @@
 #include "libavfilter/bwdif.h"
 #include "libavutil/aarch64/cpu.h"
 
+void ff_bwdif_filter_intra_neon(void *dst1, void *cur1, int w, int prefs, int mrefs,
+                                int prefs3, int mrefs3, int parity, int clip_max);
+
+
+static void filter_intra_helper(void *dst1, void *cur1, int w, int prefs, int mrefs,
+                                int prefs3, int mrefs3, int parity, int clip_max)
+{
+    const int w0 = clip_max != 255 ? 0 : w & ~15;
+
+    ff_bwdif_filter_intra_neon(dst1, cur1, w0, prefs, mrefs, prefs3, mrefs3, parity, clip_max);
+
+    if (w0 < w)
+        ff_bwdif_filter_intra_c((char *)dst1 + w0, (char *)cur1 + w0,
+                                w - w0, prefs, mrefs, prefs3, mrefs3, parity, clip_max);
+}
+
 void
 ff_bwdif_init_aarch64(BWDIFContext *s, int bit_depth)
 {
@@ -35,5 +51,6 @@ ff_bwdif_init_aarch64(BWDIFContext *s, int bit_depth)
     if (!have_neon(cpu_flags))
         return;
 
+    s->filter_intra = filter_intra_helper;
 }
 
