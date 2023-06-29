@@ -237,6 +237,13 @@ static void filter_edge_16bit(void *dst1, void *prev1, void *cur1, void *next1,
     FILTER2()
 }
 
+// Round job start line down to multiple of 4 so that if filter_line3 exists
+// and the frame is a multiple of 4 high then filter_line will never be called
+static inline int job_start(const int jobnr, const int nb_jobs, const int h)
+{
+    return jobnr >= nb_jobs ? h : ((h * jobnr) / nb_jobs) & ~3;
+}
+
 static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
 {
     BWDIFContext *s = ctx->priv;
@@ -246,8 +253,8 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
     int clip_max = (1 << (yadif->csp->comp[td->plane].depth)) - 1;
     int df = (yadif->csp->comp[td->plane].depth + 7) / 8;
     int refs = linesize / df;
-    int slice_start = (td->h *  jobnr   ) / nb_jobs;
-    int slice_end   = (td->h * (jobnr+1)) / nb_jobs;
+    int slice_start = job_start(jobnr, nb_jobs, td->h);
+    int slice_end   = job_start(jobnr + 1, nb_jobs, td->h);
     int y;
 
     for (y = slice_start; y < slice_end; y++) {
@@ -310,7 +317,7 @@ static void filter(AVFilterContext *ctx, AVFrame *dstpic,
         td.plane = i;
 
         ff_filter_execute(ctx, filter_slice, &td, NULL,
-                          FFMIN(h, ff_filter_get_nb_threads(ctx)));
+                          FFMIN((h+3)/4, ff_filter_get_nb_threads(ctx)));
     }
     if (yadif->current_field == YADIF_FIELD_END) {
         yadif->current_field = YADIF_FIELD_NORMAL;
