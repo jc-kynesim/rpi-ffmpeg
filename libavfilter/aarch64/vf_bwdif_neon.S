@@ -76,3 +76,56 @@ coeffs:
         .hword          5570, 3801, 1016, -3801         // hf[0] = v0.h[2], -hf[1] = v0.h[5]
         .hword          5077, 981                       // sp[0] = v0.h[6]
 
+// ============================================================================
+//
+// void ff_bwdif_filter_intra_neon(
+//      void *dst1,     // x0
+//      void *cur1,     // x1
+//      int w,          // w2
+//      int prefs,      // w3
+//      int mrefs,      // w4
+//      int prefs3,     // w5
+//      int mrefs3,     // w6
+//      int parity,     // w7       unused
+//      int clip_max)   // [sp, #0] unused
+
+function ff_bwdif_filter_intra_neon, export=1
+        cmp             w2, #0
+        ble             99f
+
+        ldr             q0, coeffs
+
+//    for (x = 0; x < w; x++) {
+10:
+
+//        interpol = (coef_sp[0] * (cur[mrefs] + cur[prefs]) - coef_sp[1] * (cur[mrefs3] + cur[prefs3])) >> 13;
+        ldr             q31, [x1, w4, sxtw]
+        ldr             q30, [x1, w3, sxtw]
+        ldr             q29, [x1, w6, sxtw]
+        ldr             q28, [x1, w5, sxtw]
+
+        uaddl           v20.8h,  v31.8b,  v30.8b
+        uaddl2          v21.8h,  v31.16b, v30.16b
+
+        UMULL4K         v2, v3, v4, v5, v20, v21, v0.h[6]
+
+        uaddl           v20.8h,  v29.8b,  v28.8b
+        uaddl2          v21.8h,  v29.16b, v28.16b
+
+        UMLSL4K         v2, v3, v4, v5, v20, v21, v0.h[7]
+
+//        dst[0] = av_clip(interpol, 0, clip_max);
+        SQSHRUNN        v2, v2, v3, v4, v5, 13
+        str             q2, [x0], #16
+
+//        dst++;
+//        cur++;
+//    }
+
+        subs            w2,  w2,  #16
+        add             x1,  x1,  #16
+        bgt             10b
+
+99:
+        ret
+endfunc
