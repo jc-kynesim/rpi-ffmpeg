@@ -150,6 +150,31 @@ void ff_bwdif_filter_line_c(void *dst1, void *prev1, void *cur1, void *next1,
     FILTER2()
 }
 
+#define NEXT_LINE()\
+    dst += d_stride; \
+    prev += prefs; \
+    cur  += prefs; \
+    next += prefs;
+
+void ff_bwdif_filter_line3_c(void * dst1, int d_stride,
+                             const void * prev1, const void * cur1, const void * next1, int s_stride,
+                             int w, int parity, int clip_max)
+{
+    const int prefs = s_stride;
+    uint8_t * dst  = dst1;
+    const uint8_t * prev = prev1;
+    const uint8_t * cur  = cur1;
+    const uint8_t * next = next1;
+
+    ff_bwdif_filter_line_c(dst, (void*)prev, (void*)cur, (void*)next, w,
+                           prefs, -prefs, prefs * 2, - prefs * 2, prefs * 3, -prefs * 3, prefs * 4, -prefs * 4, parity, clip_max);
+    NEXT_LINE();
+    memcpy(dst, cur, w);
+    NEXT_LINE();
+    ff_bwdif_filter_line_c(dst, (void*)prev, (void*)cur, (void*)next, w,
+                           prefs, -prefs, prefs * 2, - prefs * 2, prefs * 3, -prefs * 3, prefs * 4, -prefs * 4, parity, clip_max);
+}
+
 void ff_bwdif_filter_edge_c(void *dst1, void *prev1, void *cur1, void *next1,
                             int w, int prefs, int mrefs, int prefs2, int mrefs2,
                             int parity, int clip_max, int spat)
@@ -244,6 +269,11 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
                                refs << 1, -(refs << 1),
                                td->parity ^ td->tff, clip_max,
                                (y < 2) || ((y + 3) > td->h) ? 0 : 1);
+            } else if (s->filter_line3 && y + 2 < slice_end && y + 6 < td->h) {
+                s->filter_line3(dst, td->frame->linesize[td->plane],
+                                prev, cur, next, linesize, td->w,
+                                td->parity ^ td->tff, clip_max);
+                y += 2;
             } else {
                 s->filter_line(dst, prev, cur, next, td->w,
                                refs, -refs, refs << 1, -(refs << 1),
@@ -357,6 +387,7 @@ static int config_props(AVFilterLink *link)
 
 av_cold void ff_bwdif_init_filter_line(BWDIFContext *s, int bit_depth)
 {
+    s->filter_line3 = 0;
     if (bit_depth > 8) {
         s->filter_intra = filter_intra_16bit;
         s->filter_line  = filter_line_c_16bit;
