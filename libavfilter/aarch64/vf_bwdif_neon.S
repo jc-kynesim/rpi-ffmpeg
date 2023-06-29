@@ -151,6 +151,110 @@ coeffs:
 
 // ============================================================================
 //
+// void ff_bwdif_filter_edge_neon(
+//      void *dst1,     // x0
+//      void *prev1,    // x1
+//      void *cur1,     // x2
+//      void *next1,    // x3
+//      int w,          // w4
+//      int prefs,      // w5
+//      int mrefs,      // w6
+//      int prefs2,     // w7
+//      int mrefs2,     // [sp, #0]
+//      int parity,     // [sp, #SP_INT]
+//      int clip_max,   // [sp, #SP_INT*2]  unused
+//      int spat);      // [sp, #SP_INT*3]
+
+function ff_bwdif_filter_edge_neon, export=1
+        // Sanity check w
+        cmp             w4, #0
+        ble             99f
+
+// #define prev2 cur
+//     const uint8_t * restrict next2 = parity ? prev : next;
+
+        ldr             w8,  [sp, #0]                   // mrefs2
+
+        ldr             w17, [sp, #SP_INT]              // parity
+        ldr             w16, [sp, #SP_INT*3]            // spat
+        cmp             w17, #0
+        csel            x17, x1, x3, ne
+
+//     for (x = 0; x < w; x++) {
+
+10:
+//        int m1 = cur[mrefs];
+//        int d = (prev2[0] + next2[0]) >> 1;
+//        int p1 = cur[prefs];
+//        int temporal_diff0 = FFABS(prev2[0] - next2[0]);
+//        int temporal_diff1 =(FFABS(prev[mrefs] - m1) + FFABS(prev[prefs] - p1)) >> 1;
+//        int temporal_diff2 =(FFABS(next[mrefs] - m1) + FFABS(next[prefs] - p1)) >> 1;
+//        int diff = FFMAX3(temporal_diff0 >> 1, temporal_diff1, temporal_diff2);
+        ldr             q31, [x2]
+        ldr             q21, [x17]
+        uhadd           v16.16b, v31.16b, v21.16b       // d0 = v16
+        uabd            v17.16b, v31.16b, v21.16b       // td0 = v17
+        ldr             q24, [x2, w6, sxtw]             // m1 = v24
+        ldr             q22, [x2, w5, sxtw]             // p1 = v22
+
+        ldr             q0,  [x1, w6, sxtw]             // prev[mrefs]
+        ldr             q2,  [x1, w5, sxtw]             // prev[prefs]
+        ldr             q1,  [x3, w6, sxtw]             // next[mrefs]
+        ldr             q3,  [x3, w5, sxtw]             // next[prefs]
+
+        ushr            v29.16b, v17.16b, #1
+
+        uabd            v31.16b, v0.16b,  v24.16b
+        uabd            v30.16b, v2.16b,  v22.16b
+        uhadd           v0.16b,  v31.16b, v30.16b       // td1 = q0
+
+        uabd            v31.16b, v1.16b,  v24.16b
+        uabd            v30.16b, v3.16b,  v22.16b
+        uhadd           v1.16b,  v31.16b, v30.16b       // td2 = q1
+
+        umax            v0.16b,  v0.16b,  v29.16b
+        umax            v0.16b,  v0.16b,  v1.16b        // diff = v0
+
+//        if (spat) {
+//            SPAT_CHECK()
+//        }
+//        i0 = (m1 + p1) >> 1;
+        cbz             w16, 1f
+
+        ldr             q31, [x2,  w8, sxtw]
+        ldr             q18, [x17, w8, sxtw]
+        ldr             q30, [x2,  w7, sxtw]
+        ldr             q19, [x17, w7, sxtw]
+        uhadd           v18.16b, v18.16b, v31.16b
+        uhadd           v19.16b, v19.16b, v30.16b
+
+        SPAT_CHECK      v0, v18, v24, v16, v22, v19, v31, v30, v29, v28
+
+1:
+        uhadd           v2.16b,  v22.16b, v24.16b
+
+        // i0 = v2, s0 = v2, d0 = v16, diff = v0, t0 = v31, t1 = v30
+        DIFF_CLIP       v2, v2, v16, v0, v31, v30
+
+//        dst[0] = av_clip(interpol, 0, clip_max);
+        str             q2, [x0], #16
+
+//        dst++;
+//        cur++;
+//    }
+        subs            w4,  w4,  #16
+        add             x1,  x1,  #16
+        add             x2,  x2,  #16
+        add             x3,  x3,  #16
+        add             x17, x17, #16
+        bgt             10b
+
+99:
+        ret
+endfunc
+
+// ============================================================================
+//
 // void ff_bwdif_filter_intra_neon(
 //      void *dst1,     // x0
 //      void *cur1,     // x1
