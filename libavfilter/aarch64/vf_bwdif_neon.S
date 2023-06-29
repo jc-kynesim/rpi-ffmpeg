@@ -66,6 +66,79 @@
         umlsl2          \a3\().4s, \s1\().8h, \k
 .endm
 
+//      int b = m2s1 - m1;
+//      int f = p2s1 - p1;
+//      int dc = c0s1 - m1;
+//      int de = c0s1 - p1;
+//      int sp_max = FFMIN(p1 - c0s1, m1 - c0s1);
+//      sp_max = FFMIN(sp_max, FFMAX(-b,-f));
+//      int sp_min = FFMIN(c0s1 - p1, c0s1 - m1);
+//      sp_min = FFMIN(sp_min, FFMAX(b,f));
+//      diff = diff == 0 ? 0 : FFMAX3(diff, sp_min, sp_max);
+.macro SPAT_CHECK diff, m2s1, m1, c0s1, p1, p2s1, t0, t1, t2, t3
+        uqsub           \t0\().16b, \p1\().16b, \c0s1\().16b
+        uqsub           \t2\().16b, \m1\().16b, \c0s1\().16b
+        umin            \t2\().16b, \t0\().16b, \t2\().16b
+
+        uqsub           \t1\().16b, \m1\().16b, \m2s1\().16b
+        uqsub           \t3\().16b, \p1\().16b, \p2s1\().16b
+        umax            \t3\().16b, \t3\().16b, \t1\().16b
+        umin            \t3\().16b, \t3\().16b, \t2\().16b
+
+        uqsub           \t0\().16b, \c0s1\().16b, \p1\().16b
+        uqsub           \t2\().16b, \c0s1\().16b, \m1\().16b
+        umin            \t2\().16b, \t0\().16b, \t2\().16b
+
+        uqsub           \t1\().16b, \m2s1\().16b, \m1\().16b
+        uqsub           \t0\().16b, \p2s1\().16b, \p1\().16b
+        umax            \t0\().16b, \t0\().16b, \t1\().16b
+        umin            \t2\().16b, \t2\().16b, \t0\().16b
+
+        cmeq            \t1\().16b, \diff\().16b, #0
+        umax            \diff\().16b, \diff\().16b, \t3\().16b
+        umax            \diff\().16b, \diff\().16b, \t2\().16b
+        bic             \diff\().16b, \diff\().16b, \t1\().16b
+.endm
+
+//      i0 = s0;
+//      if (i0 > d0 + diff0)
+//          i0 = d0 + diff0;
+//      else if (i0 < d0 - diff0)
+//          i0 = d0 - diff0;
+//
+// i0 = s0 is safe
+.macro DIFF_CLIP i0, s0, d0, diff, t0, t1
+        uqadd           \t0\().16b, \d0\().16b, \diff\().16b
+        uqsub           \t1\().16b, \d0\().16b, \diff\().16b
+        umin            \i0\().16b, \s0\().16b, \t0\().16b
+        umax            \i0\().16b, \i0\().16b, \t1\().16b
+.endm
+
+//      i0 = FFABS(m1 - p1) > td0 ? i1 : i2;
+//      DIFF_CLIP
+//
+// i0 = i1 is safe
+.macro INTERPOL i0, i1, i2, m1, d0, p1, td0, diff, t0, t1, t2
+        uabd            \t0\().16b, \m1\().16b, \p1\().16b
+        cmhi            \t0\().16b, \t0\().16b, \td0\().16b
+        bsl             \t0\().16b, \i1\().16b, \i2\().16b
+        DIFF_CLIP       \i0, \t0, \d0, \diff, \t1, \t2
+.endm
+
+.macro PUSH_VREGS
+        stp             d8,  d9,  [sp, #-64]!
+        stp             d10, d11, [sp, #16]
+        stp             d12, d13, [sp, #32]
+        stp             d14, d15, [sp, #48]
+.endm
+
+.macro POP_VREGS
+        ldp             d14, d15, [sp, #48]
+        ldp             d12, d13, [sp, #32]
+        ldp             d10, d11, [sp, #16]
+        ldp             d8,  d9,  [sp], #64
+.endm
+
 // static const uint16_t coef_lf[2] = { 4309, 213 };
 // static const uint16_t coef_hf[3] = { 5570, 3801, 1016 };
 // static const uint16_t coef_sp[2] = { 5077, 981 };
