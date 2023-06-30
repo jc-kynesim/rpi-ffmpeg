@@ -279,17 +279,36 @@ endfunc
 // SAND30 -> 10bit
 .macro USAND10 d0, d1, d2, a0, a1
                 shrn            \d2\().4h, \a0\().4s, #14
-                xtn             \d0\().4h, \a0\().4s
                 shrn            \d1\().4h, \a0\().4s, #10
 
                 shrn2           \d2\().8h, \a1\().4s, #14
-                xtn2            \d0\().8h, \a1\().4s
                 shrn2           \d1\().8h, \a1\().4s, #10
+                uzp1            \d0\().8h, \a0\().8h, \a1\().8h
 
                 ushr            \d2\().8h, \d2\().8h, #6
                 bic             \d0\().8h, #0xfc,     lsl #8
                 bic             \d1\().8h, #0xfc,     lsl #8
 .endm
+
+// SAND30 -> 8bit
+.macro USAND8 d0, d1, d2, a0, a1, a2, a3, t0, t1, t2
+                shrn            \d1\().4h,  \a0\().4s,  #12
+                shrn2           \d1\().8h,  \a1\().4s,  #12
+                uzp1            \d0\().8h,  \a0\().8h,  \a1\().8h
+                uzp2            \d2\().8h,  \a0\().8h,  \a1\().8h
+
+                shrn            \t1\().4h,  \a2\().4s,  #12
+                shrn2           \t1\().8h,  \a3\().4s,  #12
+                uzp1            \t0\().8h,  \a2\().8h,  \a3\().8h
+                uzp2            \t2\().8h,  \a2\().8h,  \a3\().8h
+
+                shrn            \d0\().8b,  \d0\().8h,  #2
+                shrn2           \d0\().16b, \t0\().8h,  #2
+                shrn            \d2\().8b,  \d2\().8h,  #6
+                shrn2           \d2\().16b, \t2\().8h,  #6
+                uzp1            \d1\().16b, \d1\().16b, \t1\().16b
+.endm
+
 
 // void ff_rpi_sand30_lines_to_planar_c16(
 //   uint8_t * dst_u,            // [x0]
@@ -322,6 +341,7 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
 1:
                 ld1             {v0.4s-v3.4s}, [x5], #64
                 ld1             {v4.4s-v7.4s}, [x5], x6
+                subs            w9,  w9,  #48
 
                 USAND10         v17, v16, v18, v0, v1
                 USAND10         v20, v19, v21, v2, v3
@@ -330,7 +350,6 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 USAND10         v26, v25, v27, v6, v7
                 UZPH_C          v4, v5, v6, v22, v23, v24, v25, v26, v27
 
-                subs            w9,  w9,  #48
                 blt             2f
 
                 st3             {v0.8h-v2.8h},   [x0], #48
@@ -457,61 +476,10 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
 
                 subs            w5,  w5,  #96
 
-                // v0, v1
-
-                shrn            v18.4h,  v0.4s,   #14
-                xtn             v16.4h,  v0.4s
-                shrn            v17.4h,  v0.4s,   #10
-
-                shrn2           v18.8h,  v1.4s,   #14
-                xtn2            v16.8h,  v1.4s
-                shrn2           v17.8h,  v1.4s,   #10
-
-                ushr            v18.8h,  v18.8h,  #6
-                bic             v16.8h,  #0xfc,   lsl #8
-                bic             v17.8h,  #0xfc,   lsl #8
-
-                // v2, v3
-
-                shrn            v21.4h,  v2.4s,   #14
-                xtn             v19.4h,  v2.4s
-                shrn            v20.4h,  v2.4s,   #10
-
-                shrn2           v21.8h,  v3.4s,   #14
-                xtn2            v19.8h,  v3.4s
-                shrn2           v20.8h,  v3.4s,   #10
-
-                ushr            v21.8h,  v21.8h,  #6
-                bic             v19.8h,  #0xfc,   lsl #8
-                bic             v20.8h,  #0xfc,   lsl #8
-
-                // v4, v5
-
-                shrn            v24.4h,  v4.4s,   #14
-                xtn             v22.4h,  v4.4s
-                shrn            v23.4h,  v4.4s,   #10
-
-                shrn2           v24.8h,  v5.4s,   #14
-                xtn2            v22.8h,  v5.4s
-                shrn2           v23.8h,  v5.4s,   #10
-
-                ushr            v24.8h,  v24.8h,  #6
-                bic             v22.8h,  #0xfc,   lsl #8
-                bic             v23.8h,  #0xfc,   lsl #8
-
-                // v6, v7
-
-                shrn            v27.4h,  v6.4s,   #14
-                xtn             v25.4h,  v6.4s
-                shrn            v26.4h,  v6.4s,   #10
-
-                shrn2           v27.8h,  v7.4s,   #14
-                xtn2            v25.8h,  v7.4s
-                shrn2           v26.8h,  v7.4s,   #10
-
-                ushr            v27.8h,  v27.8h,  #6
-                bic             v25.8h,  #0xfc,   lsl #8
-                bic             v26.8h,  #0xfc,   lsl #8
+                USAND10         v16, v17, v18, v0, v1
+                USAND10         v19, v20, v21, v2, v3
+                USAND10         v22, v23, v24, v4, v5
+                USAND10         v25, v26, v27, v6, v7
 
                 blt             2f
 
@@ -624,60 +592,8 @@ function ff_rpi_sand30_lines_to_planar_y8, export=1
                 subs            w5,  w5,  #96
 
                 // v0, v1
-
-                shrn            v18.4h,  v0.4s,   #16
-                xtn             v16.4h,  v0.4s
-                shrn            v17.4h,  v0.4s,   #12
-
-                shrn2           v18.8h,  v1.4s,   #16
-                xtn2            v16.8h,  v1.4s
-                shrn2           v17.8h,  v1.4s,   #12
-
-                shrn            v18.8b,  v18.8h,  #6
-                shrn            v16.8b,  v16.8h,  #2
-                xtn             v17.8b,  v17.8h
-
-                // v2, v3
-
-                shrn            v21.4h,  v2.4s,   #16
-                xtn             v19.4h,  v2.4s
-                shrn            v20.4h,  v2.4s,   #12
-
-                shrn2           v21.8h,  v3.4s,   #16
-                xtn2            v19.8h,  v3.4s
-                shrn2           v20.8h,  v3.4s,   #12
-
-                shrn2           v18.16b, v21.8h,  #6
-                shrn2           v16.16b, v19.8h,  #2
-                xtn2            v17.16b, v20.8h
-
-                // v4, v5
-
-                shrn            v24.4h,  v4.4s,   #16
-                xtn             v22.4h,  v4.4s
-                shrn            v23.4h,  v4.4s,   #12
-
-                shrn2           v24.8h,  v5.4s,   #16
-                xtn2            v22.8h,  v5.4s
-                shrn2           v23.8h,  v5.4s,   #12
-
-                shrn            v21.8b,  v24.8h,  #6
-                shrn            v19.8b,  v22.8h,  #2
-                xtn             v20.8b,  v23.8h
-
-                // v6, v7
-
-                shrn            v27.4h,  v6.4s,   #16
-                xtn             v25.4h,  v6.4s
-                shrn            v26.4h,  v6.4s,   #12
-
-                shrn2           v27.8h,  v7.4s,   #16
-                xtn2            v25.8h,  v7.4s
-                shrn2           v26.8h,  v7.4s,   #12
-
-                shrn2           v21.16b, v27.8h,  #6
-                shrn2           v19.16b, v25.8h,  #2
-                xtn2            v20.16b, v26.8h
+                USAND8          v16, v17, v18, v0, v1, v2, v3, v22, v23, v24
+                USAND8          v19, v20, v21, v4, v5, v6, v7, v22, v23, v24
 
                 blt             2f
 
