@@ -469,6 +469,7 @@ endfunc
 function ff_rpi_sand30_lines_to_planar_y16, export=1
                 lsl             w4,  w4,  #7
                 sub             w4,  w4,  #64
+                uxtw            x4,  w4
                 sub             w1,  w1,  w7, lsl #1
                 uxtw            x6,  w6
                 add             x8,  x2,  x6, lsl #7
@@ -634,6 +635,7 @@ endfunc
 function ff_rpi_sand30_lines_to_planar_y8, export=1
                 lsl             w4,  w4,  #7
                 sub             w4,  w4,  #64
+                uxtw            x4,  w4
                 sub             w1,  w1,  w7
                 uxtw            x6,  w6
                 add             x8,  x2,  x6, lsl #7
