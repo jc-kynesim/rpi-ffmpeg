@@ -67,6 +67,7 @@ void checkasm_check_llviddspenc(void);
 void checkasm_check_nlmeans(void);
 void checkasm_check_opusdsp(void);
 void checkasm_check_pixblockdsp(void);
+void checkasm_check_rpi_sand(void);
 void checkasm_check_sbrdsp(void);
 void checkasm_check_synth_filter(void);
 void checkasm_check_sw_rgb(void);
