@@ -204,6 +204,9 @@ static const struct {
 #if CONFIG_AVUTIL
         { "fixed_dsp", checkasm_check_fixed_dsp },
         { "float_dsp", checkasm_check_float_dsp },
+    #if CONFIG_SAND
+        { "rpi_sand",  checkasm_check_rpi_sand },
+    #endif
 #endif
     { NULL }
 };
