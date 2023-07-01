@@ -105,6 +105,7 @@ AVUTILOBJS                              += fixed_dsp.o
 AVUTILOBJS                              += float_dsp.o
 AVUTILOBJS                              += lls.o
 AVUTILOBJS-$(CONFIG_PIXELUTILS)         += pixelutils.o
+AVUTILOBJS-$(CONFIG_SAND)               += rpi_sand.o
 
 CHECKASMOBJS-$(CONFIG_AVUTIL)  += $(AVUTILOBJS) $(AVUTILOBJS-yes)
 
