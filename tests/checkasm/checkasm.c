@@ -290,6 +290,9 @@ static const struct {
         { "float_dsp", checkasm_check_float_dsp },
         { "lls",       checkasm_check_lls },
         { "av_tx",     checkasm_check_av_tx },
+    #if CONFIG_SAND
+        { "rpi_sand",  checkasm_check_rpi_sand },
+    #endif
 #endif
     { NULL }
 };

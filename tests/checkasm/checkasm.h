@@ -114,6 +114,7 @@ void checkasm_check_mpegvideoencdsp(void);
 void checkasm_check_nlmeans(void);
 void checkasm_check_opusdsp(void);
 void checkasm_check_pixblockdsp(void);
+void checkasm_check_rpi_sand(void);
 void checkasm_check_sbrdsp(void);
 void checkasm_check_rv34dsp(void);
 void checkasm_check_rv40dsp(void);
