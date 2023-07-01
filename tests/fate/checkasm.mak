@@ -48,6 +48,7 @@ FATE_CHECKASM = fate-checkasm-aacencdsp                                 \
                 fate-checkasm-pixblockdsp                               \
                 fate-checkasm-png                                       \
                 fate-checkasm-qpeldsp                                   \
+                fate-checkasm-rpi_sand                                  \
                 fate-checkasm-sbrdsp                                    \
                 fate-checkasm-rv34dsp                                   \
                 fate-checkasm-rv40dsp                                   \
