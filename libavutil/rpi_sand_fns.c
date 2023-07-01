@@ -35,10 +35,12 @@ Authors: John Cox
 #include "frame.h"
 
 #if ARCH_ARM && HAVE_NEON
-#include "arm/rpi_sand_neon.h"
+#include "libavutil/arm/cpu.h"
+#include "libavutil/arm/rpi_sand_neon.h"
 #define HAVE_SAND_ASM 1
 #elif ARCH_AARCH64 && HAVE_NEON
-#include "aarch64/rpi_sand_neon.h"
+#include "libavutil/aarch64/cpu.h"
+#include "libavutil/aarch64/rpi_sand_neon.h"
 #define HAVE_SAND_ASM 1
 #else
 #define HAVE_SAND_ASM 0
@@ -97,7 +99,7 @@ void av_rpi_sand30_to_planar_y16(uint8_t * dst, const unsigned int dst_stride,
     const unsigned int slice_inc = ((stride2 - 1) * stride1) >> 2;  // RHS of a stripe to LHS of next in words
 
 #if HAVE_SAND_ASM
-    if (_x == 0) {
+    if (_x == 0 && have_neon(av_get_cpu_flags())) {
         ff_rpi_sand30_lines_to_planar_y16(dst, dst_stride, src, stride1, stride2, _x, y, _w, h);
         return;
     }
@@ -163,7 +165,7 @@ void av_rpi_sand30_to_planar_c16(uint8_t * dst_u, const unsigned int dst_stride_
     const unsigned int slice_inc = ((stride2 - 1) * stride1) >> 2;  // RHS of a stripe to LHS of next in words
 
 #if HAVE_SAND_ASM
-    if (_x == 0) {
+    if (_x == 0 && have_neon(av_get_cpu_flags())) {
         ff_rpi_sand30_lines_to_planar_c16(dst_u, dst_stride_u, dst_v, dst_stride_v,
                                        src, stride1, stride2, _x, y, _w, h);
         return;
