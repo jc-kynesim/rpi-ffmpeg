@@ -641,9 +641,9 @@ endfunc
 //      int mrefs,      // w6
 //      int prefs2,     // w7
 //      int mrefs2,     // [sp, #0]
-//      int parity,     // [sp, #8]
-//      int clip_max,   // [sp, #16]  unused
-//      int spat);      // [sp, #24]
+//      int parity,     // [sp, #SP_INT]
+//      int clip_max,   // [sp, #SP_INT*2]  unused
+//      int spat);      // [sp, #SP_INT*3]
 
 function ff_bwdif_filter_edge_neon, export=1
         // Sanity check w
@@ -655,8 +655,8 @@ function ff_bwdif_filter_edge_neon, export=1
 
         ldr             w8,  [sp, #0]                   // mrefs2
 
-        ldr             w17, [sp, #8]                   // parity
-        ldr             w16,  [sp, #24]                 // spat
+        ldr             w17, [sp, #SP_INT]              // parity
+        ldr             w16, [sp, #SP_INT*3]            // spat
         cmp             w17, #0
         csel            x17, x1, x3, ne
 
@@ -674,13 +674,13 @@ function ff_bwdif_filter_edge_neon, export=1
         ldr             q21, [x17]
         uhadd           v16.16b, v31.16b, v21.16b       // d0 = v16
         uabd            v17.16b, v31.16b, v21.16b       // td0 = v17
-        ldr             q24, [x2, w6, SXTW]             // m1 = v24
-        ldr             q22, [x2, w5, SXTW]             // p1 = v22
+        ldr             q24, [x2, w6, sxtw]             // m1 = v24
+        ldr             q22, [x2, w5, sxtw]             // p1 = v22
 
-        ldr             q0,  [x1, w6, SXTW]             // prev[mrefs]
-        ldr             q2,  [x1, w5, SXTW]             // prev[prefs]
-        ldr             q1,  [x3, w6, SXTW]             // next[mrefs]
-        ldr             q3,  [x3, w5, SXTW]             // next[prefs]
+        ldr             q0,  [x1, w6, sxtw]             // prev[mrefs]
+        ldr             q2,  [x1, w5, sxtw]             // prev[prefs]
+        ldr             q1,  [x3, w6, sxtw]             // next[mrefs]
+        ldr             q3,  [x3, w5, sxtw]             // next[prefs]
 
         ushr            v29.16b, v17.16b, #1
 
@@ -701,10 +701,10 @@ function ff_bwdif_filter_edge_neon, export=1
 //        i0 = (m1 + p1) >> 1;
         cbz             w16, 1f
 
-        ldr             q31, [x2,  w8, SXTW]
-        ldr             q18, [x17, w8, SXTW]
-        ldr             q30, [x2,  w7, SXTW]
-        ldr             q19, [x17, w7, SXTW]
+        ldr             q31, [x2,  w8, sxtw]
+        ldr             q18, [x17, w8, sxtw]
+        ldr             q30, [x2,  w7, sxtw]
+        ldr             q19, [x17, w7, sxtw]
         uhadd           v18.16b, v18.16b, v31.16b
         uhadd           v19.16b, v19.16b, v30.16b
 
