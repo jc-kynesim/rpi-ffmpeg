@@ -756,10 +756,10 @@ function ff_bwdif_filter_intra_neon, export=1
 10:
 
 //        interpol = (coef_sp[0] * (cur[mrefs] + cur[prefs]) - coef_sp[1] * (cur[mrefs3] + cur[prefs3])) >> 13;
-        ldr             q31, [x1, w4, SXTW]
-        ldr             q30, [x1, w3, SXTW]
-        ldr             q29, [x1, w6, SXTW]
-        ldr             q28, [x1, w5, SXTW]
+        ldr             q31, [x1, w4, sxtw]
+        ldr             q30, [x1, w3, sxtw]
+        ldr             q29, [x1, w6, sxtw]
+        ldr             q28, [x1, w5, sxtw]
 
         uaddl           v20.8h,  v31.8b,  v30.8b
         uaddl2          v21.8h,  v31.16b, v30.16b
