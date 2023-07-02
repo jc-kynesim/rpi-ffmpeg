@@ -23,6 +23,13 @@
 
 #include "libavutil/aarch64/asm.S"
 
+// Space taken on the stack by an int (32-bit)
+#ifdef __APPLE__
+.set    SP_INT, 4
+#else
+.set    SP_INT, 8
+#endif
+
 .macro SQSHRUNN b, s0, s1, s2, s3, n
         sqshrun         \s0\().4h, \s0\().4s, #\n - 8
         sqshrun2        \s0\().8h, \s1\().4s, #\n - 8
@@ -122,7 +129,7 @@
 // static const uint16_t coef_hf[3] = { 5570, 3801, 1016 };
 // static const uint16_t coef_sp[2] = { 5077, 981 };
 
-        .align 16
+        .balign 16
 coeffs:
         .hword          4309 * 4, 213 * 4               // lf[0]*4 = v0.h[0]
         .hword          5570, 3801, 1016, -3801         // hf[0] = v0.h[2], -hf[1] = v0.h[5]
