@@ -433,12 +433,12 @@ endfunc
 //      int mrefs,      // w6
 //      int prefs2,     // w7
 //      int mrefs2,     // [sp, #0]
-//      int prefs3,     // [sp, #8]
-//      int mrefs3,     // [sp, #16]
-//      int prefs4,     // [sp, #24]
-//      int mrefs4,     // [sp, #32]
-//      int parity,     // [sp, #40]
-//      int clip_max)   // [sp, #48]
+//      int prefs3,     // [sp, #SP_INT]
+//      int mrefs3,     // [sp, #SP_INT*2]
+//      int prefs4,     // [sp, #SP_INT*3]
+//      int mrefs4,     // [sp, #SP_INT*4]
+//      int parity,     // [sp, #SP_INT*5]
+//      int clip_max)   // [sp, #SP_INT*6]
 
 function ff_bwdif_filter_line_neon, export=1
         // Sanity check w
@@ -451,10 +451,10 @@ function ff_bwdif_filter_line_neon, export=1
         mov             w12, w7                         // w12 = pref2
         mov             w11, w5                         // w11 = pref
         ldr             w8,  [sp, #0]                   // w8 =  mref2
-        ldr             w7,  [sp, #16]                  // w7  = mref3
-        ldr             w6,  [sp, #32]                  // w6  = mref4
-        ldr             w13, [sp, #8]                   // w13 = pref3
-        ldr             w14, [sp, #24]                  // w14 = pref4
+        ldr             w7,  [sp, #SP_INT*2]            // w7  = mref3
+        ldr             w6,  [sp, #SP_INT*4]            // w6  = mref4
+        ldr             w13, [sp, #SP_INT]              // w13 = pref3
+        ldr             w14, [sp, #SP_INT*3]            // w14 = pref4
 
         mov             x4,  x3
         mov             x3,  x2
@@ -462,15 +462,11 @@ function ff_bwdif_filter_line_neon, export=1
 
 // #define prev2 cur
 //        const uint8_t * restrict next2 = parity ? prev : next;
-        ldr             w17, [sp, #40]                  // parity
+        ldr             w17, [sp, #SP_INT*5]            // parity
         cmp             w17, #0
         csel            x17, x2, x4, ne
 
-        // We want all the V registers - save all the ones we must
-        stp             d14, d15, [sp, #-64]!
-        stp             d8,  d9,  [sp, #48]
-        stp             d10, d11, [sp, #32]
-        stp             d12, d13, [sp, #16]
+        PUSH_VREGS
 
         ldr             q0, coeffs
 
@@ -494,14 +490,14 @@ function ff_bwdif_filter_line_neon, export=1
         uaddl           v20.8h,  v21.8b,  v31.8b
         uaddl2          v21.8h,  v21.16b, v31.16b
 
-        ldr             q31, [x3, w6, SXTW]
-        ldr             q23, [x17, w6, SXTW]
+        ldr             q31, [x3, w6, sxtw]
+        ldr             q23, [x17, w6, sxtw]
 
 //             i1 = coef_hf[0] * c0;                // i1 = v2-v5
         UMULL4K         v2, v3, v4, v5, v20, v21, v0.h[2]
 
-        ldr             q30, [x3, w14, SXTW]
-        ldr             q25, [x17, w14, SXTW]
+        ldr             q30, [x3, w14, sxtw]
+        ldr             q25, [x17, w14, sxtw]
 
 //             m4 = prev2[mrefs4] + next2[mrefs4];  // m4 = v22,v23
         uaddl           v22.8h,  v23.8b,  v31.8b
@@ -513,18 +509,18 @@ function ff_bwdif_filter_line_neon, export=1
         uaddl2          v25.8h,  v25.16b, v30.16b
 
 //             m3 = cur[mrefs3];                    // m3 = v20
-        ldr             q20, [x3, w7, SXTW]
+        ldr             q20, [x3, w7, sxtw]
 
 //             p3 = cur[prefs3];                    // p3 = v21
-        ldr             q21, [x3, w13, SXTW]
+        ldr             q21, [x3, w13, sxtw]
 
 //             i1 += coef_hf[2] * (m4 + p4);        // (-m4:v22,v23) (-p4:v24,v25)
         add             v22.8h,  v22.8h,  v24.8h
         add             v23.8h,  v23.8h,  v25.8h
         UMLAL4K         v2, v3, v4, v5, v22, v23, v0.h[4]
 
-        ldr             q29, [x3, w8, SXTW]
-        ldr             q23, [x17, w8, SXTW]
+        ldr             q29, [x3, w8, sxtw]
+        ldr             q23, [x17, w8, sxtw]
 
 //             i1 -= coef_lf[1] * 4 * (m3 + p3);   // -
         uaddl           v30.8h,  v20.8b,  v21.8b
@@ -537,8 +533,8 @@ function ff_bwdif_filter_line_neon, export=1
         uaddl           v22.8h,  v23.8b,  v29.8b
         uaddl2          v23.8h,  v23.16b, v29.16b
 
-        ldr             q31, [x3, w12, SXTW]
-        ldr             q27, [x17, w12, SXTW]
+        ldr             q31, [x3, w12, sxtw]
+        ldr             q27, [x17, w12, sxtw]
 
 //             j1 += coef_hf[2] * (m2 + p6);        // (-p6:v24,v25)
         add             v24.8h,  v24.8h,  v22.8h
@@ -546,7 +542,7 @@ function ff_bwdif_filter_line_neon, export=1
         UMLAL4K         v6, v7, v8, v9, v24, v25, v0.h[4]
 
 //             m1 = cur[mrefs];                     // m1 = v24
-        ldr             q24, [x3, w9, SXTW]
+        ldr             q24, [x3, w9, sxtw]
 
 //             p2 = prev2[prefs2] + next2[prefs2];  // p2 = v26, v27
 //             temporal_diff2 = FFABS(prev2[prefs2] - next2[prefs2]); // td2 = v14
@@ -562,7 +558,7 @@ function ff_bwdif_filter_line_neon, export=1
         UMLSL4K         v2, v3, v4, v5, v22, v23, v0.h[3]
 
 //             p1 = cur[prefs];                     // p1 = v22
-        ldr             q22, [x3, w11, SXTW]
+        ldr             q22, [x3, w11, sxtw]
 
 //             i2 = (coef_sp[0] * (m1 + p1) - coef_sp[1] * (m3 + p3)) >> 13; // (-m3:v20*) i2=v17
         uaddl           v18.8h,  v22.8b,  v24.8b
@@ -580,11 +576,11 @@ function ff_bwdif_filter_line_neon, export=1
         uaddl2          v27.8h,  v24.16b, v22.16b
         UMLAL4K         v2, v3, v4, v5, v26, v27, v0.h[0]
 
-        ldr             q31, [x2, w9, SXTW]
-        ldr             q29, [x4, w9, SXTW]
+        ldr             q31, [x2, w9, sxtw]
+        ldr             q29, [x4, w9, sxtw]
 
-        ldr             q30, [x2, w11, SXTW]
-        ldr             q28, [x4, w11, SXTW]
+        ldr             q30, [x2, w11, sxtw]
+        ldr             q28, [x4, w11, sxtw]
 
 //             i1 >>= 15;                            // i1 = v2, -v3, -v4*, -v5*
         SQSHRUNN        v2, v2, v3, v4, v5, 15
@@ -628,10 +624,7 @@ function ff_bwdif_filter_line_neon, export=1
         add             x17, x17, #16
         bgt             10b
 
-        ldp             d12, d13, [sp, #16]
-        ldp             d10, d11, [sp, #32]
-        ldp             d8,  d9,  [sp, #48]
-        ldp             d14, d15, [sp], #64
+        POP_VREGS
 99:
         ret
 endfunc
