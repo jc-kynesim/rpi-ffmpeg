@@ -125,6 +125,20 @@
         DIFF_CLIP       \i0, \t0, \d0, \diff, \t1, \t2
 .endm
 
+.macro PUSH_VREGS
+        stp             d8,  d9,  [sp, #-64]!
+        stp             d10, d11, [sp, #16]
+        stp             d12, d13, [sp, #32]
+        stp             d14, d15, [sp, #48]
+.endm
+
+.macro POP_VREGS
+        ldp             d14, d15, [sp, #48]
+        ldp             d12, d13, [sp, #32]
+        ldp             d10, d11, [sp, #16]
+        ldp             d8,  d9,  [sp], #64
+.endm
+
 // static const uint16_t coef_lf[2] = { 4309, 213 };
 // static const uint16_t coef_hf[3] = { 5570, 3801, 1016 };
 // static const uint16_t coef_sp[2] = { 5077, 981 };
