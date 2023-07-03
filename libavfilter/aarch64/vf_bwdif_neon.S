@@ -172,6 +172,8 @@ function ff_bwdif_filter_line3_neon, export=1
         cmp             w6, #0
         ble             99f
 
+        LDR_COEFFS      v0, x17
+
 // #define prev2 cur
 //        const uint8_t * restrict next2 = parity ? prev : next;
         cmp             w7, #0
@@ -179,8 +181,6 @@ function ff_bwdif_filter_line3_neon, export=1
 
         // We want all the V registers - save all the ones we must
         PUSH_VREGS
-
-        ldr             q0, coeffs
 
         // Some rearrangement of initial values for nice layout of refs in regs
         mov             w10, w6                         // w10 = loop count
