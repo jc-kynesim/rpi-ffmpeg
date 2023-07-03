@@ -139,15 +139,20 @@
         ldp             d8,  d9,  [sp], #64
 .endm
 
+.macro LDR_COEFFS d, t0
+        movrel          \t0, coeffs, 0
+        ld1             {\d\().8h}, [\t0]
+.endm
+
 // static const uint16_t coef_lf[2] = { 4309, 213 };
 // static const uint16_t coef_hf[3] = { 5570, 3801, 1016 };
 // static const uint16_t coef_sp[2] = { 5077, 981 };
 
-        .balign 16
-coeffs:
+const coeffs, align=4   // align 4 means align on 2^4 boundry
         .hword          4309 * 4, 213 * 4               // lf[0]*4 = v0.h[0]
         .hword          5570, 3801, 1016, -3801         // hf[0] = v0.h[2], -hf[1] = v0.h[5]
         .hword          5077, 981                       // sp[0] = v0.h[6]
+endconst
 
 // ===========================================================================
 //
