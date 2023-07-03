@@ -755,7 +755,7 @@ function ff_bwdif_filter_intra_neon, export=1
         cmp             w2, #0
         ble             99f
 
-        ldr             q0, coeffs
+        LDR_COEFFS      v0, x17
 
 //    for (x = 0; x < w; x++) {
 10:
