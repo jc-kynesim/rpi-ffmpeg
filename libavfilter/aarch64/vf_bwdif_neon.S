@@ -465,6 +465,8 @@ function ff_bwdif_filter_line_neon, export=1
         mov             x3,  x2
         mov             x2,  x1
 
+        LDR_COEFFS      v0, x17
+
 // #define prev2 cur
 //        const uint8_t * restrict next2 = parity ? prev : next;
         ldr             w17, [sp, #SP_INT*5]            // parity
@@ -472,8 +474,6 @@ function ff_bwdif_filter_line_neon, export=1
         csel            x17, x2, x4, ne
 
         PUSH_VREGS
-
-        ldr             q0, coeffs
 
 //         for (x = 0; x < w; x++) {
 //             int diff0, diff2;
