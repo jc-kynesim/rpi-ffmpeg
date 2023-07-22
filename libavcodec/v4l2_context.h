@@ -152,6 +152,19 @@ int ff_v4l2_context_set_format(V4L2Context* ctx);
 int ff_v4l2_context_get_format(V4L2Context* ctx, int probe);
 
 /**
+ * Get the list of drm fourcc pixel formats for this context
+ *
+ * @param[in] ctx A pointer to a V4L2Context. See V4L2Context
+ *       description for required variables.
+ * @param[in] pN A pointer to receive the number of formats
+ *       found. May be NULL if not wanted.
+ * @return Pointer to malloced list of zero terminated formats,
+ *         NULL if none or error. As list is malloced it must be
+ *         freed.
+ */
+uint32_t * ff_v4l2_context_enum_drm_formats(V4L2Context *ctx, unsigned int *pN);
+
+/**
  * Releases a V4L2Context.
  *
  * @param[in] ctx A pointer to a V4L2Context.
