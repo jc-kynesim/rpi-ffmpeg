@@ -1064,6 +1064,47 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout)
     return 0;
 }
 
+// Return 0 terminated list of drm fourcc video formats for this context
+// NULL if none found or error
+// Returned list is malloced so must be freed
+uint32_t * ff_v4l2_context_enum_drm_formats(V4L2Context *ctx, unsigned int *pN)
+{
+    unsigned int i;
+    unsigned int n = 0;
+    unsigned int size = 0;
+    uint32_t * e = NULL;
+    *pN = 0;
+
+    for (i = 0; i < 1024; ++i) {
+        struct v4l2_fmtdesc fdesc = {
+            .index = i,
+            .type = ctx->type
+        };
+
+        if (ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc))
+            return e;
+
+        if (n + 1 >= size) {
+            unsigned int newsize = (size == 0) ? 16 : size * 2;
+            uint32_t * t = av_realloc(e, newsize * sizeof(*t));
+            if (!t)
+                return e;
+            e = t;
+            size = newsize;
+        }
+
+        e[n] = fdesc.pixelformat;
+        e[++n] = 0;
+        if (pN)
+            *pN = n;
+    }
+
+    // If we've looped 1024 times we are clearly confused
+    *pN = 0;
+    av_free(e);
+    return NULL;
+}
+
 int ff_v4l2_context_get_format(V4L2Context* ctx, int probe)
 {
     struct v4l2_format_update fmt = { 0 };
