@@ -66,7 +66,7 @@ typedef struct BufferSinkContext {
     union {
         AVBuffersinkAllocVideoFrameFunc video;
     } alloc_cb;
-    void * alloc_v;
+    void *alloc_v;
 } BufferSinkContext;
 
 #define NB_ITEMS(list) (list ## _size / sizeof(*list))
