@@ -1035,7 +1035,7 @@ parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
         case AV_CODEC_ID_HEVC:
         {
             HEVCParamSets ps = {{NULL}};
-            HEVCSEI sei = {{{{0}}}};
+            HEVCSEI sei = {{{0}}};
             int is_nalff = 0;
             int nal_length_size = 0;
             int ret;
@@ -1068,12 +1068,68 @@ parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
     }
 }
 
+static int
+choose_capture_format(AVCodecContext * const avctx, V4L2m2mContext * const s)
+{
+    unsigned int n;
+    enum AVPixelFormat *fmts = ff_v4l2_context_enum_formats(&s->capture, &n);
+    enum AVPixelFormat *fmts2 = NULL;
+    enum AVPixelFormat t;
+    enum AVPixelFormat gf_pix_fmt;
+    unsigned int pref_n = 1;
+    int rv;
+
+    if (!fmts)
+        return AVERROR(ENOENT);
+
+    if ((fmts2 = av_malloc(sizeof(*fmts2) * (n + 2))) == NULL) {
+        rv = AVERROR(ENOMEM);
+        goto error;
+    }
+    fmts2[0] = AV_PIX_FMT_DRM_PRIME;
+
+    memcpy(fmts2 + 1, fmts, (n + 1) * sizeof(*fmts2));
+
+    // Put preferred s/w format at the end
+    t = fmts2[n];
+    fmts2[n] = fmts2[pref_n];
+    fmts2[pref_n] = t;
+
+    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
+           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt),
+           avctx->coded_width, avctx->coded_height,
+           gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
+
+    if (gf_pix_fmt == AV_PIX_FMT_NONE) {
+        rv = AVERROR(ENOENT);
+        goto error;
+    }
+
+    if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
+        avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+        s->capture.av_pix_fmt = avctx->sw_pix_fmt;
+        s->output_drm = 1;
+    }
+    else {
+        avctx->pix_fmt = gf_pix_fmt;
+        s->capture.av_pix_fmt = gf_pix_fmt;
+        s->output_drm = 0;
+    }
+
+    rv = ff_v4l2_context_set_format(&s->capture);
+
+error:
+    av_free(fmts2);
+    av_free(fmts);
+    return rv;
+}
+
 static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 {
     V4L2Context *capture, *output;
     V4L2m2mContext *s;
     V4L2m2mPriv *priv = avctx->priv_data;
-    int gf_pix_fmt;
     int ret;
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
@@ -1124,6 +1180,10 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      *       check the v4l2_get_drm_frame function.
      */
 
+#if 1
+    capture->av_pix_fmt = AV_PIX_FMT_NONE;
+    s->output_drm = 0;
+#else
     avctx->sw_pix_fmt = avctx->pix_fmt;
     gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
     av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
@@ -1139,6 +1199,7 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         capture->av_pix_fmt = gf_pix_fmt;
         s->output_drm = 0;
     }
+#endif
 
     s->db_ctl = NULL;
     if (priv->dmabuf_alloc != NULL && strcmp(priv->dmabuf_alloc, "v4l2") != 0) {
@@ -1179,6 +1240,9 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 #endif
         return ret;
     }
+
+    if ((ret = choose_capture_format(avctx, s)) != 0)
+        return ret;
 
     if ((ret = v4l2_prepare_decoder(s)) < 0)
         return ret;

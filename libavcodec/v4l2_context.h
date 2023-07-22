@@ -152,6 +152,20 @@ int ff_v4l2_context_set_format(V4L2Context* ctx);
 int ff_v4l2_context_get_format(V4L2Context* ctx, int probe);
 
 /**
+ * Get the list of video pixel formats for this context
+ * V4L2 pixels formats that are not recognised are ignored.
+ *
+ * @param[in] ctx A pointer to a V4L2Context. See V4L2Context
+ *       description for required variables.
+ * @param[in] pN A pointer to receive the number of formats
+ *       found. May be NULL if not wanted.
+ * @return Pointer to malloced list of formats terminated by
+ *         AV_PIX_FMT_NONE, NULL if none or error. As list is
+ *         malloced it must be freed.
+ */
+enum AVPixelFormat * ff_v4l2_context_enum_formats(V4L2Context *ctx, unsigned int *pN);
+
+/**
  * Releases a V4L2Context.
  *
  * @param[in] ctx A pointer to a V4L2Context.
