@@ -1064,6 +1064,52 @@ int ff_v4l2_context_dequeue_packet(V4L2Context* ctx, AVPacket* pkt, int timeout)
     return 0;
 }
 
+// Return list of video formats for this context
+// NULL if none found or error
+// Returned list is malloced so must be freed
+enum AVPixelFormat * ff_v4l2_context_enum_formats(V4L2Context *ctx, unsigned int *pN)
+{
+    unsigned int i;
+    unsigned int n = 0;
+    unsigned int size = 0;
+    enum AVPixelFormat * e = NULL;
+    *pN = 0;
+
+    for (i = 0; i < 1024; ++i) {
+        enum AVPixelFormat f;
+        struct v4l2_fmtdesc fdesc = {
+            .index = i,
+            .type = ctx->type
+        };
+
+        if (ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_ENUM_FMT, &fdesc))
+            return e;
+
+        f = ff_v4l2_format_v4l2_to_avfmt(fdesc.pixelformat, AV_CODEC_ID_RAWVIDEO);
+        if (f == AV_PIX_FMT_NONE)
+            continue;
+
+        if (n + 1 >= size) {
+            unsigned int newsize = (size == 0) ? 16 : size * 2;
+            enum AVPixelFormat * t = av_realloc(e, newsize * sizeof(*t));
+            if (!t)
+                return e;
+            e = t;
+            size = newsize;
+        }
+
+        e[n] = f;
+        e[++n] = AV_PIX_FMT_NONE;
+        if (pN)
+            *pN = n;
+    }
+
+    // If we've looped 1024 times we are clearly confused
+    *pN = 0;
+    free(e);
+    return NULL;
+}
+
 int ff_v4l2_context_get_format(V4L2Context* ctx, int probe)
 {
     struct v4l2_format_update fmt = { 0 };
