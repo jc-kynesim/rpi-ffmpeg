@@ -1106,7 +1106,7 @@ enum AVPixelFormat * ff_v4l2_context_enum_formats(V4L2Context *ctx, unsigned int
 
     // If we've looped 1024 times we are clearly confused
     *pN = 0;
-    free(e);
+    av_free(e);
     return NULL;
 }
 

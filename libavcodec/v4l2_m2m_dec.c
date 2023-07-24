@@ -1071,28 +1071,36 @@ parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
 static int
 choose_capture_format(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
-    unsigned int n;
-    enum AVPixelFormat *fmts = ff_v4l2_context_enum_formats(&s->capture, &n);
+    const V4L2m2mPriv * const priv = avctx->priv_data;
+    unsigned int fmts_n;
+    enum AVPixelFormat *fmts = ff_v4l2_context_enum_formats(&s->capture, &fmts_n);
     enum AVPixelFormat *fmts2 = NULL;
     enum AVPixelFormat t;
     enum AVPixelFormat gf_pix_fmt;
+    unsigned int i;
+    unsigned int n = 0;
     unsigned int pref_n = 1;
-    int rv;
+    int rv = AVERROR(ENOENT);
 
     if (!fmts)
         return AVERROR(ENOENT);
 
-    if ((fmts2 = av_malloc(sizeof(*fmts2) * (n + 2))) == NULL) {
+    if ((fmts2 = av_malloc(sizeof(*fmts2) * (fmts_n + 2))) == NULL) {
         rv = AVERROR(ENOMEM);
         goto error;
     }
-    fmts2[0] = AV_PIX_FMT_DRM_PRIME;
 
-    memcpy(fmts2 + 1, fmts, (n + 1) * sizeof(*fmts2));
+    fmts2[n++] = AV_PIX_FMT_DRM_PRIME;
+    for (i = 0; i != fmts_n; ++i) {
+        if (fmts[i] == priv->pix_fmt)
+            pref_n = n;
+        fmts2[n++] = fmts[i];
+    }
+    fmts2[n] = AV_PIX_FMT_NONE;
 
-    // Put preferred s/w format at the end
-    t = fmts2[n];
-    fmts2[n] = fmts2[pref_n];
+    // Put preferred s/w format at the end - ff_get_format will put it in sw_pix_fmt
+    t = fmts2[n - 1];
+    fmts2[n - 1] = fmts2[pref_n];
     fmts2[pref_n] = t;
 
     gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
@@ -1101,10 +1109,8 @@ choose_capture_format(AVCodecContext * const avctx, V4L2m2mContext * const s)
            avctx->coded_width, avctx->coded_height,
            gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
 
-    if (gf_pix_fmt == AV_PIX_FMT_NONE) {
-        rv = AVERROR(ENOENT);
+    if (gf_pix_fmt == AV_PIX_FMT_NONE)
         goto error;
-    }
 
     if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
         avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
@@ -1117,6 +1123,9 @@ choose_capture_format(AVCodecContext * const avctx, V4L2m2mContext * const s)
         s->output_drm = 0;
     }
 
+    // Get format converts capture.av_pix_fmt back into a V4L2 format in the context
+    if ((rv = ff_v4l2_context_get_format(&s->capture, 0)) != 0)
+        goto error;
     rv = ff_v4l2_context_set_format(&s->capture);
 
 error:
