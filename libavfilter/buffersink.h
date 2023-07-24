@@ -167,8 +167,8 @@ int av_buffersink_get_frame(AVFilterContext *ctx, AVFrame *frame);
 int av_buffersink_get_samples(AVFilterContext *ctx, AVFrame *frame, int nb_samples);
 
 /**
- * Callback from av_buffersink_set_alloc_video_frame to allocate 
- * a frame 
+ * Callback from ::av_buffersink_set_alloc_video_frame to
+ * allocate a frame 
  *  
  * @param ctx pointer to a context of the abuffersink AVFilter.
  * @param v opaque pointer passed to 
@@ -176,9 +176,8 @@ int av_buffersink_get_samples(AVFilterContext *ctx, AVFrame *frame, int nb_sampl
  * @param w width of frame to allocate 
  * @param height of frame to allocate 
  *  
- * @return 
- *         - The newly allocated frame
- *         - NULL if error
+ * @retval AVFrame* The newly allocated frame
+ * @retval NULL     Error allocating the frame
  */
 typedef AVFrame *(*AVBuffersinkAllocVideoFrameFunc)(AVFilterContext *ctx, void *v, int w, int h);
 
