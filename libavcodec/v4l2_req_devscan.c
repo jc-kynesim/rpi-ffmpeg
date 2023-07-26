@@ -437,12 +437,14 @@ int devscan_build(void * const dc, struct devscan **pscan)
     }
 
     udev_enumerate_unref(enumerate);
+    udev_unref(udev);
 
     *pscan = scan;
     return 0;
 
 fail:
-    udev_unref(udev);
+    if (udev)
+        udev_unref(udev);
     devscan_delete(&scan);
     return ret;
 }
