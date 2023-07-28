@@ -1004,10 +1004,12 @@ parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
 #if CONFIG_H264_DECODER
         case AV_CODEC_ID_H264:
         {
-            H264ParamSets ps = {{NULL}};
+            H264ParamSets ps;
             int is_avc = 0;
             int nal_length_size = 0;
             int ret;
+
+            memset(&ps, 0, sizeof(ps));
 
             ret = ff_h264_decode_extradata(avctx->extradata, avctx->extradata_size,
                                            &ps, &is_avc, &nal_length_size,
@@ -1034,11 +1036,14 @@ parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
 #if CONFIG_HEVC_DECODER
         case AV_CODEC_ID_HEVC:
         {
-            HEVCParamSets ps = {{NULL}};
-            HEVCSEI sei = {{{{0}}}};
+            HEVCParamSets ps;
+            HEVCSEI sei;
             int is_nalff = 0;
             int nal_length_size = 0;
             int ret;
+
+            memset(&ps, 0, sizeof(ps));
+            memset(&sei, 0, sizeof(sei));
 
             ret = ff_hevc_decode_extradata(avctx->extradata, avctx->extradata_size,
                                            &ps, &sei, &is_nalff, &nal_length_size,
