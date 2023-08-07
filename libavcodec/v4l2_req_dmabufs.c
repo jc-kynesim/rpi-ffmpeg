@@ -232,7 +232,8 @@ void dmabuf_free(struct dmabuf_h * dh)
     request_log("%s: Free: %zd, total=%zd, bufs=%d\n", __func__, dh->size, total_size, total_bufs);
 #endif
 
-    dh->fns->buf_free(dh);
+    if (dh->fns)
+        dh->fns->buf_free(dh);
 
     if (dh->mapptr != MAP_FAILED && dh->mapptr != NULL)
         munmap(dh->mapptr, dh->size);
