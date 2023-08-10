@@ -1205,8 +1205,10 @@ qe_import_from_buf(struct mediabufs_ctl *const mbc, struct qent_base * const be,
                     .plane = i,
                     .flags = O_RDWR, // *** Arguably O_RDONLY would be fine
                 };
-                if (ioctl(mbc->vfd, VIDIOC_EXPBUF, &xbuf) == 0)
+                if (ioctl(mbc->vfd, VIDIOC_EXPBUF, &xbuf) == 0) {
                     be->dh[i] = dmabuf_import(xbuf.fd, planes[i].length);
+                    close(xbuf.fd); // dmabuf_import dups the fd so close this one
+                }
             }
             else {
                 be->dh[i] = dmabuf_import_mmap(
