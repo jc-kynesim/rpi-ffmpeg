@@ -78,6 +78,67 @@ function ff_interleave_bytes_neon, export=1
         ret
 endfunc
 
+// Expand rgb2 into r0+r1/g0+g1/b0+b1
+.macro XRGB3Y r0, g0, b0, r1, g1, b1, r2, g2, b2
+        uxtl            \r0\().8h, \r2\().8b
+        uxtl            \g0\().8h, \g2\().8b
+        uxtl            \b0\().8h, \b2\().8b
+
+        uxtl2           \r1\().8h, \r2\().16b
+        uxtl2           \g1\().8h, \g2\().16b
+        uxtl2           \b1\().8h, \b2\().16b
+.endm
+
+// Expand rgb2 into r0+r1/g0+g1/b0+b1
+// and pick every other el to put back into rgb2 for chroma
+.macro XRGB3YC r0, g0, b0, r1, g1, b1, r2, g2, b2
+        XRGB3Y          \r0, \g0, \b0, \r1, \g1, \b1, \r2, \g2, \b2
+
+        bic             \r2\().8h, #0xff, LSL #8
+        bic             \g2\().8h, #0xff, LSL #8
+        bic             \b2\().8h, #0xff, LSL #8
+.endm
+
+.macro SMLAL3 d0, d1, s0, s1, s2, c0, c1, c2
+        smull           \d0\().4s, \s0\().4h, \c0
+        smlal           \d0\().4s, \s1\().4h, \c1
+        smlal           \d0\().4s, \s2\().4h, \c2
+        smull2          \d1\().4s, \s0\().8h, \c0
+        smlal2          \d1\().4s, \s1\().8h, \c1
+        smlal2          \d1\().4s, \s2\().8h, \c2
+.endm
+
+// d0 may be s0
+// s0, s2 corrupted
+.macro SHRN_Y d0, s0, s1, s2, s3, k128h
+        shrn            \s0\().4h, \s0\().4s, #12
+        shrn2           \s0\().8h, \s1\().4s, #12
+        add             \s0\().8h, \s0\().8h, \k128h\().8h     // +128 (>> 3 = 16)
+        sqrshrun        \d0\().8b, \s0\().8h, #3
+        shrn            \s2\().4h, \s2\().4s, #12
+        shrn2           \s2\().8h, \s3\().4s, #12
+        add             \s2\().8h, \s2\().8h, \k128h\().8h
+        sqrshrun2       \d0\().16b, v28.8h, #3
+.endm
+
+.macro SHRN_C d0, s0, s1, k128b
+        shrn            \s0\().4h, \s0\().4s, #14
+        shrn2           \s0\().8h, \s1\().4s, #14
+        sqrshrn         \s0\().8b, \s0\().8h, #1
+        add             \d0\().8b, \s0\().8b, \k128b\().8b     // +128
+.endm
+
+.macro STB2V s0, n, a
+        st1             {\s0\().b}[(\n+0)], [\a], #1
+        st1             {\s0\().b}[(\n+1)], [\a], #1
+.endm
+
+.macro STB4V s0, n, a
+        STB2V           \s0, (\n+0), \a
+        STB2V           \s0, (\n+2), \a
+.endm
+
+
 // void ff_rgb24toyv12_aarch64(
 //              const uint8_t *src,             // x0
 //              uint8_t *ydst,                  // x1
@@ -111,7 +172,7 @@ endfunc
 //              int lumStride,                  // w6
 //              int chromStride,                // w7
 //              int srcStr,                     // [sp, #0]
-//              int32_t *rgb2yuv);              // [sp, #8]
+//              int32_t *rgb2yuv);              // [sp, #8] (including Mac)
 
 // regs
 // v0-2         Src bytes - reused as chroma src
@@ -130,13 +191,12 @@ endfunc
 // v30          V out
 // v31          V tmp
 
-// Assumes Little Endian in tail stores & conversion matrix
-
 function ff_bgr24toyv12_aarch64, export=1
         ldr             x15, [sp, #8]
         ld3             {v3.s, v4.s, v5.s}[0], [x15], #12
         ld3             {v3.s, v4.s, v5.s}[1], [x15], #12
         ld3             {v3.s, v4.s, v5.s}[2], [x15]
+
 99:
         ldr             w14, [sp, #0]
         movi            v7.8b, #128
@@ -167,73 +227,29 @@ function ff_bgr24toyv12_aarch64, export=1
         b.le            13f
 
 10:
-        uxtl            v16.8h, v0.8b
-        uxtl            v17.8h, v1.8b
-        uxtl            v18.8h, v2.8b
-
-        uxtl2           v20.8h, v0.16b
-        uxtl2           v21.8h, v1.16b
-        uxtl2           v22.8h, v2.16b
-
-        bic             v0.8h, #0xff, LSL #8
-        bic             v1.8h, #0xff, LSL #8
-        bic             v2.8h, #0xff, LSL #8
+        XRGB3YC         v16, v17, v18,  v20, v21, v22,  v0, v1, v2
 
         // Testing shows it is faster to stack the smull/smlal ops together
         // rather than interleave them between channels and indeed even the
         // shift/add sections seem happier not interleaved
 
         // Y0
-        smull           v26.4s, v16.4h, v3.h[0]
-        smlal           v26.4s, v17.4h, v4.h[0]
-        smlal           v26.4s, v18.4h, v5.h[0]
-        smull2          v27.4s, v16.8h, v3.h[0]
-        smlal2          v27.4s, v17.8h, v4.h[0]
-        smlal2          v27.4s, v18.8h, v5.h[0]
+        SMLAL3          v26, v27, v16, v17, v18, v3.h[0], v4.h[0], v5.h[0]
         // Y1
-        smull           v28.4s, v20.4h, v3.h[0]
-        smlal           v28.4s, v21.4h, v4.h[0]
-        smlal           v28.4s, v22.4h, v5.h[0]
-        smull2          v29.4s, v20.8h, v3.h[0]
-        smlal2          v29.4s, v21.8h, v4.h[0]
-        smlal2          v29.4s, v22.8h, v5.h[0]
-        shrn            v26.4h, v26.4s, #12
-        shrn2           v26.8h, v27.4s, #12
-        add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        sqrshrun        v26.8b, v26.8h, #3
-        shrn            v28.4h, v28.4s, #12
-        shrn2           v28.8h, v29.4s, #12
-        add             v28.8h, v28.8h, v6.8h
-        sqrshrun2       v26.16b, v28.8h, #3
-        // Y0/Y1
+        SMLAL3          v28, v29, v20, v21, v22, v3.h[0], v4.h[0], v5.h[0]
+        SHRN_Y          v26, v26, v27, v28, v29, v6
 
         // U
         // Vector subscript *2 as we loaded into S but are only using H
-        smull           v24.4s, v0.4h, v3.h[2]
-        smlal           v24.4s, v1.4h, v4.h[2]
-        smlal           v24.4s, v2.4h, v5.h[2]
-        smull2          v25.4s, v0.8h, v3.h[2]
-        smlal2          v25.4s, v1.8h, v4.h[2]
-        smlal2          v25.4s, v2.8h, v5.h[2]
+        SMLAL3          v24, v25, v0, v1, v2, v3.h[2], v4.h[2], v5.h[2]
 
         // V
-        smull           v30.4s, v0.4h, v3.h[4]
-        smlal           v30.4s, v1.4h, v4.h[4]
-        smlal           v30.4s, v2.4h, v5.h[4]
-        smull2          v31.4s, v0.8h, v3.h[4]
-        smlal2          v31.4s, v1.8h, v4.h[4]
-        smlal2          v31.4s, v2.8h, v5.h[4]
+        SMLAL3          v30, v31, v0, v1, v2, v3.h[4], v4.h[4], v5.h[4]
 
         ld3             {v0.16b, v1.16b, v2.16b}, [x10], #48
 
-        shrn            v24.4h, v24.4s, #14
-        shrn2           v24.8h, v25.4s, #14
-        sqrshrn         v24.8b, v24.8h, #1
-        add             v24.8b, v24.8b, v7.8b     // +128
-        shrn            v30.4h, v30.4s, #14
-        shrn2           v30.8h, v31.4s, #14
-        sqrshrn         v30.8b, v30.8h, #1
-        add             v30.8b, v30.8b, v7.8b     // +128
+        SHRN_C          v24, v24, v25, v7
+        SHRN_C          v30, v30, v31, v7
 
         subs            w9, w9, #16
 
@@ -250,69 +266,21 @@ function ff_bgr24toyv12_aarch64, export=1
 13:
         // Body is simple copy of main loop body minus preload
 
-        uxtl            v16.8h, v0.8b
-        uxtl            v17.8h, v1.8b
-        uxtl            v18.8h, v2.8b
-
-        uxtl2           v20.8h, v0.16b
-        uxtl2           v21.8h, v1.16b
-        uxtl2           v22.8h, v2.16b
-
-        bic             v0.8h, #0xff, LSL #8
-        bic             v1.8h, #0xff, LSL #8
-        bic             v2.8h, #0xff, LSL #8
-
+        XRGB3YC         v16, v17, v18,  v20, v21, v22,  v0, v1, v2
         // Y0
-        smull           v26.4s, v16.4h, v3.h[0]
-        smlal           v26.4s, v17.4h, v4.h[0]
-        smlal           v26.4s, v18.4h, v5.h[0]
-        smull2          v27.4s, v16.8h, v3.h[0]
-        smlal2          v27.4s, v17.8h, v4.h[0]
-        smlal2          v27.4s, v18.8h, v5.h[0]
+        SMLAL3          v26, v27, v16, v17, v18, v3.h[0], v4.h[0], v5.h[0]
         // Y1
-        smull           v28.4s, v20.4h, v3.h[0]
-        smlal           v28.4s, v21.4h, v4.h[0]
-        smlal           v28.4s, v22.4h, v5.h[0]
-        smull2          v29.4s, v20.8h, v3.h[0]
-        smlal2          v29.4s, v21.8h, v4.h[0]
-        smlal2          v29.4s, v22.8h, v5.h[0]
-        shrn            v26.4h, v26.4s, #12
-        shrn2           v26.8h, v27.4s, #12
-        add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        sqrshrun        v26.8b, v26.8h, #3
-        shrn            v28.4h, v28.4s, #12
-        shrn2           v28.8h, v29.4s, #12
-        add             v28.8h, v28.8h, v6.8h
-        sqrshrun2       v26.16b, v28.8h, #3
-        // Y0/Y1
-
+        SMLAL3          v28, v29, v20, v21, v22, v3.h[0], v4.h[0], v5.h[0]
+        SHRN_Y          v26, v26, v27, v28, v29, v6
         // U
-        // Vector subscript *2 as we loaded into S but are only using H
-        smull           v24.4s, v0.4h, v3.h[2]
-        smlal           v24.4s, v1.4h, v4.h[2]
-        smlal           v24.4s, v2.4h, v5.h[2]
-        smull2          v25.4s, v0.8h, v3.h[2]
-        smlal2          v25.4s, v1.8h, v4.h[2]
-        smlal2          v25.4s, v2.8h, v5.h[2]
-
+        SMLAL3          v24, v25, v0, v1, v2, v3.h[2], v4.h[2], v5.h[2]
         // V
-        smull           v30.4s, v0.4h, v3.h[4]
-        smlal           v30.4s, v1.4h, v4.h[4]
-        smlal           v30.4s, v2.4h, v5.h[4]
-        smull2          v31.4s, v0.8h, v3.h[4]
-        smlal2          v31.4s, v1.8h, v4.h[4]
-        smlal2          v31.4s, v2.8h, v5.h[4]
+        SMLAL3          v30, v31, v0, v1, v2, v3.h[4], v4.h[4], v5.h[4]
 
         cmp             w9, #-16
 
-        shrn            v24.4h, v24.4s, #14
-        shrn2           v24.8h, v25.4s, #14
-        sqrshrn         v24.8b, v24.8h, #1
-        add             v24.8b, v24.8b, v7.8b     // +128
-        shrn            v30.4h, v30.4s, #14
-        shrn2           v30.8h, v31.4s, #14
-        sqrshrn         v30.8b, v30.8h, #1
-        add             v30.8b, v30.8b, v7.8b     // +128
+        SHRN_C          v24, v24, v25, v7
+        SHRN_C          v30, v30, v31, v7
 
         // Here:
         // w9 == 0      width % 16 == 0, tail done
@@ -347,14 +315,14 @@ function ff_bgr24toyv12_aarch64, export=1
 2:
         tbz             w9, #3, 1f
         st1             {v26.8b},    [x11], #8
-        st1             {v24.s}[0],  [x12], #4
-        st1             {v30.s}[0],  [x13], #4
+        STB4V           v24, 0, x12
+        STB4V           v30, 0, x13
 1:      tbz             w9, #2, 1f
-        st1             {v26.s}[2],  [x11], #4
-        st1             {v24.h}[2],  [x12], #2
-        st1             {v30.h}[2],  [x13], #2
+        STB4V           v26  8, x11
+        STB2V           v24, 4, x12
+        STB2V           v30, 4, x13
 1:      tbz             w9, #1, 1f
-        st1             {v26.h}[6],  [x11], #2
+        STB2V           v26, 12, x11
         st1             {v24.b}[6],  [x12], #1
         st1             {v30.b}[6],  [x13], #1
 1:      tbz             w9, #0, 1f
@@ -381,44 +349,15 @@ function ff_bgr24toyv12_aarch64, export=1
         b.le            13f
 
 10:
-        uxtl            v16.8h, v0.8b
-        uxtl            v17.8h, v1.8b
-        uxtl            v18.8h, v2.8b
-
-        uxtl2           v20.8h, v0.16b
-        uxtl2           v21.8h, v1.16b
-        uxtl2           v22.8h, v2.16b
-
-        // Testing shows it is faster to stack the smull/smlal ops together
-        // rather than interleave them between channels and indeed even the
-        // shift/add sections seem happier not interleaved
-
+        XRGB3Y          v16, v17, v18,  v20, v21, v22,  v0, v1, v2
         // Y0
-        smull           v26.4s, v16.4h, v3.h[0]
-        smlal           v26.4s, v17.4h, v4.h[0]
-        smlal           v26.4s, v18.4h, v5.h[0]
-        smull2          v27.4s, v16.8h, v3.h[0]
-        smlal2          v27.4s, v17.8h, v4.h[0]
-        smlal2          v27.4s, v18.8h, v5.h[0]
+        SMLAL3          v26, v27, v16, v17, v18, v3.h[0], v4.h[0], v5.h[0]
         // Y1
-        smull           v28.4s, v20.4h, v3.h[0]
-        smlal           v28.4s, v21.4h, v4.h[0]
-        smlal           v28.4s, v22.4h, v5.h[0]
-        smull2          v29.4s, v20.8h, v3.h[0]
-        smlal2          v29.4s, v21.8h, v4.h[0]
-        smlal2          v29.4s, v22.8h, v5.h[0]
+        SMLAL3          v28, v29, v20, v21, v22, v3.h[0], v4.h[0], v5.h[0]
 
         ld3             {v0.16b, v1.16b, v2.16b}, [x10], #48
 
-        shrn            v26.4h, v26.4s, #12
-        shrn2           v26.8h, v27.4s, #12
-        add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        sqrshrun        v26.8b, v26.8h, #3
-        shrn            v28.4h, v28.4s, #12
-        shrn2           v28.8h, v29.4s, #12
-        add             v28.8h, v28.8h, v6.8h
-        sqrshrun2       v26.16b, v28.8h, #3
-        // Y0/Y1
+        SHRN_Y          v26, v26, v27, v28, v29, v6
 
         subs            w9, w9, #16
 
@@ -433,40 +372,15 @@ function ff_bgr24toyv12_aarch64, export=1
 13:
         // Body is simple copy of main loop body minus preload
 
-        uxtl            v16.8h, v0.8b
-        uxtl            v17.8h, v1.8b
-        uxtl            v18.8h, v2.8b
-
-        uxtl2           v20.8h, v0.16b
-        uxtl2           v21.8h, v1.16b
-        uxtl2           v22.8h, v2.16b
-
+        XRGB3Y          v16, v17, v18,  v20, v21, v22,  v0, v1, v2
         // Y0
-        smull           v26.4s, v16.4h, v3.h[0]
-        smlal           v26.4s, v17.4h, v4.h[0]
-        smlal           v26.4s, v18.4h, v5.h[0]
-        smull2          v27.4s, v16.8h, v3.h[0]
-        smlal2          v27.4s, v17.8h, v4.h[0]
-        smlal2          v27.4s, v18.8h, v5.h[0]
+        SMLAL3          v26, v27, v16, v17, v18, v3.h[0], v4.h[0], v5.h[0]
         // Y1
-        smull           v28.4s, v20.4h, v3.h[0]
-        smlal           v28.4s, v21.4h, v4.h[0]
-        smlal           v28.4s, v22.4h, v5.h[0]
-        smull2          v29.4s, v20.8h, v3.h[0]
-        smlal2          v29.4s, v21.8h, v4.h[0]
-        smlal2          v29.4s, v22.8h, v5.h[0]
+        SMLAL3          v28, v29, v20, v21, v22, v3.h[0], v4.h[0], v5.h[0]
 
         cmp             w9, #-16
 
-        shrn            v26.4h, v26.4s, #12
-        shrn2           v26.8h, v27.4s, #12
-        add             v26.8h, v26.8h, v6.8h     // +128 (>> 3 = 16)
-        sqrshrun        v26.8b, v26.8h, #3
-        shrn            v28.4h, v28.4s, #12
-        shrn2           v28.8h, v29.4s, #12
-        add             v28.8h, v28.8h, v6.8h
-        sqrshrun2       v26.16b, v28.8h, #3
-        // Y0/Y1
+        SHRN_Y          v26, v26, v27, v28, v29, v6
 
         // Here:
         // w9 == 0      width % 16 == 0, tail done
@@ -500,9 +414,9 @@ function ff_bgr24toyv12_aarch64, export=1
         tbz             w9, #3, 1f
         st1             {v26.8b},    [x11], #8
 1:      tbz             w9, #2, 1f
-        st1             {v26.s}[2],  [x11], #4
+        STB4V           v26, 8,  x11
 1:      tbz             w9, #1, 1f
-        st1             {v26.h}[6],  [x11], #2
+        STB2V           v26, 12, x11
 1:      tbz             w9, #0, 1f
         st1             {v26.b}[14], [x11]
 1:
