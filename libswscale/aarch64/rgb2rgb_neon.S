@@ -92,15 +92,12 @@ endfunc
 
 function ff_rgb24toyv12_aarch64, export=1
         ldr             x15, [sp, #8]
-        ld1             {v3.s}[2], [x15], #4
-        ld1             {v3.s}[1], [x15], #4
-        ld1             {v3.s}[0], [x15], #4
-        ld1             {v4.s}[2], [x15], #4
-        ld1             {v4.s}[1], [x15], #4
-        ld1             {v4.s}[0], [x15], #4
-        ld1             {v5.s}[2], [x15], #4
-        ld1             {v5.s}[1], [x15], #4
-        ld1             {v5.s}[0], [x15]
+        ld3             {v3.s, v4.s, v5.s}[0], [x15], #12
+        ld3             {v3.s, v4.s, v5.s}[1], [x15], #12
+        ld3             {v3.s, v4.s, v5.s}[2], [x15]
+        mov             v6.16b, v3.16b
+        mov             v3.16b, v5.16b
+        mov             v5.16b, v6.16b
         b               99f
 endfunc
 
