@@ -1641,7 +1641,7 @@ static int bgr24ToYv12Wrapper(SwsContext *c, const uint8_t *src[],
                               int srcStride[], int srcSliceY, int srcSliceH,
                               uint8_t *dst[], int dstStride[])
 {
-    ff_rgb24toyv12(
+    ff_bgr24toyv12(
         src[0],
         dst[0] +  srcSliceY       * dstStride[0],
         dst[1] + (srcSliceY >> 1) * dstStride[1],

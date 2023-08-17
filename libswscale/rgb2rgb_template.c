@@ -646,7 +646,7 @@ static inline void uyvytoyv12_c(const uint8_t *src, uint8_t *ydst,
  * others are ignored in the C version.
  * FIXME: Write HQ version.
  */
-void ff_rgb24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+void ff_bgr24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
                    uint8_t *vdst, int width, int height, int lumStride,
                    int chromStride, int srcStride, int32_t *rgb2yuv)
 {
@@ -979,7 +979,7 @@ static av_cold void rgb2rgb_init_c(void)
     yuv422ptouyvy      = yuv422ptouyvy_c;
     yuy2toyv12         = yuy2toyv12_c;
     planar2x           = planar2x_c;
-    ff_rgb24toyv12     = ff_rgb24toyv12_c;
+    ff_bgr24toyv12     = ff_bgr24toyv12_c;
     interleaveBytes    = interleaveBytes_c;
     deinterleaveBytes  = deinterleaveBytes_c;
     vu9_to_vu12        = vu9_to_vu12_c;

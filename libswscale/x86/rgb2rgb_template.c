@@ -1544,7 +1544,7 @@ static inline void RENAME(uyvytoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t
  * FIXME: Write HQ version.
  */
 #if HAVE_7REGS
-static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+static inline void RENAME(bgr24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
                                        int width, int height,
                                        int lumStride, int chromStride, int srcStride,
                                        int32_t *rgb2yuv)
@@ -1556,7 +1556,7 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
     const x86_reg chromWidth= width>>1;
 
     if (height > 2) {
-        ff_rgb24toyv12_c(src, ydst, udst, vdst, width, 2, lumStride, chromStride, srcStride, rgb2yuv);
+        ff_bgr24toyv12_c(src, ydst, udst, vdst, width, 2, lumStride, chromStride, srcStride, rgb2yuv);
         src  += 2*srcStride;
         ydst += 2*lumStride;
         udst += chromStride;
@@ -1737,7 +1737,7 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
                      SFENCE"     \n\t"
                      :::"memory");
 
-     ff_rgb24toyv12_c(src, ydst, udst, vdst, width, height-y, lumStride, chromStride, srcStride, rgb2yuv);
+     ff_bgr24toyv12_c(src, ydst, udst, vdst, width, height-y, lumStride, chromStride, srcStride, rgb2yuv);
 }
 #endif /* HAVE_7REGS */
 #endif /* !COMPILE_TEMPLATE_SSE2 */
@@ -2434,7 +2434,7 @@ static av_cold void RENAME(rgb2rgb_init)(void)
 
     planar2x           = RENAME(planar2x);
 #if HAVE_7REGS
-    ff_rgb24toyv12     = RENAME(rgb24toyv12);
+    ff_bgr24toyv12     = RENAME(bgr24toyv12);
 #endif /* HAVE_7REGS */
 
     yuyvtoyuv420       = RENAME(yuyvtoyuv420);

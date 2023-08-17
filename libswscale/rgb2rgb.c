@@ -78,7 +78,7 @@ void (*yuy2toyv12)(const uint8_t *src, uint8_t *ydst,
                    uint8_t *udst, uint8_t *vdst,
                    int width, int height,
                    int lumStride, int chromStride, int srcStride);
-void (*ff_rgb24toyv12)(const uint8_t *src, uint8_t *ydst,
+void (*ff_bgr24toyv12)(const uint8_t *src, uint8_t *ydst,
                        uint8_t *udst, uint8_t *vdst,
                        int width, int height,
                        int lumStride, int chromStride, int srcStride,

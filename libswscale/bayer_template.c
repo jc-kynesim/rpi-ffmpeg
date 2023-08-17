@@ -188,7 +188,7 @@
  * invoke ff_rgb24toyv12 for 2x2 pixels
  */
 #define rgb24toyv12_2x2(src, dstY, dstU, dstV, luma_stride, src_stride, rgb2yuv) \
-    ff_rgb24toyv12(src, dstY, dstV, dstU, 2, 2, luma_stride, 0, src_stride, rgb2yuv)
+    ff_bgr24toyv12(src, dstY, dstV, dstU, 2, 2, luma_stride, 0, src_stride, rgb2yuv)
 
 static void BAYER_RENAME(rgb24_copy)(const uint8_t *src, int src_stride, uint8_t *dst, int dst_stride, int width)
 {
