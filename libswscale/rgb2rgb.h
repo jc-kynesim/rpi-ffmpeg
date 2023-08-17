@@ -135,6 +135,22 @@ extern void (*ff_rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, 
                               int width, int height,
                               int lumStride, int chromStride, int srcStride,
                               int32_t *rgb2yuv);
+extern void (*ff_rgbxtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
+extern void (*ff_bgrxtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
+extern void (*ff_xrgbtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
+extern void (*ff_xbgrtoyv12)(const uint8_t *src, uint8_t *ydst, uint8_t *udst, uint8_t *vdst,
+                             int width, int height,
+                             int lumStride, int chromStride, int srcStride,
+                             int32_t *rgb2yuv);
 extern void (*planar2x)(const uint8_t *src, uint8_t *dst, int width, int height,
                         int srcStride, int dstStride);
 

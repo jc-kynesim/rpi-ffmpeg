@@ -742,6 +742,108 @@ void ff_rgb24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
     rgb24toyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_rgb);
 }
 
+static void rgbxtoyv12_x(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv,
+                   const uint8_t x[9])
+{
+    int32_t ry = rgb2yuv[x[0]], gy = rgb2yuv[x[1]], by = rgb2yuv[x[2]];
+    int32_t ru = rgb2yuv[x[3]], gu = rgb2yuv[x[4]], bu = rgb2yuv[x[5]];
+    int32_t rv = rgb2yuv[x[6]], gv = rgb2yuv[x[7]], bv = rgb2yuv[x[8]];
+    int y;
+    const int chromWidth = width >> 1;
+    // Constants with both rounding and offset
+    const int32_t ky = ((16 << 1) + 1) << (RGB2YUV_SHIFT - 1);
+    const int32_t kc = ((128 << 1) + 1) << (RGB2YUV_SHIFT - 1);
+
+    for (y = 0; y < height; y += 2) {
+        int i;
+        for (i = 0; i < chromWidth; i++) {
+            unsigned int b = src[8 * i + 0];
+            unsigned int g = src[8 * i + 1];
+            unsigned int r = src[8 * i + 2];
+
+            unsigned int Y = (ry * r + gy * g + by * b + ky) >> RGB2YUV_SHIFT;
+            unsigned int V = (rv * r + gv * g + bv * b + kc) >> RGB2YUV_SHIFT;
+            unsigned int U = (ru * r + gu * g + bu * b + kc) >> RGB2YUV_SHIFT;
+
+            udst[i]     = U;
+            vdst[i]     = V;
+            ydst[2 * i] = Y;
+
+            b = src[8 * i + 4];
+            g = src[8 * i + 5];
+            r = src[8 * i + 6];
+
+            Y = ((ry * r + gy * g + by * b) >> RGB2YUV_SHIFT) + 16;
+            ydst[2 * i + 1] = Y;
+        }
+        if ((width & 1) != 0) {
+            unsigned int b = src[8 * i + 0];
+            unsigned int g = src[8 * i + 1];
+            unsigned int r = src[8 * i + 2];
+
+            unsigned int Y = (ry * r + gy * g + by * b + ky) >> RGB2YUV_SHIFT;
+            unsigned int V = (rv * r + gv * g + bv * b + kc) >> RGB2YUV_SHIFT;
+            unsigned int U = (ru * r + gu * g + bu * b + kc) >> RGB2YUV_SHIFT;
+
+            udst[i]     = U;
+            vdst[i]     = V;
+            ydst[2 * i] = Y;
+        }
+        ydst += lumStride;
+        src  += srcStride;
+
+        if (y+1 == height)
+            break;
+
+        for (i = 0; i < width; i++) {
+            unsigned int b = src[4 * i + 0];
+            unsigned int g = src[4 * i + 1];
+            unsigned int r = src[4 * i + 2];
+
+            unsigned int Y = (ry * r + gy * g + by * b + ky) >> RGB2YUV_SHIFT;
+
+            ydst[i] = Y;
+        }
+        udst += chromStride;
+        vdst += chromStride;
+        ydst += lumStride;
+        src  += srcStride;
+    }
+}
+
+static void ff_rgbxtoyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv)
+{
+    rgbxtoyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_rgb);
+}
+
+static void ff_bgrxtoyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv)
+{
+    rgbxtoyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_bgr);
+}
+
+// As the general code does no SIMD-like ops simply adding 1 to the src address
+// will fix the ignored alpha position
+static void ff_xrgbtoyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv)
+{
+    rgbxtoyv12_x(src + 1, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_rgb);
+}
+
+static void ff_xbgrtoyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
+                   uint8_t *vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride, int32_t *rgb2yuv)
+{
+    rgbxtoyv12_x(src + 1, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_bgr);
+}
+
+
 static void interleaveBytes_c(const uint8_t *src1, const uint8_t *src2,
                               uint8_t *dest, int width, int height,
                               int src1Stride, int src2Stride, int dstStride)
@@ -1016,6 +1118,10 @@ static av_cold void rgb2rgb_init_c(void)
     planar2x           = planar2x_c;
     ff_rgb24toyv12     = ff_rgb24toyv12_c;
     ff_bgr24toyv12     = ff_bgr24toyv12_c;
+    ff_rgbxtoyv12      = ff_rgbxtoyv12_c;
+    ff_bgrxtoyv12      = ff_bgrxtoyv12_c;
+    ff_xrgbtoyv12      = ff_xrgbtoyv12_c;
+    ff_xbgrtoyv12      = ff_xbgrtoyv12_c;
     interleaveBytes    = interleaveBytes_c;
     deinterleaveBytes  = deinterleaveBytes_c;
     vu9_to_vu12        = vu9_to_vu12_c;
