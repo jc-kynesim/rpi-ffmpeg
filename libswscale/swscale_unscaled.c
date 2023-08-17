@@ -1994,7 +1994,6 @@ void ff_get_unscaled_swscale(SwsContext *c)
     const enum AVPixelFormat dstFormat = c->dstFormat;
     const int flags = c->flags;
     const int dstH = c->dstH;
-    const int dstW = c->dstW;
     int needsDither;
 
     needsDither = isAnyRGB(dstFormat) &&
@@ -2052,12 +2051,12 @@ void ff_get_unscaled_swscale(SwsContext *c)
     /* bgr24toYV12 */
     if (srcFormat == AV_PIX_FMT_BGR24 &&
         (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P) &&
-        !(flags & (SWS_ACCURATE_RND | SWS_BITEXACT)) && !(dstW&1))
+        !(flags & (SWS_ACCURATE_RND | SWS_BITEXACT)))
         c->convert_unscaled = bgr24ToYv12Wrapper;
     /* rgb24toYV12 */
     if (srcFormat == AV_PIX_FMT_RGB24 &&
         (dstFormat == AV_PIX_FMT_YUV420P || dstFormat == AV_PIX_FMT_YUVA420P) &&
-        !(flags & (SWS_ACCURATE_RND | SWS_BITEXACT)) && !(dstW&1))
+        !(flags & (SWS_ACCURATE_RND | SWS_BITEXACT)))
         c->convert_unscaled = rgb24ToYv12Wrapper;
 
     /* RGB/BGR -> RGB/BGR (no dither needed forms) */

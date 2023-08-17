@@ -1555,6 +1555,11 @@ static inline void RENAME(bgr24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
     int y;
     const x86_reg chromWidth= width>>1;
 
+    if ((width & 1) != 0) {
+        ff_bgr24toyv12_c(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv);
+        return;
+    }
+
     if (height > 2) {
         ff_bgr24toyv12_c(src, ydst, udst, vdst, width, 2, lumStride, chromStride, srcStride, rgb2yuv);
         src  += 2*srcStride;
