@@ -2439,7 +2439,7 @@ static av_cold void RENAME(rgb2rgb_init)(void)
 
     planar2x           = RENAME(planar2x);
 #if HAVE_7REGS
-    ff_bgr24toyv12     = RENAME(bgr24toyv12);
+//    ff_bgr24toyv12     = RENAME(bgr24toyv12);
 #endif /* HAVE_7REGS */
 
     yuyvtoyuv420       = RENAME(yuyvtoyuv420);

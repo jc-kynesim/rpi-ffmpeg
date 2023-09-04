@@ -23,6 +23,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdarg.h>
+#include <time.h>
 
 #undef HAVE_AV_CONFIG_H
 #include "libavutil/cpu.h"
@@ -77,6 +78,15 @@ struct Results {
     uint64_t ssdA;
     uint32_t crc;
 };
+
+static int time_rep = 0;
+
+static uint64_t utime(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_nsec / 1000 + (uint64_t)ts.tv_sec * 1000000;
+}
 
 // test by ref -> src -> dst -> out & compare out against ref
 // ref & out are YV12
@@ -174,13 +184,24 @@ static int doTest(const uint8_t * const ref[4], int refStride[4], int w, int h,
         goto end;
     }
 
-    printf(" %s %dx%d -> %s %3dx%3d flags=%2d",
+    printf(" %s %4dx%4d -> %s %4dx%4d flags=%2d",
            desc_src->name, srcW, srcH,
            desc_dst->name, dstW, dstH,
            flags);
     fflush(stdout);
 
     sws_scale(dstContext, (const uint8_t * const*)src, srcStride, 0, srcH, dst, dstStride);
+
+    if (time_rep != 0)
+    {
+        const uint64_t now = utime();
+        uint64_t done;
+        for (i = 1; i != time_rep; ++i) {
+            sws_scale(dstContext, (const uint8_t * const*)src, srcStride, 0, srcH, dst, dstStride);
+        }
+        done = utime();
+        printf(" T=%7"PRId64"us ", done-now);
+    }
 
     for (i = 0; i < 4 && dstStride[i]; i++)
         crc = av_crc(av_crc_get_table(AV_CRC_32_IEEE), crc, dst[i],
@@ -254,7 +275,8 @@ end:
 static void selfTest(const uint8_t * const ref[4], int refStride[4],
                      int w, int h,
                      enum AVPixelFormat srcFormat_in,
-                     enum AVPixelFormat dstFormat_in)
+                     enum AVPixelFormat dstFormat_in,
+                     const unsigned int xflags)
 {
     const int flags[] = { SWS_FAST_BILINEAR, SWS_BILINEAR, SWS_BICUBIC,
                           SWS_X, SWS_POINT, SWS_AREA, 0 };
@@ -292,7 +314,7 @@ static void selfTest(const uint8_t * const ref[4], int refStride[4],
                     for (j = 0; dstH[j] && !res; j++)
                         res = doTest(ref, refStride, w, h,
                                      srcFormat, dstFormat,
-                                     srcW, srcH, dstW[i], dstH[j], flags[k],
+                                     srcW, srcH, dstW[i], dstH[j], flags[k] | xflags,
                                      NULL);
             if (dstFormat_in != AV_PIX_FMT_NONE)
                 break;
@@ -355,74 +377,127 @@ static int fileTest(const uint8_t * const ref[4], int refStride[4],
     return 0;
 }
 
-#define W 96
-#define H 96
-
 int main(int argc, char **argv)
 {
+    unsigned int W = 96;
+    unsigned int H = 96;
+    unsigned int W2;
+    unsigned int H2;
+    unsigned int S;
     enum AVPixelFormat srcFormat = AV_PIX_FMT_NONE;
     enum AVPixelFormat dstFormat = AV_PIX_FMT_NONE;
-    uint8_t *rgb_data   = av_malloc(W * H * 4);
-    const uint8_t * const rgb_src[4] = { rgb_data, NULL, NULL, NULL };
-    int rgb_stride[4]   = { 4 * W, 0, 0, 0 };
-    uint8_t *data       = av_malloc(4 * W * H);
-    const uint8_t * const src[4] = { data, data + W * H, data + W * H * 2, data + W * H * 3 };
-    int stride[4]       = { W, W, W, W };
     int x, y;
     struct SwsContext *sws;
     AVLFG rand;
     int res = -1;
     int i;
     FILE *fp = NULL;
+    uint8_t *rgb_data;
+    uint8_t * rgb_src[4] = { NULL };
+    int rgb_stride[4]   = { 0 };
+    uint8_t *data;
+    uint8_t * src[4] = { NULL };
+    int stride[4]       = { 0 };
+    unsigned int xflags = 0;
 
-    if (!rgb_data || !data)
-        return -1;
+    for (i = 1; i < argc; ++i) {
+        const char * const cmd = argv[i];
+        const char * arg2;
 
-    for (i = 1; i < argc; i += 2) {
-        if (argv[i][0] != '-' || i + 1 == argc)
+        if (argv[i][0] != '-')
             goto bad_option;
-        if (!strcmp(argv[i], "-ref")) {
-            fp = fopen(argv[i + 1], "r");
+
+        if (!strcmp(cmd, "-bitexact")) {
+            xflags |= SWS_BITEXACT;
+            continue;
+        }
+
+        if (i + 1 == argc)
+            goto bad_option;
+        arg2 = argv[++i];
+
+        if (!strcmp(cmd, "-ref")) {
+            fp = fopen(arg2, "r");
             if (!fp) {
-                fprintf(stderr, "could not open '%s'\n", argv[i + 1]);
+                fprintf(stderr, "could not open '%s'\n", arg2);
                 goto error;
             }
-        } else if (!strcmp(argv[i], "-cpuflags")) {
+        } else if (!strcmp(cmd, "-cpuflags")) {
             unsigned flags = av_get_cpu_flags();
-            int ret = av_parse_cpu_caps(&flags, argv[i + 1]);
+            int ret = av_parse_cpu_caps(&flags, arg2);
             if (ret < 0) {
-                fprintf(stderr, "invalid cpu flags %s\n", argv[i + 1]);
+                fprintf(stderr, "invalid cpu flags %s\n", arg2);
                 return ret;
             }
             av_force_cpu_flags(flags);
-        } else if (!strcmp(argv[i], "-src")) {
-            srcFormat = av_get_pix_fmt(argv[i + 1]);
+        } else if (!strcmp(cmd, "-src")) {
+            srcFormat = av_get_pix_fmt(arg2);
             if (srcFormat == AV_PIX_FMT_NONE) {
-                fprintf(stderr, "invalid pixel format %s\n", argv[i + 1]);
+                fprintf(stderr, "invalid pixel format %s\n", arg2);
                 return -1;
             }
-        } else if (!strcmp(argv[i], "-dst")) {
-            dstFormat = av_get_pix_fmt(argv[i + 1]);
+        } else if (!strcmp(cmd, "-dst")) {
+            dstFormat = av_get_pix_fmt(arg2);
             if (dstFormat == AV_PIX_FMT_NONE) {
-                fprintf(stderr, "invalid pixel format %s\n", argv[i + 1]);
+                fprintf(stderr, "invalid pixel format %s\n", arg2);
+                return -1;
+            }
+        } else if (!strcmp(cmd, "-w")) {
+            char * p = NULL;
+            W = strtoul(arg2, &p, 0);
+            if (!W || *p) {
+                fprintf(stderr, "bad width %s\n", arg2);
+                return -1;
+            }
+        } else if (!strcmp(cmd, "-h")) {
+            char * p = NULL;
+            H = strtoul(arg2, &p, 0);
+            if (!H || *p) {
+                fprintf(stderr, "bad height '%s'\n", arg2);
+                return -1;
+            }
+        } else if (!strcmp(cmd, "-t")) {
+            char * p = NULL;
+            time_rep = (int)strtol(arg2, &p, 0);
+            if (*p) {
+                fprintf(stderr, "bad time repetitions '%s'\n", arg2);
                 return -1;
             }
         } else {
 bad_option:
-            fprintf(stderr, "bad option or argument missing (%s)\n", argv[i]);
+            fprintf(stderr, "bad option or argument missing (%s)\n", cmd);
             goto error;
         }
     }
 
-    sws = sws_getContext(W / 12, H / 12, AV_PIX_FMT_RGB32, W, H,
+    S = (W + 15) & ~15;
+    rgb_data   = av_mallocz(S * H * 4);
+    rgb_src[0] = rgb_data;
+    rgb_stride[0]   = 4 * S;
+    data       = av_mallocz(4 * S * H);
+    src[0] = data;
+    src[1] = data + S * H;
+    src[2] = data + S * H * 2;
+    src[3] = data + S * H * 3;
+    stride[0] = S;
+    stride[1] = S;
+    stride[2] = S;
+    stride[3] = S;
+    H2 = H < 96 ? 8 : H / 12;
+    W2 = W < 96 ? 8 : W / 12;
+
+    if (!rgb_data || !data)
+        return -1;
+
+    sws = sws_getContext(W2, H2, AV_PIX_FMT_RGB32, W, H,
                          AV_PIX_FMT_YUVA420P, SWS_BILINEAR, NULL, NULL, NULL);
 
     av_lfg_init(&rand, 1);
 
     for (y = 0; y < H; y++)
         for (x = 0; x < W * 4; x++)
-            rgb_data[ x + y * 4 * W] = av_lfg_get(&rand);
-    res = sws_scale(sws, rgb_src, rgb_stride, 0, H / 12, (uint8_t * const *) src, stride);
+            rgb_data[ x + y * 4 * S] = av_lfg_get(&rand);
+    res = sws_scale(sws, (const uint8_t * const *)rgb_src, rgb_stride, 0, H2, (uint8_t * const *) src, stride);
     if (res < 0 || res != H) {
         res = -1;
         goto error;
@@ -431,10 +506,10 @@ bad_option:
     av_free(rgb_data);
 
     if(fp) {
-        res = fileTest(src, stride, W, H, fp, srcFormat, dstFormat);
+        res = fileTest((const uint8_t * const *)src, stride, W, H, fp, srcFormat, dstFormat);
         fclose(fp);
     } else {
-        selfTest(src, stride, W, H, srcFormat, dstFormat);
+        selfTest((const uint8_t * const *)src, stride, W, H, srcFormat, dstFormat, xflags);
         res = 0;
     }
 error:

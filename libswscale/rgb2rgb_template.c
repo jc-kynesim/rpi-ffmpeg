@@ -639,6 +639,258 @@ static inline void uyvytoyv12_c(const uint8_t *src, uint8_t *ydst,
     }
 }
 
+#define SHRR(x, n) (((x) + (1 << (n - 1))) >> (n))
+
+// Allow 6 bit filter values (with total 1 << FBITS)
+#define FBITS 6
+#define FRGB_BITS 12
+#define FCSHIFT (RGB2YUV_SHIFT + FRGB_BITS - 8)
+
+#define F4(a, b, c, d, f) ((a)*(f)[0] + (b)*(f)[1] + (c)*(f)[2] + (d)*(f)[3])
+#define F4H(s, p0, p1, p2, p3, f) F4((s)[p0], (s)[p1], (s)[p2], (s)[p3], (f))
+#define F4HV(s0, s1, s2, s3, p0, p1, p2, p3, f) SHRR(F4(\
+    F4H((s0), (p0), (p1), (p2), (p3), (f)[0]),\
+    F4H((s1), (p0), (p1), (p2), (p3), (f)[0]),\
+    F4H((s2), (p0), (p1), (p2), (p3), (f)[0]),\
+    F4H((s3), (p0), (p1), (p2), (p3), (f)[0]), (f)[1]), FBITS * 2 + 8 - FRGB_BITS)
+
+
+#define C(r, g, b, kr, kg, kb, shift, kk) (SHRR((r)*(kr) + (g)*(kg) + (b)*(kb), (shift)) +  (kk))
+
+static inline void rgbtoyv12_f4(const uint8_t * restrict src, uint8_t * restrict ydst, uint8_t * restrict udst,
+                   uint8_t * restrict vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride,
+                   const int16_t rgb2yuv[3][3],
+                   const int8_t filt[2][4], const int pp)
+{
+    const int32_t ry = rgb2yuv[0][0], gy = rgb2yuv[0][1], by = rgb2yuv[0][2];
+    const int32_t ru = rgb2yuv[1][0], gu = rgb2yuv[1][1], bu = rgb2yuv[1][2];
+    const int32_t rv = rgb2yuv[2][0], gv = rgb2yuv[2][1], bv = rgb2yuv[2][2];
+
+    const uint8_t *s0 = src;
+    const uint8_t *s1 = src;
+    const uint8_t *s2;
+    const uint8_t *s3;
+    uint8_t *d0 = ydst;
+    uint8_t *d1;
+
+    const int lumWidth = width >> 1;
+
+    int y;
+
+    for (y = 0; y < height; y += 2) {
+        uint8_t y00, y10, y01, y11, u, v;
+        uint16_t f0, f1, f2;
+        int x = 0;
+        const int pp2 = (width & 1) != 0 ? 0 : pp;
+
+        d1 = (y + 1 < height) ? d0 + lumStride : d1;
+        s2 = (y + 1 < height) ? s1 + srcStride : s1;
+        s3 = (y + 2 < height) ? s2 + srcStride : s2;
+
+        y00 = C(s1[     0], s1[     1], s1[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y10 = C(s1[pp + 0], s1[pp + 1], s1[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y01 = C(s2[     0], s2[     1], s2[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y11 = C(s2[pp + 0], s2[pp + 1], s2[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+
+        f0 = F4HV(s0 + 0, s1 + 0, s2 + 0, s3 + 0, 0, 0, pp, pp*2, filt);
+        f1 = F4HV(s0 + 1, s1 + 1, s2 + 1, s3 + 1, 0, 0, pp, pp*2, filt);
+        f2 = F4HV(s0 + 2, s1 + 2, s2 + 2, s3 + 2, 0, 0, pp, pp*2, filt);
+
+        u = C(f0, f1, f2, ru, gu, bu, FCSHIFT, 128);
+        v = C(f0, f1, f2, rv, gv, bv, FCSHIFT, 128);
+
+        d0[x*2 + 0] = y00;
+        d0[x*2 + 1] = y10;
+        d1[x*2 + 0] = y01;
+        d1[x*2 + 1] = y11;
+
+        udst[x] = u;
+        vdst[x] = v;
+
+        s0 += pp * 2;
+        s1 += pp * 2;
+        s2 += pp * 2;
+        s3 += pp * 2;
+
+        for (x = 1; x + 1 < lumWidth; ++x) {
+
+            y00 = C(s1[     0], s1[     1], s1[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+            y10 = C(s1[pp + 0], s1[pp + 1], s1[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+            y01 = C(s2[     0], s2[     1], s2[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+            y11 = C(s2[pp + 0], s2[pp + 1], s2[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+
+            f0 = F4HV(s0 + 0, s1 + 0, s2 + 0, s3 + 0, -pp, 0, pp, pp*2, filt);
+            f1 = F4HV(s0 + 1, s1 + 1, s2 + 1, s3 + 1, -pp, 0, pp, pp*2, filt);
+            f2 = F4HV(s0 + 2, s1 + 2, s2 + 2, s3 + 2, -pp, 0, pp, pp*2, filt);
+
+            u = C(f0, f1, f2, ru, gu, bu, FCSHIFT, 128);
+            v = C(f0, f1, f2, rv, gv, bv, FCSHIFT, 128);
+
+            d0[x*2 + 0] = y00;
+            d0[x*2 + 1] = y10;
+            d1[x*2 + 0] = y01;
+            d1[x*2 + 1] = y11;
+
+            udst[x] = u;
+            vdst[x] = v;
+
+            s0 += pp * 2;
+            s1 += pp * 2;
+            s2 += pp * 2;
+            s3 += pp * 2;
+        }
+
+        y00 = C(s1[     0], s1[      1], s1[      2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y10 = C(s1[pp + 0], s1[pp2 + 1], s1[pp2 + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y01 = C(s2[     0], s2[      1], s2[      2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y11 = C(s2[pp + 0], s2[pp2 + 1], s2[pp2 + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+
+        f0 = F4HV(s0 + 0, s1 + 0, s2 + 0, s3 + 0, -pp, 0, pp2, pp2, filt);
+        f1 = F4HV(s0 + 1, s1 + 1, s2 + 1, s3 + 1, -pp, 0, pp2, pp2, filt);
+        f2 = F4HV(s0 + 2, s1 + 2, s2 + 2, s3 + 2, -pp, 0, pp2, pp2, filt);
+
+        u = C(f0, f1, f2, ru, gu, bu, FCSHIFT, 128);
+        v = C(f0, f1, f2, rv, gv, bv, FCSHIFT, 128);
+
+        d0[x*2 + 0] = y00;
+        d1[x*2 + 0] = y01;
+        if ((width & 1) == 0) {
+            d1[x*2 + 1] = y11;
+            d0[x*2 + 1] = y10;
+        }
+
+        udst[x] = u;
+        vdst[x] = v;
+
+        s1 = src + srcStride * (y + 2);
+        s0 = s1 - srcStride;
+        d0 += lumStride * 2;
+        udst += chromStride;
+        vdst += chromStride;
+    }
+}
+
+#define F3(a, b, c, f) ((a)*(f)[0] + (b)*(f)[1] + (c)*(f)[2])
+#define F3H(s, p0, p1, p2, f) F3((s)[p0], (s)[p1], (s)[p2], (f))
+#define F3HV(s0, s1, s2, p0, p1, p2, f) SHRR(F3(\
+    F3H((s0), (p0), (p1), (p2), (f)[0]),\
+    F3H((s1), (p0), (p1), (p2), (f)[0]),\
+    F3H((s2), (p0), (p1), (p2), (f)[0]), (f)[1]), FBITS * 2 + 8 - FRGB_BITS)
+
+
+#define C(r, g, b, kr, kg, kb, shift, kk) (SHRR((r)*(kr) + (g)*(kg) + (b)*(kb), (shift)) +  (kk))
+
+static inline void rgbtoyv12_f3(const uint8_t * restrict src, uint8_t * restrict ydst, uint8_t * restrict udst,
+                   uint8_t * restrict vdst, int width, int height, int lumStride,
+                   int chromStride, int srcStride,
+                   const int16_t rgb2yuv[3][3],
+                   const int8_t filt[2][3], const int pp)
+{
+    const int32_t ry = rgb2yuv[0][0], gy = rgb2yuv[0][1], by = rgb2yuv[0][2];
+    const int32_t ru = rgb2yuv[1][0], gu = rgb2yuv[1][1], bu = rgb2yuv[1][2];
+    const int32_t rv = rgb2yuv[2][0], gv = rgb2yuv[2][1], bv = rgb2yuv[2][2];
+
+    const uint8_t *s0 = src;
+    const uint8_t *s1 = src;
+    const uint8_t *s2;
+    uint8_t *d0 = ydst;
+    uint8_t *d1;
+
+    const int lumWidth = width >> 1;
+
+    int y;
+
+    for (y = 0; y < height; y += 2) {
+        uint8_t y00, y10, y01, y11, u, v;
+        uint16_t f0, f1, f2;
+        int x = 0;
+        const int pp2 = (width & 1) != 0 ? 0 : pp;
+
+        d1 = (y + 1 < height) ? d0 + lumStride : d1;
+        s2 = (y + 1 < height) ? s1 + srcStride : s1;
+
+        y00 = C(s1[     0], s1[     1], s1[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y10 = C(s1[pp + 0], s1[pp + 1], s1[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y01 = C(s2[     0], s2[     1], s2[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y11 = C(s2[pp + 0], s2[pp + 1], s2[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+
+        f0 = F3HV(s0 + 0, s1 + 0, s2 + 0, 0, 0, pp, filt);
+        f1 = F3HV(s0 + 1, s1 + 1, s2 + 1, 0, 0, pp, filt);
+        f2 = F3HV(s0 + 2, s1 + 2, s2 + 2, 0, 0, pp, filt);
+
+        u = C(f0, f1, f2, ru, gu, bu, FCSHIFT, 128);
+        v = C(f0, f1, f2, rv, gv, bv, FCSHIFT, 128);
+
+        d0[x*2 + 0] = y00;
+        d0[x*2 + 1] = y10;
+        d1[x*2 + 0] = y01;
+        d1[x*2 + 1] = y11;
+
+        udst[x] = u;
+        vdst[x] = v;
+
+        s0 += pp * 2;
+        s1 += pp * 2;
+        s2 += pp * 2;
+
+        for (x = 1; x + 1 < lumWidth; ++x) {
+
+            y00 = C(s1[     0], s1[     1], s1[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+            y10 = C(s1[pp + 0], s1[pp + 1], s1[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+            y01 = C(s2[     0], s2[     1], s2[     2], ry, gy, by, RGB2YUV_SHIFT, 16);
+            y11 = C(s2[pp + 0], s2[pp + 1], s2[pp + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+
+            f0 = F3HV(s0 + 0, s1 + 0, s2 + 0, -pp, 0, pp, filt);
+            f1 = F3HV(s0 + 1, s1 + 1, s2 + 1, -pp, 0, pp, filt);
+            f2 = F3HV(s0 + 2, s1 + 2, s2 + 2, -pp, 0, pp, filt);
+
+            u = C(f0, f1, f2, ru, gu, bu, FCSHIFT, 128);
+            v = C(f0, f1, f2, rv, gv, bv, FCSHIFT, 128);
+
+            d0[x*2 + 0] = y00;
+            d0[x*2 + 1] = y10;
+            d1[x*2 + 0] = y01;
+            d1[x*2 + 1] = y11;
+
+            udst[x] = u;
+            vdst[x] = v;
+
+            s0 += pp * 2;
+            s1 += pp * 2;
+            s2 += pp * 2;
+        }
+
+        y00 = C(s1[     0], s1[      1], s1[      2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y10 = C(s1[pp + 0], s1[pp2 + 1], s1[pp2 + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y01 = C(s2[     0], s2[      1], s2[      2], ry, gy, by, RGB2YUV_SHIFT, 16);
+        y11 = C(s2[pp + 0], s2[pp2 + 1], s2[pp2 + 2], ry, gy, by, RGB2YUV_SHIFT, 16);
+
+        f0 = F3HV(s0 + 0, s1 + 0, s2 + 0, -pp, 0, pp2, filt);
+        f1 = F3HV(s0 + 1, s1 + 1, s2 + 1, -pp, 0, pp2, filt);
+        f2 = F3HV(s0 + 2, s1 + 2, s2 + 2, -pp, 0, pp2, filt);
+
+        u = C(f0, f1, f2, ru, gu, bu, FCSHIFT, 128);
+        v = C(f0, f1, f2, rv, gv, bv, FCSHIFT, 128);
+
+        d0[x*2 + 0] = y00;
+        d1[x*2 + 0] = y01;
+        if ((width & 1) == 0) {
+            d1[x*2 + 1] = y11;
+            d0[x*2 + 1] = y10;
+        }
+
+        udst[x] = u;
+        vdst[x] = v;
+
+        s1 = src + srcStride * (y + 2);
+        s0 = s1 - srcStride;
+        d0 += lumStride * 2;
+        udst += chromStride;
+        vdst += chromStride;
+    }
+}
+
 /**
  * Height should be a multiple of 2 and width should be a multiple of 2.
  * (If this is a problem for anyone then tell me, and I will fix it.)
@@ -739,7 +991,29 @@ void ff_rgb24toyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
                    uint8_t *vdst, int width, int height, int lumStride,
                    int chromStride, int srcStride, int32_t *rgb2yuv)
 {
-    rgb24toyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_rgb);
+    const int16_t cvt[3][3] = {
+        {(int16_t)rgb2yuv[RY_IDX], (int16_t)rgb2yuv[GY_IDX], (int16_t)rgb2yuv[BY_IDX]},
+        {(int16_t)rgb2yuv[RU_IDX], (int16_t)rgb2yuv[GU_IDX], (int16_t)rgb2yuv[BU_IDX]},
+        {(int16_t)rgb2yuv[RV_IDX], (int16_t)rgb2yuv[GV_IDX], (int16_t)rgb2yuv[BV_IDX]},
+    };
+#if 0
+    const int8_t filt[2][4] = {
+        {8, 24, 24, 8},
+        {8, 24, 24, 8},
+    };
+
+    printf("*******\n");
+    rgbtoyv12_f4(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, cvt, filt, 3);
+#else
+    static const int8_t filt[2][3] = {
+        {16, 32, 16},
+        {16, 32, 16},
+    };
+
+    printf("*** 2 ***\n");
+    rgbtoyv12_f3(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, cvt, filt, 3);
+#endif
+//    rgb24toyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_rgb);
 }
 
 static void rgbxtoyv12_x(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
@@ -817,13 +1091,27 @@ static void ff_rgbxtoyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
                    uint8_t *vdst, int width, int height, int lumStride,
                    int chromStride, int srcStride, int32_t *rgb2yuv)
 {
-    rgbxtoyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_rgb);
+    const int16_t cvt[3][3] = {
+        {(int16_t)rgb2yuv[RY_IDX], (int16_t)rgb2yuv[GY_IDX], (int16_t)rgb2yuv[BY_IDX]},
+        {(int16_t)rgb2yuv[RU_IDX], (int16_t)rgb2yuv[GU_IDX], (int16_t)rgb2yuv[BU_IDX]},
+        {(int16_t)rgb2yuv[RV_IDX], (int16_t)rgb2yuv[GV_IDX], (int16_t)rgb2yuv[BV_IDX]},
+    };
+
+    const int8_t filt[2][4] = {
+        {8, 24, 24, 8},
+        {8, 24, 24, 8},
+    };
+
+    printf("*******\n");
+    rgbtoyv12_f4(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, cvt, filt, 3);
+//    rgbxtoyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_rgb);
 }
 
 static void ff_bgrxtoyv12_c(const uint8_t *src, uint8_t *ydst, uint8_t *udst,
                    uint8_t *vdst, int width, int height, int lumStride,
                    int chromStride, int srcStride, int32_t *rgb2yuv)
 {
+    printf("!!!!!!!!!!!!!!!!!\n");
     rgbxtoyv12_x(src, ydst, udst, vdst, width, height, lumStride, chromStride, srcStride, rgb2yuv, x_bgr);
 }
 

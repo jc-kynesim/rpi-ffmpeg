@@ -43,7 +43,7 @@ av_cold void rgb2rgb_init_aarch64(void)
 
     if (have_neon(cpu_flags)) {
         interleaveBytes = ff_interleave_bytes_neon;
-        ff_rgb24toyv12 = ff_rgb24toyv12_neon;
-        ff_bgr24toyv12 = ff_bgr24toyv12_neon;
+//        ff_rgb24toyv12 = ff_rgb24toyv12_neon;
+//        ff_bgr24toyv12 = ff_bgr24toyv12_neon;
     }
 }
