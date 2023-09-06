@@ -1099,6 +1099,7 @@ choose_capture_format(AVCodecContext * const avctx, V4L2m2mContext * const s)
     fmts2[n++] = AV_PIX_FMT_DRM_PRIME;
     for (i = 0; i != fmts_n; ++i) {
         const enum AVPixelFormat f = ff_v4l2_format_v4l2_to_avfmt(fmts[i], AV_CODEC_ID_RAWVIDEO);
+        av_log(avctx, AV_LOG_TRACE, "VLC pix %s -> %s\n", av_fourcc2str(fmts[i]), av_get_pix_fmt_name(f));
         if (f == AV_PIX_FMT_NONE)
             continue;
 
@@ -1121,7 +1122,7 @@ choose_capture_format(AVCodecContext * const avctx, V4L2m2mContext * const s)
     fmts2[n - 1] = fmts2[pref_n];
     fmts2[pref_n] = t;
 
-    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+    gf_pix_fmt = ff_get_format(avctx, fmts2);
     av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
            avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt),
            avctx->coded_width, avctx->coded_height,
