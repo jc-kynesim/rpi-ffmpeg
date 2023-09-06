@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include "libavutil/avassert.h"
+#include "libavutil/pixdesc.h"
 #include "libavcodec/avcodec.h"
 #include "libavcodec/internal.h"
 #include "v4l2_buffers.h"
@@ -357,13 +358,23 @@ static int do_source_change(V4L2m2mContext * const s)
 
     s->capture.sample_aspect_ratio = v4l2_get_sar(&s->capture);
 
-    av_log(avctx, AV_LOG_DEBUG, "Source change: SAR: %d/%d, wxh %dx%d crop %dx%d @ %d,%d, reinit=%d\n",
+    av_log(avctx, AV_LOG_DEBUG, "Source change: Fmt: %s, SAR: %d/%d, wxh %dx%d crop %dx%d @ %d,%d, reinit=%d\n",
+           av_fourcc2str(ff_v4l2_get_format_pixelformat(&cap_fmt)),
            s->capture.sample_aspect_ratio.num, s->capture.sample_aspect_ratio.den,
            s->capture.width, s->capture.height,
            s->capture.selection.width, s->capture.selection.height,
            s->capture.selection.left, s->capture.selection.top, reinit);
 
-    if (reinit) {
+    ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMOFF);
+    if (ret)
+        av_log(avctx, AV_LOG_ERROR, "capture VIDIOC_STREAMOFF failed\n");
+    s->draining = 0;
+
+    if (!reinit) {
+        /* Buffers are OK so just stream off to ack */
+        av_log(avctx, AV_LOG_DEBUG, "%s: Parameters only - restart decode\n", __func__);
+    }
+    else {
         if (avctx)
             ret = ff_set_dimensions(s->avctx,
                                     s->capture.selection.width != 0 ? s->capture.selection.width : s->capture.width,
@@ -371,11 +382,7 @@ static int do_source_change(V4L2m2mContext * const s)
         if (ret < 0)
             av_log(avctx, AV_LOG_WARNING, "update avcodec height and width failed\n");
 
-        ret = ff_v4l2_m2m_codec_reinit(s);
-        if (ret) {
-            av_log(avctx, AV_LOG_ERROR, "v4l2_m2m_codec_reinit failed\n");
-            return AVERROR(EINVAL);
-        }
+        ff_v4l2_context_release(&s->capture);
 
         if (s->capture.width > ff_v4l2_get_format_width(&s->capture.format) ||
             s->capture.height > ff_v4l2_get_format_height(&s->capture.format)) {
@@ -388,26 +395,10 @@ static int do_source_change(V4L2m2mContext * const s)
         // Update pixel format - should only actually do something on initial change
         s->capture.av_pix_fmt =
             ff_v4l2_format_v4l2_to_avfmt(ff_v4l2_get_format_pixelformat(&s->capture.format), AV_CODEC_ID_RAWVIDEO);
-        if (s->output_drm) {
-            avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
-            avctx->sw_pix_fmt = s->capture.av_pix_fmt;
-        }
-        else
-            avctx->pix_fmt = s->capture.av_pix_fmt;
-
-        goto reinit_run;
+        avctx->pix_fmt = s->output_drm ? AV_PIX_FMT_DRM_PRIME : s->capture.av_pix_fmt;
+        avctx->sw_pix_fmt = s->capture.av_pix_fmt;
     }
 
-    /* Buffers are OK so just stream off to ack */
-    av_log(avctx, AV_LOG_DEBUG, "%s: Parameters only - restart decode\n", __func__);
-
-    ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMOFF);
-    if (ret)
-        av_log(avctx, AV_LOG_ERROR, "capture VIDIOC_STREAMOFF failed\n");
-    s->draining = 0;
-
-    /* reinit executed */
-reinit_run:
     ret = ff_v4l2_context_set_status(&s->capture, VIDIOC_STREAMON);
     return 1;
 }
