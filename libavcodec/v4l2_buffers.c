@@ -390,6 +390,39 @@ static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
     }
 
     switch (avbuf->context->av_pix_fmt) {
+    case AV_PIX_FMT_0BGR:
+        layer->format = DRM_FORMAT_RGBX8888;
+        break;
+    case AV_PIX_FMT_RGB0:
+        layer->format = DRM_FORMAT_XBGR8888;
+        break;
+    case AV_PIX_FMT_0RGB:
+        layer->format = DRM_FORMAT_BGRX8888;
+        break;
+    case AV_PIX_FMT_BGR0:
+        layer->format = DRM_FORMAT_XRGB8888;
+        break;
+
+    case AV_PIX_FMT_ABGR:
+        layer->format = DRM_FORMAT_RGBA8888;
+        break;
+    case AV_PIX_FMT_RGBA:
+        layer->format = DRM_FORMAT_ABGR8888;
+        break;
+    case AV_PIX_FMT_ARGB:
+        layer->format = DRM_FORMAT_BGRA8888;
+        break;
+    case AV_PIX_FMT_BGRA:
+        layer->format = DRM_FORMAT_ARGB8888;
+        break;
+
+    case AV_PIX_FMT_BGR24:
+        layer->format = DRM_FORMAT_BGR888;
+        break;
+    case AV_PIX_FMT_RGB24:
+        layer->format = DRM_FORMAT_RGB888;
+        break;
+
     case AV_PIX_FMT_YUYV422:
 
         layer->format = DRM_FORMAT_YUYV;
