@@ -17,6 +17,10 @@
 
 #define TRACE_ALLOC 0
 
+#ifndef __O_CLOEXEC
+#define __O_CLOEXEC 0
+#endif
+
 struct dmabufs_ctl;
 struct dmabuf_h;
 
@@ -294,19 +298,11 @@ struct dmabufs_ctl * dmabufs_ctl_ref(struct dmabufs_ctl * const dbsc)
 //
 // Alloc dmabuf via CMA
 
-static const char * const cma_names[] = {
-    "/dev/dma_heap/vidbuf_cached",
-    "/dev/dma_heap/linux,cma",
-    "/dev/dma_heap/reserved",
-    NULL
-};
-
-static int ctl_cma_new(struct dmabufs_ctl * dbsc)
+static int ctl_cma_new2(struct dmabufs_ctl * dbsc, const char * const * names)
 {
-    const char * const * names;
-    for (names = cma_names; *names != NULL; ++names)
+    for (; *names != NULL; ++names)
     {
-        while ((dbsc->fd = open(*names, O_RDWR)) == -1 &&
+        while ((dbsc->fd = open(*names, O_RDWR | __O_CLOEXEC)) == -1 &&
                errno == EINTR)
             /* Loop */;
         if (dbsc->fd != -1)
@@ -318,6 +314,17 @@ static int ctl_cma_new(struct dmabufs_ctl * dbsc)
     }
     request_log("Unable to open any dma_heap device\n");
     return -1;
+}
+
+static int ctl_cma_new(struct dmabufs_ctl * dbsc)
+{
+    static const char * const names[] = {
+        "/dev/dma_heap/linux,cma",
+        "/dev/dma_heap/reserved",
+        NULL
+    };
+
+    return ctl_cma_new2(dbsc, names);
 }
 
 static void ctl_cma_free(struct dmabufs_ctl * dbsc)
@@ -351,8 +358,8 @@ static int buf_cma_alloc(struct dmabufs_ctl * const dbsc, struct dmabuf_h * dh, 
     dh->fd = data.fd;
     dh->size = (size_t)data.len;
 
-    fprintf(stderr, "%s: size=%#zx, ftell=%#zx\n", __func__,
-            dh->size, (size_t)lseek(dh->fd, 0, SEEK_END));
+//    fprintf(stderr, "%s: size=%#zx, ftell=%#zx\n", __func__,
+//            dh->size, (size_t)lseek(dh->fd, 0, SEEK_END));
 
     return 0;
 }
@@ -371,7 +378,32 @@ static const struct dmabuf_fns dmabuf_cma_fns = {
 
 struct dmabufs_ctl * dmabufs_ctl_new(void)
 {
-    request_debug(NULL, "Dmabufs using CMA\n");;
+    request_debug(NULL, "Dmabufs using CMA\n");
     return dmabufs_ctl_new2(&dmabuf_cma_fns);
+}
+
+static int ctl_cma_new_vidbuf_cached(struct dmabufs_ctl * dbsc)
+{
+    static const char * const names[] = {
+        "/dev/dma_heap/vidbuf_cached",
+        "/dev/dma_heap/linux,cma",
+        "/dev/dma_heap/reserved",
+        NULL
+    };
+
+    return ctl_cma_new2(dbsc, names);
+}
+
+static const struct dmabuf_fns dmabuf_vidbuf_cached_fns = {
+    .buf_alloc  = buf_cma_alloc,
+    .buf_free   = buf_cma_free,
+    .ctl_new    = ctl_cma_new_vidbuf_cached,
+    .ctl_free   = ctl_cma_free,
+};
+
+struct dmabufs_ctl * dmabufs_ctl_new_vidbuf_cached(void)
+{
+    request_debug(NULL, "Dmabufs using Vidbuf\n");
+    return dmabufs_ctl_new2(&dmabuf_vidbuf_cached_fns);
 }
 
