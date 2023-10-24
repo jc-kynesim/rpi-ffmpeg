@@ -176,17 +176,6 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_DEBUG, "Trying V4L2 devices: %s,%s\n",
            decdev_media_path(decdev), decdev_video_path(decdev));
 
-    if ((ctx->dbufs = dmabufs_ctl_new()) == NULL) {
-        av_log(avctx, AV_LOG_DEBUG, "Unable to open dmabufs - try mmap buffers\n");
-        src_memtype = MEDIABUFS_MEMORY_MMAP;
-        dst_memtype = MEDIABUFS_MEMORY_MMAP;
-    }
-    else {
-        av_log(avctx, AV_LOG_DEBUG, "Dmabufs opened - try dmabuf buffers\n");
-        src_memtype = MEDIABUFS_MEMORY_DMABUF;
-        dst_memtype = MEDIABUFS_MEMORY_DMABUF;
-    }
-
     if ((ctx->pq = pollqueue_new()) == NULL) {
         av_log(avctx, AV_LOG_ERROR, "Unable to create pollqueue\n");
         goto fail1;
@@ -200,6 +189,25 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     if ((ctx->mbufs = mediabufs_ctl_new(avctx, decdev_video_path(decdev), ctx->pq)) == NULL) {
         av_log(avctx, AV_LOG_ERROR, "Unable to create media controls\n");
         goto fail3;
+    }
+
+    // Version test for functional Pi5 HEVC iommu.
+    // rpivid kernel patch was merged in 6.1.57
+    // *** Remove when it is unlikely that there are any broken kernels left
+    if (mediabufs_ctl_driver_version(ctx->mbufs) >= MEDIABUFS_DRIVER_VERSION(6,1,57))
+        ctx->dbufs = dmabufs_ctl_new_vidbuf_cached();
+    else
+        ctx->dbufs = dmabufs_ctl_new();
+
+    if (ctx->dbufs == NULL) {
+        av_log(avctx, AV_LOG_DEBUG, "Unable to open dmabufs - try mmap buffers\n");
+        src_memtype = MEDIABUFS_MEMORY_MMAP;
+        dst_memtype = MEDIABUFS_MEMORY_MMAP;
+    }
+    else {
+        av_log(avctx, AV_LOG_DEBUG, "Dmabufs opened - try dmabuf buffers\n");
+        src_memtype = MEDIABUFS_MEMORY_DMABUF;
+        dst_memtype = MEDIABUFS_MEMORY_DMABUF;
     }
 
     // Ask for an initial bitbuf size of max size / 4
@@ -229,29 +237,24 @@ retry_src_memtype:
         goto fail4;
     }
 
-    if (V2(ff_v4l2_req_hevc, 4).probe(avctx, ctx) == 0) {
-        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 4 probed successfully\n");
+    if (V2(ff_v4l2_req_hevc, 4).probe(avctx, ctx) == 0)
         ctx->fns = &V2(ff_v4l2_req_hevc, 4);
-    }
 #if CONFIG_V4L2_REQ_HEVC_VX
-    else if (V2(ff_v4l2_req_hevc, 3).probe(avctx, ctx) == 0) {
-        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 3 probed successfully\n");
+    else if (V2(ff_v4l2_req_hevc, 3).probe(avctx, ctx) == 0)
         ctx->fns = &V2(ff_v4l2_req_hevc, 3);
-    }
-    else if (V2(ff_v4l2_req_hevc, 2).probe(avctx, ctx) == 0) {
-        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 2 probed successfully\n");
+    else if (V2(ff_v4l2_req_hevc, 2).probe(avctx, ctx) == 0)
         ctx->fns = &V2(ff_v4l2_req_hevc, 2);
-    }
-    else if (V2(ff_v4l2_req_hevc, 1).probe(avctx, ctx) == 0) {
-        av_log(avctx, AV_LOG_DEBUG, "HEVC API version 1 probed successfully\n");
+    else if (V2(ff_v4l2_req_hevc, 1).probe(avctx, ctx) == 0)
         ctx->fns = &V2(ff_v4l2_req_hevc, 1);
-    }
 #endif
     else {
         av_log(avctx, AV_LOG_ERROR, "No HEVC version probed successfully\n");
         ret = AVERROR(EINVAL);
         goto fail4;
     }
+
+    av_log(avctx, AV_LOG_DEBUG, "%s probed successfully: driver v %#x\n",
+           ctx->fns->name, mediabufs_ctl_driver_version(ctx->mbufs));
 
     if (mediabufs_dst_fmt_set(ctx->mbufs, sps->width, sps->height, dst_fmt_accept_cb, avctx)) {
         char tbuf1[5];
