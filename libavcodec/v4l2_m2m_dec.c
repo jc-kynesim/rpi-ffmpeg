@@ -121,13 +121,18 @@ log_dump(void * logctx, int lvl, const void * const data, const size_t len)
 }
 #endif
 
-static int64_t pts_stats_guess(const pts_stats_t * const stats)
+static unsigned int pts_stats_interval(const pts_stats_t * const stats)
+{
+    return stats->last_interval;
+}
+
+static int64_t pts_stats_guess(const pts_stats_t * const stats, const int fail_bad_guess)
 {
     if (stats->last_count <= 1)
         return stats->last_pts;
     if (stats->last_pts == AV_NOPTS_VALUE ||
-            stats->last_interval == 0 ||
-            stats->last_count >= STATS_LAST_COUNT_MAX)
+            fail_bad_guess && (stats->last_interval == 0 ||
+                               stats->last_count >= STATS_LAST_COUNT_MAX))
         return AV_NOPTS_VALUE;
     return stats->last_pts + (int64_t)(stats->last_count - 1) * (int64_t)stats->last_interval;
 }
@@ -345,7 +350,7 @@ set_best_effort_pts(AVCodecContext *const avctx,
 {
     pts_stats_add(ps, frame->pts);
 
-    frame->best_effort_timestamp = pts_stats_guess(ps);
+    frame->best_effort_timestamp = pts_stats_guess(ps, 1);
     // If we can't guess from just PTS - try DTS
     if (frame->best_effort_timestamp == AV_NOPTS_VALUE)
         frame->best_effort_timestamp = frame->pkt_dts;
@@ -380,14 +385,24 @@ xlat_init(xlat_track_t * const x)
 }
 
 static int
-xlat_pending(const xlat_track_t * const x)
+xlat_pending(const V4L2m2mContext * const s)
 {
+    const xlat_track_t *const x = &s->xlat;
     unsigned int n = x->track_no % FF_V4L2_M2M_TRACK_SIZE;
     int i;
-    const int64_t now = x->last_pts;
+    const int64_t now = pts_stats_guess(&s->pts_stat, 0);
+    int64_t first_dts = AV_NOPTS_VALUE;
+    int no_dts_count = 0;
+    unsigned int interval = pts_stats_interval(&s->pts_stat);
 
     for (i = 0; i < FF_V4L2_M2M_TRACK_SIZE; ++i, n = (n - 1) & (FF_V4L2_M2M_TRACK_SIZE - 1)) {
         const V4L2m2mTrackEl * const t = x->track_els + n;
+
+        if (first_dts == AV_NOPTS_VALUE)
+            if (t->dts == AV_NOPTS_VALUE)
+                ++no_dts_count;
+            else
+                first_dts = t->dts;
 
         // Discard only set on never-set or flushed entries
         // So if we get here we've never successfully decoded a frame so allow
@@ -406,6 +421,18 @@ xlat_pending(const xlat_track_t * const x)
 
         if (t->dts != AV_NOPTS_VALUE && now >= t->dts)
             break;
+    }
+
+    if (first_dts != AV_NOPTS_VALUE && now != AV_NOPTS_VALUE && interval != 0 && s->reorder_size != 0) {
+        const int iframes = (first_dts - now) / (int)interval;
+        const int t = iframes - s->reorder_size + no_dts_count;
+
+//        av_log(s->avctx, AV_LOG_DEBUG, "Last:%"PRId64", Now:%"PRId64", First:%"PRId64", delta=%"PRId64", frames=%d, nodts=%d\n",
+//               x->last_dts, now, first_dts, first_dts - now, iframes, no_dts_count);
+
+        if (iframes > 0 && iframes < 64 && t < i) {
+            return t;
+        }
     }
 
     return i;
@@ -585,12 +612,12 @@ static int qbuf_wait(AVCodecContext * const avctx, V4L2Context * const ctx)
 static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     V4L2m2mContext *const s = ((V4L2m2mPriv*)avctx->priv_data)->context;
-    int src_rv = NQ_OK;
+    int src_rv = -1;
     int dst_rv = 1;  // Non-zero (done), non-negative (error) number
     unsigned int i = 0;
 
     do {
-        const int pending = xlat_pending(&s->xlat);
+        const int pending = xlat_pending(s);
         const int prefer_dq = (pending > 4);
         const int last_src_rv = src_rv;
 
@@ -846,10 +873,9 @@ check_profile(AVCodecContext *const avctx, V4L2m2mContext *const s)
 };
 
 static int
-check_size(AVCodecContext * const avctx, V4L2m2mContext * const s)
+check_size(AVCodecContext * const avctx, V4L2m2mContext * const s, const uint32_t fcc)
 {
     unsigned int i;
-    const uint32_t fcc = ff_v4l2_get_format_pixelformat(&s->capture.format);
     const uint32_t w = avctx->coded_width;
     const uint32_t h = avctx->coded_height;
 
@@ -966,8 +992,10 @@ static uint32_t max_coded_size(const AVCodecContext * const avctx)
 }
 
 static void
-parse_extradata(AVCodecContext *avctx)
+parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
+    s->reorder_size = 0;
+
     if (!avctx->extradata || !avctx->extradata_size)
         return;
 
@@ -975,10 +1003,12 @@ parse_extradata(AVCodecContext *avctx)
 #if CONFIG_H264_DECODER
         case AV_CODEC_ID_H264:
         {
-            H264ParamSets ps = {{NULL}};
+            H264ParamSets ps;
             int is_avc = 0;
             int nal_length_size = 0;
             int ret;
+
+            memset(&ps, 0, sizeof(ps));
 
             ret = ff_h264_decode_extradata(avctx->extradata, avctx->extradata_size,
                                            &ps, &is_avc, &nal_length_size,
@@ -995,6 +1025,7 @@ parse_extradata(AVCodecContext *avctx)
                 if (sps) {
                     avctx->profile = ff_h264_get_profile(sps);
                     avctx->level = sps->level_idc;
+                    s->reorder_size = sps->num_reorder_frames;
                 }
             }
             ff_h264_ps_uninit(&ps);
@@ -1004,11 +1035,14 @@ parse_extradata(AVCodecContext *avctx)
 #if CONFIG_HEVC_DECODER
         case AV_CODEC_ID_HEVC:
         {
-            HEVCParamSets ps = {{NULL}};
-            HEVCSEI sei = {{{{0}}}};
+            HEVCParamSets ps;
+            HEVCSEI sei;
             int is_nalff = 0;
             int nal_length_size = 0;
             int ret;
+
+            memset(&ps, 0, sizeof(ps));
+            memset(&sei, 0, sizeof(sei));
 
             ret = ff_hevc_decode_extradata(avctx->extradata, avctx->extradata_size,
                                            &ps, &sei, &is_nalff, &nal_length_size,
@@ -1025,6 +1059,7 @@ parse_extradata(AVCodecContext *avctx)
                 if (sps) {
                     avctx->profile = sps->ptl.general_ptl.profile_idc;
                     avctx->level   = sps->ptl.general_ptl.level_idc;
+                    s->reorder_size = sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering;
                 }
             }
             ff_hevc_ps_uninit(&ps);
@@ -1037,12 +1072,92 @@ parse_extradata(AVCodecContext *avctx)
     }
 }
 
+static int
+choose_capture_format(AVCodecContext * const avctx, V4L2m2mContext * const s)
+{
+    const V4L2m2mPriv * const priv = avctx->priv_data;
+    unsigned int fmts_n;
+    uint32_t *fmts = ff_v4l2_context_enum_drm_formats(&s->capture, &fmts_n);
+    enum AVPixelFormat *fmts2 = NULL;
+    enum AVPixelFormat t;
+    enum AVPixelFormat gf_pix_fmt;
+    unsigned int i;
+    unsigned int n = 0;
+    unsigned int pref_n = 1;
+    int rv = AVERROR(ENOENT);
+
+    if (!fmts)
+        return AVERROR(ENOENT);
+
+    if ((fmts2 = av_malloc(sizeof(*fmts2) * (fmts_n + 2))) == NULL) {
+        rv = AVERROR(ENOMEM);
+        goto error;
+    }
+
+    // Filter for formats that are supported by ffmpeg and
+    // can accomodate the stream size
+    fmts2[n++] = AV_PIX_FMT_DRM_PRIME;
+    for (i = 0; i != fmts_n; ++i) {
+        const enum AVPixelFormat f = ff_v4l2_format_v4l2_to_avfmt(fmts[i], AV_CODEC_ID_RAWVIDEO);
+        av_log(avctx, AV_LOG_TRACE, "VLC pix %s -> %s\n", av_fourcc2str(fmts[i]), av_get_pix_fmt_name(f));
+        if (f == AV_PIX_FMT_NONE)
+            continue;
+
+        if (check_size(avctx, s, fmts[i]) != 0)
+            continue;
+
+        if (f == priv->pix_fmt)
+            pref_n = n;
+        fmts2[n++] = f;
+    }
+    fmts2[n] = AV_PIX_FMT_NONE;
+
+    if (n < 2) {
+        av_log(avctx, AV_LOG_DEBUG, "%s: No usable formats found\n", __func__);
+        goto error;
+    }
+
+    // Put preferred s/w format at the end - ff_get_format will put it in sw_pix_fmt
+    t = fmts2[n - 1];
+    fmts2[n - 1] = fmts2[pref_n];
+    fmts2[pref_n] = t;
+
+    gf_pix_fmt = ff_get_format(avctx, fmts2);
+    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
+           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt),
+           avctx->coded_width, avctx->coded_height,
+           gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
+
+    if (gf_pix_fmt == AV_PIX_FMT_NONE)
+        goto error;
+
+    if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
+        avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+        s->capture.av_pix_fmt = avctx->sw_pix_fmt;
+        s->output_drm = 1;
+    }
+    else {
+        avctx->pix_fmt = gf_pix_fmt;
+        s->capture.av_pix_fmt = gf_pix_fmt;
+        s->output_drm = 0;
+    }
+
+    // Get format converts capture.av_pix_fmt back into a V4L2 format in the context
+    if ((rv = ff_v4l2_context_get_format(&s->capture, 0)) != 0)
+        goto error;
+    rv = ff_v4l2_context_set_format(&s->capture);
+
+error:
+    av_free(fmts2);
+    av_free(fmts);
+    return rv;
+}
+
 static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 {
     V4L2Context *capture, *output;
     V4L2m2mContext *s;
     V4L2m2mPriv *priv = avctx->priv_data;
-    int gf_pix_fmt;
     int ret;
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
@@ -1057,11 +1172,11 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         avctx->ticks_per_frame = 2;
     }
 
-    parse_extradata(avctx);
-
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
+
+    parse_extradata(avctx, s);
 
     xlat_init(&s->xlat);
     pts_stats_init(&s->pts_stat, avctx, "decoder");
@@ -1086,28 +1201,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     capture->av_pix_fmt = avctx->pix_fmt;
     capture->min_buf_size = 0;
 
-    /* the client requests the codec to generate DRM frames:
-     *   - data[0] will therefore point to the returned AVDRMFrameDescriptor
-     *       check the ff_v4l2_buffer_to_avframe conversion function.
-     *   - the DRM frame format is passed in the DRM frame descriptor layer.
-     *       check the v4l2_get_drm_frame function.
-     */
-
-    avctx->sw_pix_fmt = avctx->pix_fmt;
-    gf_pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
-    av_log(avctx, AV_LOG_DEBUG, "avctx requested=%d (%s) %dx%d; get_format requested=%d (%s)\n",
-           avctx->pix_fmt, av_get_pix_fmt_name(avctx->pix_fmt),
-           avctx->coded_width, avctx->coded_height,
-           gf_pix_fmt, av_get_pix_fmt_name(gf_pix_fmt));
-
-    if (gf_pix_fmt == AV_PIX_FMT_DRM_PRIME || avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
-        avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
-        s->output_drm = 1;
-    }
-    else {
-        capture->av_pix_fmt = gf_pix_fmt;
-        s->output_drm = 0;
-    }
+    capture->av_pix_fmt = AV_PIX_FMT_NONE;
+    s->output_drm = 0;
 
     s->db_ctl = NULL;
     if (priv->dmabuf_alloc != NULL && strcmp(priv->dmabuf_alloc, "v4l2") != 0) {
@@ -1149,19 +1244,21 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         return ret;
     }
 
-    if ((ret = v4l2_prepare_decoder(s)) < 0)
-        return ret;
-
     if ((ret = get_quirks(avctx, s)) != 0)
-        return ret;
-
-    if ((ret = check_size(avctx, s)) != 0)
         return ret;
 
     if ((ret = check_profile(avctx, s)) != 0) {
         av_log(avctx, AV_LOG_WARNING, "Profile %d not supported by decode\n", avctx->profile);
         return ret;
     }
+
+    // Size check done as part of format filtering
+    if ((ret = choose_capture_format(avctx, s)) != 0)
+        return ret;
+
+    if ((ret = v4l2_prepare_decoder(s)) < 0)
+        return ret;
+
     return 0;
 }
 

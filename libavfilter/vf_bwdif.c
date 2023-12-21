@@ -122,8 +122,8 @@ typedef struct ThreadData {
         next2++; \
     }
 
-static void filter_intra(void *dst1, void *cur1, int w, int prefs, int mrefs,
-                         int prefs3, int mrefs3, int parity, int clip_max)
+void ff_bwdif_filter_intra_c(void *dst1, void *cur1, int w, int prefs, int mrefs,
+                             int prefs3, int mrefs3, int parity, int clip_max)
 {
     uint8_t *dst = dst1;
     uint8_t *cur = cur1;
@@ -132,10 +132,10 @@ static void filter_intra(void *dst1, void *cur1, int w, int prefs, int mrefs,
     FILTER_INTRA()
 }
 
-static void filter_line_c(void *dst1, void *prev1, void *cur1, void *next1,
-                          int w, int prefs, int mrefs, int prefs2, int mrefs2,
-                          int prefs3, int mrefs3, int prefs4, int mrefs4,
-                          int parity, int clip_max)
+void ff_bwdif_filter_line_c(void *dst1, void *prev1, void *cur1, void *next1,
+                            int w, int prefs, int mrefs, int prefs2, int mrefs2,
+                            int prefs3, int mrefs3, int prefs4, int mrefs4,
+                            int parity, int clip_max)
 {
     uint8_t *dst   = dst1;
     uint8_t *prev  = prev1;
@@ -150,9 +150,34 @@ static void filter_line_c(void *dst1, void *prev1, void *cur1, void *next1,
     FILTER2()
 }
 
-static void filter_edge(void *dst1, void *prev1, void *cur1, void *next1,
-                        int w, int prefs, int mrefs, int prefs2, int mrefs2,
-                        int parity, int clip_max, int spat)
+#define NEXT_LINE()\
+    dst += d_stride; \
+    prev += prefs; \
+    cur  += prefs; \
+    next += prefs;
+
+void ff_bwdif_filter_line3_c(void * dst1, int d_stride,
+                             const void * prev1, const void * cur1, const void * next1, int s_stride,
+                             int w, int parity, int clip_max)
+{
+    const int prefs = s_stride;
+    uint8_t * dst  = dst1;
+    const uint8_t * prev = prev1;
+    const uint8_t * cur  = cur1;
+    const uint8_t * next = next1;
+
+    ff_bwdif_filter_line_c(dst, (void*)prev, (void*)cur, (void*)next, w,
+                           prefs, -prefs, prefs * 2, - prefs * 2, prefs * 3, -prefs * 3, prefs * 4, -prefs * 4, parity, clip_max);
+    NEXT_LINE();
+    memcpy(dst, cur, w);
+    NEXT_LINE();
+    ff_bwdif_filter_line_c(dst, (void*)prev, (void*)cur, (void*)next, w,
+                           prefs, -prefs, prefs * 2, - prefs * 2, prefs * 3, -prefs * 3, prefs * 4, -prefs * 4, parity, clip_max);
+}
+
+void ff_bwdif_filter_edge_c(void *dst1, void *prev1, void *cur1, void *next1,
+                            int w, int prefs, int mrefs, int prefs2, int mrefs2,
+                            int parity, int clip_max, int spat)
 {
     uint8_t *dst   = dst1;
     uint8_t *prev  = prev1;
@@ -212,6 +237,13 @@ static void filter_edge_16bit(void *dst1, void *prev1, void *cur1, void *next1,
     FILTER2()
 }
 
+// Round job start line down to multiple of 4 so that if filter_line3 exists
+// and the frame is a multiple of 4 high then filter_line will never be called
+static inline int job_start(const int jobnr, const int nb_jobs, const int h)
+{
+    return jobnr >= nb_jobs ? h : ((h * jobnr) / nb_jobs) & ~3;
+}
+
 static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
 {
     BWDIFContext *s = ctx->priv;
@@ -221,8 +253,8 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
     int clip_max = (1 << (yadif->csp->comp[td->plane].depth)) - 1;
     int df = (yadif->csp->comp[td->plane].depth + 7) / 8;
     int refs = linesize / df;
-    int slice_start = (td->h *  jobnr   ) / nb_jobs;
-    int slice_end   = (td->h * (jobnr+1)) / nb_jobs;
+    int slice_start = job_start(jobnr, nb_jobs, td->h);
+    int slice_end   = job_start(jobnr + 1, nb_jobs, td->h);
     int y;
 
     for (y = slice_start; y < slice_end; y++) {
@@ -244,6 +276,11 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
                                refs << 1, -(refs << 1),
                                td->parity ^ td->tff, clip_max,
                                (y < 2) || ((y + 3) > td->h) ? 0 : 1);
+            } else if (s->filter_line3 && y + 2 < slice_end && y + 6 < td->h) {
+                s->filter_line3(dst, td->frame->linesize[td->plane],
+                                prev, cur, next, linesize, td->w,
+                                td->parity ^ td->tff, clip_max);
+                y += 2;
             } else {
                 s->filter_line(dst, prev, cur, next, td->w,
                                refs, -refs, refs << 1, -(refs << 1),
@@ -280,7 +317,7 @@ static void filter(AVFilterContext *ctx, AVFrame *dstpic,
         td.plane = i;
 
         ff_filter_execute(ctx, filter_slice, &td, NULL,
-                          FFMIN(h, ff_filter_get_nb_threads(ctx)));
+                          FFMIN((h+3)/4, ff_filter_get_nb_threads(ctx)));
     }
     if (yadif->current_field == YADIF_FIELD_END) {
         yadif->current_field = YADIF_FIELD_NORMAL;
@@ -340,21 +377,29 @@ static int config_props(AVFilterLink *link)
 
     yadif->csp = av_pix_fmt_desc_get(link->format);
     yadif->filter = filter;
-    if (yadif->csp->comp[0].depth > 8) {
+    ff_bwdif_init_filter_line(s, yadif->csp->comp[0].depth);
+
+    return 0;
+}
+
+av_cold void ff_bwdif_init_filter_line(BWDIFContext *s, int bit_depth)
+{
+    s->filter_line3 = 0;
+    if (bit_depth > 8) {
         s->filter_intra = filter_intra_16bit;
         s->filter_line  = filter_line_c_16bit;
         s->filter_edge  = filter_edge_16bit;
     } else {
-        s->filter_intra = filter_intra;
-        s->filter_line  = filter_line_c;
-        s->filter_edge  = filter_edge;
+        s->filter_intra = ff_bwdif_filter_intra_c;
+        s->filter_line  = ff_bwdif_filter_line_c;
+        s->filter_edge  = ff_bwdif_filter_edge_c;
     }
 
 #if ARCH_X86
-    ff_bwdif_init_x86(s);
+    ff_bwdif_init_x86(s, bit_depth);
+#elif ARCH_AARCH64
+    ff_bwdif_init_aarch64(s, bit_depth);
 #endif
-
-    return 0;
 }
 
 

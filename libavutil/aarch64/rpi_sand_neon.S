@@ -248,197 +248,189 @@ incomplete_block_loop_end_c8:
     ret
 endfunc
 
-//void ff_rpi_sand30_lines_to_planar_c16(
-//  uint8_t * dst_u,            // [x0]
-//  unsigned int dst_stride_u,  // [w1] == _w*2
-//  uint8_t * dst_v,            // [x2]
-//  unsigned int dst_stride_v,  // [w3] == _w*2
-//  const uint8_t * src,        // [x4]
-//  unsigned int stride1,       // [w5] == 128
-//  unsigned int stride2,       // [w6] 
-//  unsigned int _x,            // [w7] == 0
-//  unsigned int y,             // [sp, #0] == 0
-//  unsigned int _w,            // [sp, #8] -> w3
-//  unsigned int h);            // [sp, #16] -> w7
+// Unzip chroma
+//
+// On entry:
+// a0 = V0, U2,  ...
+// a1 = U0, V1,  ...
+// a2 = U1, V2,  ...
+// b0 = V8, U10, ...
+// b1 = U8, V9,  ...
+// b2 = U9, V10, ...
+//
+// On exit:
+// d0 = U0, U3, ...
+// ...
+// a0 = V0, V3, ..
+// ...
+//
+// Reg order for USAND is a1, a0, a2 (i.e. swap natural order of 1st 2 dest regs)
 
-.macro rpi_sand30_lines_to_planar_c16_block_half
-    ld1 { v0.4s,  v1.4s, v2.4s, v3.4s }, [x13], #64
+.macro UZPH_C d0, d1, d2, a0, a1, a2, b0, b1, b2
+                uzp1            \d0\().8h, \a1\().8h, \b1\().8h
+                uzp1            \d1\().8h, \a2\().8h, \b2\().8h
+                uzp2            \d2\().8h, \a0\().8h, \b0\().8h
 
-    xtn v4.4h, v0.4s
-    ushr v0.4s, v0.4s, #10
-    xtn v5.4h, v0.4s
-    ushr v0.4s, v0.4s, #10
-    xtn v6.4h, v0.4s
-    xtn2 v4.8h, v1.4s
-    ushr v1.4s, v1.4s, #10
-    xtn2 v5.8h, v1.4s
-    ushr v1.4s, v1.4s, #10
-    xtn2 v6.8h, v1.4s
-    and v4.16b, v4.16b, v16.16b
-    and v5.16b, v5.16b, v16.16b
-    and v6.16b, v6.16b, v16.16b
-    st3 { v4.8h, v5.8h, v6.8h }, [sp], #48
-    
-    xtn v4.4h, v2.4s
-    ushr v2.4s, v2.4s, #10
-    xtn v5.4h, v2.4s
-    ushr v2.4s, v2.4s, #10
-    xtn v6.4h, v2.4s
-    xtn2 v4.8h, v3.4s
-    ushr v3.4s, v3.4s, #10
-    xtn2 v5.8h, v3.4s
-    ushr v3.4s, v3.4s, #10
-    xtn2 v6.8h, v3.4s
-    and v4.16b, v4.16b, v16.16b
-    and v5.16b, v5.16b, v16.16b
-    and v6.16b, v6.16b, v16.16b
-    st3 { v4.8h, v5.8h, v6.8h }, [sp]
-    sub sp, sp, #48
+                uzp1            \a0\().8h, \a0\().8h, \b0\().8h
+                uzp2            \a1\().8h, \a1\().8h, \b1\().8h
+                uzp2            \a2\().8h, \a2\().8h, \b2\().8h
 .endm
 
+// SAND30 -> 10bit
+.macro USAND10 d0, d1, d2, a0, a1
+                shrn            \d2\().4h, \a0\().4s, #14
+                shrn            \d1\().4h, \a0\().4s, #10
+
+                shrn2           \d2\().8h, \a1\().4s, #14
+                shrn2           \d1\().8h, \a1\().4s, #10
+                uzp1            \d0\().8h, \a0\().8h, \a1\().8h
+
+                ushr            \d2\().8h, \d2\().8h, #6
+                bic             \d0\().8h, #0xfc,     lsl #8
+                bic             \d1\().8h, #0xfc,     lsl #8
+.endm
+
+// SAND30 -> 8bit
+.macro USAND8 d0, d1, d2, a0, a1, a2, a3, t0, t1, t2
+                shrn            \d1\().4h,  \a0\().4s,  #12
+                shrn2           \d1\().8h,  \a1\().4s,  #12
+                uzp1            \d0\().8h,  \a0\().8h,  \a1\().8h
+                uzp2            \d2\().8h,  \a0\().8h,  \a1\().8h
+
+                shrn            \t1\().4h,  \a2\().4s,  #12
+                shrn2           \t1\().8h,  \a3\().4s,  #12
+                uzp1            \t0\().8h,  \a2\().8h,  \a3\().8h
+                uzp2            \t2\().8h,  \a2\().8h,  \a3\().8h
+
+                shrn            \d0\().8b,  \d0\().8h,  #2
+                shrn2           \d0\().16b, \t0\().8h,  #2
+                shrn            \d2\().8b,  \d2\().8h,  #6
+                shrn2           \d2\().16b, \t2\().8h,  #6
+                uzp1            \d1\().16b, \d1\().16b, \t1\().16b
+.endm
+
+
+// void ff_rpi_sand30_lines_to_planar_c16(
+//   uint8_t * dst_u,            // [x0]
+//   unsigned int dst_stride_u,  // [w1]
+//   uint8_t * dst_v,            // [x2]
+//   unsigned int dst_stride_v,  // [w3]
+//   const uint8_t * src,        // [x4]
+//   unsigned int stride1,       // [w5]      128
+//   unsigned int stride2,       // [w6]
+//   unsigned int _x,            // [w7]      0
+//   unsigned int y,             // [sp, #0]
+//   unsigned int _w,            // [sp, #8]  w9
+//   unsigned int h);            // [sp, #16] w10
+
 function ff_rpi_sand30_lines_to_planar_c16, export=1
-    stp x19, x20, [sp, #-48]!
-    stp x21, x22, [sp, #16]
-    stp x23, x24, [sp, #32]
+                ldr             w7,  [sp, #0]                   // y
+                ldr             w8,  [sp, #8]                   // _w
+                ldr             w10, [sp, #16]                  // h
+                lsl             w6,  w6,  #7                    // Fixup stride2
+                sub             w6,  w6,  #64
+                uxtw            x6,  w6
+                sub             w1,  w1,  w8,  LSL #1           // Fixup chroma strides
+                sub             w3,  w3,  w8,  LSL #1
+                lsl             w7,  w7,  #7                    // Add y to src
+                add             x4,  x4,  w7,  UXTW
+10:
+                mov             w13, #0
+                mov             x5,  x4
+                mov             w9,  w8
+1:
+                ld1             {v0.4s-v3.4s}, [x5], #64
+                ld1             {v4.4s-v7.4s}, [x5], x6
+                subs            w9,  w9,  #48
 
-    ldr w3, [sp, #48+8]    // w3 = width
-    ldr w7, [sp, #48+16]   // w7 = height
+                USAND10         v17, v16, v18, v0, v1
+                USAND10         v20, v19, v21, v2, v3
+                UZPH_C          v0, v1, v2, v16, v17, v18, v19, v20, v21
+                USAND10         v23, v22, v24, v4, v5
+                USAND10         v26, v25, v27, v6, v7
+                UZPH_C          v4, v5, v6, v22, v23, v24, v25, v26, v27
 
-    // reserve space on the stack for intermediate results
-    sub sp, sp, #256
+                blt             2f
 
-    // number of 128byte blocks per row, w8 = width / 48
-    mov w9, #48
-    udiv w8, w3, w9
+                st3             {v0.8h-v2.8h},   [x0], #48
+                st3             {v4.8h-v6.8h},   [x0], #48
+                st3             {v16.8h-v18.8h}, [x2], #48
+                st3             {v22.8h-v24.8h}, [x2], #48
 
-    // remaining pixels (rem_pix) per row, w9 = width - w8 * 48
-    mul w9, w8, w9
-    sub w9, w3, w9
+                bne             1b
+11:
+                subs            w10, w10, #1
+                add             x4,  x4,  #128
+                add             x0,  x0,  w1,  UXTW
+                add             x2,  x2,  w3,  UXTW
+                bne             10b
+99:
+                ret
 
-    // row offset, the beginning of the next row to process
-    eor w10, w10, w10
-
-    // offset to the beginning of the next block, w11 = stride2 * 128 - 128
-    lsl w11, w6, #7
-    sub w11, w11, #128
-
-    // decrease the height by one and in case of remaining pixels increase the block count by one
-    sub w7, w7, #1
-    cmp w9, #0
-    cset w19, ne    // w19 == 1 iff reamining pixels != 0
-    add w8, w8, w19
-
-    // bytes we have to move dst back by at the end of every row
-    mov w21, #48*2
-    mul w21, w21, w8
-    sub w21, w1, w21
-
-    mov w20, #0     // w20 = flag, last row processed
-
-    mov x12, #0x03ff03ff03ff03ff
-    dup v16.2d, x12
-
-    // iterate through rows, row counter = w12 = 0
-    eor w12, w12, w12
-row_loop_c16:
-    cmp w12, w7
-    bge row_loop_c16_fin
-
-    // address of row data = src + row_offset
-    mov x13, x4
-    add x13, x13, x10
-
-    eor w14, w14, w14
-block_loop_c16:
-    cmp w14, w8
-    bge block_loop_c16_fin
-
-    rpi_sand30_lines_to_planar_c16_block_half
-
-    ld2 { v0.8h, v1.8h }, [sp], #32
-    ld2 { v2.8h, v3.8h }, [sp], #32
-    ld2 { v4.8h, v5.8h }, [sp]
-    sub sp, sp, #64
-
-    st1 { v0.8h }, [x0], #16
-    st1 { v2.8h }, [x0], #16
-    st1 { v4.8h }, [x0], #16
-    st1 { v1.8h }, [x2], #16
-    st1 { v3.8h }, [x2], #16
-    st1 { v5.8h }, [x2], #16
-
-    rpi_sand30_lines_to_planar_c16_block_half
-
-    ld2 { v0.8h, v1.8h }, [sp], #32
-    ld2 { v2.8h, v3.8h }, [sp], #32
-    ld2 { v4.8h, v5.8h }, [sp]
-    sub sp, sp, #64
-
-    st1 { v0.8h }, [x0], #16
-    st1 { v2.8h }, [x0], #16
-    st1 { v4.8h }, [x0], #16
-    st1 { v1.8h }, [x2], #16
-    st1 { v3.8h }, [x2], #16
-    st1 { v5.8h }, [x2], #16
-
-    add x13, x13, x11 // offset to next block
-    add w14, w14, #1
-    b block_loop_c16
-block_loop_c16_fin:
-
-    add w10, w10, #128
-    add w12, w12, #1
-    add x0, x0, w21, sxtw  // move dst pointers back by x21
-    add x2, x2, w21, sxtw
-    b row_loop_c16
-row_loop_c16_fin:
-
-    cmp w20, #1
-    beq row_loop_c16_fin2
-    mov w20, #1
-    sub w8, w8, w19 // decrease block count by w19
-    add w7, w7, #1 // increase height
-    b row_loop_c16
-
-row_loop_c16_fin2:
-    sub x0, x0, w21, sxtw // readd x21 in case of the last row
-    sub x2, x2, w21, sxtw // so that we can write out the few remaining pixels
-
-    // last incomplete block to be finished
-    // read operations are fine, stride2 is more than large enough even if rem_pix is 0
-    rpi_sand30_lines_to_planar_c16_block_half
-    ld2 { v0.8h, v1.8h }, [sp], #32
-    ld2 { v2.8h, v3.8h }, [sp], #32
-    ld2 { v4.8h, v5.8h }, [sp], #32
-    rpi_sand30_lines_to_planar_c16_block_half
-    ld2 { v0.8h, v1.8h }, [sp], #32
-    ld2 { v2.8h, v3.8h }, [sp], #32
-    ld2 { v4.8h, v5.8h }, [sp]
-    sub sp, sp, #160
-
-    mov x4, sp
-    eor w20, w20, w20
-rem_pix_c16_loop:
-    cmp w20, w9
-    bge rem_pix_c16_fin
-
-    ldr w22, [x4], #4
-    str w22, [x0], #2
-    lsr w22, w22, #16
-    str w22, [x2], #2 
-
-    add w20, w20, #1
-    b rem_pix_c16_loop
-rem_pix_c16_fin:
-
-    add sp, sp, #256
-
-    ldp x23, x24, [sp, #32]
-    ldp x21, x22, [sp, #16]
-    ldp x19, x20, [sp], #48
-    ret
+// Partial final write
+2:
+                cmp             w9,  #24-48
+                blt             1f
+                st3             {v0.8h  - v2.8h},  [x0], #48
+                st3             {v16.8h - v18.8h}, [x2], #48
+                beq             11b
+                mov             v0.16b,  v4.16b
+                mov             v1.16b,  v5.16b
+                sub             w9,  w9,  #24
+                mov             v2.16b,  v6.16b
+                mov             v16.16b, v22.16b
+                mov             v17.16b, v23.16b
+                mov             v18.16b, v24.16b
+1:
+                cmp             w9,  #12-48
+                blt             1f
+                st3             {v0.4h  - v2.4h},  [x0], #24
+                st3             {v16.4h - v18.4h}, [x2], #24
+                beq             11b
+                mov             v0.2d[0],  v0.2d[1]
+                sub             w9,  w9,  #12
+                mov             v1.2d[0],  v1.2d[1]
+                mov             v2.2d[0],  v2.2d[1]
+                mov             v16.2d[0], v16.2d[1]
+                mov             v17.2d[0], v17.2d[1]
+                mov             v18.2d[0], v18.2d[1]
+1:
+                cmp             w9,  #6-48
+                blt             1f
+                st3             {v0.h  - v2.h}[0],  [x0], #6
+                st3             {v0.h  - v2.h}[1],  [x0], #6
+                st3             {v16.h - v18.h}[0], [x2], #6
+                st3             {v16.h - v18.h}[1], [x2], #6
+                beq             11b
+                mov             v0.s[0],  v0.s[1]
+                sub             w9,  w9,  #6
+                mov             v1.s[0],  v1.s[1]
+                mov             v2.s[0],  v2.s[1]
+                mov             v16.s[0], v16.s[1]
+                mov             v17.s[0], v17.s[1]
+                mov             v18.s[0], v18.s[1]
+1:
+                cmp             w9,  #3-48
+                blt             1f
+                st3             {v0.h  - v2.h}[0],  [x0], #6
+                st3             {v16.h - v18.h}[0], [x2], #6
+                beq             11b
+                mov             v0.h[0],  v0.h[1]
+                sub             w9,  w9,  #3
+                mov             v1.h[0],  v1.h[1]
+                mov             v16.h[0], v16.h[1]
+                mov             v17.h[0], v17.h[1]
+1:
+                cmp             w9,  #2-48
+                blt             1f
+                st2             {v0.h  - v1.h}[0],  [x0], #4
+                st2             {v16.h - v17.h}[0], [x2], #4
+                b               11b
+1:
+                st1             {v0.h}[0],  [x0], #2
+                st1             {v16.h}[0], [x2], #2
+                b               11b
 endfunc
-
 
 
 //void ff_rpi_sand30_lines_to_planar_p010(
@@ -469,6 +461,7 @@ endfunc
 function ff_rpi_sand30_lines_to_planar_y16, export=1
                 lsl             w4,  w4,  #7
                 sub             w4,  w4,  #64
+                uxtw            x4,  w4
                 sub             w1,  w1,  w7, lsl #1
                 uxtw            x6,  w6
                 add             x8,  x2,  x6, lsl #7
@@ -483,61 +476,10 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
 
                 subs            w5,  w5,  #96
 
-                // v0, v1
-
-                shrn            v18.4h,  v0.4s,   #14
-                xtn             v16.4h,  v0.4s
-                shrn            v17.4h,  v0.4s,   #10
-
-                shrn2           v18.8h,  v1.4s,   #14
-                xtn2            v16.8h,  v1.4s
-                shrn2           v17.8h,  v1.4s,   #10
-
-                ushr            v18.8h,  v18.8h,  #6
-                bic             v16.8h,  #0xfc,   lsl #8
-                bic             v17.8h,  #0xfc,   lsl #8
-
-                // v2, v3
-
-                shrn            v21.4h,  v2.4s,   #14
-                xtn             v19.4h,  v2.4s
-                shrn            v20.4h,  v2.4s,   #10
-
-                shrn2           v21.8h,  v3.4s,   #14
-                xtn2            v19.8h,  v3.4s
-                shrn2           v20.8h,  v3.4s,   #10
-
-                ushr            v21.8h,  v21.8h,  #6
-                bic             v19.8h,  #0xfc,   lsl #8
-                bic             v20.8h,  #0xfc,   lsl #8
-
-                // v4, v5
-
-                shrn            v24.4h,  v4.4s,   #14
-                xtn             v22.4h,  v4.4s
-                shrn            v23.4h,  v4.4s,   #10
-
-                shrn2           v24.8h,  v5.4s,   #14
-                xtn2            v22.8h,  v5.4s
-                shrn2           v23.8h,  v5.4s,   #10
-
-                ushr            v24.8h,  v24.8h,  #6
-                bic             v22.8h,  #0xfc,   lsl #8
-                bic             v23.8h,  #0xfc,   lsl #8
-
-                // v6, v7
-
-                shrn            v27.4h,  v6.4s,   #14
-                xtn             v25.4h,  v6.4s
-                shrn            v26.4h,  v6.4s,   #10
-
-                shrn2           v27.8h,  v7.4s,   #14
-                xtn2            v25.8h,  v7.4s
-                shrn2           v26.8h,  v7.4s,   #10
-
-                ushr            v27.8h,  v27.8h,  #6
-                bic             v25.8h,  #0xfc,   lsl #8
-                bic             v26.8h,  #0xfc,   lsl #8
+                USAND10         v16, v17, v18, v0, v1
+                USAND10         v19, v20, v21, v2, v3
+                USAND10         v22, v23, v24, v4, v5
+                USAND10         v25, v26, v27, v6, v7
 
                 blt             2f
 
@@ -634,6 +576,7 @@ endfunc
 function ff_rpi_sand30_lines_to_planar_y8, export=1
                 lsl             w4,  w4,  #7
                 sub             w4,  w4,  #64
+                uxtw            x4,  w4
                 sub             w1,  w1,  w7
                 uxtw            x6,  w6
                 add             x8,  x2,  x6, lsl #7
@@ -649,60 +592,8 @@ function ff_rpi_sand30_lines_to_planar_y8, export=1
                 subs            w5,  w5,  #96
 
                 // v0, v1
-
-                shrn            v18.4h,  v0.4s,   #16
-                xtn             v16.4h,  v0.4s
-                shrn            v17.4h,  v0.4s,   #12
-
-                shrn2           v18.8h,  v1.4s,   #16
-                xtn2            v16.8h,  v1.4s
-                shrn2           v17.8h,  v1.4s,   #12
-
-                shrn            v18.8b,  v18.8h,  #6
-                shrn            v16.8b,  v16.8h,  #2
-                xtn             v17.8b,  v17.8h
-
-                // v2, v3
-
-                shrn            v21.4h,  v2.4s,   #16
-                xtn             v19.4h,  v2.4s
-                shrn            v20.4h,  v2.4s,   #12
-
-                shrn2           v21.8h,  v3.4s,   #16
-                xtn2            v19.8h,  v3.4s
-                shrn2           v20.8h,  v3.4s,   #12
-
-                shrn2           v18.16b, v21.8h,  #6
-                shrn2           v16.16b, v19.8h,  #2
-                xtn2            v17.16b, v20.8h
-
-                // v4, v5
-
-                shrn            v24.4h,  v4.4s,   #16
-                xtn             v22.4h,  v4.4s
-                shrn            v23.4h,  v4.4s,   #12
-
-                shrn2           v24.8h,  v5.4s,   #16
-                xtn2            v22.8h,  v5.4s
-                shrn2           v23.8h,  v5.4s,   #12
-
-                shrn            v21.8b,  v24.8h,  #6
-                shrn            v19.8b,  v22.8h,  #2
-                xtn             v20.8b,  v23.8h
-
-                // v6, v7
-
-                shrn            v27.4h,  v6.4s,   #16
-                xtn             v25.4h,  v6.4s
-                shrn            v26.4h,  v6.4s,   #12
-
-                shrn2           v27.8h,  v7.4s,   #16
-                xtn2            v25.8h,  v7.4s
-                shrn2           v26.8h,  v7.4s,   #12
-
-                shrn2           v21.16b, v27.8h,  #6
-                shrn2           v19.16b, v25.8h,  #2
-                xtn2            v20.16b, v26.8h
+                USAND8          v16, v17, v18, v0, v1, v2, v3, v22, v23, v24
+                USAND8          v19, v20, v21, v4, v5, v6, v7, v22, v23, v24
 
                 blt             2f
 

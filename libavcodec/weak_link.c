@@ -19,6 +19,7 @@ struct ff_weak_link_master * ff_weak_link_new(void * p)
     struct ff_weak_link_master * w = malloc(sizeof(*w));
     if (!w)
         return NULL;
+    atomic_init(&w->ref_count, 0);
     w->ptr = p;
     if (pthread_rwlock_init(&w->lock, NULL)) {
         free(w);

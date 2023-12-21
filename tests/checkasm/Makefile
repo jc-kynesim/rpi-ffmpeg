@@ -38,6 +38,7 @@ CHECKASMOBJS-$(CONFIG_AVCODEC)          += $(AVCODECOBJS-yes)
 # libavfilter tests
 AVFILTEROBJS-$(CONFIG_AFIR_FILTER) += af_afir.o
 AVFILTEROBJS-$(CONFIG_BLEND_FILTER) += vf_blend.o
+AVFILTEROBJS-$(CONFIG_BWDIF_FILTER)      += vf_bwdif.o
 AVFILTEROBJS-$(CONFIG_COLORSPACE_FILTER) += vf_colorspace.o
 AVFILTEROBJS-$(CONFIG_EQ_FILTER)         += vf_eq.o
 AVFILTEROBJS-$(CONFIG_GBLUR_FILTER)      += vf_gblur.o
@@ -56,8 +57,9 @@ CHECKASMOBJS-$(CONFIG_SWSCALE)  += $(SWSCALEOBJS)
 AVUTILOBJS                              += av_tx.o
 AVUTILOBJS                              += fixed_dsp.o
 AVUTILOBJS                              += float_dsp.o
+AVUTILOBJS-$(CONFIG_SAND)               += rpi_sand.o
 
-CHECKASMOBJS-$(CONFIG_AVUTIL)  += $(AVUTILOBJS)
+CHECKASMOBJS-$(CONFIG_AVUTIL)  += $(AVUTILOBJS) $(AVUTILOBJS-yes)
 
 CHECKASMOBJS-$(ARCH_AARCH64)            += aarch64/checkasm.o
 CHECKASMOBJS-$(HAVE_ARMV5TE_EXTERNAL)   += arm/checkasm.o

@@ -109,6 +109,44 @@ static int v4l2_prepare_contexts(V4L2m2mContext *s, int probe)
     return AVERROR(EINVAL);
 }
 
+static int check_size(AVCodecContext * const avctx, V4L2m2mContext * const s)
+{
+    struct v4l2_format fmt = {.type = s->output.type};
+    int rv;
+    uint32_t pixfmt = ff_v4l2_format_avfmt_to_v4l2(avctx->pix_fmt);
+    unsigned int w;
+    unsigned int h;
+
+    if (V4L2_TYPE_IS_MULTIPLANAR(fmt.type)) {
+        fmt.fmt.pix_mp.pixelformat = pixfmt;
+        fmt.fmt.pix_mp.width = avctx->width;
+        fmt.fmt.pix_mp.height = avctx->height;
+    }
+    else {
+        fmt.fmt.pix.pixelformat = pixfmt;
+        fmt.fmt.pix.width = avctx->width;
+        fmt.fmt.pix.height = avctx->height;
+    }
+
+    rv = ioctl(s->fd, VIDIOC_TRY_FMT, &fmt);
+
+    if (rv != 0) {
+        rv = AVERROR(errno);
+        av_log(avctx, AV_LOG_ERROR, "%s: Tryfmt failed: %s\n", __func__, av_err2str(rv));
+        return rv;
+    }
+
+    w = ff_v4l2_get_format_width(&fmt);
+    h = ff_v4l2_get_format_height(&fmt);
+
+    if (w < avctx->width || h < avctx->height) {
+        av_log(avctx, AV_LOG_WARNING, "%s: Size check failed: asked for %dx%d, got: %dx%d\n", __func__, avctx->width, avctx->height, w, h);
+        return AVERROR(EINVAL);
+    }
+
+    return 0;
+}
+
 static int v4l2_probe_driver(V4L2m2mContext *s)
 {
     void *log_ctx = s->avctx;
@@ -127,6 +165,11 @@ static int v4l2_probe_driver(V4L2m2mContext *s)
         av_log(log_ctx, AV_LOG_DEBUG, "v4l2 output format not supported\n");
         goto done;
     }
+
+    // If being given frames (encode) check that V4L2 can cope with the size
+    if (s->output.av_codec_id == AV_CODEC_ID_RAWVIDEO &&
+        (ret = check_size(s->avctx, s)) != 0)
+        goto done;
 
     ret = ff_v4l2_context_get_format(&s->capture, 1);
     if (ret) {
@@ -293,10 +336,14 @@ int ff_v4l2_m2m_codec_end(V4L2m2mPriv *priv)
     }
 
     ff_v4l2_context_release(&s->output);
+    av_buffer_unref(&s->device_ref);
 
     dmabufs_ctl_unref(&s->db_ctl);
-    close(s->fd);
-    s->fd = -1;
+
+    if (s->fd != -1) {
+        close(s->fd);
+        s->fd = -1;
+    }
 
     s->self_ref = NULL;
     // This is only called on avctx close so after this point we don't have that

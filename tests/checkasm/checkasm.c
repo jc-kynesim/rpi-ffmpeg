@@ -173,6 +173,9 @@ static const struct {
     #if CONFIG_BLEND_FILTER
         { "vf_blend", checkasm_check_blend },
     #endif
+    #if CONFIG_BWDIF_FILTER
+        { "vf_bwdif", checkasm_check_vf_bwdif },
+    #endif
     #if CONFIG_COLORSPACE_FILTER
         { "vf_colorspace", checkasm_check_colorspace },
     #endif
@@ -201,6 +204,9 @@ static const struct {
         { "fixed_dsp", checkasm_check_fixed_dsp },
         { "float_dsp", checkasm_check_float_dsp },
         { "av_tx",     checkasm_check_av_tx },
+    #if CONFIG_SAND
+        { "rpi_sand",  checkasm_check_rpi_sand },
+    #endif
 #endif
     { NULL }
 };

@@ -26,6 +26,7 @@ FATE_CHECKASM = fate-checkasm-aacpsdsp                                  \
                 fate-checkasm-motion                                    \
                 fate-checkasm-opusdsp                                   \
                 fate-checkasm-pixblockdsp                               \
+                fate-checkasm-rpi_sand                                  \
                 fate-checkasm-sbrdsp                                    \
                 fate-checkasm-synth_filter                              \
                 fate-checkasm-sw_gbrp                                   \
@@ -36,6 +37,7 @@ FATE_CHECKASM = fate-checkasm-aacpsdsp                                  \
                 fate-checkasm-v210enc                                   \
                 fate-checkasm-vc1dsp                                    \
                 fate-checkasm-vf_blend                                  \
+                fate-checkasm-vf_bwdif                                  \
                 fate-checkasm-vf_colorspace                             \
                 fate-checkasm-vf_eq                                     \
                 fate-checkasm-vf_gblur                                  \

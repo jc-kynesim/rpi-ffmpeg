@@ -35,8 +35,29 @@ typedef struct BWDIFContext {
     void (*filter_edge)(void *dst, void *prev, void *cur, void *next,
                         int w, int prefs, int mrefs, int prefs2, int mrefs2,
                         int parity, int clip_max, int spat);
+    void (*filter_line3)(void *dst, int dstride,
+                         const void *prev, const void *cur, const void *next, int prefs,
+                         int w, int parity, int clip_max);
 } BWDIFContext;
 
-void ff_bwdif_init_x86(BWDIFContext *bwdif);
+void ff_bwdif_init_filter_line(BWDIFContext *bwdif, int bit_depth);
+void ff_bwdif_init_x86(BWDIFContext *bwdif, int bit_depth);
+void ff_bwdif_init_aarch64(BWDIFContext *bwdif, int bit_depth);
+
+void ff_bwdif_filter_edge_c(void *dst1, void *prev1, void *cur1, void *next1,
+                            int w, int prefs, int mrefs, int prefs2, int mrefs2,
+                            int parity, int clip_max, int spat);
+
+void ff_bwdif_filter_intra_c(void *dst1, void *cur1, int w, int prefs, int mrefs,
+                             int prefs3, int mrefs3, int parity, int clip_max);
+
+void ff_bwdif_filter_line_c(void *dst1, void *prev1, void *cur1, void *next1,
+                            int w, int prefs, int mrefs, int prefs2, int mrefs2,
+                            int prefs3, int mrefs3, int prefs4, int mrefs4,
+                            int parity, int clip_max);
+
+void ff_bwdif_filter_line3_c(void * dst1, int d_stride,
+                             const void * prev1, const void * cur1, const void * next1, int s_stride,
+                             int w, int parity, int clip_max);
 
 #endif /* AVFILTER_BWDIF_H */
