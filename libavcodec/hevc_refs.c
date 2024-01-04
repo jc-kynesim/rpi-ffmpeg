@@ -306,9 +306,10 @@ static int init_slice_rpl(HEVCContext *s)
     if (frame->rpl_tab) {
         for (i = ctb_addr_ts; i < ctb_count; i++)
             frame->rpl_tab[i] = frame->rpl + s->slice_idx;
-
-        frame->refPicList = (RefPicList *)frame->rpl_tab[ctb_addr_ts];
     }
+
+//    frame->refPicList = (RefPicList *)frame->rpl_tab[ctb_addr_ts];
+    frame->refPicList = (RefPicList *)(frame->rpl + s->slice_idx);
 
     return 0;
 }
