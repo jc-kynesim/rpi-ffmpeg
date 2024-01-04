@@ -3387,8 +3387,8 @@ static int hevc_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     ret    = decode_nal_units(s, avpkt->data, avpkt->size);
     if (ret < 0) {
         // Ensure that hwaccel knows this frame is over
-        if (s->avctx->hwaccel && s->avctx->hwaccel->abort_frame)
-            s->avctx->hwaccel->abort_frame(s->avctx);
+        if (FF_HW_HAS_CB(avctx, abort_frame))
+            FF_HW_SIMPLE_CALL(avctx, abort_frame);
 
         return ret;
     }

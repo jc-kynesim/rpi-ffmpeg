@@ -23,7 +23,9 @@
 //     limited to testing.
 
 #include "libavutil/opt.h"
+#include "libavutil/frame.h"
 #include "libavutil/pixdesc.h"
+#include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_drm.h"
 #include "libavformat/mux.h"
 #include "avdevice.h"

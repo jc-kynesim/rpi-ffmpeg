@@ -20,6 +20,7 @@
 #include "config.h"
 #include "decode.h"
 #include "hevcdec.h"
+#include "hwaccel_internal.h"
 #include "hwconfig.h"
 #include "internal.h"
 
@@ -59,48 +60,51 @@ static int v4l2_req_hevc_start_frame(AVCodecContext *avctx,
                                      av_unused const uint8_t *buffer,
                                      av_unused uint32_t size)
 {
-    const V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    return ctx->fns->start_frame(avctx, buffer, size);
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+    V4L2RequestContextHEVC *const ctx = priv->cctx;
+    return ctx->fns->start_frame(avctx, ctx, buffer, size);
 }
 
 static int v4l2_req_hevc_decode_slice(AVCodecContext *avctx, const uint8_t *buffer, uint32_t size)
 {
-    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    return ctx->fns->decode_slice(avctx, buffer, size);
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+    V4L2RequestContextHEVC *const ctx = priv->cctx;
+    return ctx->fns->decode_slice(avctx, ctx, buffer, size);
 }
 
 static int v4l2_req_hevc_end_frame(AVCodecContext *avctx)
 {
-    V4L2RequestContextHEVC *ctx = avctx->internal->hwaccel_priv_data;
-    return ctx->fns->end_frame(avctx);
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+    V4L2RequestContextHEVC *const ctx = priv->cctx;
+    return ctx->fns->end_frame(avctx, ctx);
 }
 
 static void v4l2_req_hevc_abort_frame(AVCodecContext * const avctx)
 {
-    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    ctx->fns->abort_frame(avctx);
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+    V4L2RequestContextHEVC *const ctx = priv->cctx;
+    ctx->fns->abort_frame(avctx, ctx);
 }
 
 static int v4l2_req_hevc_frame_params(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx)
 {
-    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    return ctx->fns->frame_params(avctx, hw_frames_ctx);
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+    V4L2RequestContextHEVC *const ctx = priv->cctx;
+    return ctx->fns->frame_params(avctx, ctx, hw_frames_ctx);
 }
 
 static int v4l2_req_hevc_alloc_frame(AVCodecContext * avctx, AVFrame *frame)
 {
-    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-    return ctx->fns->alloc_frame(avctx, frame);
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+    V4L2RequestContextHEVC *const ctx = priv->cctx;
+    return ctx->fns->alloc_frame(avctx, ctx, frame);
 }
 
 
-static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
+static void
+cctx_free(void * v, uint8_t * data)
 {
-    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
-
-    av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
-
-    decode_q_wait(&ctx->decode_q, NULL);  // Wait for all other threads to be out of decode
+    V4L2RequestContextHEVC *const ctx = (V4L2RequestContextHEVC *)data;
 
     mediabufs_ctl_unref(&ctx->mbufs);
     media_pool_delete(&ctx->mpool);
@@ -109,6 +113,20 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     devscan_delete(&ctx->devscan);
 
     decode_q_uninit(&ctx->decode_q);
+
+    av_free(ctx);
+}
+
+static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
+{
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+
+    av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
+
+//    decode_q_wait(&ctx->decode_q, NULL);  // Wait for all other threads to be out of decode
+
+    priv->cctx = NULL;
+    av_buffer_unref(&priv->cctx_buf);
 
 //    if (avctx->hw_frames_ctx) {
 //        AVHWFramesContext *hwfc = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
@@ -139,7 +157,8 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
 static int v4l2_request_hevc_init(AVCodecContext *avctx)
 {
     const HEVCContext *h = avctx->priv_data;
-    V4L2RequestContextHEVC * const ctx = avctx->internal->hwaccel_priv_data;
+    V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
+    V4L2RequestContextHEVC * ctx;
     const HEVCSPS * const sps = h->ps.sps;
     int ret;
     const struct decdev * decdev;
@@ -161,9 +180,22 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         return AVERROR_PATCHWELCOME;
     }
 
+
+    if ((ctx = av_mallocz(sizeof(*ctx))) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Unable to allocate context");
+        return AVERROR(ENOMEM);
+    }
+    if ((priv->cctx_buf = av_buffer_create((uint8_t*)ctx, sizeof(*ctx), cctx_free, NULL, 0)) == NULL) {
+        av_log(avctx, AV_LOG_ERROR, "Unable to allocate context buffer");
+        av_free(ctx);
+        return AVERROR(ENOMEM);
+    }
+    priv->cctx = ctx;
+
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_WARNING, "Failed to find any V4L2 devices\n");
-        return (AVERROR(-ret));
+        ret = AVERROR(-ret);
+        goto fail0;
     }
     ret = AVERROR(ENOMEM);  // Assume mem fail by default for these
 
@@ -321,23 +353,40 @@ retry_src_memtype:
 fail5:
     av_buffer_unref(&avctx->hw_frames_ctx);
 fail4:
-    mediabufs_ctl_unref(&ctx->mbufs);
 fail3:
-    media_pool_delete(&ctx->mpool);
 fail2:
-    pollqueue_unref(&ctx->pq);
 fail1:
-    dmabufs_ctl_unref(&ctx->dbufs);
 fail0:
-    devscan_delete(&ctx->devscan);
+    priv->cctx = NULL;
+    av_buffer_unref(&priv->cctx_buf);
     return ret;
 }
 
-const AVHWAccel ff_hevc_v4l2request_hwaccel = {
-    .name           = "hevc_v4l2request",
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_HEVC,
-    .pix_fmt        = AV_PIX_FMT_DRM_PRIME,
+static int
+v4l2_request_update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
+{
+    V4L2RequestPrivHEVC * const spriv = src->internal->hwaccel_priv_data;
+    V4L2RequestPrivHEVC * const dpriv = dst->internal->hwaccel_priv_data;
+
+    av_log(dst, AV_LOG_DEBUG, "<<< %s (%s)\n", __func__, dpriv->cctx_buf ? "old" : "new");
+
+    if (dpriv->cctx_buf)
+        return 0;
+
+    if ((dpriv->cctx_buf = av_buffer_ref(spriv->cctx_buf)) == NULL)
+        return AVERROR(ENOMEM);
+
+    dpriv->cctx = spriv->cctx;
+    return 0;
+}
+
+const FFHWAccel ff_hevc_v4l2request_hwaccel = {
+    .p = {
+        .name           = "hevc_v4l2request",
+        .type           = AVMEDIA_TYPE_VIDEO,
+        .id             = AV_CODEC_ID_HEVC,
+        .pix_fmt        = AV_PIX_FMT_DRM_PRIME,
+    },
     .alloc_frame    = v4l2_req_hevc_alloc_frame,
     .start_frame    = v4l2_req_hevc_start_frame,
     .decode_slice   = v4l2_req_hevc_decode_slice,
@@ -345,7 +394,8 @@ const AVHWAccel ff_hevc_v4l2request_hwaccel = {
     .abort_frame    = v4l2_req_hevc_abort_frame,
     .init           = v4l2_request_hevc_init,
     .uninit         = v4l2_request_hevc_uninit,
-    .priv_data_size = sizeof(V4L2RequestContextHEVC),
+    .update_thread_context = v4l2_request_update_thread_context,
+    .priv_data_size = sizeof(V4L2RequestPrivHEVC),
     .frame_params   = v4l2_req_hevc_frame_params,
-    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_MT_SAFE,
+    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
 };

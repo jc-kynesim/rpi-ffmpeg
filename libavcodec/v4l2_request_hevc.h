@@ -76,6 +76,11 @@ typedef struct V4L2RequestContextHEVC {
     struct mediabufs_ctl *mbufs;
 } V4L2RequestContextHEVC;
 
+typedef struct V4L2RequestPrivHEVC {
+    V4L2RequestContextHEVC * cctx;  // Common context
+    AVBufferRef * cctx_buf;         // Buf for cctx
+} V4L2RequestPrivHEVC;
+
 typedef struct v4l2_req_decode_fns {
     int src_pix_fmt_v4l2;
     const char * name;
@@ -85,12 +90,12 @@ typedef struct v4l2_req_decode_fns {
     int (*set_controls)(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx);
 
     // Passthrough of hwaccel fns
-    int (*start_frame)(AVCodecContext *avctx, const uint8_t *buf, uint32_t buf_size);
-    int (*decode_slice)(AVCodecContext *avctx, const uint8_t *buf, uint32_t buf_size);
-    int (*end_frame)(AVCodecContext *avctx);
-    void (*abort_frame)(AVCodecContext *avctx);
-    int (*frame_params)(AVCodecContext *avctx, AVBufferRef *hw_frames_ctx);
-    int (*alloc_frame)(AVCodecContext * avctx, AVFrame *frame);
+    int (*start_frame)(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx, const uint8_t *buf, uint32_t buf_size);
+    int (*decode_slice)(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx, const uint8_t *buf, uint32_t buf_size);
+    int (*end_frame)(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx);
+    void (*abort_frame)(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx);
+    int (*frame_params)(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx, AVBufferRef *hw_frames_ctx);
+    int (*alloc_frame)(AVCodecContext * avctx, V4L2RequestContextHEVC *const ctx, AVFrame *frame);
 } v4l2_req_decode_fns;
 
 
