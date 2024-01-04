@@ -180,7 +180,6 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         return AVERROR_PATCHWELCOME;
     }
 
-
     if ((ctx = av_mallocz(sizeof(*ctx))) == NULL) {
         av_log(avctx, AV_LOG_ERROR, "Unable to allocate context");
         return AVERROR(ENOMEM);
@@ -367,14 +366,12 @@ v4l2_request_update_thread_context(AVCodecContext *dst, const AVCodecContext *sr
 {
     V4L2RequestPrivHEVC * const spriv = src->internal->hwaccel_priv_data;
     V4L2RequestPrivHEVC * const dpriv = dst->internal->hwaccel_priv_data;
+    int rv;
 
     av_log(dst, AV_LOG_DEBUG, "<<< %s (%s)\n", __func__, dpriv->cctx_buf ? "old" : "new");
 
-    if (dpriv->cctx_buf)
-        return 0;
-
-    if ((dpriv->cctx_buf = av_buffer_ref(spriv->cctx_buf)) == NULL)
-        return AVERROR(ENOMEM);
+    if ((rv = av_buffer_replace(&dpriv->cctx_buf, spriv->cctx_buf)) != 0)
+        return rv;
 
     dpriv->cctx = spriv->cctx;
     return 0;
