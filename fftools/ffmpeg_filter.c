@@ -1752,8 +1752,8 @@ int ifilter_parameters_from_dec(InputFilter *ifilter, const AVCodecContext *dec)
 
     if (dec->codec_type == AVMEDIA_TYPE_VIDEO) {
         ifp->fallback.format                 = dec->pix_fmt;
-        ifp->fallback.width                  = av_frame_cropped_width(dec);
-        ifp->fallback.height                 = av_frame_cropped_height(dec);
+        ifp->fallback.width                  = dec->width;
+        ifp->fallback.height                 = dec->height;
         ifp->fallback.sample_aspect_ratio    = dec->sample_aspect_ratio;
     } else if (dec->codec_type == AVMEDIA_TYPE_AUDIO) {
         int ret;
@@ -2368,8 +2368,8 @@ int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_reference)
                        av_channel_layout_compare(&ifp->ch_layout, &frame->ch_layout);
         break;
     case AVMEDIA_TYPE_VIDEO:
-        need_reinit |= ifp->width  != frame->width ||
-                       ifp->height != frame->height;
+        need_reinit |= ifp->width  != av_frame_cropped_width(frame) ||
+                       ifp->height != av_frame_cropped_height(frame);
         break;
     }
 
@@ -2379,6 +2379,9 @@ int ifilter_send_frame(InputFilter *ifilter, AVFrame *frame, int keep_reference)
     if (!!ifp->hw_frames_ctx != !!frame->hw_frames_ctx ||
         (ifp->hw_frames_ctx && ifp->hw_frames_ctx->data != frame->hw_frames_ctx->data))
         need_reinit = 1;
+
+    if (no_cvt_hw && fg->graph)
+        need_reinit = 0;
 
     if (sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DISPLAYMATRIX)) {
         if (!ifp->displaymatrix_present ||

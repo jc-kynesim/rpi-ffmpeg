@@ -31,6 +31,7 @@
 #include "libavutil/avassert.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/imgutils.h"
+#include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_drm.h"
 #include "libavformat/mux.h"
 #include "avdevice.h"

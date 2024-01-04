@@ -161,6 +161,17 @@ typedef struct FFHWAccel {
      * Callback to flush the hwaccel state.
      */
     void (*flush)(AVCodecContext *avctx);
+
+    /**
+     * Called if parsing fails
+     *
+     * An error has occured, end_frame will not be called
+     * start_frame & decode_slice may or may not have been called
+     * Optional
+     *
+     * @param avctx the codec context
+     */
+    void (*abort_frame)(AVCodecContext *avctx);
 } FFHWAccel;
 
 static inline const FFHWAccel *ffhwaccel(const AVHWAccel *codec)

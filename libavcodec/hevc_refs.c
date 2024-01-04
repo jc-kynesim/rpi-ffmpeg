@@ -299,7 +299,6 @@ static int init_slice_rpl(HEVCContext *s)
     int ctb_count    = frame->ctb_count;
     int ctb_addr_ts  = s->ps.pps->ctb_addr_rs_to_ts[s->sh.slice_segment_addr];
     int i;
-    RefPicListTab * const tab = (RefPicListTab *)frame->rpl_buf->data + s->slice_idx;
 
     if (s->slice_idx >= frame->nb_rpl_elems)
         return AVERROR_INVALIDDATA;
@@ -307,9 +306,9 @@ static int init_slice_rpl(HEVCContext *s)
     if (frame->rpl_tab) {
         for (i = ctb_addr_ts; i < ctb_count; i++)
             frame->rpl_tab[i] = frame->rpl + s->slice_idx;
-    }
 
-    frame->refPicList = tab->refPicList;
+        frame->refPicList = (RefPicList *)frame->rpl_tab[ctb_addr_ts];
+    }
 
     return 0;
 }
