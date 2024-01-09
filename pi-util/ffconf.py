@@ -14,7 +14,12 @@ HWACCEL_RPI     = 2
 HWACCEL_DRM     = 3
 HWACCEL_VAAPI   = 4
 
-def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_exec):
+def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
+    ffmpeg_exec = args.ffmpeg
+    gen_yuv = args.gen_yuv
+    valgrind = args.valgrind
+    rv = 0
+
     hwaccel = ""
     if dectype == HWACCEL_RPI:
         hwaccel = "rpi"
@@ -48,17 +53,29 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_e
     except:
         pass
 
-    flog = open(os.path.join(tmp_root, name + ".log"), "wt")
+    yuv_file = os.path.join(tmp_root, name + ".dec.yuv")
+    try:
+        os.remove(yuv_file)
+    except:
+        pass
 
-    ffargs = [ffmpeg_exec, "-flags", "unaligned", "-hwaccel", hwaccel, "-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] + pix_fmt + ["-f", "md5", dec_file]
+    flog = open(os.path.join(tmp_root, name + ".log"), "w+t")
+
+    ffargs = [ffmpeg_exec, "-flags", "unaligned"] +\
+        (["-hwaccel", hwaccel] if hwaccel else []) +\
+        ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
+        pix_fmt +\
+        ([yuv_file] if gen_yuv else ["-f", "md5", dec_file])
+
+    if valgrind:
+        ffargs = ['valgrind', '--leak-check=full'] + ffargs
 
     # Unaligned needed for cropping conformance
-    if hwaccel:
-        rstr = subprocess.call(ffargs, stdout=flog, stderr=subprocess.STDOUT)
-    else:
-        rstr = subprocess.call(
-            [ffmpeg_exec, "-flags", "unaligned", "-vcodec", vcodec, "-i", os.path.join(fileroot, es_file), "-f", "md5", dec_file],
-            stdout=flog, stderr=subprocess.STDOUT)
+    rstr = subprocess.call(ffargs, stdout=flog, stderr=subprocess.STDOUT)
+
+    if gen_yuv:
+        with open(dec_file, 'wt') as f:
+            subprocess.call(["md5sum", yuv_file], stdout=f, stderr=subprocess.STDOUT)
 
     try:
         m1 = None
@@ -74,9 +91,21 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_e
     except:
         pass
 
+    if valgrind:
+        flog.seek(0)
+        leak = True
+        valerr = True
+
+        for line in flog:
+            if re.search("^==[0-9]+== All heap blocks were freed", line):
+                leak = False
+            if re.search("^==[0-9]+== ERROR SUMMARY: 0 errors", line):
+                valerr = False
+        if leak or valerr:
+            rv = 4
+
     if  m1 and m2 and m1.group() == m2.group():
         print("Match: " + m1.group(), file=flog)
-        rv = 0
     elif not m1:
         print("****** Cannot find m1", file=flog)
         rv = 3
@@ -121,7 +150,7 @@ def runtest(name, tests):
             return True
     return False
 
-def doconf(csva, tests, test_root, vcodec, dectype, ffmpeg_exec):
+def doconf(csva, tests, test_root, vcodec, dectype, args):
     unx_failures = []
     unx_success = []
     failures = 0
@@ -133,7 +162,7 @@ def doconf(csva, tests, test_root, vcodec, dectype, ffmpeg_exec):
             print ("==== ", name, end="")
             sys.stdout.flush()
 
-            rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, ffmpeg_exec=ffmpeg_exec)
+            rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, args=args)
             if (rv == 0):
                 successes += 1
             else:
@@ -158,6 +187,8 @@ def doconf(csva, tests, test_root, vcodec, dectype, ffmpeg_exec):
                     print(": * CRASH *")
                 elif (rv == 3) :
                     print(": * MD5 MISSING *")
+                elif (rv == 4) :
+                    print(": * VALGRIND *")
                 else :
                     print(": * BANG *")
 
@@ -189,6 +220,8 @@ if __name__ == '__main__':
     argp.add_argument("--csv", default="pi-util/conf_h265.2016.csv", help="CSV filename")
     argp.add_argument("--vcodec", default="hevc_rpi", help="vcodec name to use")
     argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name")
+    argp.add_argument("--valgrind", action='store_true', help="Run valgrind on tests")
+    argp.add_argument("--gen_yuv", action='store_true', help="Create yuv file (stored with log under /tmp)")
     args = argp.parse_args()
 
     if args.csvgen:
@@ -211,5 +244,5 @@ if __name__ == '__main__':
     elif args.vaapi:
         dectype = HWACCEL_VAAPI
 
-    doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args.ffmpeg)
+    doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args)
 
