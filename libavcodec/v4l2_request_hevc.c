@@ -377,6 +377,12 @@ v4l2_request_update_thread_context(AVCodecContext *dst, const AVCodecContext *sr
     return 0;
 }
 
+static void
+v4l2_request_free_frame_priv(FFRefStructOpaque hwctx, void *data)
+{
+    fprintf(stderr, "%s\n", __func__);
+}
+
 const FFHWAccel ff_hevc_v4l2request_hwaccel = {
     .p = {
         .name           = "hevc_v4l2request",
@@ -391,6 +397,8 @@ const FFHWAccel ff_hevc_v4l2request_hwaccel = {
     .abort_frame    = v4l2_req_hevc_abort_frame,
     .init           = v4l2_request_hevc_init,
     .uninit         = v4l2_request_hevc_uninit,
+    .free_frame_priv = v4l2_request_free_frame_priv,
+    .frame_priv_data_size  = 128,
     .update_thread_context = v4l2_request_update_thread_context,
     .priv_data_size = sizeof(V4L2RequestPrivHEVC),
     .frame_params   = v4l2_req_hevc_frame_params,
