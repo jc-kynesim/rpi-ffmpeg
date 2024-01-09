@@ -14,7 +14,13 @@ HWACCEL_RPI     = 2
 HWACCEL_DRM     = 3
 HWACCEL_VAAPI   = 4
 
+gen_yuv = False
+#gen_yuv = True
+valgrind = True
+
 def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_exec):
+    rv = 0
+
     hwaccel = ""
     if dectype == HWACCEL_RPI:
         hwaccel = "rpi"
@@ -48,17 +54,29 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_e
     except:
         pass
 
-    flog = open(os.path.join(tmp_root, name + ".log"), "wt")
+    yuv_file = os.path.join(tmp_root, name + ".dec.yuv")
+    try:
+        os.remove(yuv_file)
+    except:
+        pass
 
-    ffargs = [ffmpeg_exec, "-flags", "unaligned", "-hwaccel", hwaccel, "-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] + pix_fmt + ["-f", "md5", dec_file]
+    flog = open(os.path.join(tmp_root, name + ".log"), "w+t")
+
+    ffargs = [ffmpeg_exec, "-flags", "unaligned"] +\
+        (["-hwaccel", hwaccel] if hwaccel else []) +\
+        ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
+        pix_fmt +\
+        ([yuv_file] if gen_yuv else ["-f", "md5", dec_file])
+
+    if valgrind:
+        ffargs = ['valgrind', '--leak-check=full'] + ffargs
 
     # Unaligned needed for cropping conformance
-    if hwaccel:
-        rstr = subprocess.call(ffargs, stdout=flog, stderr=subprocess.STDOUT)
-    else:
-        rstr = subprocess.call(
-            [ffmpeg_exec, "-flags", "unaligned", "-vcodec", vcodec, "-i", os.path.join(fileroot, es_file), "-f", "md5", dec_file],
-            stdout=flog, stderr=subprocess.STDOUT)
+    rstr = subprocess.call(ffargs, stdout=flog, stderr=subprocess.STDOUT)
+
+    if gen_yuv:
+        with open(dec_file, 'wt') as f:
+            subprocess.call(["md5sum", yuv_file], stdout=f, stderr=subprocess.STDOUT)
 
     try:
         m1 = None
@@ -74,9 +92,21 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, ffmpeg_e
     except:
         pass
 
+    if valgrind:
+        flog.seek(0)
+        leak = True
+        valerr = True
+
+        for line in flog:
+            if re.search("^==[0-9]+== All heap blocks were freed", line):
+                leak = False
+            if re.search("^==[0-9]+== ERROR SUMMARY: 0 errors", line):
+                valerr = False
+        if leak or valerr:
+            rv = 4
+
     if  m1 and m2 and m1.group() == m2.group():
         print("Match: " + m1.group(), file=flog)
-        rv = 0
     elif not m1:
         print("****** Cannot find m1", file=flog)
         rv = 3
@@ -158,6 +188,8 @@ def doconf(csva, tests, test_root, vcodec, dectype, ffmpeg_exec):
                     print(": * CRASH *")
                 elif (rv == 3) :
                     print(": * MD5 MISSING *")
+                elif (rv == 4) :
+                    print(": * VALGRIND *")
                 else :
                     print(": * BANG *")
 
