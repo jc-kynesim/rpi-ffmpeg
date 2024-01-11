@@ -1227,6 +1227,42 @@ fail_release:
     return ret;
 }
 
+int ff_v4l2_context_frames_set(V4L2Context *const ctx)
+{
+    AVHWFramesContext *hwframes;
+    V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+    const int w = ctx->width != 0 ? ctx->width : s->avctx->width;
+    const int h = ctx->height != 0 ? ctx->height : s->avctx->height;
+    int ret;
+
+    if (ctx->frames_ref != NULL) {
+        const AVHWFramesContext * const hwf = (AVHWFramesContext*)ctx->frames_ref->data;
+        if (hwf->sw_format == ctx->av_pix_fmt && hwf->width == w && hwf->height == h)
+            return 0;
+        av_buffer_unref(&ctx->frames_ref);
+    }
+
+    ctx->frames_ref = av_hwframe_ctx_alloc(s->device_ref);
+    if (!ctx->frames_ref)
+        return AVERROR(ENOMEM);
+
+    hwframes = (AVHWFramesContext*)ctx->frames_ref->data;
+    hwframes->format = AV_PIX_FMT_DRM_PRIME;
+    hwframes->sw_format = ctx->av_pix_fmt;
+    hwframes->width = w;
+    hwframes->height = h;
+    ret = av_hwframe_ctx_init(ctx->frames_ref);
+    if (ret < 0) {
+        av_log(s->avctx, AV_LOG_ERROR, "Failed to create hwframes context: %s\n", av_err2str(ret));
+        av_buffer_unref(&ctx->frames_ref);
+        return ret;
+    }
+
+    av_log(s->avctx, AV_LOG_DEBUG, "%s: HWFramesContext set to %s, %dx%d\n", __func__,
+           av_get_pix_fmt_name(ctx->av_pix_fmt), w, h);
+    return 0;
+}
+
 int ff_v4l2_context_init(V4L2Context* ctx)
 {
     struct v4l2_queryctrl qctrl;
@@ -1245,30 +1281,11 @@ int ff_v4l2_context_init(V4L2Context* ctx)
     pthread_cond_init(&ctx->cond, NULL);
     atomic_init(&ctx->q_count, 0);
 
-    if (s->output_drm) {
-        AVHWFramesContext *hwframes;
-
-        ctx->frames_ref = av_hwframe_ctx_alloc(s->device_ref);
-        if (!ctx->frames_ref) {
-            ret = AVERROR(ENOMEM);
-            goto fail_unlock;
-        }
-
-        hwframes = (AVHWFramesContext*)ctx->frames_ref->data;
-        hwframes->format = AV_PIX_FMT_DRM_PRIME;
-        hwframes->sw_format = ctx->av_pix_fmt;
-        hwframes->width = ctx->width != 0 ? ctx->width : s->avctx->width;
-        hwframes->height = ctx->height != 0 ? ctx->height : s->avctx->height;
-        ret = av_hwframe_ctx_init(ctx->frames_ref);
-        if (ret < 0)
-            goto fail_unref_hwframes;
-    }
-
     ret = ioctl(s->fd, VIDIOC_G_FMT, &ctx->format);
     if (ret) {
         ret = AVERROR(errno);
         av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_G_FMT failed: %s\n", ctx->name, av_err2str(ret));
-        goto fail_unref_hwframes;
+        goto fail_unlock;
     }
 
     memset(&qctrl, 0, sizeof(qctrl));
@@ -1277,7 +1294,7 @@ int ff_v4l2_context_init(V4L2Context* ctx)
         ret = AVERROR(errno);
         if (ret != AVERROR(EINVAL)) {
             av_log(logger(ctx), AV_LOG_ERROR, "%s VIDIOC_QUERCTRL failed: %s\n", ctx->name, av_err2str(ret));
-            goto fail_unref_hwframes;
+            goto fail_unlock;
         }
         // Control unsupported - set default if wanted
         if (ctx->num_buffers < 2)
@@ -1291,12 +1308,10 @@ int ff_v4l2_context_init(V4L2Context* ctx)
 
     ret = create_buffers(ctx, ctx->num_buffers, ctx->buf_mem);
     if (ret < 0)
-        goto fail_unref_hwframes;
+        goto fail_unlock;
 
     return 0;
 
-fail_unref_hwframes:
-    av_buffer_unref(&ctx->frames_ref);
 fail_unlock:
     ff_mutex_destroy(&ctx->lock);
     return ret;

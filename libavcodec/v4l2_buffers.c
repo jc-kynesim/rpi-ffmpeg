@@ -607,6 +607,10 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 
     if (buf_to_m2mctx(avbuf)->output_drm) {
         /* 1. get references to the actual data */
+        const int rv = ff_v4l2_context_frames_set(avbuf->context);
+        if (rv != 0)
+            return rv;
+
         frame->data[0] = (uint8_t *) v4l2_get_drm_frame(avbuf);
         frame->format = AV_PIX_FMT_DRM_PRIME;
         frame->hw_frames_ctx = av_buffer_ref(avbuf->context->frames_ref);
