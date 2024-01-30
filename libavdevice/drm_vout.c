@@ -501,6 +501,13 @@ static int find_crtc(struct AVFormatContext * const avctx, int drmfd, struct drm
                 crtc ? crtc->height : 0,
                 (s->conId == (int)con->connector_id ?
             " (chosen)" : ""));
+
+          if (crtc)
+              drmModeFreeCrtc(crtc);
+          if (enc)
+              drmModeFreeEncoder(enc);
+          if (con)
+              drmModeFreeConnector(con);
       }
 
       if (!s->conId) {
