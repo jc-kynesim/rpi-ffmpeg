@@ -906,56 +906,88 @@ static int stuff_all_buffers(AVCodecContext * avctx, V4L2Context* ctx)
         }
     }
 
+    ff_mutex_lock(&ctx->lock);
     for (i = 0; i < ctx->num_buffers; ++i) {
         struct V4L2Buffer * const buf = (struct V4L2Buffer *)ctx->bufrefs[i]->data;
         if (buf->status == V4L2BUF_AVAILABLE) {
             rv = ff_v4l2_buffer_enqueue(buf);
             if (rv < 0)
-                return rv;
+                break;
         }
     }
-    return 0;
+    ff_mutex_unlock(&ctx->lock);
+    return rv;
 }
 
-int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
+static int set_streamon(AVCodecContext * const avctx, V4L2Context*const ctx)
 {
     int type = ctx->type;
     int ret = 0;
-    AVCodecContext * const avctx = logger(ctx);
 
-    // Avoid doing anything if there is nothing we can do
-    if (cmd == VIDIOC_STREAMOFF && !ctx_buffers_alloced(ctx) && !ctx->streamon)
-        return 0;
-
-    ff_mutex_lock(&ctx->lock);
-
-    if (cmd == VIDIOC_STREAMON && !V4L2_TYPE_IS_OUTPUT(ctx->type))
+    if (!V4L2_TYPE_IS_OUTPUT(ctx->type))
         stuff_all_buffers(avctx, ctx);
 
-    if (ioctl(ctx_to_m2mctx(ctx)->fd, cmd, &type) < 0) {
-        const int err = errno;
-        av_log(avctx, AV_LOG_ERROR, "%s set status %d (%s) failed: err=%d\n", ctx->name,
-               cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF", err);
-        ret = AVERROR(err);
-    }
-    else
-    {
-        if (cmd == VIDIOC_STREAMOFF)
-            flush_all_buffers_status(ctx);
-        else
-            ctx->first_buf = 1;
-
-        ctx->streamon = (cmd == VIDIOC_STREAMON);
-        av_log(avctx, AV_LOG_DEBUG, "%s set status %d (%s) OK\n", ctx->name,
-               cmd, (cmd == VIDIOC_STREAMON) ? "ON" : "OFF");
+    if (ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_STREAMON, &type) < 0) {
+        ret = AVERROR(errno);
+        av_log(avctx, AV_LOG_ERROR, "%s set status ON failed: err=%s\n", ctx->name,
+               av_err2str(ret));
+        return ret;
     }
 
-    // Both stream off & on effectively clear flag_last
+    ctx->first_buf = 1;
+    ctx->streamon = 1;
     ctx->flag_last = 0;
-
-    ff_mutex_unlock(&ctx->lock);
-
+    av_log(avctx, AV_LOG_DEBUG, "%s set status ON OK\n", ctx->name);
     return ret;
+}
+
+static int set_streamoff(AVCodecContext * const avctx, V4L2Context*const ctx)
+{
+    int type = ctx->type;
+    int ret = 0;
+    const int has_bufs = ctx_buffers_alloced(ctx);
+
+    // Avoid doing anything if there is nothing we can do
+    if (!has_bufs && !ctx->streamon)
+        return 0;
+
+    if (has_bufs)
+        ff_mutex_lock(&ctx->lock);
+
+    if (ioctl(ctx_to_m2mctx(ctx)->fd, VIDIOC_STREAMOFF, &type) < 0) {
+        ret = AVERROR(errno);
+        av_log(avctx, AV_LOG_ERROR, "%s set status ON failed: err=%s\n", ctx->name,
+               av_err2str(ret));
+    }
+    else {
+        flush_all_buffers_status(ctx);
+
+        ctx->streamon = 0;
+        ctx->flag_last = 0;
+
+        av_log(avctx, AV_LOG_DEBUG, "%s set status OFF OK\n", ctx->name);
+    }
+
+    if (has_bufs)
+        ff_mutex_unlock(&ctx->lock);
+    return ret;
+}
+
+
+int ff_v4l2_context_set_status(V4L2Context* ctx, uint32_t cmd)
+{
+    AVCodecContext * const avctx = logger(ctx);
+
+    switch (cmd) {
+        case VIDIOC_STREAMOFF:
+            return set_streamoff(avctx, ctx);
+        case VIDIOC_STREAMON:
+            return set_streamon(avctx, ctx);
+        default:
+            av_log(avctx, AV_LOG_ERROR, "%s: Unexpected cmd: %d\n", __func__, cmd);
+            break;
+    }
+    return AVERROR_BUG;
 }
 
 int ff_v4l2_context_enqueue_frame(V4L2Context* ctx, const AVFrame* frame)
