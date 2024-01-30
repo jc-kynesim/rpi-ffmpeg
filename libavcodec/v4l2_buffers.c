@@ -484,7 +484,7 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
 
     if (ctx != NULL) {
         // Buffer still attached to context
-        V4L2m2mContext *s = buf_to_m2mctx(avbuf);
+        V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
 
         if (!s->output_drm && avbuf->dmabuf[0] != NULL) {
             for (unsigned int i = 0; i != avbuf->num_planes; ++i)
@@ -494,15 +494,14 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
         ff_mutex_lock(&ctx->lock);
 
         ff_v4l2_buffer_set_avail(avbuf);
+        avbuf->buf.timestamp.tv_sec = 0;
+        avbuf->buf.timestamp.tv_usec = 0;
 
-        if (s->draining && V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+        if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
             av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer avail\n", ctx->name);
-            /* no need to queue more buffers to the driver */
         }
         else if (ctx->streamon) {
             av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer requeue\n", ctx->name);
-            avbuf->buf.timestamp.tv_sec = 0;
-            avbuf->buf.timestamp.tv_usec = 0;
             ff_v4l2_buffer_enqueue(avbuf);  // will set to IN_DRIVER
         }
         else {
