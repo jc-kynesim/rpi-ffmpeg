@@ -1125,7 +1125,7 @@ static int mkv_assemble_native_codecprivate(AVFormatContext *s, AVIOContext *dyn
     case AV_CODEC_ID_WAVPACK:
         return put_wv_codecpriv(dyn_cp, extradata, extradata_size);
     case AV_CODEC_ID_H264:
-        if (par->extradata_size)
+        if (extradata_size)
             return ff_isom_write_avcc(dyn_cp, extradata,
                                       extradata_size);
         else
