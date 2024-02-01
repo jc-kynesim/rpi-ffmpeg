@@ -3189,9 +3189,15 @@ static int mkv_init(struct AVFormatContext *s)
             track->reformat = mkv_reformat_wavpack;
             break;
         case AV_CODEC_ID_H264:
+            // Default to reformat if no extradata as the only current
+            // encoder which does this is v4l2m2m which needs reformat
+            if (par->extradata_size == 0 ||
+                (par->extradata_size > 3 &&
+                 (AV_RB24(par->extradata) == 1 || AV_RB32(par->extradata) == 1)))
+                track->reformat = mkv_reformat_h2645;
+            break;
         case AV_CODEC_ID_HEVC:
-            if ((par->codec_id == AV_CODEC_ID_H264 && par->extradata_size > 0 ||
-                 par->codec_id == AV_CODEC_ID_HEVC && par->extradata_size > 6) &&
+            if (par->extradata_size > 6 &&
                 (AV_RB24(par->extradata) == 1 || AV_RB32(par->extradata) == 1))
                 track->reformat = mkv_reformat_h2645;
             break;
