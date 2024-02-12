@@ -42,6 +42,12 @@
 
 #define ERRSTR strerror(errno)
 
+#ifndef SAND_AUTO_HEIGHT
+#define SAND_AUTO_HEIGHT	0xffffffffffffULL
+#define DRM_FORMAT_MOD_BROADCOM_SAND128_AUTO_HEIGHT \
+	DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(SAND_AUTO_HEIGHT)
+#endif
+
 struct drm_setup {
    int conId;
    uint32_t crtcId;
@@ -272,9 +278,24 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
             for (j = 0; j < desc->layers[i].nb_planes; ++j) {
                 const AVDRMPlaneDescriptor * const p = desc->layers[i].planes + j;
                 const AVDRMObjectDescriptor * const obj = desc->objects + p->object_index;
+                uint64_t mod = obj->format_modifier;
+
+                if (desc->layers[0].format == DRM_FORMAT_P030 ||
+                    desc->layers[0].format == DRM_FORMAT_NV12) {
+                    if (mod == DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(frame->height * 3/2)) {
+                        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_AUTO_HEIGHT;
+                        av_log(s, AV_LOG_DEBUG, "Height auto\n");
+                    }
+                    else {
+                        av_log(s, AV_LOG_DEBUG, "Col Height: %d, height=%d, *3/2=%d\n",
+                               (int)fourcc_mod_broadcom_param(mod),
+                               frame->height, frame->height * 3/2);
+                    }
+                }
+
                 pitches[n] = p->pitch;
                 offsets[n] = p->offset;
-                modifiers[n] = obj->format_modifier;
+                modifiers[n] = mod;
                 bo_handles[n] = da->bo_handles[p->object_index];
                 ++n;
             }
@@ -306,8 +327,8 @@ static int do_display(AVFormatContext * const s, drm_display_env_t * const de, A
 #endif
 
         if (drmModeAddFB2WithModifiers(de->drm_fd,
-                                       av_frame_cropped_width(frame),
-                                       av_frame_cropped_height(frame),
+                                       frame->width,
+                                       frame->height,
                                        desc->layers[0].format, bo_handles,
                                        pitches, offsets,
                                        has_mods ? modifiers : NULL,
