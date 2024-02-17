@@ -587,7 +587,7 @@ static int rtp_write_packet(AVFormatContext *s1, AVPacket *pkt)
     case AV_CODEC_ID_H264:
     {
         uint8_t *side_data;
-        int side_data_size = 0;
+        size_t side_data_size = 0;
 
         side_data = av_packet_get_side_data(pkt, AV_PKT_DATA_NEW_EXTRADATA,
                                             &side_data_size);
