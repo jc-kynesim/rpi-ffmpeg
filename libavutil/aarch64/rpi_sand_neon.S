@@ -387,13 +387,13 @@ function ff_rpi_sand30_lines_to_planar_c16, export=1
                 st3             {v0.4h  - v2.4h},  [x0], #24
                 st3             {v16.4h - v18.4h}, [x2], #24
                 beq             11b
-                mov             v0.2d[0],  v0.2d[1]
+                mov             v0.d[0],  v0.d[1]
                 sub             w9,  w9,  #12
-                mov             v1.2d[0],  v1.2d[1]
-                mov             v2.2d[0],  v2.2d[1]
-                mov             v16.2d[0], v16.2d[1]
-                mov             v17.2d[0], v17.2d[1]
-                mov             v18.2d[0], v18.2d[1]
+                mov             v1.d[0],  v1.d[1]
+                mov             v2.d[0],  v2.d[1]
+                mov             v16.d[0], v16.d[1]
+                mov             v17.d[0], v17.d[1]
+                mov             v18.d[0], v18.d[1]
 1:
                 cmp             w9,  #6-48
                 blt             1f
@@ -526,28 +526,28 @@ function ff_rpi_sand30_lines_to_planar_y16, export=1
                 blt             1f
                 st3             {v16.4h, v17.4h, v18.4h}, [x0], #24
                 beq             11b
-                mov             v16.2d[0], v16.2d[1]
+                mov             v16.d[0], v16.d[1]
                 sub             w5,  w5,  #12
-                mov             v17.2d[0], v17.2d[1]
-                mov             v18.2d[0], v18.2d[1]
+                mov             v17.d[0], v17.d[1]
+                mov             v18.d[0], v18.d[1]
 1:
                 cmp             w5,  #6-96
                 blt             1f
                 st3             {v16.h, v17.h, v18.h}[0], [x0], #6
                 st3             {v16.h, v17.h, v18.h}[1], [x0], #6
                 beq             11b
-                mov             v16.2s[0], v16.2s[1]
+                mov             v16.s[0], v16.s[1]
                 sub             w5,  w5,  #6
-                mov             v17.2s[0], v17.2s[1]
-                mov             v18.2s[0], v18.2s[1]
+                mov             v17.s[0], v17.s[1]
+                mov             v18.s[0], v18.s[1]
 1:
                 cmp             w5,  #3-96
                 blt             1f
                 st3             {v16.h, v17.h, v18.h}[0], [x0], #6
                 beq             11b
-                mov             v16.4h[0], v16.4h[1]
+                mov             v16.h[0], v16.h[1]
                 sub             w5,  w5,  #3
-                mov             v17.4h[0], v17.4h[1]
+                mov             v17.h[0], v17.h[1]
 1:
                 cmp             w5,  #2-96
                 blt             1f
@@ -625,10 +625,10 @@ function ff_rpi_sand30_lines_to_planar_y8, export=1
                 blt             1f
                 st3             {v16.8b, v17.8b, v18.8b}, [x0], #24
                 beq             11b
-                mov             v16.2d[0], v16.2d[1]
+                mov             v16.d[0], v16.d[1]
                 sub             w5,  w5,  #24
-                mov             v17.2d[0], v17.2d[1]
-                mov             v18.2d[0], v18.2d[1]
+                mov             v17.d[0], v17.d[1]
+                mov             v18.d[0], v18.d[1]
 1:
                 cmp             w5,  #12-96
                 blt             1f
@@ -637,28 +637,28 @@ function ff_rpi_sand30_lines_to_planar_y8, export=1
                 st3             {v16.b, v17.b, v18.b}[2], [x0], #3
                 st3             {v16.b, v17.b, v18.b}[3], [x0], #3
                 beq             11b
-                mov             v16.2s[0], v16.2s[1]
+                mov             v16.s[0], v16.s[1]
                 sub             w5,  w5,  #12
-                mov             v17.2s[0], v17.2s[1]
-                mov             v18.2s[0], v18.2s[1]
+                mov             v17.s[0], v17.s[1]
+                mov             v18.s[0], v18.s[1]
 1:
                 cmp             w5,  #6-96
                 blt             1f
                 st3             {v16.b, v17.b, v18.b}[0], [x0], #3
                 st3             {v16.b, v17.b, v18.b}[1], [x0], #3
                 beq             11b
-                mov             v16.4h[0], v16.4h[1]
+                mov             v16.h[0], v16.h[1]
                 sub             w5,  w5,  #6
-                mov             v17.4h[0], v17.4h[1]
-                mov             v18.4h[0], v18.4h[1]
+                mov             v17.h[0], v17.h[1]
+                mov             v18.h[0], v18.h[1]
 1:
                 cmp             w5,  #3-96
                 blt             1f
                 st3             {v16.b, v17.b, v18.b}[0], [x0], #3
                 beq             11b
-                mov             v16.8b[0], v16.8b[1]
+                mov             v16.b[0], v16.b[1]
                 sub             w5,  w5,  #3
-                mov             v17.8b[0], v17.8b[1]
+                mov             v17.b[0], v17.b[1]
 1:
                 cmp             w5,  #2-96
                 blt             1f
