@@ -1,6 +1,8 @@
 #ifndef AVCODEC_V4L2_REQ_DECODE_Q_H
 #define AVCODEC_V4L2_REQ_DECODE_Q_H
 
+#include <pthread.h>
+
 typedef struct req_decode_ent {
     struct req_decode_ent * next;
     struct req_decode_ent * prev;
