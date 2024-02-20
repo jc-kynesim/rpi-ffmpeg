@@ -31,6 +31,7 @@ is16BPS:
   rgbaf16le
   rgbf16be
   rgbf16le
+  sand64_16
   xv48be
   xv48le
   y216be
@@ -93,6 +94,7 @@ isNBPS:
   p410le
   p412be
   p412le
+  sand64_10
   v30xbe
   v30xle
   x2bgr10be
@@ -287,6 +289,9 @@ isYUV:
   p412le
   p416be
   p416le
+  sand128
+  sand64_10
+  sand64_16
   uyva
   uyvy422
   uyyvyy411
@@ -939,6 +944,9 @@ Packed:
   rgbf16le
   rgbf32be
   rgbf32le
+  sand128
+  sand64_10
+  sand64_16
   uyva
   uyvy422
   uyyvyy411
