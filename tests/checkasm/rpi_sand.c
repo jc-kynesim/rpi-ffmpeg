@@ -29,6 +29,10 @@
 #elif ARCH_AARCH64
 #include "libavutil/aarch64/cpu.h"
 #include "libavutil/aarch64/rpi_sand_neon.h"
+#else
+#define have_neon(flags) 0
+#define ff_rpi_sand30_lines_to_planar_y16 NULL
+#define ff_rpi_sand30_lines_to_planar_c16 NULL
 #endif
 
 static inline uint32_t pack30(unsigned int a, unsigned int b, unsigned int c)
