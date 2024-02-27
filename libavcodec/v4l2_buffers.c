@@ -1045,7 +1045,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
         avbuf->buf.length    = avbuf->planes[0].length;
     }
 
-    if (!want_mmap) {
+    if (V4L2_TYPE_IS_CAPTURE(ctx->type) && !want_mmap) {
         // export_drm does dmabuf alloc if we aren't using v4l2 alloc
         ret = v4l2_buffer_export_drm(avbuf);
         if (ret) {
