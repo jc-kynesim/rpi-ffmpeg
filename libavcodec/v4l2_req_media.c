@@ -200,6 +200,8 @@ struct media_request * media_request_get(struct media_pool * const mp)
         req->next = NULL;
     }
     pthread_mutex_unlock(&mp->lock);
+
+    req->mp = media_pool_ref(mp);
     return req;
 }
 
@@ -226,7 +228,9 @@ int media_request_start(struct media_request * const req)
 static void media_request_done(void *v, short revents)
 {
     struct media_request *const req = v;
-    struct media_pool *const mp = req->mp;
+    struct media_pool * mp = req->mp;
+
+    req->mp = NULL;
 
     /* ** Not sure what to do about timeout */
 
@@ -239,6 +243,8 @@ static void media_request_done(void *v, short revents)
     mp->free_reqs = req;
     pthread_mutex_unlock(&mp->lock);
     sem_post(&mp->sem);
+
+    media_pool_unref(&mp);
 }
 
 int media_request_abort(struct media_request ** const preq)
@@ -293,7 +299,7 @@ struct media_pool * media_pool_new(const char * const media_path,
 
         *req = (struct media_request){
             .next = mp->free_reqs,
-            .mp = mp,
+            .mp = NULL,
             .fd = -1
         };
         mp->free_reqs = req;
