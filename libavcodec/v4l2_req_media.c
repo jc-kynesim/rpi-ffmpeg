@@ -83,6 +83,8 @@ static size_t round_up_size(const size_t x)
 struct media_request;
 
 struct media_pool {
+    atomic_int ref_count;  /* 0 is single ref for easier atomics */
+
     int fd;
     sem_t sem;
     pthread_mutex_t lock;
@@ -198,6 +200,8 @@ struct media_request * media_request_get(struct media_pool * const mp)
         req->next = NULL;
     }
     pthread_mutex_unlock(&mp->lock);
+
+    req->mp = media_pool_ref(mp);
     return req;
 }
 
@@ -224,7 +228,9 @@ int media_request_start(struct media_request * const req)
 static void media_request_done(void *v, short revents)
 {
     struct media_request *const req = v;
-    struct media_pool *const mp = req->mp;
+    struct media_pool * mp = req->mp;
+
+    req->mp = NULL;
 
     /* ** Not sure what to do about timeout */
 
@@ -237,6 +243,8 @@ static void media_request_done(void *v, short revents)
     mp->free_reqs = req;
     pthread_mutex_unlock(&mp->lock);
     sem_post(&mp->sem);
+
+    media_pool_unref(&mp);
 }
 
 int media_request_abort(struct media_request ** const preq)
@@ -275,6 +283,7 @@ struct media_pool * media_pool_new(const char * const media_path,
     if (!mp)
         goto fail0;
 
+    mp->ref_count = ATOMIC_VAR_INIT(0);
     mp->pq = pq;
     pthread_mutex_init(&mp->lock, NULL);
     mp->fd = open(media_path, O_RDWR | O_NONBLOCK);
@@ -290,7 +299,7 @@ struct media_pool * media_pool_new(const char * const media_path,
 
         *req = (struct media_request){
             .next = mp->free_reqs,
-            .mp = mp,
+            .mp = NULL,
             .fd = -1
         };
         mp->free_reqs = req;
@@ -319,13 +328,22 @@ fail0:
     return NULL;
 }
 
-void media_pool_delete(struct media_pool ** pMp)
+struct media_pool * media_pool_ref(struct media_pool * mp)
+{
+    atomic_fetch_add(&mp->ref_count, 1);
+    return mp;
+}
+
+void media_pool_unref(struct media_pool ** pMp)
 {
     struct media_pool * const mp = *pMp;
 
     if (!mp)
         return;
     *pMp = NULL;
+
+    if (atomic_fetch_sub(&mp->ref_count, 1) != 0)
+        return;
 
     delete_req_chain(mp->free_reqs);
     close(mp->fd);
