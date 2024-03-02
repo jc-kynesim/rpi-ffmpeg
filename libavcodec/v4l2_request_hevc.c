@@ -103,7 +103,7 @@ static int v4l2_request_hevc_uninit(AVCodecContext *avctx)
     decode_q_wait(&ctx->decode_q, NULL);  // Wait for all other threads to be out of decode
 
     mediabufs_ctl_unref(&ctx->mbufs);
-    media_pool_delete(&ctx->mpool);
+    media_pool_unref(&ctx->mpool);
     pollqueue_unref(&ctx->pq);
     dmabufs_ctl_unref(&ctx->dbufs);
     devscan_delete(&ctx->devscan);
@@ -323,7 +323,7 @@ fail5:
 fail4:
     mediabufs_ctl_unref(&ctx->mbufs);
 fail3:
-    media_pool_delete(&ctx->mpool);
+    media_pool_unref(&ctx->mpool);
 fail2:
     pollqueue_unref(&ctx->pq);
 fail1:

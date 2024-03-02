@@ -49,7 +49,8 @@ typedef enum media_buf_status {
 struct media_pool * media_pool_new(const char * const media_path,
                    struct pollqueue * const pq,
                    const unsigned int n);
-void media_pool_delete(struct media_pool ** pmp);
+struct media_pool * media_pool_ref(struct media_pool * mp);
+void media_pool_unref(struct media_pool ** pmp);
 
 // Obtain a media request
 // Will block if none availible - has a 2sec timeout

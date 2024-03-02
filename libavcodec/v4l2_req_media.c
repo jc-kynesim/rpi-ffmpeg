@@ -83,6 +83,8 @@ static size_t round_up_size(const size_t x)
 struct media_request;
 
 struct media_pool {
+    atomic_int ref_count;  /* 0 is single ref for easier atomics */
+
     int fd;
     sem_t sem;
     pthread_mutex_t lock;
@@ -275,6 +277,7 @@ struct media_pool * media_pool_new(const char * const media_path,
     if (!mp)
         goto fail0;
 
+    mp->ref_count = ATOMIC_VAR_INIT(0);
     mp->pq = pq;
     pthread_mutex_init(&mp->lock, NULL);
     mp->fd = open(media_path, O_RDWR | O_NONBLOCK);
@@ -319,13 +322,22 @@ fail0:
     return NULL;
 }
 
-void media_pool_delete(struct media_pool ** pMp)
+struct media_pool * media_pool_ref(struct media_pool * mp)
+{
+    atomic_fetch_add(&mp->ref_count, 1);
+    return mp;
+}
+
+void media_pool_unref(struct media_pool ** pMp)
 {
     struct media_pool * const mp = *pMp;
 
     if (!mp)
         return;
     *pMp = NULL;
+
+    if (atomic_fetch_sub(&mp->ref_count, 1) != 0)
+        return;
 
     delete_req_chain(mp->free_reqs);
     close(mp->fd);
