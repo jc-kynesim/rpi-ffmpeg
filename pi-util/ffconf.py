@@ -219,10 +219,14 @@ if __name__ == '__main__':
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
     argp.add_argument("--csv", default="pi-util/conf_h265.2016.csv", help="CSV filename")
     argp.add_argument("--vcodec", default="hevc_rpi", help="vcodec name to use")
-    argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name")
+    argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name; if directory given use <dir>/ffmpeg")
     argp.add_argument("--valgrind", action='store_true', help="Run valgrind on tests")
     argp.add_argument("--gen_yuv", action='store_true', help="Create yuv file (stored with log under /tmp)")
     args = argp.parse_args()
+
+    if not os.path.isdir(args.test_root):
+        print("Test root dir '%s' not found" % args.test_root)
+        exit(1)
 
     if args.csvgen:
         csv.writer(sys.stdout).writerows(scandir(args.test_root))
@@ -243,6 +247,12 @@ if __name__ == '__main__':
         dectype = HWACCEL_DRM
     elif args.vaapi:
         dectype = HWACCEL_VAAPI
+
+    if os.path.isdir(args.ffmpeg):
+        args.ffmpeg = os.path.join(args.ffmpeg, "ffmpeg")
+    if not os.path.isfile(args.ffmpeg):
+        print("FFmpeg file '%s' not found" % args.ffmpeg)
+        exit(1)
 
     doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args)
 
