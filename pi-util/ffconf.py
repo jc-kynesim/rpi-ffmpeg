@@ -198,6 +198,8 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
     else:
         print("All tests normal:", successes, "ok,", failures, "failed")
 
+    return unx_failures + unx_success
+
 
 class ConfCSVDialect(csv.Dialect):
     delimiter = ','
@@ -222,6 +224,7 @@ if __name__ == '__main__':
     argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name; if directory given use <dir>/ffmpeg")
     argp.add_argument("--valgrind", action='store_true', help="Run valgrind on tests")
     argp.add_argument("--gen_yuv", action='store_true', help="Create yuv file (stored with log under /tmp)")
+    argp.add_argument("--loop", default=0, type=int, help="Create yuv file (stored with log under /tmp)")
     args = argp.parse_args()
 
     if not os.path.isdir(args.test_root):
@@ -254,5 +257,11 @@ if __name__ == '__main__':
         print("FFmpeg file '%s' not found" % args.ffmpeg)
         exit(1)
 
-    doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args)
+    i = 0
+    while True:
+        i = i + 1
+        if args.loop:
+            print("== Loop ", i)
+        if doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args) or (args.loop >= 0 and i > args.loop):
+            break
 
