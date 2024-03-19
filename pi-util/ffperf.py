@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import shlex
 import time
 import string
 import os
@@ -36,14 +37,20 @@ class tstats:
     def __gt__(self, other):
         return self.elapsed > other.elapsed
 
-    def time_file(name, prefix, ffmpeg="./ffmpeg"):
+    def time_file(name, prefix, args):
+        cmdargs = [args.ffmpeg]
+        for x in args.args :
+            if x == '{INPUT}':
+                cmdargs.append(prefix + name)
+            elif x == '{NULL}':
+                cmdargs.append(os.devnull)
+            else:
+                cmdargs.append(x)
+
         stats = tstats()
         stats.name = name
         start_time = time.clock_gettime(time.CLOCK_MONOTONIC);
-        cproc = subprocess.Popen([ffmpeg, "-no_cvt_hw",
-                                  "-vcodec", "hevc_rpi",
-                                  "-t", "30", "-i", prefix + name,
-                                  "-f", "vout_rpi", os.devnull], bufsize=-1, stdout=flog, stderr=flog);
+        cproc = subprocess.Popen(cmdargs, bufsize=-1, stdout=flog, stderr=flog);
         pinfo = os.wait4(cproc.pid, 0)
         end_time = time.clock_gettime(time.CLOCK_MONOTONIC);
         stats.elapsed = end_time - start_time
@@ -67,6 +74,10 @@ To blank the screen before starting use "xdg-screensaver activate"
 """)
 
     argp.add_argument("streams", nargs='*')
+    argp.add_argument("--args", default='-t 30 -i {INPUT} -f null {NULL}', help="""
+ffmpeg arguments, default='-t 30 -i {INPUT} -f null {NULL}';
+  {INPUT} is replaced by current inputfile path;
+  {NULL} is replaced by the system null device""")
     argp.add_argument("--csv_out", default="ffperf_out.csv", help="CSV output filename")
     argp.add_argument("--csv_in", help="CSV input filename")
     argp.add_argument("--prefix", help="Filename prefix (include terminal '/' if a directory).")
@@ -74,6 +85,7 @@ To blank the screen before starting use "xdg-screensaver activate"
     argp.add_argument("--ffmpeg", default="./ffmpeg", help="FFmpeg executable")
 
     args = argp.parse_args()
+    args.args = shlex.split(args.args)
 
     csv_out = csv.DictWriter(open(args.csv_out, 'w', newline=''), ["name", "elapsed", "user", "sys"])
     csv_out.writeheader()
@@ -107,7 +119,7 @@ To blank the screen before starting use "xdg-screensaver activate"
 
         t0 = tstats({"name":f, "elapsed":999, "user":999, "sys":999})
         for i in range(args.repeat):
-            t = tstats.time_file(f, prefix, args.ffmpeg)
+            t = tstats.time_file(f, prefix, args)
             print ("...", t.times_str())
             if t0 > t:
                 t0 = t
