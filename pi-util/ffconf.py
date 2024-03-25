@@ -224,7 +224,7 @@ if __name__ == '__main__':
     argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name; if directory given use <dir>/ffmpeg")
     argp.add_argument("--valgrind", action='store_true', help="Run valgrind on tests")
     argp.add_argument("--gen_yuv", action='store_true', help="Create yuv file (stored with log under /tmp)")
-    argp.add_argument("--loop", default=0, type=int, help="Create yuv file (stored with log under /tmp)")
+    argp.add_argument("--loop", default=0, type=int, help="Loop n times, or until unexpected result")
     args = argp.parse_args()
 
     if not os.path.isdir(args.test_root):
