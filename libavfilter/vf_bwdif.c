@@ -115,19 +115,28 @@ static void filter(AVFilterContext *ctx, AVFrame *dstpic,
     YADIFContext *yadif = &bwdif->yadif;
     ThreadData td = { .frame = dstpic, .parity = parity, .tff = tff };
     int i;
+    int last_plane = -1;
 
     for (i = 0; i < yadif->csp->nb_components; i++) {
         int w = dstpic->width;
         int h = dstpic->height;
+        const AVComponentDescriptor * const comp = yadif->csp->comp + i;
+
+        // If the last plane was the same as this plane assume we've dealt
+        // with all the pels already
+        if (last_plane == comp->plane)
+            continue;
+        last_plane = comp->plane;
 
         if (i == 1 || i == 2) {
             w = AV_CEIL_RSHIFT(w, yadif->csp->log2_chroma_w);
             h = AV_CEIL_RSHIFT(h, yadif->csp->log2_chroma_h);
         }
 
-        td.w     = w;
-        td.h     = h;
-        td.plane = i;
+        // comp step is in bytes but td.w is in pels
+        td.w       = w * comp->step / ((comp->depth + 7) / 8);
+        td.h       = h;
+        td.plane   = comp->plane;
 
         ff_filter_execute(ctx, filter_slice, &td, NULL,
                           FFMIN((h+3)/4, ff_filter_get_nb_threads(ctx)));
@@ -151,6 +160,7 @@ static const enum AVPixelFormat pix_fmts[] = {
     AV_PIX_FMT_YUVA420P9, AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA444P9,
     AV_PIX_FMT_YUVA420P10, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA444P10,
     AV_PIX_FMT_YUVA420P16, AV_PIX_FMT_YUVA422P16, AV_PIX_FMT_YUVA444P16,
+    AV_PIX_FMT_NV12,
     AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP9, AV_PIX_FMT_GBRP10,
     AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
     AV_PIX_FMT_GBRAP, AV_PIX_FMT_GBRAP16,
