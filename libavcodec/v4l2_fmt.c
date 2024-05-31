@@ -25,6 +25,8 @@
 #include <search.h>
 #include "v4l2_fmt.h"
 
+#include "libavutil/fourcc_v4l2.h"
+
 #define V4L2_FMT(x) V4L2_PIX_FMT_##x
 #define AV_CODEC(x) AV_CODEC_ID_##x
 #define AV_FMT(x)   AV_PIX_FMT_##x
@@ -59,6 +61,14 @@ static const struct fmt_conversion {
     { AV_FMT(YUV410P),     AV_CODEC(RAWVIDEO),    V4L2_FMT(YUV410) },
     { AV_FMT(YUV410P),     AV_CODEC(RAWVIDEO),    V4L2_FMT(YVU410) },
     { AV_FMT(NV12),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV12) },
+    { AV_FMT(NV16),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV16) },
+    { AV_FMT(NV24),        AV_CODEC(RAWVIDEO),    V4L2_FMT(NV24) },
+    { AV_FMT(P010LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P010) },
+    { AV_FMT(P012LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P012) },
+    { AV_FMT(P210LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P210) },
+    { AV_FMT(P212LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P212) },
+    { AV_FMT(P410LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P410) },
+    { AV_FMT(P412LE),      AV_CODEC(RAWVIDEO),    V4L2_FMT(P412) },
     { AV_FMT(NONE),        AV_CODEC(MJPEG),       V4L2_FMT(MJPEG) },
     { AV_FMT(NONE),        AV_CODEC(MJPEG),       V4L2_FMT(JPEG) },
 #ifdef V4L2_PIX_FMT_SRGGB8
@@ -66,6 +76,12 @@ static const struct fmt_conversion {
     { AV_FMT(BAYER_GBRG8), AV_CODEC(RAWVIDEO),    V4L2_FMT(SGBRG8) },
     { AV_FMT(BAYER_GRBG8), AV_CODEC(RAWVIDEO),    V4L2_FMT(SGRBG8) },
     { AV_FMT(BAYER_RGGB8), AV_CODEC(RAWVIDEO),    V4L2_FMT(SRGGB8) },
+#endif
+#ifdef V4L2_PIX_FMT_Y10
+    { AV_FMT(GRAY10LE),    AV_CODEC(RAWVIDEO),    V4L2_FMT(Y10) },
+#endif
+#ifdef V4L2_PIX_FMT_Y12
+    { AV_FMT(GRAY12LE),    AV_CODEC(RAWVIDEO),    V4L2_FMT(Y12) },
 #endif
 #ifdef V4L2_PIX_FMT_Y16
     { AV_FMT(GRAY16LE),    AV_CODEC(RAWVIDEO),    V4L2_FMT(Y16) },
