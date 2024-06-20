@@ -2824,6 +2824,10 @@ static int matroska_parse_tracks(AVFormatContext *s)
                    track->time_scale);
             track->time_scale = 1.0;
         }
+
+        if (matroska->time_scale * track->time_scale > UINT_MAX)
+            return AVERROR_INVALIDDATA;
+
         avpriv_set_pts_info(st, 64, matroska->time_scale * track->time_scale,
                             1000 * 1000 * 1000);    /* 64 bit pts in ns */
 
@@ -3844,7 +3848,7 @@ static int matroska_parse_cluster(MatroskaDemuxContext *matroska)
     MatroskaBlock     *block = &cluster->block;
     int res;
 
-    av_assert0(matroska->num_levels <= 2);
+    av_assert0(matroska->num_levels <= 2U);
 
     if (matroska->num_levels == 1) {
         res = ebml_parse(matroska, matroska_segment, NULL);

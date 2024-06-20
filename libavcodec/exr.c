@@ -334,7 +334,10 @@ static int huf_unpack_enc_table(GetByteContext *gb,
         return ret;
 
     for (; im <= iM; im++) {
-        uint64_t l = freq[im] = get_bits(&gbit, 6);
+        int l;
+        if (get_bits_left(&gbit) < 6)
+            return AVERROR_INVALIDDATA;
+        l = freq[im] = get_bits(&gbit, 6);
 
         if (l == LONG_ZEROCODE_RUN) {
             int zerun = get_bits(&gbit, 8) + SHORTEST_LONG_RUN;
@@ -1953,7 +1956,7 @@ static int decode_header(EXRContext *s, AVFrame *frame)
                                                      "preview", 16)) >= 0) {
             uint32_t pw = bytestream2_get_le32(gb);
             uint32_t ph = bytestream2_get_le32(gb);
-            uint64_t psize = pw * ph;
+            uint64_t psize = pw * (uint64_t)ph;
             if (psize > INT64_MAX / 4) {
                 ret = AVERROR_INVALIDDATA;
                 goto fail;

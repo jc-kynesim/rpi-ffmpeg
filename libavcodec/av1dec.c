@@ -170,7 +170,7 @@ static uint8_t get_shear_params_valid(AV1DecContext *s, int idx)
     int16_t alpha, beta, gamma, delta, divf, divs;
     int64_t v, w;
     int32_t *param = &s->cur_frame.gm_params[idx][0];
-    if (param[2] < 0)
+    if (param[2] <= 0)
         return 0;
 
     alpha = av_clip_int16(param[2] - (1 << AV1_WARPEDMODEL_PREC_BITS));
@@ -675,7 +675,7 @@ static int set_context_with_sequence(AVCodecContext *avctx,
     avctx->color_range =
         seq->color_config.color_range ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
     avctx->color_primaries = seq->color_config.color_primaries;
-    avctx->colorspace = seq->color_config.color_primaries;
+    avctx->colorspace = seq->color_config.matrix_coefficients;
     avctx->color_trc = seq->color_config.transfer_characteristics;
 
     switch (seq->color_config.chroma_sample_position) {

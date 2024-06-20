@@ -1130,8 +1130,12 @@ static int mov_read_ftyp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     int ret = ffio_read_size(pb, type, 4);
     if (ret < 0)
         return ret;
-    if (c->fc->nb_streams)
-        return AVERROR_INVALIDDATA;
+    if (c->fc->nb_streams) {
+        if (c->fc->strict_std_compliance >= FF_COMPLIANCE_STRICT)
+            return AVERROR_INVALIDDATA;
+        av_log(c->fc, AV_LOG_DEBUG, "Ignoring duplicate FTYP\n");
+        return 0;
+    }
 
     if (strcmp(type, "qt  "))
         c->isom = 1;
@@ -2083,8 +2087,13 @@ static int mov_read_stco(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         for (i = 0; i < entries && !pb->eof_reached; i++)
             sc->chunk_offsets[i] = avio_rb32(pb);
     else if (atom.type == MKTAG('c','o','6','4'))
-        for (i = 0; i < entries && !pb->eof_reached; i++)
+        for (i = 0; i < entries && !pb->eof_reached; i++) {
             sc->chunk_offsets[i] = avio_rb64(pb);
+            if (sc->chunk_offsets[i] < 0) {
+                av_log(c->fc, AV_LOG_WARNING, "Impossible chunk_offset\n");
+                sc->chunk_offsets[i] = 0;
+            }
+        }
     else
         return AVERROR_INVALIDDATA;
 
@@ -3031,15 +3040,15 @@ static int mov_read_stts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             sc->stts_data[i].duration = 1;
             corrected_dts += (delta_magnitude < 0 ? (int64_t)delta_magnitude : 1) * sample_count;
         } else {
-            corrected_dts += sample_duration * sample_count;
+            corrected_dts += sample_duration * (int64_t)sample_count;
         }
 
-        current_dts += sc->stts_data[i].duration * sample_count;
+        current_dts += sc->stts_data[i].duration * (int64_t)sample_count;
 
         if (current_dts > corrected_dts) {
             int64_t drift = (current_dts - corrected_dts)/FFMAX(sample_count, 1);
             uint32_t correction = (sc->stts_data[i].duration > drift) ? drift : sc->stts_data[i].duration - 1;
-            current_dts -= correction * sample_count;
+            current_dts -= correction * (uint64_t)sample_count;
             sc->stts_data[i].duration -= correction;
         }
 
@@ -4604,12 +4613,13 @@ static int mov_read_keys(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     for (i = 1; i <= count; ++i) {
         uint32_t key_size = avio_rb32(pb);
         uint32_t type = avio_rl32(pb);
-        if (key_size < 8) {
+        if (key_size < 8 || key_size > atom.size) {
             av_log(c->fc, AV_LOG_ERROR,
                    "The key# %"PRIu32" in meta has invalid size:"
                    "%"PRIu32"\n", i, key_size);
             return AVERROR_INVALIDDATA;
         }
+        atom.size -= key_size;
         key_size -= 8;
         if (type != MKTAG('m','d','t','a')) {
             avio_skip(pb, key_size);
@@ -5622,8 +5632,10 @@ static int mov_read_smdm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         av_log(c->fc, AV_LOG_WARNING, "Unsupported Mastering Display Metadata box version %d\n", version);
         return 0;
     }
-    if (sc->mastering)
-        return AVERROR_INVALIDDATA;
+    if (sc->mastering) {
+        av_log(c->fc, AV_LOG_WARNING, "Ignoring duplicate Mastering Display Metadata\n");
+        return 0;
+    }
 
     avio_skip(pb, 3); /* flags */
 
@@ -5660,9 +5672,14 @@ static int mov_read_mdcv(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
     sc = c->fc->streams[c->fc->nb_streams - 1]->priv_data;
 
-    if (atom.size < 24 || sc->mastering) {
+    if (atom.size < 24) {
         av_log(c->fc, AV_LOG_ERROR, "Invalid Mastering Display Color Volume box\n");
         return AVERROR_INVALIDDATA;
+    }
+
+    if (sc->mastering) {
+        av_log(c->fc, AV_LOG_WARNING, "Ignoring duplicate Mastering Display Color Volume\n");
+        return 0;
     }
 
     sc->mastering = av_mastering_display_metadata_alloc();
@@ -8087,7 +8104,7 @@ static int mov_read_timecode_track(AVFormatContext *s, AVStream *st)
     /* 60 fps content have tmcd_nb_frames set to 30 but tc_rate set to 60, so
      * we multiply the frame number with the quotient.
      * See tickets #9492, #9710. */
-    rounded_tc_rate = (tc_rate.num + tc_rate.den / 2) / tc_rate.den;
+    rounded_tc_rate = (tc_rate.num + tc_rate.den / 2LL) / tc_rate.den;
     /* Work around files where tmcd_nb_frames is rounded down from frame rate
      * instead of up. See ticket #5978. */
     if (tmcd_nb_frames == tc_rate.num / tc_rate.den &&
@@ -8749,7 +8766,7 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
         pkt->flags |= AV_PKT_FLAG_DISCARD;
     }
     if (sc->ctts_data && sc->ctts_index < sc->ctts_count) {
-        pkt->pts = pkt->dts + sc->dts_shift + sc->ctts_data[sc->ctts_index].duration;
+        pkt->pts = av_sat_add64(pkt->dts, av_sat_add64(sc->dts_shift, sc->ctts_data[sc->ctts_index].duration));
         /* update ctts context */
         sc->ctts_sample++;
         if (sc->ctts_index < sc->ctts_count &&

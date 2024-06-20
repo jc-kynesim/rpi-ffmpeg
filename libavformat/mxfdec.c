@@ -239,7 +239,7 @@ typedef struct MXFMCASubDescriptor {
 
 typedef struct MXFIndexTableSegment {
     MXFMetadataSet meta;
-    int edit_unit_byte_count;
+    unsigned edit_unit_byte_count;
     int index_sid;
     int body_sid;
     AVRational index_edit_rate;
@@ -257,7 +257,6 @@ typedef struct MXFPackage {
     UID package_ul;
     UID *tracks_refs;
     int tracks_count;
-    MXFDescriptor *descriptor; /* only one */
     UID descriptor_ref;
     char *name;
     UID *comment_refs;
@@ -779,6 +778,9 @@ static int mxf_read_partition_pack(void *arg, AVIOContext *pb, int tag, int size
     partition->index_sid = avio_rb32(pb);
     partition->body_offset = avio_rb64(pb);
     partition->body_sid = avio_rb32(pb);
+    if (partition->body_offset < 0)
+        return AVERROR_INVALIDDATA;
+
     if (avio_read(pb, op, sizeof(UID)) != sizeof(UID)) {
         av_log(mxf->fc, AV_LOG_ERROR, "Failed reading UID\n");
         return AVERROR_INVALIDDATA;
@@ -1250,6 +1252,9 @@ static int mxf_read_index_table_segment(void *arg, AVIOContext *pb, int tag, int
     case 0x3F0B:
         segment->index_edit_rate.num = avio_rb32(pb);
         segment->index_edit_rate.den = avio_rb32(pb);
+        if (segment->index_edit_rate.num <= 0 ||
+            segment->index_edit_rate.den <= 0)
+            return AVERROR_INVALIDDATA;
         av_log(NULL, AV_LOG_TRACE, "IndexEditRate %d/%d\n", segment->index_edit_rate.num,
                 segment->index_edit_rate.den);
         break;
@@ -1547,7 +1552,7 @@ static void *mxf_resolve_strong_ref(MXFContext *mxf, UID *strong_ref, enum MXFMe
         return NULL;
     for (i = mxf->metadata_sets_count - 1; i >= 0; i--) {
         if (!memcmp(*strong_ref, mxf->metadata_sets[i]->uid, 16) &&
-            (type == AnyType || mxf->metadata_sets[i]->type == type)) {
+            (mxf->metadata_sets[i]->type == type)) {
             return mxf->metadata_sets[i];
         }
     }
@@ -1861,9 +1866,13 @@ static int mxf_edit_unit_absolute_offset(MXFContext *mxf, MXFIndexTable *index_t
         if (edit_unit < s->index_start_position + s->index_duration) {
             int64_t index = edit_unit - s->index_start_position;
 
-            if (s->edit_unit_byte_count)
+            if (s->edit_unit_byte_count) {
+                if (index > INT64_MAX / s->edit_unit_byte_count ||
+                    s->edit_unit_byte_count * index > INT64_MAX - offset_temp)
+                    return AVERROR_INVALIDDATA;
+
                 offset_temp += s->edit_unit_byte_count * index;
-            else {
+            } else {
                 if (s->nb_index_entries == 2 * s->index_duration + 1)
                     index *= 2;     /* Avid index */
 
@@ -2167,22 +2176,17 @@ static int mxf_add_timecode_metadata(AVDictionary **pm, const char *key, AVTimec
 
 static MXFTimecodeComponent* mxf_resolve_timecode_component(MXFContext *mxf, UID *strong_ref)
 {
-    MXFStructuralComponent *component = NULL;
-    MXFPulldownComponent *pulldown = NULL;
+    MXFTimecodeComponent *timecode;
+    MXFPulldownComponent *pulldown;
 
-    component = mxf_resolve_strong_ref(mxf, strong_ref, AnyType);
-    if (!component)
-        return NULL;
+    timecode = mxf_resolve_strong_ref(mxf, strong_ref, TimecodeComponent);
+    if (timecode)
+        return timecode;
 
-    switch (component->meta.type) {
-    case TimecodeComponent:
-        return (MXFTimecodeComponent*)component;
-    case PulldownComponent: /* timcode component may be located on a pulldown component */
-        pulldown = (MXFPulldownComponent*)component;
+    pulldown = mxf_resolve_strong_ref(mxf, strong_ref, PulldownComponent);
+    if (pulldown)
         return mxf_resolve_strong_ref(mxf, &pulldown->input_segment_ref, TimecodeComponent);
-    default:
-        break;
-    }
+
     return NULL;
 }
 
@@ -2202,17 +2206,16 @@ static MXFPackage* mxf_resolve_source_package(MXFContext *mxf, UID package_ul, U
     return NULL;
 }
 
-static MXFDescriptor* mxf_resolve_multidescriptor(MXFContext *mxf, MXFDescriptor *descriptor, int track_id)
+static MXFDescriptor* mxf_resolve_descriptor(MXFContext *mxf, UID *strong_ref, int track_id)
 {
-    MXFDescriptor *file_descriptor = NULL;
-    int i;
+    MXFDescriptor *descriptor = mxf_resolve_strong_ref(mxf, strong_ref, Descriptor);
+    if (descriptor)
+        return descriptor;
 
-    if (!descriptor)
-        return NULL;
-
-    if (descriptor->meta.type == MultipleDescriptor) {
-        for (i = 0; i < descriptor->file_descriptors_count; i++) {
-            file_descriptor = mxf_resolve_strong_ref(mxf, &descriptor->file_descriptors_refs[i], Descriptor);
+    descriptor = mxf_resolve_strong_ref(mxf, strong_ref, MultipleDescriptor);
+    if (descriptor) {
+        for (int i = 0; i < descriptor->file_descriptors_count; i++) {
+            MXFDescriptor *file_descriptor = mxf_resolve_strong_ref(mxf, &descriptor->file_descriptors_refs[i], Descriptor);
 
             if (!file_descriptor) {
                 av_log(mxf->fc, AV_LOG_ERROR, "could not resolve file descriptor strong ref\n");
@@ -2222,20 +2225,25 @@ static MXFDescriptor* mxf_resolve_multidescriptor(MXFContext *mxf, MXFDescriptor
                 return file_descriptor;
             }
         }
-    } else if (descriptor->meta.type == Descriptor)
-        return descriptor;
+    }
 
     return NULL;
 }
 
-static MXFStructuralComponent* mxf_resolve_essence_group_choice(MXFContext *mxf, MXFEssenceGroup *essence_group)
+static MXFStructuralComponent* mxf_resolve_sourceclip(MXFContext *mxf, UID *strong_ref)
 {
     MXFStructuralComponent *component = NULL;
     MXFPackage *package = NULL;
     MXFDescriptor *descriptor = NULL;
+    MXFEssenceGroup *essence_group;
     int i;
 
-    if (!essence_group || !essence_group->structural_components_count)
+    component = mxf_resolve_strong_ref(mxf, strong_ref, SourceClip);
+    if (component)
+        return component;
+
+    essence_group = mxf_resolve_strong_ref(mxf, strong_ref, EssenceGroup);
+    if (!essence_group)
         return NULL;
 
     /* essence groups contains multiple representations of the same media,
@@ -2252,24 +2260,7 @@ static MXFStructuralComponent* mxf_resolve_essence_group_choice(MXFContext *mxf,
         if (descriptor)
             return component;
     }
-    return NULL;
-}
 
-static MXFStructuralComponent* mxf_resolve_sourceclip(MXFContext *mxf, UID *strong_ref)
-{
-    MXFStructuralComponent *component = NULL;
-
-    component = mxf_resolve_strong_ref(mxf, strong_ref, AnyType);
-    if (!component)
-        return NULL;
-    switch (component->meta.type) {
-        case SourceClip:
-            return component;
-        case EssenceGroup:
-            return mxf_resolve_essence_group_choice(mxf, (MXFEssenceGroup*) component);
-        default:
-            break;
-    }
     return NULL;
 }
 
@@ -2709,8 +2700,7 @@ static int mxf_parse_structural_metadata(MXFContext *mxf)
         st->id = material_track->track_id;
         st->priv_data = source_track;
 
-        source_package->descriptor = mxf_resolve_strong_ref(mxf, &source_package->descriptor_ref, AnyType);
-        descriptor = mxf_resolve_multidescriptor(mxf, source_package->descriptor, source_track->track_id);
+        descriptor = mxf_resolve_descriptor(mxf, &source_package->descriptor_ref, source_track->track_id);
 
         /* A SourceClip from a EssenceGroup may only be a single frame of essence data. The clips duration is then how many
          * frames its suppose to repeat for. Descriptor->duration, if present, contains the real duration of the essence data */
@@ -3150,7 +3140,7 @@ static const MXFMetadataReadTableEntry mxf_metadata_read_table[] = {
     { { 0x06,0x0e,0x2b,0x34,0x02,0x05,0x01,0x01,0x0d,0x01,0x02,0x01,0x01,0x04,0x04,0x00 }, mxf_read_partition_pack },
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x2f,0x00 }, mxf_read_preface_metadata },
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x30,0x00 }, mxf_read_identification_metadata },
-    { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x18,0x00 }, mxf_read_content_storage, 0, AnyType },
+    { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x18,0x00 }, mxf_read_content_storage },
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x37,0x00 }, mxf_read_package, sizeof(MXFPackage), SourcePackage },
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x36,0x00 }, mxf_read_package, sizeof(MXFPackage), MaterialPackage },
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x0f,0x00 }, mxf_read_sequence, sizeof(MXFSequence), Sequence },
@@ -3178,7 +3168,7 @@ static const MXFMetadataReadTableEntry mxf_metadata_read_table[] = {
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x04,0x01,0x02,0x02,0x00,0x00 }, mxf_read_cryptographic_context, sizeof(MXFCryptoContext), CryptoContext },
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x02,0x01,0x01,0x10,0x01,0x00 }, mxf_read_index_table_segment, sizeof(MXFIndexTableSegment), IndexTableSegment },
     { { 0x06,0x0e,0x2b,0x34,0x02,0x53,0x01,0x01,0x0d,0x01,0x01,0x01,0x01,0x01,0x23,0x00 }, mxf_read_essence_container_data, sizeof(MXFEssenceContainerData), EssenceContainerData },
-    { { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 }, NULL, 0, AnyType },
+    { { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 }, NULL },
 };
 
 static int mxf_metadataset_init(MXFMetadataSet *ctx, enum MXFMetadataSetType type, MXFPartition *partition)

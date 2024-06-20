@@ -5516,6 +5516,7 @@ case $target_os in
         ;;
     netbsd)
         disable symver
+        enable section_data_rel_ro
         oss_indev_extralibs="-lossaudio"
         oss_outdev_extralibs="-lossaudio"
         enabled gcc || check_ldflags -Wl,-zmuldefs
@@ -5534,6 +5535,7 @@ case $target_os in
         disable symver
         ;;
     freebsd)
+        enable section_data_rel_ro
         ;;
     bsd/os)
         add_extralibs -lpoll -lgnugetopt
@@ -6996,7 +6998,7 @@ fi
 
 if enabled x86; then
     case $target_os in
-        mingw32*|mingw64*|win32|win64|linux|cygwin*)
+        freebsd|mingw32*|mingw64*|win32|win64|linux|cygwin*)
             ;;
         *)
             disable ffnvcodec cuvid nvdec nvenc
@@ -7825,7 +7827,7 @@ cat > $TMPH <<EOF
 #define FFMPEG_CONFIG_H
 #define FFMPEG_CONFIGURATION "$(c_escape $FFMPEG_CONFIGURATION)"
 #define FFMPEG_LICENSE "$(c_escape $license)"
-#define CONFIG_THIS_YEAR 2023
+#define CONFIG_THIS_YEAR 2024
 #define FFMPEG_DATADIR "$(eval c_escape $datadir)"
 #define AVCONV_DATADIR "$(eval c_escape $datadir)"
 #define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})"
