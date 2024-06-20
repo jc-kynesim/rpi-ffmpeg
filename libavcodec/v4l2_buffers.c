@@ -484,20 +484,24 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
 
     if (ctx != NULL) {
         // Buffer still attached to context
-        V4L2m2mContext *s = buf_to_m2mctx(avbuf);
+        V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+
+        if (!s->output_drm && avbuf->dmabuf[0] != NULL) {
+            for (unsigned int i = 0; i != avbuf->num_planes; ++i)
+                dmabuf_read_end(avbuf->dmabuf[i]);
+        }
 
         ff_mutex_lock(&ctx->lock);
 
         ff_v4l2_buffer_set_avail(avbuf);
+        avbuf->buf.timestamp.tv_sec = 0;
+        avbuf->buf.timestamp.tv_usec = 0;
 
-        if (s->draining && V4L2_TYPE_IS_OUTPUT(ctx->type)) {
+        if (V4L2_TYPE_IS_OUTPUT(ctx->type)) {
             av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer avail\n", ctx->name);
-            /* no need to queue more buffers to the driver */
         }
         else if (ctx->streamon) {
             av_log(logger(avbuf), AV_LOG_DEBUG, "%s: Buffer requeue\n", ctx->name);
-            avbuf->buf.timestamp.tv_sec = 0;
-            avbuf->buf.timestamp.tv_usec = 0;
             ff_v4l2_buffer_enqueue(avbuf);  // will set to IN_DRIVER
         }
         else {
@@ -533,6 +537,9 @@ static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
                 avbuf->buf.m.planes[i].m.fd = dma_fd;
             else
                 avbuf->buf.m.fd = dma_fd;
+
+            if (!s->output_drm)
+                avbuf->plane_info[i].mm_addr = dmabuf_map(avbuf->dmabuf[i]);
         }
         else {
             struct v4l2_exportbuffer expbuf;
@@ -607,6 +614,10 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 
     if (buf_to_m2mctx(avbuf)->output_drm) {
         /* 1. get references to the actual data */
+        const int rv = ff_v4l2_context_frames_set(avbuf->context);
+        if (rv != 0)
+            return rv;
+
         frame->data[0] = (uint8_t *) v4l2_get_drm_frame(avbuf);
         frame->format = AV_PIX_FMT_DRM_PRIME;
         frame->hw_frames_ctx = av_buffer_ref(avbuf->context->frames_ref);
@@ -641,6 +652,11 @@ static int v4l2_buffer_buf_to_swframe(AVFrame *frame, V4L2Buffer *avbuf)
 
     default:
         break;
+    }
+
+    if (avbuf->dmabuf[0] != NULL) {
+        for (unsigned int i = 0; i != avbuf->num_planes; ++i)
+            dmabuf_read_start(avbuf->dmabuf[i]);
     }
 
     return 0;
@@ -943,6 +959,7 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
     V4L2Buffer * const avbuf = av_mallocz(sizeof(*avbuf));
     AVBufferRef * bufref;
     V4L2m2mContext * const s = ctx_to_m2mctx(ctx);
+    int want_mmap;
 
     *pbufref = NULL;
     if (avbuf == NULL)
@@ -984,10 +1001,10 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
     } else
         avbuf->num_planes = 1;
 
-    for (i = 0; i < avbuf->num_planes; i++) {
-        const int want_mmap = avbuf->buf.memory == V4L2_MEMORY_MMAP &&
-            (V4L2_TYPE_IS_OUTPUT(ctx->type) || !buf_to_m2mctx(avbuf)->output_drm);
+    want_mmap = avbuf->buf.memory == V4L2_MEMORY_MMAP &&
+        (V4L2_TYPE_IS_OUTPUT(ctx->type) || !buf_to_m2mctx(avbuf)->output_drm);
 
+    for (i = 0; i < avbuf->num_planes; i++) {
         avbuf->plane_info[i].bytesperline = V4L2_TYPE_IS_MULTIPLANAR(ctx->type) ?
             ctx->format.fmt.pix_mp.plane_fmt[i].bytesperline :
             ctx->format.fmt.pix.bytesperline;
@@ -1028,13 +1045,12 @@ int ff_v4l2_buffer_initialize(AVBufferRef ** pbufref, int index, V4L2Context *ct
         avbuf->buf.length    = avbuf->planes[0].length;
     }
 
-    if (!V4L2_TYPE_IS_OUTPUT(ctx->type)) {
-        if (s->output_drm) {
-            ret = v4l2_buffer_export_drm(avbuf);
-            if (ret) {
-                av_log(logger(avbuf), AV_LOG_ERROR, "Failed to get exported drm handles\n");
-                goto fail;
-            }
+    if (V4L2_TYPE_IS_CAPTURE(ctx->type) && !want_mmap) {
+        // export_drm does dmabuf alloc if we aren't using v4l2 alloc
+        ret = v4l2_buffer_export_drm(avbuf);
+        if (ret) {
+            av_log(logger(avbuf), AV_LOG_ERROR, "Failed to get exported drm handles\n");
+            goto fail;
         }
     }
 

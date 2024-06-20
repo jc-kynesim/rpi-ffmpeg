@@ -135,6 +135,14 @@ typedef struct V4L2Context {
 int ff_v4l2_context_init(V4L2Context* ctx);
 
 /**
+ * (re)set the hwframecontext from the current v4l2 context
+ *
+ * @param[in] ctx A pointer to a V4L2Context. See V4L2Context description for required variables.
+ * @return 0 in case of success, a negative value representing the error otherwise.
+ */
+int ff_v4l2_context_frames_set(V4L2Context *const ctx);
+
+/**
  * Sets the V4L2Context format in the v4l2 driver.
  *
  * @param[in] ctx A pointer to a V4L2Context. See V4L2Context description for required variables.

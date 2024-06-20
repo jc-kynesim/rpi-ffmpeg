@@ -10,6 +10,8 @@ RPI_KEEPS=""
 NOSHARED=
 MMAL=
 USR_PREFIX=
+TOOLCHAIN=
+R=rel
 
 while [ "$1" != "" ] ; do
     case $1 in
@@ -21,6 +23,10 @@ while [ "$1" != "" ] ; do
 	    ;;
 	--usr)
 	    USR_PREFIX=/usr
+	    ;;
+	--tsan)
+	    TOOLCHAIN="--toolchain=gcc-tsan"
+	    R=tsan
 	    ;;
 	*)
 	    echo "Usage $0: [--noshared] [--mmal] [--usr]"
@@ -82,11 +88,11 @@ V=`cat RELEASE`
 SHARED_LIBS="--enable-shared"
 if [ $NOSHARED ]; then
   SHARED_LIBS="--disable-shared"
-  OUT=$BUILDBASE/$B-$C-$V-static-rel
+  OUT=$BUILDBASE/$B-$C-$V-static-$R
   echo Static libs
 else
   echo Shared libs
-  OUT=$BUILDBASE/$B-$C-$V-shared-rel
+  OUT=$BUILDBASE/$B-$C-$V-shared-$R
 fi
 
 if [ ! $USR_PREFIX ]; then
@@ -106,6 +112,7 @@ $FFSRC/configure \
  --libdir=$LIB_PREFIX\
  --incdir=$INC_PREFIX\
  $MCOPTS\
+ $TOOLCHAIN\
  --disable-stripping\
  --disable-thumb\
  --enable-sand\

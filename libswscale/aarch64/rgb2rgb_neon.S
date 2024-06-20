@@ -338,8 +338,8 @@ function ff_bgr24toyv12_aarch64, export=1
         b.eq            90f
 
         subs            w9,  w4, #0
-        add             x0, x0, w14, SXTX
-        add             x1, x1, w6, SXTX
+        add             x0, x0, w14, sxtw
+        add             x1, x1, w6, sxtw
         mov             x10, x0
         mov             x11, x1
         b.lt            12f
@@ -424,10 +424,10 @@ function ff_bgr24toyv12_aarch64, export=1
 
 // ------------------- Loop to start
 
-        add             x0, x0, w14, SXTX
-        add             x1, x1, w6, SXTX
-        add             x2, x2, w7, SXTX
-        add             x3, x3, w7, SXTX
+        add             x0, x0, w14, sxtw
+        add             x1, x1, w6, sxtw
+        add             x2, x2, w7, sxtw
+        add             x3, x3, w7, sxtw
         subs            w5, w5, #1
         b.gt            11b
 90:

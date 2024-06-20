@@ -86,6 +86,8 @@ struct media_pool {
     int fd;
     sem_t sem;
     pthread_mutex_t lock;
+    unsigned int pool_n;
+    struct media_request * pool_reqs;
     struct media_request * free_reqs;
     struct pollqueue * pq;
 };
@@ -251,18 +253,17 @@ int media_request_abort(struct media_request ** const preq)
     return 0;
 }
 
-static void delete_req_chain(struct media_request * const chain)
+static void free_req_pool(struct media_request * const pool, const unsigned int n)
 {
-    struct media_request * next = chain;
-    while (next) {
-        struct media_request * const req = next;
-        next = req->next;
+    unsigned int i;
+    for (i = 0; i != n; ++i) {
+        struct media_request * const req = pool + i;
         if (req->pt)
             polltask_delete(&req->pt);
         if (req->fd != -1)
             close(req->fd);
-        free(req);
     }
+    free(pool);
 }
 
 struct media_pool * media_pool_new(const char * const media_path,
@@ -283,17 +284,16 @@ struct media_pool * media_pool_new(const char * const media_path,
         goto fail1;
     }
 
+    if ((mp->pool_reqs = calloc(n, sizeof(*mp->pool_reqs))) == NULL)
+        goto fail3;
+    mp->pool_n = n;
     for (i = 0; i != n; ++i) {
-        struct media_request * req = malloc(sizeof(*req));
-        if (!req)
-            goto fail4;
+        mp->pool_reqs[i].mp = mp;
+        mp->pool_reqs[i].fd = -1;
+    }
 
-        *req = (struct media_request){
-            .next = mp->free_reqs,
-            .mp = mp,
-            .fd = -1
-        };
-        mp->free_reqs = req;
+    for (i = 0; i != n; ++i) {
+        struct media_request * const req = mp->pool_reqs + i;
 
         if (ioctl(mp->fd, MEDIA_IOC_REQUEST_ALLOC, &req->fd) == -1) {
             request_log("Failed to alloc request %d: %s\n", i, strerror(errno));
@@ -303,6 +303,9 @@ struct media_pool * media_pool_new(const char * const media_path,
         req->pt = polltask_new(pq, req->fd, POLLPRI, media_request_done, req);
         if (!req->pt)
             goto fail4;
+
+        req->next = mp->free_reqs,
+        mp->free_reqs = req;
     }
 
     sem_init(&mp->sem, 0, n);
@@ -310,7 +313,8 @@ struct media_pool * media_pool_new(const char * const media_path,
     return mp;
 
 fail4:
-    delete_req_chain(mp->free_reqs);
+    free_req_pool(mp->pool_reqs, mp->pool_n);
+fail3:
     close(mp->fd);
     pthread_mutex_destroy(&mp->lock);
 fail1:
@@ -327,7 +331,7 @@ void media_pool_delete(struct media_pool ** pMp)
         return;
     *pMp = NULL;
 
-    delete_req_chain(mp->free_reqs);
+    free_req_pool(mp->pool_reqs, mp->pool_n);
     close(mp->fd);
     sem_destroy(&mp->sem);
     pthread_mutex_destroy(&mp->lock);
