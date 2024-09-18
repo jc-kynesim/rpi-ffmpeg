@@ -74,6 +74,9 @@ typedef struct V4L2RequestContextHEVC {
     struct pollqueue *pq;
     struct media_pool * mpool;
     struct mediabufs_ctl *mbufs;
+
+    struct v4l2_ctrl_hevc_sps cur_sps;
+    struct v4l2_ctrl_hevc_pps cur_pps;
 } V4L2RequestContextHEVC;
 
 typedef struct v4l2_req_decode_fns {

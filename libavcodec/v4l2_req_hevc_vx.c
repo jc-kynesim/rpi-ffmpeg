@@ -808,13 +808,16 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
     void * const offsets, const size_t offset_count)
 {
     int rv;
-#if HEVC_CTRLS_VERSION >= 2
+#if HEVC_CTRLS_VERSION >= 4
+    unsigned int n = 1;
+#elif HEVC_CTRLS_VERSION >= 2
     unsigned int n = 3;
 #else
     unsigned int n = 2;
 #endif
 
     struct v4l2_ext_control control[6] = {
+#if HEVC_CTRLS_VERSION < 4
         {
             .id = V4L2_CID_STATELESS_HEVC_SPS,
             .ptr = &controls->sps,
@@ -825,6 +828,7 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
             .ptr = &controls->pps,
             .size = sizeof(controls->pps),
         },
+#endif
 #if HEVC_CTRLS_VERSION >= 2
         {
             .id = V4L2_CID_STATELESS_HEVC_DECODE_PARAMS,
@@ -833,6 +837,27 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
         },
 #endif
     };
+
+#if HEVC_CTRLS_VERSION >= 4
+    if (memcmp(&ctx->cur_sps, &controls->sps, sizeof(ctx->cur_sps)) != 0) {
+        fprintf(stderr, "*** New SPS\n");
+        memcpy(&ctx->cur_sps, &controls->sps, sizeof(ctx->cur_sps));
+        control[n++] = (struct v4l2_ext_control) {
+            .id = V4L2_CID_STATELESS_HEVC_SPS,
+            .ptr = &controls->sps,
+            .size = sizeof(controls->sps),
+        };
+    }
+    if (memcmp(&ctx->cur_pps, &controls->pps, sizeof(ctx->cur_pps)) != 0) {
+        fprintf(stderr, "*** New PPS\n");
+        memcpy(&ctx->cur_pps, &controls->pps, sizeof(ctx->cur_pps));
+        control[n++] = (struct v4l2_ext_control) {
+            .id = V4L2_CID_STATELESS_HEVC_PPS,
+            .ptr = &controls->pps,
+            .size = sizeof(controls->pps),
+        };
+    }
+#endif
 
     if (slices)
         control[n++] = (struct v4l2_ext_control) {
