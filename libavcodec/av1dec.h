@@ -118,6 +118,7 @@ typedef struct AV1DecContext {
 
     // AVOptions
     int operating_point;
+    int all_layers;
 } AV1DecContext;
 
 #endif /* AVCODEC_AV1DEC_H */

@@ -1162,9 +1162,13 @@ static int set_output_frame(AVCodecContext *avctx, AVFrame *frame)
     int ret;
 
     // TODO: all layers
-    if (s->operating_point_idc &&
-        av_log2(s->operating_point_idc >> 8) > s->cur_frame.spatial_id)
-        return 0;
+    if (!s->all_layers) {
+        if (s->operating_point_idc &&
+            av_log2(s->operating_point_idc >> 8) > s->cur_frame.spatial_id) {
+            av_log(avctx, AV_LOG_DEBUG, "Skip output for spatial layer %d. Operating point idx = %x. Wxh = %dx%d.\n", s->cur_frame.spatial_id, s->operating_point_idc,srcframe->width,srcframe->height);
+            return 0;
+        }
+    }
 
     ret = av_frame_ref(frame, srcframe);
     if (ret < 0)
@@ -1553,6 +1557,7 @@ static void av1_decode_flush(AVCodecContext *avctx)
 static const AVOption av1_options[] = {
     { "operating_point",  "Select an operating point of the scalable bitstream",
                           OFFSET(operating_point), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, AV1_MAX_OPERATING_POINTS - 1, VD },
+    { "alllayers", "Output all spatial layers", OFFSET(all_layers), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM },
     { NULL }
 };
 
