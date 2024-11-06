@@ -40,14 +40,11 @@
 #include "hwcontext_drm.h"
 #include "hwcontext_internal.h"
 #include "imgutils.h"
-<<<<<<< HEAD
 #include "mem.h"
 
-=======
 #if CONFIG_SAND
 #include "libavutil/rpi_sand_fns.h"
 #endif
->>>>>>> d3edc98531 (hwcontext_drm: Add sand conversions)
 
 static void drm_device_free(AVHWDeviceContext *hwdev)
 {
