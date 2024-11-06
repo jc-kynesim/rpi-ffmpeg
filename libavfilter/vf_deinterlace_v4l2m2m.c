@@ -44,6 +44,7 @@
 #include "libavutil/hwcontext_drm.h"
 #include "libavutil/internal.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/time.h"
@@ -53,7 +54,6 @@
 #include "filters.h"
 #include "avfilter.h"
 #include "formats.h"
-#include "internal.h"
 #include "scale_eval.h"
 #include "video.h"
 
@@ -201,6 +201,39 @@ typedef struct DeintV4L2M2MContext {
     enum AVChromaLocation chroma_location;
 } DeintV4L2M2MContext;
 
+
+static inline void frame_set_progressive(AVFrame* frame)
+{
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+    frame->interlaced_frame = 0;
+    frame->top_field_first =  0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+    frame->flags &= ~(AV_FRAME_FLAG_TOP_FIELD_FIRST | AV_FRAME_FLAG_INTERLACED);
+}
+
+static inline int frame_is_interlaced(const AVFrame* const frame)
+{
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+    return frame->interlaced_frame || (frame->flags & AV_FRAME_FLAG_INTERLACED) != 0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#else
+    return (frame->flags & AV_FRAME_FLAG_INTERLACED) != 0;
+#endif
+}
+
+static inline int frame_is_tff(const AVFrame* const frame)
+{
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+    return frame->top_field_first || (frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) != 0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#else
+    return (frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) != 0;
+#endif
+}
 
 static inline int drain_frame_expected(const drain_state_t d)
 {
@@ -1435,8 +1468,8 @@ static int deint_v4l2m2m_enqueue_frame(V4L2Queue * const queue, AVFrame * const 
     else
         buf->buffer.m.fd = drm_desc->objects[0].fd;
 
-    buf->buffer.field = !frame->interlaced_frame ? V4L2_FIELD_NONE :
-        frame->top_field_first ? V4L2_FIELD_INTERLACED_TB :
+    buf->buffer.field = !frame_is_interlaced(frame) ? V4L2_FIELD_NONE :
+        frame_is_tff(frame) ? V4L2_FIELD_INTERLACED_TB :
             V4L2_FIELD_INTERLACED_BT;
 
     if (ctx->field_order != buf->buffer.field) {
@@ -1566,8 +1599,7 @@ static int deint_v4l2m2m_dequeue_frame(V4L2Queue *queue, AVFrame* frame, int tim
 
     if (ctx->filter_type == FILTER_V4L2_DEINTERLACE) {
         // Not interlaced now
-        frame->interlaced_frame = 0;   // *** Fill in from dst buffer?
-        frame->top_field_first = 0;
+        frame_set_progressive(frame);
         // Duration halved
         frame->duration /= 2;
     }
@@ -1607,32 +1639,20 @@ static int deint_v4l2m2m_config_props(AVFilterLink *outlink)
         ctx->output_height = ctx->height;
     }
 
-    av_log(priv, AV_LOG_DEBUG, "%s: %dx%d->%dx%d FR: %d/%d->%d/%d\n", __func__,
-           ctx->width, ctx->height, ctx->output_width, ctx->output_height,
-           inlink->frame_rate.num, inlink->frame_rate.den, outlink->frame_rate.num, outlink->frame_rate.den);
+    av_log(priv, AV_LOG_DEBUG, "%s: %dx%d->%dx%d\n", __func__,
+           ctx->width, ctx->height, ctx->output_width, ctx->output_height);
 
     outlink->time_base           = inlink->time_base;
     outlink->w                   = ctx->output_width;
     outlink->h                   = ctx->output_height;
     outlink->format              = inlink->format;
-    if (ctx->filter_type == FILTER_V4L2_DEINTERLACE && inlink->frame_rate.den != 0)
-        outlink->frame_rate = (AVRational){inlink->frame_rate.num * 2, inlink->frame_rate.den};
 
     if (inlink->sample_aspect_ratio.num)
         outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink->w, outlink->w * inlink->h}, inlink->sample_aspect_ratio);
     else
         outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
 
-    ret = deint_v4l2m2m_find_device(ctx);
-    if (ret)
-        return ret;
-
-    if (inlink->hw_frames_ctx) {
-        ctx->hw_frames_ctx = av_buffer_ref(inlink->hw_frames_ctx);
-        if (!ctx->hw_frames_ctx)
-            return AVERROR(ENOMEM);
-    }
-    return 0;
+    return deint_v4l2m2m_find_device(ctx);
 }
 
 static uint32_t desc_pixelformat(const AVDRMFrameDescriptor * const drm_desc)
@@ -1669,7 +1689,7 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
     int ret;
 
     av_log(priv, AV_LOG_DEBUG, "<<< %s: input pts: %"PRId64" dts: %"PRId64" field :%d interlaced: %d aspect:%d/%d\n",
-           __func__, in->pts, in->pkt_dts, in->top_field_first, in->interlaced_frame, in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
+           __func__, in->pts, in->pkt_dts, frame_is_tff(in), frame_is_interlaced(in), in->sample_aspect_ratio.num, in->sample_aspect_ratio.den);
 
     if (ctx->field_order == V4L2_FIELD_ANY) {
         const AVDRMFrameDescriptor * const drm_desc = (AVDRMFrameDescriptor *)in->data[0];
@@ -1732,7 +1752,7 @@ static int deint_v4l2m2m_filter_frame(AVFilterLink *link, AVFrame *in)
             return ret;
         }
 
-        if (in->top_field_first)
+        if (frame_is_tff(in))
             ctx->field_order = V4L2_FIELD_INTERLACED_TB;
         else
             ctx->field_order = V4L2_FIELD_INTERLACED_BT;
@@ -1843,7 +1863,7 @@ static int deint_v4l2m2m_activate(AVFilterContext *avctx)
             }
         }
         else {
-            frame->interlaced_frame = 0;
+            frame_set_progressive(frame);
             // frame is always consumed by filter_frame - even on error despite
             // a somewhat confusing comment in the header
             rv = ff_filter_frame(outlink, frame);
