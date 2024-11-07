@@ -49,17 +49,13 @@ struct ff_weak_link_client;
 struct dmabuf_h;
 
 typedef struct V4L2Buffer {
-    /* This object is refcounted per-plane, so we need to keep track
-     * of how many context-refs we are holding.
-     * This pointer is a RefStruct reference. */
-    const struct V4L2m2mContext *context_ref;
-    atomic_uint context_refcount;
     /* each buffer needs to have a reference to its context
      * The pointer is good enough for most operation but once the buffer has
      * been passed to the user the buffer may become orphaned so for free ops
      * the weak link must be used to ensure that the context is actually
      * there
      */
+    struct V4L2Context *context;
     struct ff_weak_link_client *context_wl;
 
     /* DRM descriptor */

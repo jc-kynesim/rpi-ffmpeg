@@ -415,6 +415,5 @@ int ff_v4l2_m2m_create_context(V4L2m2mPriv *priv, V4L2m2mContext **s)
         return AVERROR(ENOMEM);
     }
 
-    *pps = s;
     return 0;
 }

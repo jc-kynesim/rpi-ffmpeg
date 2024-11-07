@@ -29,6 +29,7 @@
 #include "libavutil/avassert.h"
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_drm.h"
+#include "libavutil/mem.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
@@ -49,7 +50,7 @@
 #include "h264_parse.h"
 #endif
 #if CONFIG_HEVC_DECODER
-#include "hevc_parse.h"
+#include "hevc/parse.h"
 #endif
 
 // Pick 64 for max last count - that is >1sec at 60fps

@@ -31,8 +31,9 @@
 #include "libavcodec/avcodec.h"
 #include "libavcodec/internal.h"
 #include "libavutil/avassert.h"
+#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
-#include "refstruct.h"
+#include "libavutil/hwcontext.h"
 #include "v4l2_context.h"
 #include "v4l2_buffers.h"
 #include "v4l2_m2m.h"
@@ -491,9 +492,6 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
                 dmabuf_read_end(avbuf->dmabuf[i]);
         }
 
-<<<<<<< HEAD
-        ff_refstruct_unref(&avbuf->context_ref);
-=======
         ff_mutex_lock(&ctx->lock);
 
         ff_v4l2_buffer_set_avail(avbuf);
@@ -512,7 +510,6 @@ static void v4l2_free_bufref(void *opaque, uint8_t *data)
         }
 
         ff_mutex_unlock(&ctx->lock);
->>>>>>> dca7e2923a (V4L2 stateful rework)
     }
 
     ff_weak_link_unlock(avbuf->context_wl);
@@ -524,17 +521,10 @@ static inline uint32_t ff_v4l2_buf_len(const struct v4l2_buffer * b, unsigned in
     return V4L2_TYPE_IS_MULTIPLANAR(b->type) ? b->m.planes[i].length : b->length;
 }
 
-<<<<<<< HEAD
-    if (in->context_ref)
-        atomic_fetch_add(&in->context_refcount, 1);
-    else {
-        in->context_ref = ff_refstruct_ref(s->self_ref);
-=======
 static int v4l2_buffer_export_drm(V4L2Buffer* avbuf)
 {
     int i, ret;
     const V4L2m2mContext * const s = buf_to_m2mctx(avbuf);
->>>>>>> dca7e2923a (V4L2 stateful rework)
 
     for (i = 0; i < avbuf->num_planes; i++) {
         int dma_fd = -1;

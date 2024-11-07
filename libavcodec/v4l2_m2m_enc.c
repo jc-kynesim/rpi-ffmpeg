@@ -30,6 +30,7 @@
 #include "libavcodec/avcodec.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/pixfmt.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "codec_internal.h"
 #include "profiles.h"
