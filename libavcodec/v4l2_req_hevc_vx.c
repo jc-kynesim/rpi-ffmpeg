@@ -1,10 +1,12 @@
 // File included by v4l2_req_hevc_v* - not compiled on its own
 
 #include "decode.h"
-#include "hevcdec.h"
+#include "hevc/hevcdec.h"
 #include "hwconfig.h"
 #include "internal.h"
 #include "thread.h"
+
+#include "libavutil/mem.h"
 
 #if HEVC_CTRLS_VERSION == 1
 #include "hevc-ctrls-v1.h"
@@ -140,16 +142,18 @@ static inline void frame_set_capture_dpb(AVFrame * const frame, const uint64_t d
 static void fill_pred_table(const HEVCContext *h, struct v4l2_hevc_pred_weight_table *table)
 {
     int32_t luma_weight_denom, chroma_weight_denom;
-    const SliceHeader *sh = &h->sh;
+    const SliceHeader * const sh = &h->sh;
+    const HEVCPPS * const pps = h->pps;
+    const HEVCSPS * const sps = pps->sps;
 
     if (sh->slice_type == HEVC_SLICE_I ||
-        (sh->slice_type == HEVC_SLICE_P && !h->ps.pps->weighted_pred_flag) ||
-        (sh->slice_type == HEVC_SLICE_B && !h->ps.pps->weighted_bipred_flag))
+        (sh->slice_type == HEVC_SLICE_P && !pps->weighted_pred_flag) ||
+        (sh->slice_type == HEVC_SLICE_B && !pps->weighted_bipred_flag))
         return;
 
     table->luma_log2_weight_denom = sh->luma_log2_weight_denom;
 
-    if (h->ps.sps->chroma_format_idc)
+    if (sps->chroma_format_idc)
         table->delta_chroma_log2_weight_denom = sh->chroma_log2_weight_denom - sh->luma_log2_weight_denom;
 
     luma_weight_denom = (1 << sh->luma_log2_weight_denom);
@@ -185,19 +189,19 @@ static int find_frame_rps_type(const HEVCContext *h, uint64_t timestamp)
 
     for (i = 0; i < h->rps[ST_CURR_BEF].nb_refs; i++) {
         frame = h->rps[ST_CURR_BEF].ref[i];
-        if (frame && timestamp == frame_capture_dpb(frame->frame))
+        if (frame && timestamp == frame_capture_dpb(frame->f))
             return V4L2_HEVC_DPB_ENTRY_RPS_ST_CURR_BEFORE;
     }
 
     for (i = 0; i < h->rps[ST_CURR_AFT].nb_refs; i++) {
         frame = h->rps[ST_CURR_AFT].ref[i];
-        if (frame && timestamp == frame_capture_dpb(frame->frame))
+        if (frame && timestamp == frame_capture_dpb(frame->f))
             return V4L2_HEVC_DPB_ENTRY_RPS_ST_CURR_AFTER;
     }
 
     for (i = 0; i < h->rps[LT_CURR].nb_refs; i++) {
         frame = h->rps[LT_CURR].ref[i];
-        if (frame && timestamp == frame_capture_dpb(frame->frame))
+        if (frame && timestamp == frame_capture_dpb(frame->f))
             return V4L2_HEVC_DPB_ENTRY_RPS_LT_CURR;
     }
 
@@ -215,7 +219,7 @@ get_ref_pic_index(const HEVCContext *h, const HEVCFrame *frame,
     if (!frame)
         return 0;
 
-    timestamp = frame_capture_dpb(frame->frame);
+    timestamp = frame_capture_dpb(frame->f);
 
     for (unsigned int i = 0; i < num_entries; i++) {
         if (entries[i].timestamp == timestamp)
@@ -246,24 +250,22 @@ static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
 static int slice_add(V4L2MediaReqDescriptor * const rd)
 {
     if (rd->num_slices >= rd->alloced_slices) {
-        struct v4l2_ctrl_hevc_slice_params * p2;
-        struct slice_info * s2;
         size_t n2 = rd->alloced_slices == 0 ? 8 : rd->alloced_slices * 2;
 
-        p2 = av_realloc_array(rd->slice_params, n2, sizeof(*p2));
-        if (p2 == NULL)
-            return AVERROR(ENOMEM);
-        rd->slice_params = p2;
-
-        s2 = av_realloc_array(rd->slices, n2, sizeof(*s2));
-        if (s2 == NULL)
-            return AVERROR(ENOMEM);
-        rd->slices = s2;
-
+        if (av_reallocp_array(&rd->slice_params, n2, sizeof(*rd->slice_params)))
+            goto fail;
+        if (av_reallocp_array(&rd->slices, n2, sizeof(*rd->slices)))
+            goto fail;
         rd->alloced_slices = n2;
     }
     ++rd->num_slices;
     return 0;
+
+fail:
+    av_freep(&rd->slices);
+    rd->alloced_slices = 0;
+    rd->num_slices = 0;
+    return AVERROR(ENOMEM);
 }
 
 static int offsets_add(V4L2MediaReqDescriptor *const rd, const size_t n, const unsigned * const offsets)
@@ -273,8 +275,11 @@ static int offsets_add(V4L2MediaReqDescriptor *const rd, const size_t n, const u
         void * p2;
         while (rd->num_offsets + n > n2)
             n2 *= 2;
-        if ((p2 = av_realloc_array(rd->offsets, n2, sizeof(*rd->offsets))) == NULL)
+        if (av_reallocp_array(&rd->offsets, n2, sizeof(*rd->offsets))) {
+            rd->alloced_offsets = 0;
+            rd->num_offsets = 0;
             return AVERROR(ENOMEM);
+        }
         rd->offsets = p2;
         rd->alloced_offsets = n2;
     }
@@ -288,21 +293,22 @@ fill_dpb_entries(const HEVCContext * const h, struct v4l2_hevc_dpb_entry * const
 {
     unsigned int i;
     unsigned int n = 0;
-    const HEVCFrame * const pic = h->ref;
+    const HEVCFrame * const pic = h->cur_frame;
+    const HEVCLayerContext * const layer = &h->layers[h->cur_layer];
 
-    for (i = 0; i < FF_ARRAY_ELEMS(h->DPB); i++) {
-        const HEVCFrame * const frame = &h->DPB[i];
+    for (i = 0; i < FF_ARRAY_ELEMS(layer->DPB); i++) {
+        const HEVCFrame * const frame = &layer->DPB[i];
         if (frame != pic && (frame->flags & (HEVC_FRAME_FLAG_LONG_REF | HEVC_FRAME_FLAG_SHORT_REF))) {
             struct v4l2_hevc_dpb_entry * const entry = entries + n++;
 
-            entry->timestamp = frame_capture_dpb(frame->frame);
+            entry->timestamp = frame_capture_dpb(frame->f);
 #if HEVC_CTRLS_VERSION <= 2
             entry->rps = find_frame_rps_type(h, entry->timestamp);
 #else
             entry->flags = (frame->flags & HEVC_FRAME_FLAG_LONG_REF) == 0 ? 0 :
                 V4L2_HEVC_DPB_ENTRY_LONG_TERM_REFERENCE;
 #endif
-            entry->field_pic = frame->frame->interlaced_frame;
+            entry->field_pic = (frame->f->flags & AV_FRAME_FLAG_INTERLACED) != 0;
 
 #if HEVC_CTRLS_VERSION <= 3
             /* TODO: Interleaved: Get the POC for each field. */
@@ -351,7 +357,7 @@ static void fill_slice_params(const HEVCContext * const h,
         /* ISO/IEC 23008-2, ITU-T Rec. H.265: General slice segment header */
         .slice_type = sh->slice_type,
         .colour_plane_id = sh->colour_plane_id,
-        .slice_pic_order_cnt = h->ref->poc,
+        .slice_pic_order_cnt = h->cur_frame->poc,
         .num_ref_idx_l0_active_minus1 = sh->nb_refs[L0] ? sh->nb_refs[L0] - 1 : 0,
         .num_ref_idx_l1_active_minus1 = sh->nb_refs[L1] ? sh->nb_refs[L1] - 1 : 0,
         .collocated_ref_idx = sh->slice_temporal_mvp_enabled_flag ? sh->collocated_ref_idx : 0,
@@ -409,13 +415,13 @@ static void fill_slice_params(const HEVCContext * const h,
 #endif
 
     if (sh->slice_type != HEVC_SLICE_I) {
-        rpl = &h->ref->refPicList[0];
+        rpl = &h->cur_frame->refPicList[0];
         for (i = 0; i < rpl->nb_refs; i++)
             slice_params->ref_idx_l0[i] = get_ref_pic_index(h, rpl->ref[i], dpb, dpb_n);
     }
 
     if (sh->slice_type == HEVC_SLICE_B) {
-        rpl = &h->ref->refPicList[1];
+        rpl = &h->cur_frame->refPicList[1];
         for (i = 0; i < rpl->nb_refs; i++)
             slice_params->ref_idx_l1[i] = get_ref_pic_index(h, rpl->ref[i], dpb, dpb_n);
     }
@@ -499,31 +505,31 @@ static void fill_sps(struct v4l2_ctrl_hevc_sps *ctrl, const HEVCSPS *sps)
         .sps_max_sub_layers_minus1 = sps->max_sub_layers - 1,
     };
 
-    if (sps->separate_colour_plane_flag)
+    if (sps->separate_colour_plane)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_SEPARATE_COLOUR_PLANE;
 
-    if (sps->scaling_list_enable_flag)
+    if (sps->scaling_list_enabled)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_SCALING_LIST_ENABLED;
 
-    if (sps->amp_enabled_flag)
+    if (sps->amp_enabled)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_AMP_ENABLED;
 
     if (sps->sao_enabled)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_SAMPLE_ADAPTIVE_OFFSET;
 
-    if (sps->pcm_enabled_flag)
+    if (sps->pcm_enabled)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_PCM_ENABLED;
 
-    if (sps->pcm.loop_filter_disable_flag)
+    if (sps->pcm_loop_filter_disabled)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_PCM_LOOP_FILTER_DISABLED;
 
-    if (sps->long_term_ref_pics_present_flag)
+    if (sps->long_term_ref_pics_present)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_LONG_TERM_REF_PICS_PRESENT;
 
-    if (sps->sps_temporal_mvp_enabled_flag)
+    if (sps->temporal_mvp_enabled)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_SPS_TEMPORAL_MVP_ENABLED;
 
-    if (sps->sps_strong_intra_smoothing_enable_flag)
+    if (sps->strong_intra_smoothing_enabled)
         ctrl->flags |= V4L2_HEVC_SPS_FLAG_STRONG_INTRA_SMOOTHING_ENABLED;
 }
 
@@ -693,7 +699,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
                                          av_unused uint32_t size)
 {
     const HEVCContext *h = avctx->priv_data;
-    V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)h->ref->frame->data[0];
+    V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)h->cur_frame->f->data[0];
     static int z = 0;
 
     fprintf(stderr, "<<< %s: %d\n", __func__, ++z);
@@ -705,7 +711,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
     rd->timestamp = cvt_timestamp_to_dpb(ctx->timestamp);
 
     {
-        FrameDecodeData * const fdd = (FrameDecodeData*)h->ref->frame->private_ref->data;
+        FrameDecodeData * const fdd = (FrameDecodeData*)h->cur_frame->f->private_ref->data;
         fdd->post_process = frame_post_process;
     }
 
@@ -718,7 +724,7 @@ static int v4l2_request_hevc_start_frame(AVCodecContext *avctx,
         }
     }
 
-    ff_thread_finish_setup(avctx); // Allow next thread to enter rpi_hevc_start_frame
+    // ff_thread_finish_setup by caller
 
     return 0;
 }
@@ -890,12 +896,12 @@ add_ref_once(V4L2MediaReqDescriptor * const rd, struct HEVCFrame * const ref)
     AVBufferRef **p = rd->refs;
     int i = 0;
     while (*p != NULL) {
-        if (ref->frame->buf[0]->data == (*p)->data)
+        if (ref->f->buf[0]->data == (*p)->data)
             return;
         ++p;
         av_assert0(++i < 16);
     }
-    *p = av_buffer_ref(ref->frame->buf[0]);
+    *p = av_buffer_ref(ref->f->buf[0]);
 }
 
 // This only works because we started out from a single coded frame buffer
@@ -903,9 +909,9 @@ add_ref_once(V4L2MediaReqDescriptor * const rd, struct HEVCFrame * const ref)
 static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx, const uint8_t *buffer, uint32_t size)
 {
     const HEVCContext * const h = avctx->priv_data;
-    V4L2MediaReqDescriptor * const rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
-    int bcount = get_bits_count(&h->HEVClc->gb);
-    uint32_t boff = (ptr_from_index(buffer, bcount/8 + 1) - (buffer + bcount/8 + 1)) * 8 + bcount;
+    const SliceHeader * const sh = &h->sh;
+    V4L2MediaReqDescriptor * const rd = (V4L2MediaReqDescriptor*)h->cur_frame->f->data[0];
+    uint32_t boff = (ptr_from_index(buffer, sh->data_offset) - buffer) * 8 - 1;
 
     const unsigned int n = rd->num_slices;
     const unsigned int block_start = (n / ctx->max_slices) * ctx->max_slices;
@@ -913,7 +919,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, V4L2RequestCont
     int rv;
     struct slice_info * si;
 
-    fprintf(stderr, "<<< %s\n", __func__);
+    fprintf(stderr, "<<< %s: boff=%u\n", __func__, boff);
     // This looks dodgy but we know that FFmpeg has parsed this from a buffer
     // that contains the entire frame including the start code
     if (ctx->start_code == V4L2_STATELESS_HEVC_START_CODE_ANNEX_B) {
@@ -962,18 +968,17 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, V4L2RequestCont
 #endif
 
     {
-        const SliceHeader * const sh = &h->sh;
         RefPicList *rpl;
         int i;
 
         if (sh->slice_type != HEVC_SLICE_I) {
-            rpl = &h->ref->refPicList[0];
+            rpl = &h->cur_frame->refPicList[0];
             for (i = 0; i < rpl->nb_refs; i++)
                 add_ref_once(rd, rpl->ref[i]);
         }
 
         if (sh->slice_type == HEVC_SLICE_B) {
-            rpl = &h->ref->refPicList[1];
+            rpl = &h->cur_frame->refPicList[1];
             for (i = 0; i < rpl->nb_refs; i++)
                 add_ref_once(rd, rpl->ref[i]);
         }
@@ -990,8 +995,8 @@ static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx, V4L2Requ
 {
     const HEVCContext * const h = avctx->priv_data;
     fprintf(stderr, "<<< %s\n", __func__);
-    if (h->ref != NULL) {
-        V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)h->ref->frame->data[0];
+    if (h->cur_frame != NULL) {
+        V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)h->cur_frame->f->data[0];
 
         media_request_abort(&rd->req);
         mediabufs_src_qent_abort(ctx->mbufs, &rd->qe_src);
@@ -1065,7 +1070,7 @@ fail1:
 static int v4l2_request_hevc_end_frame(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx)
 {
     const HEVCContext * const h = avctx->priv_data;
-    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->ref->frame->data[0];
+    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)h->cur_frame->f->data[0];
     struct req_controls rc;
     unsigned int i;
     int rv;
@@ -1081,16 +1086,18 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx, V4L2RequestContext
     }
 
     {
-        const ScalingList *sl = h->ps.pps->scaling_list_data_present_flag ?
-                                    &h->ps.pps->scaling_list :
-                                h->ps.sps->scaling_list_enable_flag ?
-                                    &h->ps.sps->scaling_list : NULL;
+        const HEVCPPS *pps = h->pps;
+        const HEVCSPS *sps = pps->sps;
+        const ScalingList *sl = pps->scaling_list_data_present_flag ?
+                                    &pps->scaling_list :
+                                sps->scaling_list_enabled ?
+                                    &sps->scaling_list : NULL;
 
 
         memset(&rc, 0, sizeof(rc));
         rc.tv = cvt_dpb_to_tv(rd->timestamp);
-        fill_sps(&rc.sps, h->ps.sps);
-        fill_pps(&rc.pps, h->ps.pps);
+        fill_sps(&rc.sps, sps);
+        fill_pps(&rc.pps, pps);
         if (sl) {
             rc.has_scaling = 1;
             fill_scaling_matrix(sl, &rc.scaling_matrix);
@@ -1144,7 +1151,7 @@ static int
 probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
 {
     const HEVCContext *h = avctx->priv_data;
-    const HEVCSPS * const sps = h->ps.sps;
+    const HEVCSPS * const sps = h->pps->sps;
     struct v4l2_ctrl_hevc_sps ctrl_sps;
     unsigned int i;
 

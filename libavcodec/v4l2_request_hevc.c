@@ -19,7 +19,7 @@
 
 #include "config.h"
 #include "decode.h"
-#include "hevcdec.h"
+#include "hevc/hevcdec.h"
 #include "hwaccel_internal.h"
 #include "hwconfig.h"
 #include "internal.h"
@@ -27,6 +27,7 @@
 #include "v4l2_request_hevc.h"
 
 #include "libavutil/hwcontext_drm.h"
+#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 
 #include "v4l2_req_devscan.h"
@@ -139,14 +140,16 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
 {
     AVCodecContext *const avctx = v;
     const HEVCContext *const h = avctx->priv_data;
+    const HEVCPPS * const pps = h->pps;
+    const HEVCSPS * const sps = pps->sps;
 
-    if (h->ps.sps->bit_depth == 8) {
+    if (sps->bit_depth == 8) {
         if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128 ||
             fmtdesc->pixelformat == V4L2_PIX_FMT_NV12) {
             return 1;
         }
     }
-    else if (h->ps.sps->bit_depth == 10) {
+    else if (sps->bit_depth == 10) {
         if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
             return 1;
         }
@@ -159,7 +162,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     const HEVCContext *h = avctx->priv_data;
     V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
     V4L2RequestContextHEVC * ctx;
-    const HEVCSPS * const sps = h->ps.sps;
+    const HEVCPPS * const pps = h->pps;
+    const HEVCSPS * const sps = pps->sps;
     int ret;
     const struct decdev * decdev;
     const uint32_t src_pix_fmt = V2(ff_v4l2_req_hevc, 4).src_pix_fmt_v4l2;  // Assuming constant for all APIs but avoiding V4L2 includes
@@ -170,13 +174,13 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
     // Give up immediately if this is something that we have no code to deal with
-    if (h->ps.sps->chroma_format_idc != 1) {
-        av_log(avctx, AV_LOG_WARNING, "chroma_format_idc(%d) != 1: Not implemented\n", h->ps.sps->chroma_format_idc);
+    if (sps->chroma_format_idc != 1) {
+        av_log(avctx, AV_LOG_WARNING, "chroma_format_idc(%d) != 1: Not implemented\n", sps->chroma_format_idc);
         return AVERROR_PATCHWELCOME;
     }
-    if (!(h->ps.sps->bit_depth == 10 || h->ps.sps->bit_depth == 8) ||
-        h->ps.sps->bit_depth != h->ps.sps->bit_depth_chroma) {
-        av_log(avctx, AV_LOG_WARNING, "Bit depth Y:%d C:%d: Not implemented\n", h->ps.sps->bit_depth, h->ps.sps->bit_depth_chroma);
+    if (!(sps->bit_depth == 10 || sps->bit_depth == 8) ||
+        sps->bit_depth != sps->bit_depth_chroma) {
+        av_log(avctx, AV_LOG_WARNING, "Bit depth Y:%d C:%d: Not implemented\n", sps->bit_depth, sps->bit_depth_chroma);
         return AVERROR_PATCHWELCOME;
     }
 
