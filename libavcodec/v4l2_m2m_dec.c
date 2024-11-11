@@ -618,7 +618,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
     do {
         const int pending = xlat_pending(s);
-        const int prefer_dq = (pending > 4);
+        const int prefer_dq = (pending > 4) || (avctx->flags & AV_CODEC_FLAG_LOW_DELAY) != 0;
         const int last_src_rv = src_rv;
 
         av_log(avctx, AV_LOG_TRACE, "Pending=%d, src_rv=%d, req_pkt=%d\n", pending, src_rv, s->req_pkt);
