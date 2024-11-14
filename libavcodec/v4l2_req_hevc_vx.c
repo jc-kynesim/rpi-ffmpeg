@@ -112,8 +112,10 @@ static enum AVPixelFormat pixel_format_from_format(const struct v4l2_format *con
         return AV_PIX_FMT_NV12;
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
+    case V4L2_PIX_FMT_NV12_COL128M:
         return AV_PIX_FMT_RPI4_8;
     case V4L2_PIX_FMT_NV12_10_COL128:
+    case V4L2_PIX_FMT_NV12_10_COL128M:
         return AV_PIX_FMT_RPI4_10;
 #endif
     default:
@@ -709,6 +711,8 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     unsigned int height;
     unsigned int bpl;
     uint32_t pixelformat;
+    uint64_t mod = DRM_FORMAT_MOD_LINEAR;
+    unsigned int object_count = 1;
 
     if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
         width       = format->fmt.pix_mp.width;
@@ -726,47 +730,56 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     switch (pixelformat) {
     case V4L2_PIX_FMT_NV12:
         layer->format = DRM_FORMAT_NV12;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
         layer->format = DRM_FORMAT_NV12;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
         break;
     case V4L2_PIX_FMT_NV12_10_COL128:
         layer->format = DRM_FORMAT_P030;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(bpl);
+        break;
+    case V4L2_PIX_FMT_NV12_COL128M:
+        layer->format = DRM_FORMAT_NV12;
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(0);
+        object_count = 2;
+        break;
+    case V4L2_PIX_FMT_NV12_10_COL128M:
+        layer->format = DRM_FORMAT_P030;
+        mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(0);
+        object_count = 2;
         break;
 #endif
 #ifdef DRM_FORMAT_MOD_ALLWINNER_TILED
     case V4L2_PIX_FMT_SUNXI_TILED_NV12:
         layer->format = DRM_FORMAT_NV12;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_ALLWINNER_TILED;
+        mod = DRM_FORMAT_MOD_ALLWINNER_TILED;
         break;
 #endif
 #if defined(V4L2_PIX_FMT_NV15) && defined(DRM_FORMAT_NV15)
     case V4L2_PIX_FMT_NV15:
         layer->format = DRM_FORMAT_NV15;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #endif
     case V4L2_PIX_FMT_NV16:
         layer->format = DRM_FORMAT_NV16;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #if defined(V4L2_PIX_FMT_NV20) && defined(DRM_FORMAT_NV20)
     case V4L2_PIX_FMT_NV20:
         layer->format = DRM_FORMAT_NV20;
-        desc->objects[0].format_modifier = DRM_FORMAT_MOD_LINEAR;
         break;
 #endif
     default:
         return -1;
     }
 
-    desc->nb_objects = 1;
-    desc->objects[0].fd = -1;
-    desc->objects[0].size = 0;
+    desc->nb_objects = object_count;
+    for (unsigned int i = 0; i != AV_DRM_MAX_PLANES; ++i) {
+        desc->objects[i].fd = -1;
+        desc->objects[i].size = 0;
+        desc->objects[i].format_modifier = (i >= object_count) ? DRM_FORMAT_MOD_INVALID : mod;
+    }
 
     desc->nb_layers = 1;
     layer->nb_planes = 2;
@@ -790,8 +803,8 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     else
 #endif
     {
-        layer->planes[1].object_index = 0;
-        layer->planes[1].offset = layer->planes[0].pitch * height;
+        layer->planes[1].object_index = (object_count > 1) ? 1 : 0;
+        layer->planes[1].offset = (object_count > 1) ? 0 : layer->planes[0].pitch * height;
         layer->planes[1].pitch = layer->planes[0].pitch;
     }
 
@@ -1066,8 +1079,10 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx)
 
     // Set the drm_prime desriptor
     drm_from_format(&rd->drm, mediabufs_dst_fmt(ctx->mbufs));
-    rd->drm.objects[0].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, 0));
-    rd->drm.objects[0].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, 0));
+    for (i = 0; i != rd->drm.nb_objects; ++i) {
+        rd->drm.objects[i].fd = dmabuf_fd(qent_dst_dmabuf(rd->qe_dst, i));
+        rd->drm.objects[i].size = dmabuf_size(qent_dst_dmabuf(rd->qe_dst, i));
+    }
 
     decode_q_remove(&ctx->decode_q, &rd->decode_ent);
     return 0;
