@@ -68,10 +68,10 @@ static int raw_sand8_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 
     dst = pkt->data;
 
-    av_rpi_sand_to_planar_y8(dst, width, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
+    av_rpi_sand_to_planar_y8(dst, width, frame->data[0], frame->linesize[0], av_rpi_sand_frame_stride2_y(frame), x0, y0, width, height);
     dst += width * height;
     av_rpi_sand_to_planar_c8(dst, width / 2, dst + width * height / 4, width / 2,
-                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0 / 2, y0 / 2, width / 2, height / 2);
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2_c(frame), x0 / 2, y0 / 2, width / 2, height / 2);
     return 0;
 }
 
@@ -91,10 +91,10 @@ static int raw_sand16_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 
     dst = pkt->data;
 
-    av_rpi_sand_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0 * 2, y0, width * 2, height);
+    av_rpi_sand_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], av_rpi_sand_frame_stride2_y(frame), x0 * 2, y0, width * 2, height);
     dst += width * height * 2;
     av_rpi_sand_to_planar_c16(dst, width, dst + width * height / 2, width,
-                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0, y0 / 2, width, height / 2);
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2_c(frame), x0, y0 / 2, width, height / 2);
     return 0;
 }
 
@@ -114,10 +114,10 @@ static int raw_sand30_as_yuv420(AVCodecContext *avctx, AVPacket *pkt,
 
     dst = pkt->data;
 
-    av_rpi_sand30_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], frame->linesize[3], x0, y0, width, height);
+    av_rpi_sand30_to_planar_y16(dst, width * 2, frame->data[0], frame->linesize[0], av_rpi_sand_frame_stride2_y(frame), x0, y0, width, height);
     dst += width * height * 2;
     av_rpi_sand30_to_planar_c16(dst, width, dst + width * height / 2, width,
-                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2(frame), x0/2, y0 / 2, width/2, height / 2);
+                          frame->data[1], frame->linesize[1], av_rpi_sand_frame_stride2_c(frame), x0/2, y0 / 2, width/2, height / 2);
     return 0;
 }
 #endif

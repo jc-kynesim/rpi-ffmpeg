@@ -113,11 +113,17 @@ static inline unsigned int av_rpi_sand_frame_stride1(const AVFrame * const frame
 #endif
 }
 
-static inline unsigned int av_rpi_sand_frame_stride2(const AVFrame * const frame)
+static inline unsigned int av_rpi_sand_frame_stride2_y(const AVFrame * const frame)
 {
-    return frame->linesize[3];
+    return frame->linesize[3] > 1 ? frame->linesize[3] :
+        frame->linesize[3] == 0 ? frame->height : frame->height * 3 / 2;
 }
 
+static inline unsigned int av_rpi_sand_frame_stride2_c(const AVFrame * const frame)
+{
+    return frame->linesize[3] > 1 ? frame->linesize[3] :
+        frame->linesize[3] == 0 ? frame->height / 2 : frame->height * 3 / 2;
+}
 
 static inline int av_rpi_is_sand_format(const int format)
 {
@@ -147,41 +153,6 @@ static inline int av_rpi_is_sand30_frame(const AVFrame * const frame)
 static inline int av_rpi_sand_frame_xshl(const AVFrame * const frame)
 {
     return av_rpi_is_sand8_frame(frame) ? 0 : 1;
-}
-
-// If x is measured in bytes (not pixels) then this works for sand64_16 as
-// well as sand128 - but in the general case we work that out
-
-static inline unsigned int av_rpi_sand_frame_off_y(const AVFrame * const frame, const unsigned int x_y, const unsigned int y)
-{
-    const unsigned int stride1 = av_rpi_sand_frame_stride1(frame);
-    const unsigned int stride2 = av_rpi_sand_frame_stride2(frame);
-    const unsigned int x = x_y << av_rpi_sand_frame_xshl(frame);
-    const unsigned int x1 = x & (stride1 - 1);
-    const unsigned int x2 = x ^ x1;
-
-    return x1 + stride1 * y + stride2 * x2;
-}
-
-static inline unsigned int av_rpi_sand_frame_off_c(const AVFrame * const frame, const unsigned int x_c, const unsigned int y_c)
-{
-    const unsigned int stride1 = av_rpi_sand_frame_stride1(frame);
-    const unsigned int stride2 = av_rpi_sand_frame_stride2(frame);
-    const unsigned int x = x_c << (av_rpi_sand_frame_xshl(frame) + 1);
-    const unsigned int x1 = x & (stride1 - 1);
-    const unsigned int x2 = x ^ x1;
-
-    return x1 + stride1 * y_c + stride2 * x2;
-}
-
-static inline uint8_t * av_rpi_sand_frame_pos_y(const AVFrame * const frame, const unsigned int x, const unsigned int y)
-{
-    return frame->data[0] + av_rpi_sand_frame_off_y(frame, x, y);
-}
-
-static inline uint8_t * av_rpi_sand_frame_pos_c(const AVFrame * const frame, const unsigned int x, const unsigned int y)
-{
-    return frame->data[1] + av_rpi_sand_frame_off_c(frame, x, y);
 }
 
 #endif
