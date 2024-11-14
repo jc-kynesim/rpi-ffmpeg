@@ -124,12 +124,14 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
 
     if (h->ps.sps->bit_depth == 8) {
         if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128 ||
+            fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128M ||
             fmtdesc->pixelformat == V4L2_PIX_FMT_NV12) {
             return 1;
         }
     }
     else if (h->ps.sps->bit_depth == 10) {
-        if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128) {
+        if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128 ||
+            fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128M) {
             return 1;
         }
     }
