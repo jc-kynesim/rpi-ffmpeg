@@ -359,6 +359,8 @@ int av_rpi_sand_to_planar_frame(AVFrame * const dst, const AVFrame * const src)
     const int h = av_frame_cropped_height(src);
     const int x = src->crop_left;
     const int y = src->crop_top;
+    const unsigned int stride2_y = av_rpi_sand_frame_stride2_y(src);
+    const unsigned int stride2_c = av_rpi_sand_frame_stride2_c(src);
 
     // We will crop as part of the conversion
     dst->crop_top = 0;
@@ -373,22 +375,22 @@ int av_rpi_sand_to_planar_frame(AVFrame * const dst, const AVFrame * const src)
                 case AV_PIX_FMT_YUV420P:
                     av_rpi_sand_to_planar_y8(dst->data[0], dst->linesize[0],
                                              src->data[0],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_y,
                                              x, y, w, h);
                     av_rpi_sand_to_planar_c8(dst->data[1], dst->linesize[1],
                                              dst->data[2], dst->linesize[2],
                                              src->data[1],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_c,
                                              x/2, y/2,  w/2, h/2);
                     break;
                 case AV_PIX_FMT_NV12:
                     av_rpi_sand_to_planar_y8(dst->data[0], dst->linesize[0],
                                              src->data[0],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_y,
                                              x, y, w, h);
                     av_rpi_sand_to_planar_y8(dst->data[1], dst->linesize[1],
                                              src->data[1],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_c,
                                              x/2, y/2, w, h/2);
                     break;
                 default:
@@ -400,12 +402,12 @@ int av_rpi_sand_to_planar_frame(AVFrame * const dst, const AVFrame * const src)
                 case AV_PIX_FMT_YUV420P10:
                     av_rpi_sand_to_planar_y16(dst->data[0], dst->linesize[0],
                                              src->data[0],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_y,
                                              x*2, y, w*2, h);
                     av_rpi_sand_to_planar_c16(dst->data[1], dst->linesize[1],
                                              dst->data[2], dst->linesize[2],
                                              src->data[1],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_c,
                                              x, y/2,  w, h/2);
                     break;
                 default:
@@ -417,22 +419,22 @@ int av_rpi_sand_to_planar_frame(AVFrame * const dst, const AVFrame * const src)
                 case AV_PIX_FMT_YUV420P10:
                     av_rpi_sand30_to_planar_y16(dst->data[0], dst->linesize[0],
                                              src->data[0],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_y,
                                              x, y, w, h);
                     av_rpi_sand30_to_planar_c16(dst->data[1], dst->linesize[1],
                                              dst->data[2], dst->linesize[2],
                                              src->data[1],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_c,
                                              x/2, y/2, w/2, h/2);
                     break;
                 case AV_PIX_FMT_NV12:
                     av_rpi_sand30_to_planar_y8(dst->data[0], dst->linesize[0],
                                              src->data[0],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_y,
                                              x, y, w, h);
                     av_rpi_sand30_to_planar_y8(dst->data[1], dst->linesize[1],
                                              src->data[1],
-                                             av_rpi_sand_frame_stride1(src), av_rpi_sand_frame_stride2(src),
+                                             av_rpi_sand_frame_stride1(src), stride2_c,
                                              x/2, y/2, w, h/2);
                     break;
                 default:
