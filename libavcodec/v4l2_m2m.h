@@ -45,10 +45,12 @@
 typedef struct V4L2m2mTrackEl {
     int     discard;   // If we see this buffer its been flushed, so discard
     int     pending;
-    int     pkt_size;
     int64_t pts;
     int64_t dts;
+#if FF_API_FRAME_PKT
     int64_t pkt_pos;
+    int     pkt_size;
+#endif
     int64_t duration;
     int64_t track_pts;
 } V4L2m2mTrackEl;

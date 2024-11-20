@@ -103,13 +103,16 @@ xlat_pts_frame_in(AVCodecContext *const avctx, xlat_track_t *const x, const AVFr
     x->track_els[x->track_no  % FF_V4L2_M2M_TRACK_SIZE] = (V4L2m2mTrackEl){
         .discard          = 0,
         .pending          = 1,
-        .pkt_size         = 0,
         .pts              = frame->pts,
         .dts              = AV_NOPTS_VALUE,
-        .pkt_pos          = frame->pkt_pos,
         .duration         = frame->duration,
         .track_pts        = track_pts
     };
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS
+        x->track_els[x->track_no  % FF_V4L2_M2M_TRACK_SIZE].pkt_pos = frame->pkt_pos;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     return track_pts;
 }
 
@@ -128,17 +131,25 @@ xlat_pts_frame_out(AVCodecContext *const avctx,
                "Frame tracking failure: pts=%" PRId64 ", track[%d]=%" PRId64 "\n", frame->pts, n, t->track_pts);
         frame->pts              = AV_NOPTS_VALUE;
         frame->pkt_dts          = AV_NOPTS_VALUE;
-        frame->pkt_pos          = -1;
         frame->duration         = 0;
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS
         frame->pkt_size         = -1;
+        frame->pkt_pos          = -1;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     }
     else if (!t->discard)
     {
         frame->pts              = t->pending ? t->pts : AV_NOPTS_VALUE;
         frame->pkt_dts          = t->dts;
-        frame->pkt_pos          = t->pkt_pos;
         frame->duration         = t->duration;
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS
+        frame->pkt_pos          = t->pkt_pos;
         frame->pkt_size         = t->pkt_size;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
 
         if (frame->pts != AV_NOPTS_VALUE)
             x->last_pts = frame->pts;

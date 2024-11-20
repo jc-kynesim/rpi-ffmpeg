@@ -372,6 +372,76 @@ static void v4l2_set_interlace(V4L2Buffer * const buf, const int is_interlaced, 
         is_tff ? V4L2_FIELD_INTERLACED_TB : V4L2_FIELD_INTERLACED_BT;
 }
 
+static inline void frame_set_interlace(AVFrame* frame, const int is_interlaced, const int is_tff)
+{
+    if (!is_interlaced) {
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+        frame->interlaced_frame = 0;
+        frame->top_field_first =  0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+        frame->flags &= ~(AV_FRAME_FLAG_TOP_FIELD_FIRST | AV_FRAME_FLAG_INTERLACED);
+    }
+    else {
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+        frame->interlaced_frame = 1;
+        frame->top_field_first =  !!is_tff;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+        if (is_tff)
+            frame->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST | AV_FRAME_FLAG_INTERLACED;
+        else
+            frame->flags = (frame->flags & ~AV_FRAME_FLAG_TOP_FIELD_FIRST) | AV_FRAME_FLAG_INTERLACED;
+    }
+}
+
+static inline int frame_is_interlaced(const AVFrame* const frame)
+{
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+    return frame->interlaced_frame || (frame->flags & AV_FRAME_FLAG_INTERLACED) != 0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#else
+    return (frame->flags & AV_FRAME_FLAG_INTERLACED) != 0;
+#endif
+}
+
+static inline int frame_is_tff(const AVFrame* const frame)
+{
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+    return frame->top_field_first || (frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) != 0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#else
+    return (frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) != 0;
+#endif
+}
+
+static inline int frame_is_key(const AVFrame* const frame)
+{
+#if FF_API_FRAME_KEY
+FF_DISABLE_DEPRECATION_WARNINGS
+    return frame->key_frame || (frame->flags & AV_FRAME_FLAG_KEY) != 0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#else
+    return (frame->flags & AV_FRAME_FLAG_KEY) != 0;
+#endif
+}
+
+static inline void frame_set_key(AVFrame* const frame, const int is_key)
+{
+#if FF_API_FRAME_KEY
+FF_DISABLE_DEPRECATION_WARNINGS
+    frame->key_frame = !!is_key;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+    frame->flags = is_key ?
+        frame->flags | AV_FRAME_FLAG_KEY :
+        frame->flags & ~AV_FRAME_FLAG_KEY;
+}
+
 static uint8_t * v4l2_get_drm_frame(V4L2Buffer *avbuf)
 {
     AVDRMFrameDescriptor *drm_desc = &avbuf->drm_frame;
@@ -795,7 +865,7 @@ static int v4l2_buffer_swframe_to_buf(const AVFrame *frame, V4L2Buffer *out)
 
 int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out, const int64_t track_ts)
 {
-    out->buf.flags = frame->key_frame ?
+    out->buf.flags = frame_is_key(frame) ?
         (out->buf.flags | V4L2_BUF_FLAG_KEYFRAME) :
         (out->buf.flags & ~V4L2_BUF_FLAG_KEYFRAME);
     // Beware that colour info is held in format rather than the actual
@@ -807,7 +877,7 @@ int ff_v4l2_buffer_avframe_to_buf(const AVFrame *frame, V4L2Buffer *out, const i
         out->buf.timestamp = tv_from_int(track_ts);
     else
         v4l2_set_pts(out, frame->pts);
-    v4l2_set_interlace(out, frame->interlaced_frame, frame->top_field_first);
+    v4l2_set_interlace(out, frame_is_interlaced(frame), frame_is_tff(frame));
 
     return frame->format == AV_PIX_FMT_DRM_PRIME ?
         v4l2_buffer_primeframe_to_buf(frame, out) :
@@ -827,12 +897,8 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
         return ret;
 
     /* 2. get frame information */
-    if (avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME)
-        frame->flags |= AV_FRAME_FLAG_KEY;
-#if FF_API_FRAME_KEY
-    frame->key_frame = !!(avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME);
-#endif
-    frame->pict_type = (frame->flags & AV_FRAME_FLAG_KEY) != 0 ? AV_PICTURE_TYPE_I :
+    frame_set_key(frame, avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME);
+    frame->pict_type = (avbuf->buf.flags & V4L2_BUF_FLAG_KEYFRAME) != 0 ? AV_PICTURE_TYPE_I :
         (avbuf->buf.flags & V4L2_BUF_FLAG_PFRAME) != 0 ? AV_PICTURE_TYPE_P :
         (avbuf->buf.flags & V4L2_BUF_FLAG_BFRAME) != 0 ? AV_PICTURE_TYPE_B :
             AV_PICTURE_TYPE_NONE;
@@ -842,8 +908,7 @@ int ff_v4l2_buffer_buf_to_avframe(AVFrame *frame, V4L2Buffer *avbuf)
     frame->color_trc = v4l2_get_color_trc(avbuf);
     frame->pts = v4l2_get_pts(avbuf);
     frame->pkt_dts = AV_NOPTS_VALUE;
-    frame->interlaced_frame = v4l2_buf_is_interlaced(avbuf);
-    frame->top_field_first = v4l2_buf_is_top_first(avbuf);
+    frame_set_interlace(frame, v4l2_buf_is_interlaced(avbuf), v4l2_buf_is_top_first(avbuf));
 
     /* these values are updated also during re-init in v4l2_process_driver_event */
     frame->height = ctx->height;

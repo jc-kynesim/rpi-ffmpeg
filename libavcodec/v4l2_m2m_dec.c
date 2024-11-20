@@ -1169,6 +1169,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_TRACE, "<<< %s\n", __func__);
 
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS
     if (avctx->codec_id == AV_CODEC_ID_H264) {
         if (avctx->ticks_per_frame == 1) {
             if(avctx->time_base.den < INT_MAX/2) {
@@ -1178,6 +1180,8 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
         }
         avctx->ticks_per_frame = 2;
     }
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
 
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
