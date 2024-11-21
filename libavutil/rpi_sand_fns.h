@@ -115,14 +115,16 @@ static inline unsigned int av_rpi_sand_frame_stride1(const AVFrame * const frame
 
 static inline unsigned int av_rpi_sand_frame_stride2_y(const AVFrame * const frame)
 {
+    unsigned int s2 = (frame->height + 7) & ~7;
     return frame->linesize[3] > 1 ? frame->linesize[3] :
-        frame->linesize[3] == 0 ? frame->height : frame->height * 3 / 2;
+        frame->linesize[3] == 0 ? s2 : s2 * 3 / 2;
 }
 
 static inline unsigned int av_rpi_sand_frame_stride2_c(const AVFrame * const frame)
 {
+    unsigned int s2 = (frame->height + 7) & ~7;
     return frame->linesize[3] > 1 ? frame->linesize[3] :
-        frame->linesize[3] == 0 ? frame->height / 2 : frame->height * 3 / 2;
+        frame->linesize[3] == 0 ? s2 / 2 : s2 * 3 / 2;
 }
 
 static inline int av_rpi_is_sand_format(const int format)
