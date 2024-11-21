@@ -216,6 +216,7 @@ if __name__ == '__main__':
     argp.add_argument("tests", nargs='*')
     argp.add_argument("--pi4", action='store_true', help="Force pi4 cmd line")
     argp.add_argument("--drm", action='store_true', help="Force v4l2 drm cmd line")
+    argp.add_argument("--sw", action='store_true', help="Use software decode")
     argp.add_argument("--vaapi", action='store_true', help="Force vaapi cmd line")
     argp.add_argument("--test_root", default="/opt/conform/h265.2016", help="Root dir for test")
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
@@ -241,7 +242,7 @@ if __name__ == '__main__':
     dectype = CODEC_HEVC_RPI
     if os.path.exists("/dev/rpivid-hevcmem"):
         dectype = HWACCEL_RPI
-    if args.drm or os.path.exists("/sys/module/rpivid_hevc"):
+    if args.drm or os.path.exists("/sys/module/rpivid_hevc") or os.path.exists("/sys/module/rpi_hevc_dec"):
         dectype = HWACCEL_DRM
 
     if args.pi4:
@@ -256,6 +257,11 @@ if __name__ == '__main__':
     if not os.path.isfile(args.ffmpeg):
         print("FFmpeg file '%s' not found" % args.ffmpeg)
         exit(1)
+
+    if args.sw:
+        dectype = None
+    elif not dectype:
+        print("WARNING: no h/w decode slected - using software")
 
     i = 0
     while True:
