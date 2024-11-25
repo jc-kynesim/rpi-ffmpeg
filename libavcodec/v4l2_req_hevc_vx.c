@@ -1351,6 +1351,10 @@ static int alloc_frame(AVCodecContext * avctx, AVFrame *frame)
     frame->data[0] = frame->buf[0]->data;
 
     frame->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
+    // Cropping will be applied by hevc_refs.c:ff_hevc_set_new_ref
+    // Mirrors hwaccel path in avcodec_default_get_buffer2
+    frame->width = avctx->coded_width;
+    frame->height = avctx->coded_height;
 
     if ((rv = ff_attach_decode_data(frame)) != 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to attach decode data to frame\n");
