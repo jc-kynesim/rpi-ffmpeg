@@ -1,5 +1,8 @@
 Files without standard license headers:
 libavcodec/file_open.c
+libavcodec/hevc-ctrls-v1.h
+libavcodec/hevc-ctrls-v2.h
+libavcodec/hevc-ctrls-v3.h
 libavcodec/interplayacm.c
 libavcodec/log2_tab.c
 libavcodec/reverse.c
@@ -26,6 +29,9 @@ compat/float/float.h
 compat/float/limits.h
 compat/stdbit/stdbit.h
 libavcodec/bitstream_template.h
+libavcodec/hevc-ctrls-v1.h
+libavcodec/hevc-ctrls-v2.h
+libavcodec/hevc-ctrls-v3.h
 tools/decode_simple.h
 Use of av_clip() where av_clip_uintp2() could be used:
 Use of av_clip() where av_clip_intp2() could be used:
