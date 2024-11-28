@@ -140,16 +140,19 @@ static HEVCFrame *alloc_frame(HEVCContext *s, HEVCLayerContext *l)
             goto fail;
         frame->nb_rpl_elems = s->pkt.nb_nals;
 
-        frame->tab_mvf = ff_refstruct_pool_get(l->tab_mvf_pool);
-        if (!frame->tab_mvf)
-            goto fail;
-
-        frame->rpl_tab = ff_refstruct_pool_get(l->rpl_tab_pool);
-        if (!frame->rpl_tab)
-            goto fail;
-        frame->ctb_count = l->sps->ctb_width * l->sps->ctb_height;
-        for (j = 0; j < frame->ctb_count; j++)
-            frame->rpl_tab[j] = frame->rpl;
+        if (l->tab_mvf_pool) {
+            frame->tab_mvf = ff_refstruct_pool_get(l->tab_mvf_pool);
+            if (!frame->tab_mvf)
+                goto fail;
+        }
+        if (l->rpl_tab_pool) {
+            frame->rpl_tab = ff_refstruct_pool_get(l->rpl_tab_pool);
+            if (!frame->rpl_tab)
+                goto fail;
+            frame->ctb_count = l->sps->ctb_width * l->sps->ctb_height;
+            for (j = 0; j < frame->ctb_count; j++)
+                frame->rpl_tab[j] = frame->rpl;
+        }
 
         if (s->sei.picture_timing.picture_struct == AV_PICTURE_STRUCTURE_TOP_FIELD)
             frame->f->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
@@ -287,14 +290,17 @@ static int init_slice_rpl(HEVCContext *s)
     int ctb_count    = frame->ctb_count;
     int ctb_addr_ts  = s->pps->ctb_addr_rs_to_ts[s->sh.slice_segment_addr];
     int i;
+    RefPicListTab * const rpl = frame->rpl + s->slice_idx;
 
     if (s->slice_idx >= frame->nb_rpl_elems)
         return AVERROR_INVALIDDATA;
 
-    for (i = ctb_addr_ts; i < ctb_count; i++)
-        frame->rpl_tab[i] = frame->rpl + s->slice_idx;
+    if (frame->rpl_tab) {
+        for (i = ctb_addr_ts; i < ctb_count; i++)
+            frame->rpl_tab[i] = rpl;
+    }
 
-    frame->refPicList = (RefPicList *)frame->rpl_tab[ctb_addr_ts];
+    frame->refPicList = (RefPicList *)rpl;
 
     return 0;
 }

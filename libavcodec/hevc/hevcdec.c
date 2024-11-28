@@ -703,13 +703,16 @@ static int set_sps(HEVCContext *s, HEVCLayerContext *l, const HEVCSPS *sps)
     if (!sps)
         return 0;
 
-    ret = pic_arrays_init(l, sps);
-    if (ret < 0)
-        goto fail;
+    // If hwaccel then we don't need all the s/w decode helper arrays
+    if (!s->avctx->hwaccel) {
+        ret = pic_arrays_init(l, sps);
+        if (ret < 0)
+            goto fail;
 
-    ff_hevc_pred_init(&s->hpc,     sps->bit_depth);
-    ff_hevc_dsp_init (&s->hevcdsp, sps->bit_depth);
-    ff_videodsp_init (&s->vdsp,    sps->bit_depth);
+        ff_hevc_pred_init(&s->hpc,     sps->bit_depth);
+        ff_hevc_dsp_init (&s->hevcdsp, sps->bit_depth);
+        ff_videodsp_init (&s->vdsp,    sps->bit_depth);
+    }
 
     l->sps    = ff_refstruct_ref_c(sps);
     s->vps    = ff_refstruct_ref_c(sps->vps);
@@ -3230,11 +3233,13 @@ static int hevc_frame_start(HEVCContext *s, HEVCLayerContext *l,
         }
     }
 
-    memset(l->horizontal_bs, 0, l->bs_width * l->bs_height);
-    memset(l->vertical_bs,   0, l->bs_width * l->bs_height);
-    memset(l->cbf_luma,      0, sps->min_tb_width * sps->min_tb_height);
-    memset(l->is_pcm,        0, (sps->min_pu_width + 1) * (sps->min_pu_height + 1));
-    memset(l->tab_slice_address, -1, pic_size_in_ctb * sizeof(*l->tab_slice_address));
+    if (l->horizontal_bs) {
+        memset(l->horizontal_bs, 0, l->bs_width * l->bs_height);
+        memset(l->vertical_bs,   0, l->bs_width * l->bs_height);
+        memset(l->cbf_luma,      0, sps->min_tb_width * sps->min_tb_height);
+        memset(l->is_pcm,        0, (sps->min_pu_width + 1) * (sps->min_pu_height + 1));
+        memset(l->tab_slice_address, -1, pic_size_in_ctb * sizeof(*l->tab_slice_address));
+    }
 
     if (IS_IDR(s))
         ff_hevc_clear_refs(l);
@@ -3837,8 +3842,10 @@ static int hevc_ref_frame(HEVCFrame *dst, const HEVCFrame *src)
     }
 
     dst->pps     = ff_refstruct_ref_c(src->pps);
-    dst->tab_mvf = ff_refstruct_ref(src->tab_mvf);
-    dst->rpl_tab = ff_refstruct_ref(src->rpl_tab);
+    if (src->tab_mvf)
+        dst->tab_mvf = ff_refstruct_ref(src->tab_mvf);
+    if (src->rpl_tab)
+        dst->rpl_tab = ff_refstruct_ref(src->rpl_tab);
     dst->rpl = ff_refstruct_ref(src->rpl);
     dst->nb_rpl_elems = src->nb_rpl_elems;
 
