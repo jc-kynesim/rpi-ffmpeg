@@ -41,6 +41,8 @@
 #include "progressframe.h"
 #include "refstruct.h"
 
+#include <stdbool.h>
+
 /**< same with Div_Lut defined in spec 7.11.3.7 */
 static const uint16_t div_lut[AV1_DIV_LUT_NUM] = {
   16384, 16320, 16257, 16194, 16132, 16070, 16009, 15948, 15888, 15828, 15768,
@@ -1276,6 +1278,17 @@ static int get_current_frame(AVCodecContext *avctx)
     return ret;
 }
 
+static bool seq_changed(const AV1RawSequenceHeader * const a, const AV1RawSequenceHeader * const b)
+{
+    return a == NULL || b == NULL ||
+            a->max_frame_height_minus_1   != b->max_frame_height_minus_1 ||
+            a->max_frame_width_minus_1    != b->max_frame_width_minus_1 ||
+            a->color_config.high_bitdepth != b->color_config.high_bitdepth ||
+            a->color_config.twelve_bit    != b->color_config.twelve_bit ||
+            a->color_config.mono_chrome   != b->color_config.mono_chrome;
+
+}
+
 static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
 {
     AV1DecContext *s = avctx->priv_data;
@@ -1302,6 +1315,9 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
 
         switch (unit->type) {
         case AV1_OBU_SEQUENCE_HEADER:
+        {
+            const bool changed = seq_changed(s->raw_seq, &obu->obu.sequence_header);
+
             ret = av_buffer_replace(&s->seq_data_ref, unit->data_ref);
             if (ret < 0)
                 goto end;
@@ -1321,9 +1337,13 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
 
             s->operating_point_idc = s->raw_seq->operating_point_idc[s->operating_point];
 
-            s->pix_fmt = AV_PIX_FMT_NONE;
+            if (changed) {
+                av_log(avctx, AV_LOG_INFO, "New SEQ\n");
+                s->pix_fmt = AV_PIX_FMT_NONE;
+            }
 
             break;
+        }
         case AV1_OBU_REDUNDANT_FRAME_HEADER:
             if (s->raw_frame_header)
                 break;
