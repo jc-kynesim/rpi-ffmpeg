@@ -901,8 +901,7 @@ static int FUNC(loop_filter_params)(CodedBitstreamContext *ctx, RWContext *rw,
     fb(3, loop_filter_sharpness);
 
     flag(loop_filter_delta_enabled);
-    if (current->loop_filter_delta_enabled) {
-        const int8_t *ref_loop_filter_ref_deltas, *ref_loop_filter_mode_deltas;
+    const int8_t *ref_loop_filter_ref_deltas, *ref_loop_filter_mode_deltas;
 
         if (current->primary_ref_frame == AV1_PRIMARY_REF_NONE) {
             ref_loop_filter_ref_deltas = default_loop_filter_ref_deltas;
@@ -913,6 +912,7 @@ static int FUNC(loop_filter_params)(CodedBitstreamContext *ctx, RWContext *rw,
             ref_loop_filter_mode_deltas =
                 priv->ref[current->ref_frame_idx[current->primary_ref_frame]].loop_filter_mode_deltas;
         }
+    if (current->loop_filter_delta_enabled) {
 
         flag(loop_filter_delta_update);
         for (i = 0; i < AV1_TOTAL_REFS_PER_FRAME; i++) {
@@ -937,9 +937,9 @@ static int FUNC(loop_filter_params)(CodedBitstreamContext *ctx, RWContext *rw,
         }
     } else {
         for (i = 0; i < AV1_TOTAL_REFS_PER_FRAME; i++)
-            infer(loop_filter_ref_deltas[i], default_loop_filter_ref_deltas[i]);
+            infer(loop_filter_ref_deltas[i], ref_loop_filter_ref_deltas[i]);
         for (i = 0; i < 2; i++)
-            infer(loop_filter_mode_deltas[i], default_loop_filter_mode_deltas[i]);
+            infer(loop_filter_mode_deltas[i], ref_loop_filter_mode_deltas[i]);
     }
 
     return 0;
