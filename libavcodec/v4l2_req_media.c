@@ -1285,7 +1285,9 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struc
 
             if (create_dst_bufs(mbc, 1, &be_dst) != 1) {
                 qe_dst_free(be_dst);
-                return NULL;
+                // We can't extend any more - try again but wait
+                mbc->dst_fixed = true;
+                return mediabufs_dst_qent_alloc(mbc, dbsc);
             }
         }
     }
