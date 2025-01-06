@@ -1640,13 +1640,9 @@ int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_
 
 int mediabufs_src_resizable(const struct mediabufs_ctl *const mbc)
 {
-#if 1
-    return 0;
-#else
     // Single planar OUTPUT can only take exact size buffers
     // Multiplanar will take larger than negotiated
     return V4L2_TYPE_IS_MULTIPLANAR(mbc->src_fmt.type);
-#endif
 }
 
 static void mediabufs_ctl_delete(struct mediabufs_ctl *const mbc)
