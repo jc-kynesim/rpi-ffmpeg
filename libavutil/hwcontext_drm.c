@@ -298,6 +298,10 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
         // overwrites any crop that we create with the old values
         const unsigned int w = FFMIN(dst->width, map->width);
         const unsigned int h = FFMIN(dst->height, map->height);
+        const size_t ct = map->crop_top;
+        const size_t cb = map->crop_bottom;
+        const size_t cl = map->crop_left;
+        const size_t cr = map->crop_right;
 
         map->crop_top = 0;
         map->crop_bottom = 0;
@@ -313,6 +317,10 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
 
         dst->width = w;
         dst->height = h;
+        dst->crop_top = ct;
+        dst->crop_bottom = cb;
+        dst->crop_left = cl;
+        dst->crop_right = cr;
     }
     else
 #endif
