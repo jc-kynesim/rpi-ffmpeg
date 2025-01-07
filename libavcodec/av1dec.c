@@ -836,9 +836,14 @@ static int update_context_with_frame_header(AVCodecContext *avctx,
               INT_MAX);
 
     if (av_cmp_q(avctx->sample_aspect_ratio, aspect_ratio)) {
+#if 1
+        // Do not die over an out of range SAR
+        ff_set_sar(avctx, aspect_ratio);
+#else
         ret = ff_set_sar(avctx, aspect_ratio);
         if (ret < 0)
             return ret;
+#endif
     }
 
     return 0;
