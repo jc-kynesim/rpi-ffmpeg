@@ -135,10 +135,16 @@ void devscan_delete(struct devscan **const pScan)
     free(scan);
 }
 
+#if 0
 #define REQ_BUF_CAPS (\
     V4L2_BUF_CAP_SUPPORTS_DMABUF |\
     V4L2_BUF_CAP_SUPPORTS_REQUESTS |\
     V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF)
+#else
+#define REQ_BUF_CAPS (\
+    V4L2_BUF_CAP_SUPPORTS_REQUESTS |\
+    0)
+#endif
 
 static void probe_formats(void * const dc,
               struct devscan *const scan,
