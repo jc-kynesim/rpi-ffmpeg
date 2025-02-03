@@ -7,7 +7,6 @@
 #include "thread.h"
 
 #include "v4l2_fmt.h"
-#include "v4l2_req_av1.h"
 #include "v4l2_req_dmabufs.h"
 #include "v4l2_req_media.h"
 
@@ -496,9 +495,13 @@ fill_frame(struct v4l2_ctrl_av1_frame * const vframe,
         vframe->flags |= V4L2_AV1_FRAME_FLAG_REFERENCE_SELECT;
     if (fh->reduced_tx_set)
         vframe->flags |= V4L2_AV1_FRAME_FLAG_REDUCED_TX_SET;
-#warning NIF: frame flag V4L2_AV1_FRAME_FLAG_SKIP_MODE_ALLOWED
-    if (fh->skip_mode_present)
+    // V4L2_AV1_FRAME_FLAG_SKIP_MODE_ALLOWED not recorded in fh and is not
+    // used by any current decode so just set to skip_mode_present so
+    // as not to run afoul of consistency checkers
+    if (fh->skip_mode_present) {
+        vframe->flags |= V4L2_AV1_FRAME_FLAG_SKIP_MODE_ALLOWED;
         vframe->flags |= V4L2_AV1_FRAME_FLAG_SKIP_MODE_PRESENT;
+    }
     if (fh->frame_size_override_flag)
         vframe->flags |= V4L2_AV1_FRAME_FLAG_FRAME_SIZE_OVERRIDE;
     if (fh->buffer_removal_time_present_flag)
@@ -1087,7 +1090,7 @@ req_av1_alloc_frame(AVCodecContext * avctx, V4L2RequestContextHEVC *const ctx, A
 }
 
 
-const struct v4l2_req_decode_fns ff_v4l2_req_av1_fns = {
+static const struct v4l2_req_decode_fns req_av1_fns = {
     .src_pix_fmt_v4l2 = V4L2_PIX_FMT_AV1_FRAME,
     .name = "V4L2 AV1 stateless",
     .probe = req_av1_probe,
@@ -1100,6 +1103,41 @@ const struct v4l2_req_decode_fns ff_v4l2_req_av1_fns = {
     .abort_frame    = req_av1_abort_frame,
     .frame_params   = req_av1_frame_params,
     .alloc_frame    = req_av1_alloc_frame,
-
 };
 
+static int v4l2_request_av1_init(AVCodecContext *avctx)
+{
+    const AV1DecContext * const s = avctx->priv_data;
+    const AV1RawSequenceHeader * const seq = s->raw_seq;
+
+    const struct v4l2_req_decode_fns * const try_fns[] = {
+        &req_av1_fns,
+        NULL
+    };
+
+    return ff_v4l2_request_init(avctx, try_fns, seq->max_frame_width_minus_1 + 1, seq->max_frame_height_minus_1 + 1,
+                             get_bit_depth_from_seq(seq), AV1_TOTAL_REFS_PER_FRAME);
+}
+
+
+const FFHWAccel ff_av1_v4l2request_hwaccel = {
+    .p = {
+        .name           = "av1_v4l2request",
+        .type           = AVMEDIA_TYPE_VIDEO,
+        .id             = AV_CODEC_ID_HEVC,
+        .pix_fmt        = AV_PIX_FMT_DRM_PRIME,
+    },
+    .alloc_frame    = ff_v4l2_request_alloc_frame,
+    .start_frame    = ff_v4l2_request_start_frame,
+    .decode_slice   = ff_v4l2_request_decode_slice,
+    .end_frame      = ff_v4l2_request_end_frame,
+    .abort_frame    = ff_v4l2_request_abort_frame,
+    .init           = v4l2_request_av1_init,
+    .uninit         = ff_v4l2_request_uninit,
+    .free_frame_priv = ff_v4l2_request_free_frame_priv,
+    .frame_priv_data_size  = 128,
+    .update_thread_context = ff_v4l2_request_update_thread_context,
+    .priv_data_size = sizeof(V4L2RequestPrivHEVC),
+    .frame_params   = ff_v4l2_request_frame_params,
+    .caps_internal  = HWACCEL_CAP_ASYNC_SAFE | HWACCEL_CAP_THREAD_SAFE,
+};
