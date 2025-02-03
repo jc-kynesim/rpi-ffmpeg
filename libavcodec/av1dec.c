@@ -543,6 +543,7 @@ static int get_pixel_format(AVCodecContext *avctx)
                      CONFIG_AV1_NVDEC_HWACCEL + \
                      CONFIG_AV1_VAAPI_HWACCEL + \
                      CONFIG_AV1_VDPAU_HWACCEL + \
+                     CONFIG_AV1_V4L2REQUEST_HWACCEL + \
                      CONFIG_AV1_VULKAN_HWACCEL)
     enum AVPixelFormat pix_fmts[HWACCEL_MAX + 2], *fmtp = pix_fmts;
 
@@ -575,6 +576,9 @@ static int get_pixel_format(AVCodecContext *avctx)
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
 #endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
         break;
     case AV_PIX_FMT_YUV420P10:
 #if CONFIG_AV1_DXVA2_HWACCEL
@@ -599,50 +603,88 @@ static int get_pixel_format(AVCodecContext *avctx)
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
 #endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
         break;
     case AV_PIX_FMT_YUV420P12:
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
+#endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
 #endif
         break;
     case AV_PIX_FMT_YUV422P:
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
 #endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
         break;
     case AV_PIX_FMT_YUV422P10:
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
+#endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
 #endif
         break;
     case AV_PIX_FMT_YUV422P12:
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
 #endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
         break;
     case AV_PIX_FMT_YUV444P:
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
+#endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
 #endif
         break;
     case AV_PIX_FMT_YUV444P10:
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
 #endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
         break;
     case AV_PIX_FMT_YUV444P12:
 #if CONFIG_AV1_VULKAN_HWACCEL
         *fmtp++ = AV_PIX_FMT_VULKAN;
+#endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
 #endif
         break;
     case AV_PIX_FMT_GRAY8:
 #if CONFIG_AV1_NVDEC_HWACCEL
         *fmtp++ = AV_PIX_FMT_CUDA;
 #endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
         break;
     case AV_PIX_FMT_GRAY10:
 #if CONFIG_AV1_NVDEC_HWACCEL
         *fmtp++ = AV_PIX_FMT_CUDA;
+#endif
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
+#endif
+        break;
+    case AV_PIX_FMT_GRAY12:
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        *fmtp++ = AV_PIX_FMT_DRM_PRIME;
 #endif
         break;
     }
@@ -1638,7 +1680,9 @@ const FFCodec ff_av1_decoder = {
 #if CONFIG_AV1_VULKAN_HWACCEL
         HWACCEL_VULKAN(av1),
 #endif
-
+#if CONFIG_AV1_V4L2REQUEST_HWACCEL
+        HWACCEL_V4L2REQUEST(av1),
+#endif
         NULL
     },
 };
