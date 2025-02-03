@@ -71,6 +71,11 @@ struct qent_dst;
 struct dmabuf_h;
 struct dmabufs_ctl;
 
+struct timeval;
+enum v4l2_buf_type;
+struct v4l2_ext_control;
+struct v4l2_query_ext_ctrl;
+
 // 1-1 mammping to V4L2 type - just defined separetely to avoid some include versioning difficulties
 enum mediabufs_memory {
    MEDIABUFS_MEMORY_UNSET            = 0,
@@ -135,12 +140,12 @@ struct qent_src *mediabufs_src_qent_get(struct mediabufs_ctl *const mbc);
 void mediabufs_src_qent_abort(struct mediabufs_ctl *const mbc, struct qent_src **const pqe_src);
 
 int mediabufs_ctl_set_ext_ctrls(struct mediabufs_ctl * mbc, struct media_request * const mreq,
-                                struct v4l2_ext_control control_array[], unsigned int n);
+                                struct v4l2_ext_control * const control_array, unsigned int n);
 MediaBufsStatus mediabufs_set_ext_ctrl(struct mediabufs_ctl *const mbc,
                 struct media_request * const mreq,
                 unsigned int id, void *data,
                 unsigned int size);
-int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl ctrls[], unsigned int n);
+int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl * ctrls, unsigned int n);
 
 int mediabufs_src_resizable(const struct mediabufs_ctl *const mbc);
 

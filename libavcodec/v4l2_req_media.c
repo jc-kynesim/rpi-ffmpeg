@@ -1567,7 +1567,7 @@ MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc)
     return status;
 }
 
-int mediabufs_ctl_set_ext_ctrls(struct mediabufs_ctl * mbc, struct media_request * const mreq, struct v4l2_ext_control control_array[], unsigned int n)
+int mediabufs_ctl_set_ext_ctrls(struct mediabufs_ctl * mbc, struct media_request * const mreq, struct v4l2_ext_control * const control_array, unsigned int n)
 {
     struct v4l2_ext_controls controls = {
         .controls = control_array,
@@ -1619,7 +1619,7 @@ MediaBufsStatus mediabufs_src_fmt_set(struct mediabufs_ctl *const mbc,
     return rv;
 }
 
-int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl ctrls[], unsigned int n)
+int mediabufs_ctl_query_ext_ctrls(struct mediabufs_ctl * mbc, struct v4l2_query_ext_ctrl * ctrls, unsigned int n)
 {
     int rv = 0;
     while (n--) {
