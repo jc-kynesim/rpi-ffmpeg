@@ -9,32 +9,21 @@ import sys
 import csv
 from stat import *
 
-CODEC_HEVC_RPI  = 1
-HWACCEL_RPI     = 2
-HWACCEL_DRM     = 3
-HWACCEL_VAAPI   = 4
+class DecodeType:
+    def __init__(self, textname, hwaccel):
+        self.textname = textname
+        self.hwaccel = hwaccel
+
+hwaccel_rpi = DecodeType("RPI Test/Legacy", "rpi")
+hwaccel_sw = DecodeType("Software", None)
+hwaccel_drm = DecodeType("DRM Prime", "drm")
+hwaccel_vaapi = DecodeType("VAAPI", "vaapi")
 
 def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     ffmpeg_exec = args.ffmpeg
     gen_yuv = args.gen_yuv
     valgrind = args.valgrind
     rv = 0
-
-    hwaccel = ""
-    if dectype == HWACCEL_RPI:
-        hwaccel = "rpi"
-    elif dectype == HWACCEL_DRM:
-        hwaccel = "drm"
-    elif dectype == HWACCEL_VAAPI:
-        hwaccel = "vaapi"
-
-    pix_fmt = []
-    if pix == "8":
-        pix_fmt = ["-pix_fmt", "yuv420p"]
-    elif pix == "10":
-        pix_fmt = ["-pix_fmt", "yuv420p10le"]
-    elif pix == "12":
-        pix_fmt = ["-pix_fmt", "yuv420p12le"]
 
     tmp_root = "/tmp"
 
@@ -62,10 +51,10 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     flog = open(os.path.join(tmp_root, name + ".log"), "w+t")
 
     ffargs = [ffmpeg_exec, "-flags", "unaligned"] +\
-        (["-hwaccel", hwaccel] if hwaccel else []) +\
+        ["-no_cvt_hw"] +\
+        (["-hwaccel", dectype.hwaccel] if dectype.hwaccel else []) +\
         ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
-        pix_fmt +\
-        ([yuv_file] if gen_yuv else ["-f", "md5", dec_file])
+        (["-conform_yuv", "1", "-f", "conform", yuv_file] if gen_yuv else ["-f", "conform", dec_file])
 
     if valgrind:
         ffargs = ['valgrind', '--leak-check=full'] + ffargs
@@ -192,6 +181,8 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
                 else :
                     print(": * BANG *")
 
+    print()
+    print("Tested using decode type:", dectype.textname)
     if unx_failures or unx_success:
         print("Unexpected Failures:", unx_failures)
         print("Unexpected Success: ", unx_success)
@@ -209,6 +200,8 @@ class ConfCSVDialect(csv.Dialect):
     quoting = csv.QUOTE_MINIMAL
     skipinitialspace = True
     strict = True
+
+
 
 if __name__ == '__main__':
 
@@ -239,18 +232,20 @@ if __name__ == '__main__':
     with open(args.csv, 'rt') as csvfile:
         csva = [a for a in csv.reader(csvfile, ConfCSVDialect())]
 
-    dectype = CODEC_HEVC_RPI
+    dectype = None
     if os.path.exists("/dev/rpivid-hevcmem"):
-        dectype = HWACCEL_RPI
+        dectype = hwaccel_rpi
     if args.drm or os.path.exists("/sys/module/rpivid_hevc") or os.path.exists("/sys/module/rpi_hevc_dec"):
-        dectype = HWACCEL_DRM
+        dectype = hwaccel_drm
 
     if args.pi4:
-        dectype = HWACCEL_RPI
+        dectype = hwaccel_rpi
     elif args.drm:
-        dectype = HWACCEL_DRM
+        dectype = hwaccel_drm
     elif args.vaapi:
-        dectype = HWACCEL_VAAPI
+        dectype = hwaccel_vaapi
+    elif args.sw:
+        dectype = hwaccel_sw
 
     if os.path.isdir(args.ffmpeg):
         args.ffmpeg = os.path.join(args.ffmpeg, "ffmpeg")
@@ -258,10 +253,10 @@ if __name__ == '__main__':
         print("FFmpeg file '%s' not found" % args.ffmpeg)
         exit(1)
 
-    if args.sw:
-        dectype = None
-    elif not dectype:
-        print("WARNING: no h/w decode slected - using software")
+    if not dectype:
+        print("No decode type selected and no h/w detected")
+        exit(1)
+    print("Running test using decode:", dectype.textname)
 
     i = 0
     while True:
