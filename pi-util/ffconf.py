@@ -25,14 +25,6 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     valgrind = args.valgrind
     rv = 0
 
-    pix_fmt = []
-    if pix == "8":
-        pix_fmt = ["-pix_fmt", "yuv420p"]
-    elif pix == "10":
-        pix_fmt = ["-pix_fmt", "yuv420p10le"]
-    elif pix == "12":
-        pix_fmt = ["-pix_fmt", "yuv420p12le"]
-
     tmp_root = "/tmp"
 
     names = srcname.split('/')
@@ -59,10 +51,10 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     flog = open(os.path.join(tmp_root, name + ".log"), "w+t")
 
     ffargs = [ffmpeg_exec, "-flags", "unaligned"] +\
+        ["-no_cvt_hw"] +\
         (["-hwaccel", dectype.hwaccel] if dectype.hwaccel else []) +\
         ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
-        pix_fmt +\
-        ([yuv_file] if gen_yuv else ["-f", "md5", dec_file])
+        (["-conform_yuv", "1", "-f", "conform", yuv_file] if gen_yuv else ["-f", "conform", dec_file])
 
     if valgrind:
         ffargs = ['valgrind', '--leak-check=full'] + ffargs
