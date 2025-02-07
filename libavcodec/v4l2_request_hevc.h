@@ -26,53 +26,14 @@
 #define AVCODEC_V4L2_REQUEST_HEVC_H
 
 #include <stdint.h>
-#include <drm_fourcc.h>
-
 #include "refstruct.h"
+#include "libavutil/fourcc_drm.h"
 #include "v4l2_req_decode_q.h"
 
-#ifndef DRM_FORMAT_NV15
-#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
-#endif
-
-#ifndef DRM_FORMAT_NV20
-#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
-#endif
-
-// P030 should be defined in drm_fourcc.h and hopefully will be sometime
-// in the future but until then...
-#ifndef DRM_FORMAT_P030
-#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
-#endif
-
-#ifndef DRM_FORMAT_NV15
-#define DRM_FORMAT_NV15 fourcc_code('N', 'V', '1', '5')
-#endif
-
-#ifndef DRM_FORMAT_NV20
-#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
-#endif
-
-#ifndef V4L2_PIX_FMT_NV12_COL128M
-#define V4L2_PIX_FMT_NV12_COL128M v4l2_fourcc('N', 'c', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
-#define V4L2_PIX_FMT_NV12_10_COL128M v4l2_fourcc('N', 'c', '3', '0')
-								/* Y/CbCr 4:2:0 10bpc, 3x10 packed as 4 bytes in
-								 * a 128 bytes / 96 pixel wide column */
-#endif
-
+#include "libavutil/fourcc_v4l2.h"
 #include <linux/videodev2.h>
 #ifndef V4L2_CID_CODEC_BASE
 #define V4L2_CID_CODEC_BASE V4L2_CID_MPEG_BASE
-#endif
-
-// V4L2_PIX_FMT_NV12_10_COL128 and V4L2_PIX_FMT_NV12_COL128 should be defined
-// in drm_fourcc.h hopefully will be sometime in the future but until then...
-#ifndef V4L2_PIX_FMT_NV12_10_COL128
-#define V4L2_PIX_FMT_NV12_10_COL128 v4l2_fourcc('N', 'C', '3', '0')
-#endif
-
-#ifndef V4L2_PIX_FMT_NV12_COL128
-#define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
 #endif
 
 #ifndef V4L2_CTRL_FLAG_DYNAMIC_ARRAY
