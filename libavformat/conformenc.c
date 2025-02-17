@@ -115,7 +115,6 @@ static int conform_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
            de->fno, de->foffset,
            sf->width, sf->height, sf->crop_left, sf->crop_top, sf->crop_right, sf->crop_bottom,
            av_get_pix_fmt_name(sf->format), av_get_pix_fmt_name(fmt));
-    av_log(s, AV_LOG_DEBUG, "%s: Data ref count=%d, data=%p\n", __func__, av_buffer_get_ref_count(sf->buf[0]), sf->data[0]);
 
     if ((sf->flags & AV_FRAME_FLAG_CORRUPT) != 0) {
         av_log(s, AV_LOG_WARNING, "Discard corrupt frame: fmt=%d, ts=%" PRId64 "\n", sf->format, sf->pts);
@@ -144,7 +143,6 @@ static int conform_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
         const unsigned int bpp = cd->depth > 8 ? 2 : 1;
         const unsigned int h = (f->height - (f->crop_top + f->crop_bottom) + rndh) >> srh;
         unsigned int y;
-        av_log(s, AV_LOG_DEBUG, "[%d] srp=%d\n", i, srp);
         for (y = 0; y < h; ++y) {
             const void *const lstart = f->data[cd->plane] + (y + (f->crop_top >> srh)) * f->linesize[cd->plane] + cd->offset + (f->crop_left >> srw) * cd->step;
             const unsigned int w = (f->width - (f->crop_left + f->crop_right) + rndw) >> srw;
@@ -177,8 +175,6 @@ static int conform_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
         }
     }
     ++de->fno;
-
-    av_log(s, AV_LOG_DEBUG, "%s: Done: Data ref count=%d\n", __func__, av_buffer_get_ref_count(sf->buf[0]));
 
     av_frame_free(&cf);
 
