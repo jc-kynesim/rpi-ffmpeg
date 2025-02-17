@@ -215,7 +215,7 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
 #endif
 
     err = ff_hwframe_map_create(src->hw_frames_ctx, dst, src,
-                                &drm_unmap_frame, map);
+                                drm_unmap_frame, map);
     if (err < 0)
         goto fail;
 
