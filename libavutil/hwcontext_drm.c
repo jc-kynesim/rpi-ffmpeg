@@ -196,10 +196,7 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
 
     dst->width  = src->width;
     dst->height = src->height;
-    dst->crop_top    = src->crop_top;
-    dst->crop_bottom = src->crop_bottom;
-    dst->crop_left   = src->crop_left;
-    dst->crop_right  = src->crop_right;
+    // Crop copied with props
 
 #if CONFIG_SAND
     // Rework for sand frames
@@ -219,6 +216,7 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
     if (err < 0)
         goto fail;
 
+    av_frame_copy_props(dst, src);
     return 0;
 
 fail:
@@ -294,14 +292,8 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
 #endif
 #if CONFIG_SAND
     if (av_rpi_is_sand_frame(map)) {
-        // Preserve crop - later ffmpeg code assumes that we have in that it
-        // overwrites any crop that we create with the old values
         const unsigned int w = FFMIN(dst->width, map->width);
         const unsigned int h = FFMIN(dst->height, map->height);
-        const size_t ct = map->crop_top;
-        const size_t cb = map->crop_bottom;
-        const size_t cl = map->crop_left;
-        const size_t cr = map->crop_right;
 
         map->crop_top = 0;
         map->crop_bottom = 0;
@@ -317,19 +309,17 @@ static int drm_transfer_data_from(AVHWFramesContext *hwfc,
 
         dst->width = w;
         dst->height = h;
-        dst->crop_top = ct;
-        dst->crop_bottom = cb;
-        dst->crop_left = cl;
-        dst->crop_right = cr;
+        // Cropping restored as part of props
     }
     else
 #endif
     {
-        // Kludge mapped h/w s.t. frame_copy works
-        map->width  = dst->width;
-        map->height = dst->height;
+        dst->width  = map->width;
+        dst->height = map->height;
         err = av_frame_copy(dst, map);
     }
+
+    av_frame_copy_props(dst, src);
 
     if (err)
     {
