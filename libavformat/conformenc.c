@@ -49,9 +49,11 @@ typedef struct conform_display_env_s
     void * line_buf;
     size_t line_size;
 
+    struct AVMD5 * frame_md5;
     struct AVMD5 * md5;
 
     int conform_file;
+    int frame_md5_flag;
 
     unsigned long long foffset;
     unsigned int fno;
@@ -132,6 +134,9 @@ static int conform_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
         f = cf;
     }
 
+    if (de->frame_md5)
+        av_md5_init(de->frame_md5);
+
     // This is fully generic - much optimisation possible
     for (i = 0; i != pix_desc->nb_components; ++i) {
         const AVComponentDescriptor * const cd = pix_desc->comp + i;
@@ -166,6 +171,8 @@ static int conform_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
 
             // We have one line
 
+            if (de->frame_md5)
+                av_md5_update(de->frame_md5, de->line_buf, w * bpp);
             if (de->md5)
                 av_md5_update(de->md5, de->line_buf, w * bpp);
             else {
@@ -173,6 +180,14 @@ static int conform_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
                 de->foffset += w * bpp;
             }
         }
+    }
+
+    if (de->frame_md5) {
+        uint8_t m[16];
+        av_md5_final(de->frame_md5, m);
+        avio_printf(s->pb, "MD5-Frame-%d=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                    de->fno,
+                    m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
     }
     ++de->fno;
 
@@ -198,8 +213,11 @@ static int conform_vout_init(struct AVFormatContext * s)
     de->line_size = (8192 * 4); // 4bpp * 8k seems plenty
     de->line_buf = av_malloc(de->line_size);
 
-    if (!de->conform_file)
+    if (!de->conform_file) {
         de->md5 = av_md5_alloc();
+        if (de->frame_md5_flag)
+            de->frame_md5 = av_md5_alloc();
+    }
 
     av_log(s, AV_LOG_DEBUG, ">>> %s\n", __func__);
 
@@ -214,6 +232,7 @@ static void conform_vout_deinit(struct AVFormatContext * s)
 
     av_freep(&de->line_buf);
     av_freep(&de->md5);
+    av_freep(&de->frame_md5);
 
     av_log(s, AV_LOG_DEBUG, ">>> %s\n", __func__);
 }
@@ -221,6 +240,7 @@ static void conform_vout_deinit(struct AVFormatContext * s)
 
 #define OFFSET(x) offsetof(conform_display_env_t, x)
 static const AVOption options[] = {
+    { "conform_frame_md5", "Produce per-frame MD5s as well as final", OFFSET(frame_md5_flag), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { "conform_yuv", "Output yuv file rather than md5", OFFSET(conform_file), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, AV_OPT_FLAG_ENCODING_PARAM },
     { NULL }
 };
