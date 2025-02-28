@@ -710,6 +710,7 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     unsigned int width;
     unsigned int height;
     unsigned int bpl;
+    unsigned int bpl2;
     uint32_t pixelformat;
     uint64_t mod = DRM_FORMAT_MOD_LINEAR;
     unsigned int object_count = 1;
@@ -726,6 +727,7 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
         pixelformat = format->fmt.pix.pixelformat;
         bpl         = format->fmt.pix.bytesperline;
     }
+    bpl2 = bpl;
 
     switch (pixelformat) {
     case V4L2_PIX_FMT_NV12:
@@ -743,11 +745,15 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     case V4L2_PIX_FMT_NV12_COL128M:
         layer->format = DRM_FORMAT_NV12;
         mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(0);
+        bpl = height;
+        bpl2 = height / 2;
         object_count = 2;
         break;
     case V4L2_PIX_FMT_NV12_10_COL128M:
         layer->format = DRM_FORMAT_P030;
         mod = DRM_FORMAT_MOD_BROADCOM_SAND128_COL_HEIGHT(0);
+        bpl = height;
+        bpl2 = height / 2;
         object_count = 2;
         break;
 #endif
@@ -805,7 +811,7 @@ static int drm_from_format(AVDRMFrameDescriptor * const desc, const struct v4l2_
     {
         layer->planes[1].object_index = (object_count > 1) ? 1 : 0;
         layer->planes[1].offset = (object_count > 1) ? 0 : layer->planes[0].pitch * height;
-        layer->planes[1].pitch = layer->planes[0].pitch;
+        layer->planes[1].pitch = bpl2;
     }
 
     return 0;
