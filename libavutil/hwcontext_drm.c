@@ -206,10 +206,17 @@ static int drm_map_frame(AVHWFramesContext *hwfc,
         // As it stands the sand formats hold stride2 in linesize[3]
         // linesize[0] & [1] contain stride1 which is always 128 for everything we do
         // * Arguably this should be reworked s.t. stride2 is in linesize[0] & [1]
-        dst->linesize[3] = fourcc_mod_broadcom_param(desc->objects[0].format_modifier);
+        int mod_stride = fourcc_mod_broadcom_param(desc->objects[0].format_modifier);
+        if (mod_stride == 0) {
+            dst->linesize[3] = dst->linesize[0];
+            dst->linesize[4] = dst->linesize[1];
+        }
+        else {
+            dst->linesize[3] = mod_stride;
+            dst->linesize[4] = mod_stride;
+        }
         dst->linesize[0] = 128;
         dst->linesize[1] = 128;
-        // *** Are we sure src->height is actually what we want ???
     }
 #endif
 
