@@ -127,6 +127,9 @@ MediaBufsStatus mediabufs_dst_slots_create(struct mediabufs_ctl *const mbc, cons
 
 MediaBufsStatus mediabufs_stream_on(struct mediabufs_ctl *const mbc);
 MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc);
+
+MediaBufsStatus mediabufs_stream_wait_dst_done(struct mediabufs_ctl *const mbc);
+
 const struct v4l2_format *mediabufs_dst_fmt(struct mediabufs_ctl *const mbc);
 
 typedef int mediabufs_dst_fmt_accept_fn(void * v, const struct v4l2_fmtdesc *fmtdesc);

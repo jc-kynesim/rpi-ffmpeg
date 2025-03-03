@@ -129,7 +129,10 @@ int ff_v4l2_request_uninit(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
 
     if (priv->cctx != NULL) {
-        decode_q_wait(&priv->cctx->decode_q, NULL);  // Wait for all other threads to be out of decode
+        V4L2RequestContextHEVC *const ctx = priv->cctx;
+
+        decode_q_wait(&ctx->decode_q, NULL);  // Wait for all other threads to be out of decode
+        mediabufs_stream_wait_dst_done(ctx->mbufs);  // Now wait for processing to finish
 
         priv->cctx = NULL;
         av_buffer_unref(&priv->cctx_buf);

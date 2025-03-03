@@ -1170,6 +1170,32 @@ static int create_dst_bufs(struct mediabufs_ctl *const mbc, unsigned int n, stru
     return cbuf.count;
 }
 
+static void queue_dst_wait_no_waiting(struct buf_pool *const bp)
+{
+    // This is O(n^2), but n is not very big & shoudl only happen on shutdown
+    // so it isn't worth adding any processing to anything else to make this
+    // more efficient
+    for (;;) {
+        struct qent_base *be;
+        struct qent_dst *be_dst = NULL;
+
+        pthread_mutex_lock(&bp->lock);
+        for (be = bp->inuse.head; be != NULL; be = be->next) {
+            be_dst = base_to_dst(be);
+            if (be_dst->waiting) {
+                qent_dst_ref(be_dst);
+                break;
+            }
+        }
+        pthread_mutex_unlock(&bp->lock);
+
+        if (be == NULL)
+            break;
+
+        qent_dst_wait(be_dst);
+    }
+}
+
 static MediaBufsStatus
 qe_import_from_buf(struct mediabufs_ctl *const mbc, struct qent_base * const be, const struct v4l2_format *const fmt,
                    const unsigned int n, const bool x_dmabuf)
@@ -1564,6 +1590,12 @@ MediaBufsStatus mediabufs_stream_off(struct mediabufs_ctl *const mbc)
 
     mbc->stream_on = false;
     return status;
+}
+
+MediaBufsStatus mediabufs_stream_wait_dst_done(struct mediabufs_ctl *const mbc)
+{
+    queue_dst_wait_no_waiting(mbc->dst);
+    return MEDIABUFS_STATUS_SUCCESS;
 }
 
 int mediabufs_ctl_set_ext_ctrls(struct mediabufs_ctl * mbc, struct media_request * const mreq, struct v4l2_ext_control * const control_array, unsigned int n)
