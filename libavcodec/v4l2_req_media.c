@@ -383,7 +383,7 @@ struct qe_list_head {
 struct buf_pool {
     enum mediabufs_memory memtype;
     pthread_mutex_t lock;
-    sem_t free_sem;
+    pthread_cond_t cond;
     struct qe_list_head free;
     struct qe_list_head inuse;
 };
@@ -544,8 +544,8 @@ static void queue_put_free(struct buf_pool *const bp, struct qent_base *be)
     for (i = 0; i < VIDEO_MAX_PLANES && be->dh[i]; ++i)
         dmabuf_len_set(be->dh[i], 0);
     bq_put_free(bp, be);
+    pthread_cond_broadcast(&bp->cond);
     pthread_mutex_unlock(&bp->lock);
-    sem_post(&bp->free_sem);
 }
 
 static bool queue_is_inuse(const struct buf_pool *const bp)
@@ -567,10 +567,9 @@ static struct qent_base *queue_get_free(struct buf_pool *const bp)
 {
     struct qent_base *buf;
 
-    if (do_wait(&bp->free_sem))
-        return NULL;
     pthread_mutex_lock(&bp->lock);
-    buf = bq_get_free(bp);
+    while ((buf = bq_get_free(bp)) == NULL && pthread_cond_wait(&bp->cond, &bp->lock) == 0)
+        /* Loop */;
     pthread_mutex_unlock(&bp->lock);
     return buf;
 }
@@ -579,8 +578,6 @@ static struct qent_base *queue_tryget_free(struct buf_pool *const bp)
 {
     struct qent_base *buf;
 
-    if (do_trywait(&bp->free_sem))
-        return NULL;
     pthread_mutex_lock(&bp->lock);
     buf = bq_get_free(bp);
     pthread_mutex_unlock(&bp->lock);
@@ -606,7 +603,7 @@ static struct qent_base * queue_find_extract_index(struct buf_pool *const bp, co
 
 static void queue_delete(struct buf_pool *const bp)
 {
-    sem_destroy(&bp->free_sem);
+    pthread_cond_destroy(&bp->cond);
     pthread_mutex_destroy(&bp->lock);
     free(bp);
 }
@@ -617,7 +614,7 @@ static struct buf_pool* queue_new(const int vfd)
     if (!bp)
         return NULL;
     pthread_mutex_init(&bp->lock, NULL);
-    sem_init(&bp->free_sem, 0, 0);
+    pthread_cond_init(&bp->cond, NULL);
     return bp;
 }
 
