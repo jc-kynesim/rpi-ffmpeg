@@ -120,6 +120,9 @@ static int conform_vout_write_packet(AVFormatContext *s, AVPacket *pkt)
 
     if ((sf->flags & AV_FRAME_FLAG_CORRUPT) != 0) {
         av_log(s, AV_LOG_WARNING, "Discard corrupt frame: fmt=%d, ts=%" PRId64 "\n", sf->format, sf->pts);
+        if (de->frame_md5)
+            avio_printf(s->pb, "MD5-Frame-%d=*BAD*\n", de->fno);
+        ++de->fno;
         return 0;
     }
 
