@@ -44,9 +44,6 @@ typedef struct req_av1_frame_env_s {
     // Decode only - should be NULL by the time we emit the frame
     struct req_decode_ent decode_ent;
 
-    struct media_request *req;
-    struct qent_src *qe_src;
-
     const uint8_t * buffer0;
     size_t num_tiles;
     struct v4l2_ctrl_av1_tile_group_entry * tile_groups;
@@ -999,9 +996,6 @@ req_av1_abort_frame(AVCodecContext * const avctx, V4L2RequestContextHEVC *const 
 
     fprintf(stderr, "<<< %s\n", __func__);
     if (rd != NULL) {
-        media_request_abort(&rd->req);
-        mediabufs_src_qent_abort(ctx->mbufs, &rd->qe_src);
-
         decode_q_remove(&ctx->decode_q, &rd->decode_ent);
     }
 }
@@ -1038,10 +1032,6 @@ free_av1_buf0(void *opaque, uint8_t *data)
     frame_finish(rd);
 
     qent_dst_unref(&rd->qe_dst);
-
-    // We don't expect req or qe_src to be set
-    if (rd->req || rd->qe_src)
-        av_log(NULL, AV_LOG_ERROR, "%s: qe_src %p or req %p not NULL\n", __func__, rd->req, rd->qe_src);
 
     av_freep(&rd->tile_groups);
 
