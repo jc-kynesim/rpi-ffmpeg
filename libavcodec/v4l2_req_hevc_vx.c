@@ -95,9 +95,6 @@ typedef struct V4L2MediaReqDescriptor {
     // Decode only - should be NULL by the time we emit the frame
     struct req_decode_ent decode_ent;
 
-    struct media_request *req;
-    struct qent_src *qe_src;
-
 #if HEVC_CTRLS_VERSION >= 2
     struct v4l2_ctrl_hevc_decode_params dec;
 #endif
@@ -1025,9 +1022,6 @@ static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx, V4L2Requ
     if (h->cur_frame != NULL) {
         V4L2MediaReqDescriptor *const rd = (V4L2MediaReqDescriptor *)h->cur_frame->f->data[0];
 
-        media_request_abort(&rd->req);
-        mediabufs_src_qent_abort(ctx->mbufs, &rd->qe_src);
-
         decode_q_remove(&ctx->decode_q, &rd->decode_ent);
     }
 }
@@ -1324,10 +1318,6 @@ static void v4l2_req_frame_free(void *opaque, uint8_t *data)
     frame_finish(rd);
 
     qent_dst_unref(&rd->qe_dst);
-
-    // We don't expect req or qe_src to be set
-    if (rd->req || rd->qe_src)
-        av_log(NULL, AV_LOG_ERROR, "%s: qe_src %p or req %p not NULL\n", __func__, rd->req, rd->qe_src);
 
     av_freep(&rd->slices);
     av_freep(&rd->slice_params);
