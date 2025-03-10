@@ -1084,8 +1084,7 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
 
 #if CONFIG_SAND
     // Sand cannot be cropped - do not try
-    // If it might be encapsulated in DRM_PRIME don't crop that either
-    if (av_rpi_is_sand_format(frame->format) || frame->format == AV_PIX_FMT_DRM_PRIME)
+    if (av_rpi_is_sand_format(frame->format))
         return 0;
 #endif
 
