@@ -367,12 +367,16 @@ struct qent_src {
     int fixed_size;
 };
 
+
 struct qent_dst {
     struct qent_base base;
     bool waiting;
     pthread_mutex_t lock;
     pthread_cond_t cond;
     struct ff_weak_link_client * mbc_wl;
+
+    qent_dst_done_fn * done_fn;
+    void * done_v;
 };
 
 struct qe_list_head {
@@ -456,7 +460,7 @@ static struct qent_dst* qe_dst_new(struct ff_weak_link_master * const wl, const 
         .base = QENT_BASE_INITIALIZER(memtype),
         .lock = PTHREAD_MUTEX_INITIALIZER,
         .cond = PTHREAD_COND_INITIALIZER,
-        .mbc_wl = ff_weak_link_ref(wl)
+        .mbc_wl = ff_weak_link_ref(wl),
     };
     return be_dst;
 }
@@ -749,6 +753,9 @@ static struct qent_base * qe_dequeue(struct buf_pool *const bp,
 
 static void qe_dst_done(struct qent_dst * dst_be)
 {
+    if (dst_be->done_fn)
+        dst_be->done_fn(dst_be, dst_be->done_v);
+
     pthread_mutex_lock(&dst_be->lock);
     dst_be->waiting = false;
     pthread_cond_broadcast(&dst_be->cond);
@@ -893,14 +900,14 @@ MediaBufsStatus mediabufs_start_request(struct mediabufs_ctl *const mbc,
 
     if (dst_be) {
         if (qe_dst_waiting(dst_be)) {
-            request_info(mbc->dc, "Request buffer already waiting on start\n");
-            goto fail1;
+            request_info(mbc->dc, "Dst buffer already waiting on start\n");
+            goto fail0;
         }
         dst_be->base.timestamp = (struct timeval){0,0};
+        qent_dst_ref(dst_be);
         if (qe_v4l2_queue(&dst_be->base, mbc->vfd, NULL, &mbc->dst_fmt, true, false))
             goto fail1;
 
-        qent_dst_ref(dst_be);
         queue_put_inuse(mbc->dst, &dst_be->base);
     }
 
@@ -929,6 +936,7 @@ fail1:
         dst_be->base.status = QENT_ERROR;
         qe_dst_done(dst_be);
     }
+fail0:
     pthread_mutex_unlock(&mbc->lock);
     return MEDIABUFS_ERROR_OPERATION_FAILED;
 }
@@ -1095,6 +1103,14 @@ MediaBufsStatus qent_dst_read_stop(struct qent_dst *const be_dst)
             status = MEDIABUFS_ERROR_OPERATION_FAILED;
     }
     return status;
+}
+
+void qent_dst_done_cb_set(struct qent_dst * qe_dst, qent_dst_done_fn * fn, void * v)
+{
+    if (qe_dst == NULL)
+        return;
+    qe_dst->done_fn = fn;
+    qe_dst->done_v = v;
 }
 
 struct qent_dst * qent_dst_ref(struct qent_dst * const be_dst)
@@ -1332,6 +1348,8 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struc
         }
     }
 
+    be_dst->done_fn = (qent_dst_done_fn*)0;
+    be_dst->done_v = NULL;
     be_dst->base.status = QENT_PENDING;
     atomic_store(&be_dst->base.ref_count, 0);
     return be_dst;

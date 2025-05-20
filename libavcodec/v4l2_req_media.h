@@ -100,6 +100,9 @@ void qent_dst_delete(struct qent_dst *const be);
 void qent_dst_unref(struct qent_dst ** const pbe_dst);
 struct qent_dst * qent_dst_ref(struct qent_dst * const be_dst);
 
+typedef void qent_dst_done_fn(struct qent_dst * qe_dst, void * v);
+void qent_dst_done_cb_set(struct qent_dst * qe_dst, qent_dst_done_fn * fn, void * v);
+
 const uint8_t * qent_dst_data(struct qent_dst *const be, unsigned int buf_no);
 MediaBufsStatus qent_dst_read_start(struct qent_dst *const be);
 MediaBufsStatus qent_dst_read_stop(struct qent_dst *const be);

@@ -663,6 +663,22 @@ static void fill_pps(struct v4l2_ctrl_hevc_pps * const ctrl, const HEVCPPS * con
     }
 }
 
+static void frame_unref_refs(V4L2MediaReqDescriptor * const rd)
+{
+    AVBufferRef **p = rd->refs;
+    for (; *p != NULL; ++p)
+        av_buffer_unref(p);
+}
+
+// Guaranteed to be called before dst_wait would return
+static void qent_dst_done_cb(struct qent_dst * be_dst, void * v)
+{
+    AVBufferRef * buf = v;
+    V4L2MediaReqDescriptor *rd = (V4L2MediaReqDescriptor*)buf->data;
+    frame_unref_refs(rd);
+    av_buffer_unref(&buf);
+}
+
 static int frame_finish(V4L2MediaReqDescriptor * const rd)
 {
     int rv = 0;
@@ -673,12 +689,7 @@ static int frame_finish(V4L2MediaReqDescriptor * const rd)
             rv = -1;
     }
 
-    {
-        AVBufferRef **p = rd->refs;
-        for (; *p != NULL; ++p)
-            av_buffer_unref(p);
-    }
-
+    frame_unref_refs(rd);
     return rv;
 }
 
@@ -1136,6 +1147,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx, V4L2RequestContext
             rv = AVERROR(ENOMEM);
             goto fail;
         }
+        qent_dst_done_cb_set(rd->qe_dst, qent_dst_done_cb, av_buffer_ref(h->cur_frame->f->buf[0]));
     }
 
     // Send as slices
