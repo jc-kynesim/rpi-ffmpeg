@@ -54,7 +54,7 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
         ["-no_cvt_hw"] +\
         (["-hwaccel", dectype.hwaccel] if dectype.hwaccel else []) +\
         ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
-        (["-conform_yuv", "1", "-f", "conform", yuv_file] if gen_yuv else ["-f", "conform", dec_file])
+        (["-conform_out", "file", "-f", "conform", yuv_file] if gen_yuv else ["-conform_out", "md5", "-f", "conform", dec_file])
 
     if valgrind:
         ffargs = ['valgrind', '--leak-check=full'] + ffargs
