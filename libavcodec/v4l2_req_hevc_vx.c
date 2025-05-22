@@ -127,12 +127,16 @@ struct req_controls {
 
 //static uint8_t nalu_slice_start_code[] = { 0x00, 0x00, 0x01 };
 
+static inline uint32_t vpixfmt(const struct v4l2_format *const format)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
+            format->fmt.pix_mp.pixelformat : format->fmt.pix.pixelformat;
+}
 
 // Get an FFmpeg format from the v4l2 format
 static enum AVPixelFormat pixel_format_from_format(const struct v4l2_format *const format)
 {
-    const uint32_t vfmt = V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
-            format->fmt.pix_mp.pixelformat : format->fmt.pix.pixelformat;
+    const uint32_t vfmt = vpixfmt(format);
     switch (vfmt) {
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
@@ -268,6 +272,23 @@ static const uint8_t * ptr_from_index(const uint8_t * b, unsigned int idx)
     return b;
 }
 
+static uint32_t trimmed_bits(const uint8_t * b, unsigned int byte_len)
+{
+    const uint8_t * p = b + byte_len - 1;
+    unsigned int i;
+    // Strip simple trailing zeros
+    while (p > b && p[0] == 0)
+        --p;
+    // Strip cabac zero words
+    while (p > b + 2 && p[0] == 3 && p[-1] == 0 && p[-2] == 0)
+        p -= 3;
+    // We expect this byte to be non zero for a legal stream
+    for (i = 0; i != 7; ++i)
+        if (((1 << i) & p[0]) != 0)
+            break;
+    return (p - b) * 8 + 7 - i;
+}
+
 static int slice_add(V4L2MediaReqDescriptor * const rd)
 {
     if (rd->num_slices >= rd->alloced_slices) {
@@ -348,7 +369,7 @@ static void fill_slice_params(const HEVCContext * const h,
                               const struct v4l2_ctrl_hevc_decode_params * const dec,
 #endif
                               struct v4l2_ctrl_hevc_slice_params *slice_params,
-                              uint32_t bit_size, uint32_t bit_offset)
+                              const uint32_t data_offset, const uint32_t bit_size)
 {
     const SliceHeader * const sh = &h->sh;
 #if HEVC_CTRLS_VERSION >= 2
@@ -364,9 +385,9 @@ static void fill_slice_params(const HEVCContext * const h,
     *slice_params = (struct v4l2_ctrl_hevc_slice_params) {
         .bit_size = bit_size,
 #if HEVC_CTRLS_VERSION <= 3
-        .data_bit_offset = bit_offset,
+        .data_bit_offset = data_offset * 8 - 1,
 #else
-        .data_byte_offset = bit_offset / 8 + 1,
+        .data_byte_offset = data_offset,
 #endif
         /* ISO/IEC 23008-2, ITU-T Rec. H.265: General slice segment header */
         .slice_segment_addr = sh->slice_segment_addr,
@@ -943,13 +964,16 @@ add_ref_once(V4L2MediaReqDescriptor * const rd, struct HEVCFrame * const ref)
 
 // This only works because we started out from a single coded frame buffer
 // that will remain intact until after end_frame
-static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx, const uint8_t *buffer, uint32_t size)
+static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, V4L2RequestContextHEVC *const ctx,
+                                          const uint8_t *buffer, uint32_t buffer_size)
 {
+    uint32_t size = buffer_size;
     const HEVCContext * const h = avctx->priv_data;
     const SliceHeader * const sh = &h->sh;
     V4L2MediaReqDescriptor * const rd = (V4L2MediaReqDescriptor*)h->cur_frame->f->data[0];
-    uint32_t boff = (ptr_from_index(buffer, sh->data_offset) - buffer) * 8 - 1;
-
+    uint32_t data_offset = (ptr_from_index(buffer, sh->data_offset) - buffer);
+    uint32_t block_offset = 0;
+    uint32_t bsize;
     const unsigned int n = rd->num_slices;
     const unsigned int block_start = (n / ctx->max_slices) * ctx->max_slices;
 
@@ -961,7 +985,7 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, V4L2RequestCont
     if (ctx->start_code == V4L2_STATELESS_HEVC_START_CODE_ANNEX_B) {
         buffer -= 3;
         size += 3;
-        boff += 24;
+        data_offset += 3;
         if (buffer[0] != 0 || buffer[1] != 0 || buffer[2] != 1) {
             av_log(avctx, AV_LOG_ERROR, "Start code requested but missing %02x:%02x:%02x\n",
                    buffer[0], buffer[1], buffer[2]);
@@ -978,18 +1002,19 @@ static int v4l2_request_hevc_decode_slice(AVCodecContext *avctx, V4L2RequestCont
 
     if (n != block_start) {
         struct slice_info *const si0 = rd->slices + block_start;
-        const size_t offset = (buffer - si0->ptr);
-        boff += offset * 8;
-        size += offset;
-        si0->len = si->len + offset;
+        block_offset = (buffer - si0->ptr);
+        si0->len = si->len + block_offset;
     }
 
+    bsize = ctx->bit_size_is_offset ?
+        (size + block_offset) * 8 :
+        trimmed_bits(buffer + data_offset, size - data_offset);
 #if HEVC_CTRLS_VERSION >= 2
     if (n == 0)
         fill_decode_params(h, &rd->dec);
-    fill_slice_params(h, &rd->dec, rd->slice_params + n, size * 8, boff);
+    fill_slice_params(h, &rd->dec, rd->slice_params + n, data_offset + block_offset, bsize);
 #else
-    fill_slice_params(h, rd->slice_params + n, size * 8, boff);
+    fill_slice_params(h, rd->slice_params + n, data_offset + block_offset, bsize);
 #endif
 
     {
@@ -1255,6 +1280,17 @@ set_controls(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         { .id = V4L2_CID_STATELESS_HEVC_DECODE_MODE, },
         { .id = V4L2_CID_STATELESS_HEVC_START_CODE, },
     };
+
+    // Fix RPi Quirk
+    switch (vpixfmt(mediabufs_dst_fmt(ctx->mbufs))) {
+    case V4L2_PIX_FMT_NV12_COL128:
+    case V4L2_PIX_FMT_NV12_10_COL128:
+        ctx->bit_size_is_offset = 1;
+        break;
+    default:
+        ctx->bit_size_is_offset = 0;
+        break;
+    }
 
     mediabufs_ctl_query_ext_ctrls(ctx->mbufs, querys, FF_ARRAY_ELEMS(querys));
 

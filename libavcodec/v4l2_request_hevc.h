@@ -100,6 +100,8 @@ typedef struct V4L2RequestContextHEVC {
     unsigned int max_slices;    // 0 => not wanted (frame mode)
     unsigned int max_offsets;   // 0 => not wanted
 
+    int bit_size_is_offset;  // Quirk for old RPi decodes (not worth an entire VX)
+
     req_decode_q decode_q;
 
     struct devscan *devscan;
