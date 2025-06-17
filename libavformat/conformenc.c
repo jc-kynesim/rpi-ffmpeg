@@ -244,6 +244,13 @@ static int conform_planar(AVFormatContext * const s, conform_display_env_t * con
         for (y = 0; y < h; ++y) {
             const void *const lstart = f->data[cd->plane] + (y + (f->crop_top >> srh)) * f->linesize[cd->plane] + cd->offset + (f->crop_left >> srw) * cd->step;
             unsigned int x;
+
+            // If line_buf construction would be a simple copy then bypass
+            if (srp == 0 && cd->step == bpp) {
+                add_block(s, de, lstart, w * bpp);
+                continue;
+            }
+
             if (bpp == 1) {
                 uint8_t *d = de->line_buf;
                 const uint8_t *s = lstart;
