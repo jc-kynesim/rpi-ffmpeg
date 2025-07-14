@@ -178,10 +178,9 @@ static void add_block(AVFormatContext * const s, conform_display_env_t * const d
         av_md5_update(de->frame_md5, line, size);
     if (de->md5)
         av_md5_update(de->md5, line, size);
-    else {
+    else
         avio_write(s->pb, line, size);
-        de->foffset += size;
-    }
+    de->foffset += size;
 }
 
 static void end_frame(AVFormatContext * const s, conform_display_env_t * const de)
