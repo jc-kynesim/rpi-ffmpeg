@@ -861,7 +861,7 @@ int qent_src_data_copy(struct qent_src *const be_src, const size_t offset, const
     return 0;
 }
 
-const struct dmabuf_h * qent_dst_dmabuf(const struct qent_dst *const be_dst, unsigned int plane)
+struct dmabuf_h * qent_dst_dmabuf(const struct qent_dst *const be_dst, unsigned int plane)
 {
     const struct qent_base *const be = &be_dst->base;
 
