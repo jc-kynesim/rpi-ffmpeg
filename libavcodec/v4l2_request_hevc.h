@@ -149,6 +149,7 @@ int ff_v4l2_request_alloc_frame(AVCodecContext * avctx, AVFrame *frame);
 int ff_v4l2_request_init(AVCodecContext *avctx,
                          const struct v4l2_req_decode_fns * const * const try_fns,
                          const int width, const int height, const int bit_depth,
+                         const size_t src_bufsize,
                          const int dst_buffers);
 int ff_v4l2_request_uninit(AVCodecContext *avctx);
 int ff_v4l2_request_update_thread_context(AVCodecContext *dst, const AVCodecContext *src);

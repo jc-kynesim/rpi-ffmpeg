@@ -173,6 +173,7 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
 int ff_v4l2_request_init(AVCodecContext *avctx,
                          const struct v4l2_req_decode_fns * const * const try_fns,
                          const int width, const int height, const int bit_depth,
+                         const size_t src_bufsize,
                          const int dst_buffers)
 {
     V4L2RequestPrivHEVC * const priv = avctx->internal->hwaccel_priv_data;
@@ -184,7 +185,8 @@ int ff_v4l2_request_init(AVCodecContext *avctx,
     enum mediabufs_memory src_memtype;
     enum mediabufs_memory dst_memtype;
 
-    av_log(avctx, AV_LOG_DEBUG, "<<< %s\n", __func__);
+    av_log(avctx, AV_LOG_DEBUG, "<<< %s (%dx%d %d bits src_size %zd dst_bufs %d\n", __func__,
+           width, height, bit_depth, src_bufsize, dst_buffers);
 
     if ((ctx = av_mallocz(sizeof(*ctx))) == NULL) {
         av_log(avctx, AV_LOG_ERROR, "Unable to allocate context");
@@ -253,7 +255,7 @@ int ff_v4l2_request_init(AVCodecContext *avctx,
     // We will realloc if we need more
     // Must use sps->h/w as avctx contains cropped size
 retry_src_memtype:
-    src_size = bit_buf_size(width, height, bit_depth - 8);
+    src_size = src_bufsize;
     if (src_memtype == MEDIABUFS_MEMORY_DMABUF && mediabufs_src_resizable(ctx->mbufs))
         src_size /= 4;
     // Kludge for conformance tests which break Annex A limits
@@ -407,7 +409,8 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
     }
 
     return ff_v4l2_request_init(avctx, try_fns, sps->width, sps->height, sps->bit_depth,
-                             sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering);
+                                bit_buf_size(sps->width, sps->height, sps->bit_depth - 8),
+                                sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering);
 }
 
 const FFHWAccel ff_hevc_v4l2request_hwaccel = {
