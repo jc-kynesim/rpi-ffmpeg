@@ -32,6 +32,8 @@ struct dmabuf_h;
 
 struct dmabufs_ctl * dmabufs_ctl_new(void);
 struct dmabufs_ctl * dmabufs_ctl_new_vidbuf_cached(void);
+struct dmabufs_ctl * dmabufs_ctl_new_udmabuf(void);
+
 void dmabufs_ctl_unref(struct dmabufs_ctl ** const pdbsc);
 struct dmabufs_ctl * dmabufs_ctl_ref(struct dmabufs_ctl * const dbsc);
 
