@@ -22,6 +22,8 @@
     DEALINGS IN THE SOFTWARE.
  */
 
+#define _GNU_SOURCE
+
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -431,3 +433,93 @@ struct dmabufs_ctl * dmabufs_ctl_new_vidbuf_cached(void)
     return dmabufs_ctl_new2(&dmabuf_vidbuf_cached_fns);
 }
 
+//-----------------------------------------------------------------------------
+
+#include <linux/udmabuf.h>
+
+static int buf_udma_alloc(struct dmabufs_ctl * const dbsc, struct dmabuf_h * dh, size_t req_size)
+{
+    int err;
+    size_t size = (req_size + dbsc->page_size - 1) & ~(dbsc->page_size - 1);
+    struct udmabuf_create udc = {
+        .memfd = -1,
+        .flags = UDMABUF_FLAGS_CLOEXEC,
+        .offset = 0,
+        .size = size
+    };
+
+    if ((udc.memfd = memfd_create("ffmpeg-dmabuf", MFD_CLOEXEC | MFD_ALLOW_SEALING)) == -1) {
+        err = -errno;
+        request_log("%s: Failed to alloc memfd\n", __func__);
+        goto fail0;
+    }
+
+    if (ftruncate(udc.memfd, size) == -1) {
+        err = -errno;
+        request_log("%s: Failed to resize memfd to %zd\n", __func__, size);
+        goto fail_mfd;
+    }
+
+    if (fcntl(udc.memfd, F_ADD_SEALS, F_SEAL_SHRINK) < 0) {
+        err = -errno;
+        request_log("%s: Failed to seal memfd\n", __func__);
+        goto fail_mfd;
+    }
+
+    while ((dh->fd = ioctl(dbsc->fd, UDMABUF_CREATE, &udc)) == -1) {
+        err = -errno;
+        if (err != -EINTR) {
+            request_log("%s: Failed udambuf create\n", __func__);
+            goto fail_mfd;
+        }
+    }
+
+    dh->size = (size_t)size;
+    close(udc.memfd);
+    return 0;
+
+fail_mfd:
+    close(udc.memfd);
+fail0:
+    return err;
+
+}
+
+static void buf_udma_free(struct dmabuf_h * dh)
+{
+    // Nothing needed
+}
+
+static int ctl_udma_new(struct dmabufs_ctl * dbsc)
+{
+    while ((dbsc->fd = open("/dev/udmabuf", O_RDWR | __O_CLOEXEC)) == -1 &&
+           errno == EINTR)
+        /* Loop */;
+    if (dbsc->fd == -1)
+    {
+        request_debug(NULL, "%s: Cannot open udmabuf device\n", __func__);
+        return -1;
+    }
+    request_debug(NULL, "%s: Using udmabuf device\n", __func__);
+    return 0;
+}
+
+static void ctl_udma_free(struct dmabufs_ctl * dbsc)
+{
+    if (dbsc->fd != -1)
+        while (close(dbsc->fd) == -1 && errno == EINTR)
+            /* loop */;
+}
+
+static const struct dmabuf_fns dmabuf_udmabuf_fns = {
+    .buf_alloc  = buf_udma_alloc,
+    .buf_free   = buf_udma_free,
+    .ctl_new    = ctl_udma_new,
+    .ctl_free   = ctl_udma_free,
+};
+
+struct dmabufs_ctl * dmabufs_ctl_new_udmabuf(void)
+{
+    request_debug(NULL, "Dmabufs using Vidbuf\n");
+    return dmabufs_ctl_new2(&dmabuf_udmabuf_fns);
+}
