@@ -204,6 +204,7 @@ static int conform_planar(AVFormatContext * const s, conform_display_env_t * con
     int is_hw = (pix_desc->flags & AV_PIX_FMT_FLAG_HWACCEL) != 0;
     enum AVPixelFormat fmt = is_hw ? AV_PIX_FMT_NONE : sf->format;
     unsigned int i;
+    char * meta = NULL;
 
     if (is_hw) {
         enum AVPixelFormat *xfmts = NULL;
@@ -212,10 +213,12 @@ static int conform_planar(AVFormatContext * const s, conform_display_env_t * con
         av_free(xfmts);
     }
 
-    av_log(s, AV_LOG_DEBUG, "%s: Frame %3d: %#08llx %dx%d crop(ltrb) %zd,%zd,%zd,%zd fmt %s -> %s\n", __func__,
+    av_dict_get_string(sf->metadata, &meta, '=', ';');
+    av_log(s, AV_LOG_DEBUG, "%s: Frame %3d: %#08llx %dx%d crop(ltrb) %zd,%zd,%zd,%zd fmt %s -> %s PTS %"PRId64" [%s]\n", __func__,
            de->fno, de->foffset,
            sf->width, sf->height, sf->crop_left, sf->crop_top, sf->crop_right, sf->crop_bottom,
-           av_get_pix_fmt_name(sf->format), av_get_pix_fmt_name(fmt));
+           av_get_pix_fmt_name(sf->format), av_get_pix_fmt_name(fmt), sf->pts, meta);
+    free(meta);
 
     if (start_frame(s, de, sf))
         return 0;
