@@ -716,6 +716,7 @@ static int frame_post_process(void *logctx, AVFrame *frame)
         av_log(logctx, AV_LOG_ERROR, "%s: Decode fail\n", __func__);
         frame->flags |= AV_FRAME_FLAG_CORRUPT;
     }
+    av_dict_set_int(&frame->metadata, "v4l2_ts", rd->timestamp, 0);
     return 0;
 }
 
