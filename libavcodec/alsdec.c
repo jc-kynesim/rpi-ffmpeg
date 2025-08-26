@@ -2111,15 +2111,15 @@ static av_cold int decode_init(AVCodecContext *avctx)
         ctx->acf               = av_malloc_array(channels, sizeof(*ctx->acf));
         ctx->shift_value       = av_calloc(channels, sizeof(*ctx->shift_value));
         ctx->last_shift_value  = av_calloc(channels, sizeof(*ctx->last_shift_value));
-        ctx->last_acf_mantissa = av_malloc_array(channels, sizeof(*ctx->last_acf_mantissa));
+        ctx->last_acf_mantissa = av_calloc(channels, sizeof(*ctx->last_acf_mantissa));
         ctx->raw_mantissa      = av_calloc(channels, sizeof(*ctx->raw_mantissa));
 
         ctx->larray = av_malloc_array(ctx->cur_frame_length * 4, sizeof(*ctx->larray));
         ctx->nbits  = av_malloc_array(ctx->cur_frame_length, sizeof(*ctx->nbits));
         ctx->mlz    = av_mallocz(sizeof(*ctx->mlz));
 
-        if (!ctx->mlz || !ctx->acf || !ctx->shift_value || !ctx->last_shift_value
-            || !ctx->last_acf_mantissa || !ctx->raw_mantissa) {
+        if (!ctx->larray || !ctx->nbits || !ctx->mlz || !ctx->acf || !ctx->shift_value
+            || !ctx->last_shift_value || !ctx->last_acf_mantissa || !ctx->raw_mantissa) {
             av_log(avctx, AV_LOG_ERROR, "Allocating buffer memory failed.\n");
             return AVERROR(ENOMEM);
         }
@@ -2131,6 +2131,10 @@ static av_cold int decode_init(AVCodecContext *avctx)
 
         for (c = 0; c < channels; ++c) {
             ctx->raw_mantissa[c] = av_calloc(ctx->cur_frame_length, sizeof(**ctx->raw_mantissa));
+            if (!ctx->raw_mantissa[c]) {
+                av_log(avctx, AV_LOG_ERROR, "Allocating buffer memory failed.\n");
+                return AVERROR(ENOMEM);
+            }
         }
     }
 

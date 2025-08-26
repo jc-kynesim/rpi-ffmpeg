@@ -80,6 +80,11 @@ static inline int get_vlc_symbol(GetBitContext *gb, VlcState *const state,
         k++;
         i += i;
     }
+    if (k > bits) {
+        ff_dlog(NULL, "k-overflow bias:%d error:%d drift:%d count:%d k:%d",
+                state->bias, state->error_sum, state->drift, state->count, k);
+        k = bits;
+    }
 
     v = get_sr_golomb(gb, k, 12, bits);
     ff_dlog(NULL, "v:%d bias:%d error:%d drift:%d count:%d k:%d",
@@ -363,7 +368,7 @@ static int decode_slice(AVCodecContext *c, void *arg)
     if (fs->ac != AC_GOLOMB_RICE && f->version > 2) {
         int v;
         get_rac(&fs->c, (uint8_t[]) { 129 });
-        v = fs->c.bytestream_end - fs->c.bytestream - 2 - 5*f->ec;
+        v = fs->c.bytestream_end - fs->c.bytestream - 2 - 5*!!f->ec;
         if (v) {
             av_log(f->avctx, AV_LOG_ERROR, "bytestream end mismatching by %d\n", v);
             fs->slice_damaged = 1;
@@ -1100,7 +1105,6 @@ const FFCodec ff_ffv1_decoder = {
     FF_CODEC_DECODE_CB(decode_frame),
     .update_thread_context = ONLY_IF_THREADS_ENABLED(update_thread_context),
     .p.capabilities = AV_CODEC_CAP_DR1 /*| AV_CODEC_CAP_DRAW_HORIZ_BAND*/ |
-                      AV_CODEC_CAP_FRAME_THREADS | AV_CODEC_CAP_SLICE_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP |
-                      FF_CODEC_CAP_ALLOCATE_PROGRESS,
+                      AV_CODEC_CAP_SLICE_THREADS,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
 };

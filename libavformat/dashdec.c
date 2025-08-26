@@ -443,7 +443,7 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
     av_freep(pb);
     av_dict_copy(&tmp, *opts, 0);
     av_dict_copy(&tmp, opts2, 0);
-    ret = avio_open2(pb, url, AVIO_FLAG_READ, c->interrupt_callback, &tmp);
+    ret = ffio_open_whitelist(pb, url, AVIO_FLAG_READ, c->interrupt_callback, &tmp, s->protocol_whitelist, s->protocol_blacklist);
     if (ret >= 0) {
         // update cookies on http response with setcookies.
         char *new_cookies = NULL;
@@ -732,7 +732,7 @@ static int resolve_content_path(AVFormatContext *s, const char *url, int *max_ur
     }
 
     tmp_max_url_size = aligned(tmp_max_url_size);
-    text = av_mallocz(tmp_max_url_size);
+    text = av_mallocz(tmp_max_url_size + 1);
     if (!text) {
         updated = AVERROR(ENOMEM);
         goto end;
@@ -744,7 +744,7 @@ static int resolve_content_path(AVFormatContext *s, const char *url, int *max_ur
     }
     av_free(text);
 
-    path = av_mallocz(tmp_max_url_size);
+    path = av_mallocz(tmp_max_url_size + 2);
     tmp_str = av_mallocz(tmp_max_url_size);
     if (!tmp_str || !path) {
         updated = AVERROR(ENOMEM);
@@ -766,6 +766,15 @@ static int resolve_content_path(AVFormatContext *s, const char *url, int *max_ur
 
     node = baseurl_nodes[rootId];
     baseurl = xmlNodeGetContent(node);
+    if (baseurl) {
+        size_t len = xmlStrlen(baseurl)+2;
+        char *tmp = xmlRealloc(baseurl, len);
+        if (!tmp) {
+            updated = AVERROR(ENOMEM);
+            goto end;
+        }
+        baseurl = tmp;
+    }
     root_url = (av_strcasecmp(baseurl, "")) ? baseurl : path;
     if (node) {
         xmlNodeSetContent(node, root_url);
@@ -1222,7 +1231,7 @@ static int parse_manifest(AVFormatContext *s, const char *url, AVIOContext *in)
         close_in = 1;
 
         av_dict_copy(&opts, c->avio_opts, 0);
-        ret = avio_open2(&in, url, AVIO_FLAG_READ, c->interrupt_callback, &opts);
+        ret = ffio_open_whitelist(&in, url, AVIO_FLAG_READ, c->interrupt_callback, &opts, s->protocol_whitelist, s->protocol_blacklist);
         av_dict_free(&opts);
         if (ret < 0)
             return ret;

@@ -183,7 +183,7 @@ static AVIOContext * wtvfile_open_sector(unsigned first_sector, uint64_t length,
         int nb_sectors1 = read_ints(s->pb, sectors1, WTV_SECTOR_SIZE / 4);
         int i;
 
-        wf->sectors = av_malloc_array(nb_sectors1, 1 << WTV_SECTOR_BITS);
+        wf->sectors = av_calloc(nb_sectors1, 1 << WTV_SECTOR_BITS);
         if (!wf->sectors) {
             av_free(wf);
             return NULL;
@@ -840,7 +840,7 @@ static int parse_chunks(AVFormatContext *s, int mode, int64_t seekts, int *len_p
             int stream_index = ff_find_stream_index(s, sid);
             if (stream_index >= 0) {
                 AVStream *st = s->streams[stream_index];
-                uint8_t buf[258];
+                uint8_t buf[258] = {0};
                 const uint8_t *pbuf = buf;
                 int buf_size;
 
@@ -853,7 +853,8 @@ static int parse_chunks(AVFormatContext *s, int mode, int64_t seekts, int *len_p
                 }
 
                 buf_size = FFMIN(len - consumed, sizeof(buf));
-                avio_read(pb, buf, buf_size);
+                if (avio_read(pb, buf, buf_size) != buf_size)
+                    return AVERROR_INVALIDDATA;
                 consumed += buf_size;
                 ff_parse_mpeg2_descriptor(s, st, 0, &pbuf, buf + buf_size, NULL, 0, 0, NULL);
             }

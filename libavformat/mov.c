@@ -1015,7 +1015,9 @@ static int mov_read_adrm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     avio_read(pb, output, 8); // go to offset 8, absolute position 0x251
     avio_read(pb, input, DRM_BLOB_SIZE);
     avio_read(pb, output, 4); // go to offset 4, absolute position 0x28d
-    avio_read(pb, file_checksum, 20);
+    ret = ffio_read_size(pb, file_checksum, 20);
+    if (ret < 0)
+        goto fail;
 
     // required by external tools
     ff_data_to_hex(checksum_string, file_checksum, sizeof(file_checksum), 1);
@@ -3041,10 +3043,10 @@ static int mov_read_stts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             sc->stts_data[i].duration = 1;
             corrected_dts += (delta_magnitude < 0 ? (int64_t)delta_magnitude : 1) * sample_count;
         } else {
-            corrected_dts += sample_duration * (int64_t)sample_count;
+            corrected_dts += sample_duration * (uint64_t)sample_count;
         }
 
-        current_dts += sc->stts_data[i].duration * (int64_t)sample_count;
+        current_dts += sc->stts_data[i].duration * (uint64_t)sample_count;
 
         if (current_dts > corrected_dts) {
             int64_t drift = (current_dts - corrected_dts)/FFMAX(sample_count, 1);
@@ -5554,6 +5556,11 @@ static int mov_read_elst(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             c->fc->strict_std_compliance >= FF_COMPLIANCE_STRICT) {
             av_log(c->fc, AV_LOG_ERROR, "Track %d, edit %d: Invalid edit list media time=%"PRId64"\n",
                    c->fc->nb_streams-1, i, e->time);
+            return AVERROR_INVALIDDATA;
+        }
+        if (e->duration < 0) {
+            av_log(c->fc, AV_LOG_ERROR, "Track %d, edit %d: Invalid edit list duration=%"PRId64"\n",
+                   c->fc->nb_streams-1, i, e->duration);
             return AVERROR_INVALIDDATA;
         }
     }
@@ -8660,25 +8667,73 @@ static int mov_change_extradata(MOVStreamContext *sc, AVPacket *pkt)
     return 0;
 }
 
-static int get_eia608_packet(AVIOContext *pb, AVPacket *pkt, int size)
+static int get_eia608_packet(AVIOContext *pb, AVPacket *pkt, int src_size)
 {
-    int new_size, ret;
+    /* We can't make assumptions about the structure of the payload,
+       because it may include multiple cdat and cdt2 samples. */
+    const uint32_t cdat = AV_RB32("cdat");
+    const uint32_t cdt2 = AV_RB32("cdt2");
+    int ret, out_size = 0;
 
-    if (size <= 8)
+    /* a valid payload must have size, 4cc, and at least 1 byte pair: */
+    if (src_size < 10)
         return AVERROR_INVALIDDATA;
-    new_size = ((size - 8) / 2) * 3;
-    ret = av_new_packet(pkt, new_size);
+
+    /* avoid an int overflow: */
+    if ((src_size - 8) / 2 >= INT_MAX / 3)
+        return AVERROR_INVALIDDATA;
+
+    ret = av_new_packet(pkt, ((src_size - 8) / 2) * 3);
     if (ret < 0)
         return ret;
 
-    avio_skip(pb, 8);
-    for (int j = 0; j < new_size; j += 3) {
-        pkt->data[j] = 0xFC;
-        pkt->data[j+1] = avio_r8(pb);
-        pkt->data[j+2] = avio_r8(pb);
+    /* parse and re-format the c608 payload in one pass. */
+    while (src_size >= 10) {
+        const uint32_t atom_size = avio_rb32(pb);
+        const uint32_t atom_type = avio_rb32(pb);
+        const uint32_t data_size = atom_size - 8;
+        const uint8_t cc_field =
+            atom_type == cdat ? 1 :
+            atom_type == cdt2 ? 2 :
+            0;
+
+        /* account for bytes consumed for atom size and type. */
+        src_size -= 8;
+
+        /* make sure the data size stays within the buffer boundaries. */
+        if (data_size < 2 || data_size > src_size) {
+            ret = AVERROR_INVALIDDATA;
+            break;
+        }
+
+        /* make sure the data size is consistent with N byte pairs. */
+        if (data_size % 2 != 0) {
+            ret = AVERROR_INVALIDDATA;
+            break;
+        }
+
+        if (!cc_field) {
+            /* neither cdat or cdt2 ... skip it */
+            avio_skip(pb, data_size);
+            src_size -= data_size;
+            continue;
+        }
+
+        for (uint32_t i = 0; i < data_size; i += 2) {
+            pkt->data[out_size] = (0x1F << 3) | (1 << 2) | (cc_field - 1);
+            pkt->data[out_size + 1] = avio_r8(pb);
+            pkt->data[out_size + 2] = avio_r8(pb);
+            out_size += 3;
+            src_size -= 2;
+        }
     }
 
-    return 0;
+    if (src_size > 0)
+        /* skip any remaining unread portion of the input payload */
+        avio_skip(pb, src_size);
+
+    av_shrink_packet(pkt, out_size);
+    return ret;
 }
 
 static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)

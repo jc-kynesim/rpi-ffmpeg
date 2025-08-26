@@ -168,7 +168,7 @@ static void handle_stream_probing(AVStream *st)
 {
     if (st->codecpar->codec_id == AV_CODEC_ID_PCM_S16LE) {
         FFStream *const sti = ffstream(st);
-        sti->request_probe = AVPROBE_SCORE_EXTENSION;
+        sti->request_probe = AVPROBE_SCORE_EXTENSION + 1;
         sti->probe_packets = FFMIN(sti->probe_packets, 32);
     }
 }
@@ -863,8 +863,7 @@ static int w64_read_header(AVFormatContext *s)
     uint8_t guid[16];
     int ret;
 
-    avio_read(pb, guid, 16);
-    if (memcmp(guid, ff_w64_guid_riff, 16))
+    if (avio_read(pb, guid, 16) != 16 || memcmp(guid, ff_w64_guid_riff, 16))
         return AVERROR_INVALIDDATA;
 
     /* riff + wave + fmt + sizes */

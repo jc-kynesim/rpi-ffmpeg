@@ -221,6 +221,8 @@ typedef struct HLSContext {
     AVDictionary *avio_opts;
     AVDictionary *seg_format_opts;
     char *allowed_extensions;
+    char *allowed_segment_extensions;
+    int extension_picky;
     int max_reload;
     int http_persistent;
     int http_multiple;
@@ -723,6 +725,50 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
     return ret;
 }
 
+static int test_segment(AVFormatContext *s, const AVInputFormat *in_fmt, struct playlist *pls, struct segment *seg)
+{
+    HLSContext *c = s->priv_data;
+    int matchA = 3;
+    int matchF = 0;
+
+    if (!c->extension_picky)
+        return 0;
+
+    if (strcmp(c->allowed_segment_extensions, "ALL"))
+        matchA =      av_match_ext    (seg->url, c->allowed_segment_extensions)
+                 + 2*(ff_match_url_ext(seg->url, c->allowed_segment_extensions) > 0);
+
+    if (!matchA) {
+        av_log(s, AV_LOG_ERROR, "URL %s is not in allowed_segment_extensions\n", seg->url);
+        return AVERROR_INVALIDDATA;
+    }
+
+    if (in_fmt) {
+        if (in_fmt->extensions) {
+            matchF =      av_match_ext(    seg->url, in_fmt->extensions)
+                     + 2*(ff_match_url_ext(seg->url, in_fmt->extensions) > 0);
+            // Youtube uses aac files with .ts extension
+            if(av_match_name("mp4", in_fmt->name) || av_match_name("aac", in_fmt->name)) {
+                matchF |=      av_match_ext(    seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts,cmfv,cmfa")
+                          + 2*(ff_match_url_ext(seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts,cmfv,cmfa") > 0);
+            }
+        } else if (!strcmp(in_fmt->name, "mpegts")) {
+            const char *str = "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts"
+                              ",html" // https://flash1.bogulus.cfd/
+                            ;
+            matchF =      av_match_ext(    seg->url, str)
+                     + 2*(ff_match_url_ext(seg->url, str) > 0);
+        }
+
+        if (!(matchA & matchF)) {
+            av_log(s, AV_LOG_ERROR, "detected format %s extension %s mismatches allowed extensions in url %s\n", in_fmt->name, in_fmt->extensions ? in_fmt->extensions : "none", seg->url);
+            return AVERROR_INVALIDDATA;
+        }
+    }
+
+    return 0;
+}
+
 static int parse_playlist(HLSContext *c, const char *url,
                           struct playlist *pls, AVIOContext *in)
 {
@@ -978,6 +1024,14 @@ static int parse_playlist(HLSContext *c, const char *url,
                     av_free(seg->key);
                     av_free(seg);
                     ret = AVERROR(ENOMEM);
+                    goto fail;
+                }
+
+                ret = test_segment(c->ctx, pls->ctx ? pls->ctx->iformat : NULL, pls, seg);
+                if (ret < 0) {
+                    av_free(seg->url);
+                    av_free(seg->key);
+                    av_free(seg);
                     goto fail;
                 }
 
@@ -2102,6 +2156,11 @@ static int hls_read_header(AVFormatContext *s)
             pls->ctx->interrupt_callback = s->interrupt_callback;
             url = av_strdup(pls->segments[0]->url);
             ret = av_probe_input_buffer(&pls->pb.pub, &in_fmt, url, NULL, 0, 0);
+
+            for (int n = 0; n < pls->n_segments; n++)
+                if (ret >= 0)
+                    ret = test_segment(s, in_fmt, pls, pls->segments[n]);
+
             if (ret < 0) {
                 /* Free the ctx - it isn't initialized properly at this point,
                 * so avformat_close_input shouldn't be called. If
@@ -2535,10 +2594,25 @@ static const AVOption hls_options[] = {
         OFFSET(prefer_x_start), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, FLAGS},
     {"allowed_extensions", "List of file extensions that hls is allowed to access",
         OFFSET(allowed_extensions), AV_OPT_TYPE_STRING,
-        {.str = "3gp,aac,avi,ac3,eac3,flac,mkv,m3u8,m4a,m4s,m4v,mpg,mov,mp2,mp3,mp4,mpeg,mpegts,ogg,ogv,oga,ts,vob,wav"},
+        {.str = "3gp,aac,avi,ac3,eac3,flac,mkv,m3u8,m4a,m4s,m4v,mpg,mov,mp2,mp3,mp4,mpeg,mpegts,ogg,ogv,oga,ts,vob,vtt,wav,webvtt"
+            ",cmfv,cmfa" // Ticket11526 www.nicovideo.jp
+            ",ec3"       // part of Ticket11435 (Elisa Viihde (Finnish online recording service))
+            ",fmp4"      // https://github.com/yt-dlp/yt-dlp/issues/12700
+        },
         INT_MIN, INT_MAX, FLAGS},
+    {"allowed_segment_extensions", "List of file extensions that hls is allowed to access",
+        OFFSET(allowed_segment_extensions), AV_OPT_TYPE_STRING,
+        {.str = "3gp,aac,avi,ac3,eac3,flac,mkv,m3u8,m4a,m4s,m4v,mpg,mov,mp2,mp3,mp4,mpeg,mpegts,ogg,ogv,oga,ts,vob,vtt,wav,webvtt"
+            ",cmfv,cmfa" // Ticket11526 www.nicovideo.jp
+            ",ec3"       // part of Ticket11435 (Elisa Viihde (Finnish online recording service))
+            ",fmp4"      // https://github.com/yt-dlp/yt-dlp/issues/12700
+            ",html"      // https://flash1.bogulus.cfd/
+        },
+        INT_MIN, INT_MAX, FLAGS},
+    {"extension_picky", "Be picky with all extensions matching",
+        OFFSET(extension_picky), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, FLAGS},
     {"max_reload", "Maximum number of times a insufficient list is attempted to be reloaded",
-        OFFSET(max_reload), AV_OPT_TYPE_INT, {.i64 = 3}, 0, INT_MAX, FLAGS},
+        OFFSET(max_reload), AV_OPT_TYPE_INT, {.i64 = 100}, 0, INT_MAX, FLAGS},
     {"m3u8_hold_counters", "The maximum number of times to load m3u8 when it refreshes without new segments",
         OFFSET(m3u8_hold_counters), AV_OPT_TYPE_INT, {.i64 = 1000}, 0, INT_MAX, FLAGS},
     {"http_persistent", "Use persistent HTTP connections",
