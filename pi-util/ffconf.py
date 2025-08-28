@@ -51,9 +51,10 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     flog = open(os.path.join(tmp_root, name + ".log"), "w+t")
 
     ffargs = [ffmpeg_exec, "-flags", "unaligned"] +\
-        ["-no_cvt_hw"] +\
+        ["-no_cvt_hw", "-flags", "output_corrupt"] +\
         (["-hwaccel", dectype.hwaccel] if dectype.hwaccel else []) +\
         ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
+        ["-conform_corrupt", "1"] +\
         (["-conform_out", "file", "-f", "conform", yuv_file] if gen_yuv else ["-conform_out", "md5", "-f", "conform", dec_file])
 
     if valgrind:
