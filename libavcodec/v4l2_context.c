@@ -502,7 +502,7 @@ dq_buf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
             // buffers but better to be tidy.
             ff_v4l2_buffer_enqueue(avbuf);
 
-            ctx->flag_last = 1;
+            // ctx->flag_last = 1; // XXX: breaks av1, doesn't seem necessary?
             return AVERROR(EPIPE);
         }
 
