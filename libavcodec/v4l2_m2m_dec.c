@@ -883,6 +883,68 @@ check_size(AVCodecContext * const avctx, V4L2m2mContext * const s, const uint32_
         av_log(avctx, AV_LOG_TRACE, "%s: Size %dx%d or fcc %s empty\n", __func__, w, h, av_fourcc2str(fcc));
         return 0;
     }
+
+    if ((s->quirks & FF_V4L2_QUIRK_8192_MACRO_MAX) != 0 &&
+        ((w + 15) >> 4) * ((h + 15) >> 4) > 8192)
+    {
+        av_log(avctx, AV_LOG_DEBUG, "%s: %d x %d > 8192 macroblocks (quirk)\n", __func__, w, h);
+        return AVERROR(-EINVAL);
+    }
+
+    // Test with TRY_FMT
+    {
+        struct v4l2_format fmt = {
+            .type = s->capture.format.type,
+        };
+        int rv;
+
+        if (V4L2_TYPE_IS_MULTIPLANAR(s->capture.format.type))
+        {
+            fmt.fmt.pix.width = w;
+            fmt.fmt.pix.height = h;
+            fmt.fmt.pix.pixelformat = fcc;
+        }
+        else
+        {
+            fmt.fmt.pix_mp.width = w;
+            fmt.fmt.pix_mp.height = h;
+            fmt.fmt.pix_mp.pixelformat = fcc;
+        }
+
+        while ((rv = ioctl(s->fd, VIDIOC_TRY_FMT, &fmt)) != 0 && errno == EINTR)
+            /* Loop */;
+
+        if (rv != 0) {
+            rv = AVERROR(errno);
+            if (rv != AVERROR(ENOTTY)) {
+                av_log(avctx, AV_LOG_WARNING, "%s: Try FMT failed\n", __func__);
+                return rv;
+            }
+            av_log(avctx, AV_LOG_DEBUG, "%s: Try FMT not supported\n", __func__);
+            // Just continue hopefully
+        }
+        else if (V4L2_TYPE_IS_MULTIPLANAR(s->capture.format.type))
+        {
+            av_log(avctx, AV_LOG_TRACE, "%s: requested %s %dx%d TRY_FMT %s %dx%d\n", __func__,
+                   av_fourcc2str(fcc), w, h,
+                   av_fourcc2str(fmt.fmt.pix.pixelformat), fmt.fmt.pix.width, fmt.fmt.pix.height);
+            if (fmt.fmt.pix.width < w || fmt.fmt.pix.height < h || fmt.fmt.pix.pixelformat != fcc) {
+                av_log(avctx, AV_LOG_DEBUG, "%s: TRY_FMT returned incompatible size\n", __func__);
+                return AVERROR(EINVAL);
+            }
+        }
+        else
+        {
+            av_log(avctx, AV_LOG_TRACE, "%s: requested %s %dx%d TRY_FMT %s %dx%d\n", __func__,
+                   av_fourcc2str(fcc), w, h,
+                   av_fourcc2str(fmt.fmt.pix_mp.pixelformat), fmt.fmt.pix_mp.width, fmt.fmt.pix_mp.height);
+            if (fmt.fmt.pix_mp.width < w || fmt.fmt.pix_mp.height < h || fmt.fmt.pix_mp.pixelformat != fcc) {
+                av_log(avctx, AV_LOG_DEBUG, "%s: TRY_FMT returned incompatible size\n", __func__);
+                return AVERROR(EINVAL);
+            }
+        }
+    }
+
     if ((s->quirks & FF_V4L2_QUIRK_ENUM_FRAMESIZES_BROKEN) != 0) {
         av_log(avctx, AV_LOG_TRACE, "%s: Skipped (quirk): Size %dx%d, fcc %s\n", __func__, w, h, av_fourcc2str(fcc));
         return 0;
@@ -968,6 +1030,9 @@ get_quirks(AVCodecContext * const avctx, V4L2m2mContext * const s)
     // size in the first place.
     if (strcmp(cap.driver, "meson-vdec") == 0)
         s->quirks |= FF_V4L2_QUIRK_REINIT_ALWAYS | FF_V4L2_QUIRK_ENUM_FRAMESIZES_BROKEN;
+    // RPI has a max 8192 macroblock limit but no way of signaling it
+    if (strcmp(cap.driver, "bcm2835-codec") == 0)
+        s->quirks |= FF_V4L2_QUIRK_8192_MACRO_MAX;
 
     av_log(avctx, AV_LOG_DEBUG, "Driver '%s': Quirks=%#x\n", cap.driver, s->quirks);
     return 0;
