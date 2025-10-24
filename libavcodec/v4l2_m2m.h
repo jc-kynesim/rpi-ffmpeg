@@ -121,6 +121,7 @@ typedef struct V4L2m2mContext {
 
 #define FF_V4L2_QUIRK_REINIT_ALWAYS             1
 #define FF_V4L2_QUIRK_ENUM_FRAMESIZES_BROKEN    2
+#define FF_V4L2_QUIRK_8192_MACRO_MAX            4   // Size limited to 8192 macroblocks
     /* Quirks */
     unsigned int quirks;
 
