@@ -1370,7 +1370,9 @@ static int mov_read_adrm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     avio_read(pb, output, 8); // go to offset 8, absolute position 0x251
     avio_read(pb, input, DRM_BLOB_SIZE);
     avio_read(pb, output, 4); // go to offset 4, absolute position 0x28d
-    avio_read(pb, file_checksum, 20);
+    ret = ffio_read_size(pb, file_checksum, 20);
+    if (ret < 0)
+        goto fail;
 
     // required by external tools
     ff_data_to_hex(checksum_string, file_checksum, sizeof(file_checksum), 1);
@@ -6223,6 +6225,11 @@ static int mov_read_elst(MOVContext *c, AVIOContext *pb, MOVAtom atom)
                    c->fc->nb_streams-1, i, e->time);
             return AVERROR_INVALIDDATA;
         }
+        if (e->duration < 0) {
+            av_log(c->fc, AV_LOG_ERROR, "Track %d, edit %d: Invalid edit list duration=%"PRId64"\n",
+                   c->fc->nb_streams-1, i, e->duration);
+            return AVERROR_INVALIDDATA;
+        }
     }
     sc->elst_count = i;
 
@@ -10137,7 +10144,7 @@ static int mov_parse_heif_items(AVFormatContext *s)
         st->codecpar->height = item->height;
 
         err = sanity_checks(s, sc, item->item_id);
-        if (err)
+        if (err || !sc->sample_count)
             return AVERROR_INVALIDDATA;
 
         sc->sample_sizes[0]  = item->extent_length;
@@ -10449,7 +10456,7 @@ static AVIndexEntry *mov_find_next_sample(AVFormatContext *s, AVStream **st)
                 ((s->pb->seekable & AVIO_SEEKABLE_NORMAL) &&
                  ((msc->pb != s->pb && dts < best_dts) || (msc->pb == s->pb && dts != AV_NOPTS_VALUE &&
                  ((dtsdiff <= AV_TIME_BASE && current_sample->pos < sample->pos) ||
-                  (dtsdiff > AV_TIME_BASE && dts < best_dts)))))) {
+                  (dtsdiff > AV_TIME_BASE && dts < best_dts && mov->interleaved_read)))))) {
                 sample = current_sample;
                 best_dts = dts;
                 *st = avst;

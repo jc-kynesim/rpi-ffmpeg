@@ -440,7 +440,9 @@ Advanced options (experts only):
   --enable-hardcoded-tables use hardcoded tables instead of runtime generation
   --disable-safe-bitstream-reader
                            disable buffer boundary checking in bitreaders
-                           (faster, but may crash)
+                           (This disables some security checks and can cause undefined behavior,
+                            crashes and arbitrary code execution, it may be faster, but
+                            should only be used with trusted input)
   --sws-max-filter-size=N  the max filter size swscale uses [$sws_max_filter_size_default]
 
 Optimization options (experts only):
@@ -2226,6 +2228,7 @@ ARCH_EXT_LIST_PPC="
     ldbrx
     power8
     ppc4xx
+    vec_xl
     vsx
 "
 
@@ -2774,6 +2777,7 @@ altivec_deps="ppc"
 dcbzl_deps="ppc"
 ldbrx_deps="ppc"
 ppc4xx_deps="ppc"
+vec_xl_deps="altivec"
 vsx_deps="altivec"
 power8_deps="vsx"
 
@@ -4134,6 +4138,8 @@ if test "$target_os_default" = aix; then
     arch_default=$(uname -p)
     strip_default="strip -X32_64"
     nm_default="nm -g -X32_64"
+elif test "$MSYSTEM_CARCH" != ""; then
+    arch_default="$MSYSTEM_CARCH"
 else
     arch_default=$(uname -m)
 fi
@@ -5829,6 +5835,13 @@ case $target_os in
             clang_version=$($cc -dumpversion)
             test ${clang_version%%.*} -eq 11 && add_cflags -fno-stack-check
         fi
+
+        # Xcode Clang doesn't default to -fno-common while upstream llvm.org
+        # Clang (and GCC) do. This avoids linker warnings on Xcode 16.3 about
+        # "reducing alignment of section __DATA,__common from 0x8000 to 0x4000
+        # because it exceeds segment maximum alignment".
+        check_cflags -fno-common
+
         ;;
     msys*)
         die "Native MSYS builds are discouraged, please use the MINGW environment."
@@ -6413,6 +6426,11 @@ elif enabled ppc; then
         check_cpp_condition power8 "altivec.h" "defined(_ARCH_PWR8)"
     fi
 
+    if enabled altivec; then
+        check_cc vec_xl altivec.h "const unsigned char *y1i = { 0 };
+                                   vector unsigned char y0 = vec_xl(0, y1i);"
+    fi
+
 elif enabled riscv; then
 
     enabled rv && check_inline_asm rv '".option arch, +zbb\nrev8 t0, t1"'
@@ -6504,6 +6522,9 @@ check_cc intrinsics_sse2 emmintrin.h "__m128i test = _mm_setzero_si128()"
 
 check_ldflags -Wl,--as-needed
 check_ldflags -Wl,-z,noexecstack
+if [ $target_os = "darwin" ]; then
+    check_ldflags -Wl,-no_warn_duplicate_libraries
+fi
 
 if ! disabled network; then
     check_func getaddrinfo $network_extralibs
@@ -7986,6 +8007,7 @@ if enabled ppc; then
     echo "POWER8 enabled            ${power8-no}"
     echo "PPC 4xx optimizations     ${ppc4xx-no}"
     echo "dcbzl available           ${dcbzl-no}"
+    echo "vec_xl available          ${vec_xl-no}"
 fi
 if enabled loongarch; then
     echo "LSX enabled               ${lsx-no}"

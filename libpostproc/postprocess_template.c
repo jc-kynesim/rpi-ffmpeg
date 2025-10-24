@@ -831,9 +831,11 @@ static inline void RENAME(doVertDefFilter)(uint8_t src[], int stride, PPContext 
 #endif //TEMPLATE_PP_ALTIVEC
 
 #if !TEMPLATE_PP_ALTIVEC
-static inline void RENAME(dering)(uint8_t src[], int stride, PPContext *c)
+static inline void RENAME(dering)(uint8_t src[], int stride, PPContext *c, int leftborder, int rightborder, int topborder)
 {
 #if TEMPLATE_PP_MMXEXT && HAVE_7REGS
+    if (topborder)
+        return;
     DECLARE_ALIGNED(8, uint64_t, tmp)[3];
     __asm__ volatile(
         "pxor %%mm6, %%mm6                      \n\t"
@@ -1044,10 +1046,11 @@ DERING_CORE((%0, %1, 8)       ,(%%FF_REGd, %1, 4),%%mm2,%%mm4,%%mm0,%%mm3,%%mm5,
 
     if(max - min <deringThreshold) return;
 
-    for(y=0; y<10; y++){
+    s[0] = 0;
+    for(y=topborder; y<10; y++){
         int t = 0;
 
-        if(src[stride*y + 0] > avg) t+= 1;
+        if(!leftborder && src[stride*y + 0] > avg) t+= 1;
         if(src[stride*y + 1] > avg) t+= 2;
         if(src[stride*y + 2] > avg) t+= 4;
         if(src[stride*y + 3] > avg) t+= 8;
@@ -1056,7 +1059,7 @@ DERING_CORE((%0, %1, 8)       ,(%%FF_REGd, %1, 4),%%mm2,%%mm4,%%mm0,%%mm3,%%mm5,
         if(src[stride*y + 6] > avg) t+= 64;
         if(src[stride*y + 7] > avg) t+= 128;
         if(src[stride*y + 8] > avg) t+= 256;
-        if(src[stride*y + 9] > avg) t+= 512;
+        if(!rightborder && src[stride*y + 9] > avg) t+= 512;
 
         t |= (~t)<<16;
         t &= (t<<1) & (t>>1);
@@ -1073,8 +1076,8 @@ DERING_CORE((%0, %1, 8)       ,(%%FF_REGd, %1, 4),%%mm2,%%mm4,%%mm0,%%mm3,%%mm5,
         int x;
         int t = s[y-1];
 
-        p= src + stride*y;
-        for(x=1; x<9; x++){
+        p= src + stride*y + leftborder;
+        for(x=1+leftborder; x<9-rightborder; x++){
             p++;
             if(t & (1<<x)){
                 int f= (*(p-stride-1)) + 2*(*(p-stride)) + (*(p-stride+1))
@@ -3210,8 +3213,7 @@ static void RENAME(postProcess)(const uint8_t src[], int srcStride, uint8_t dst[
                 }
 #endif //TEMPLATE_PP_MMX
                 if(mode & DERING){
-                //FIXME filter first line
-                    if(y>0) RENAME(dering)(dstBlock - stride - 8, stride, c);
+                    RENAME(dering)(dstBlock - stride - 8, stride, c, x<=8, 0, y<=0);
                 }
 
                 if(mode & TEMP_NOISE_FILTER)
@@ -3233,7 +3235,7 @@ static void RENAME(postProcess)(const uint8_t src[], int srcStride, uint8_t dst[
         }
 
         if(mode & DERING){
-            if(y > 0) RENAME(dering)(dstBlock - dstStride - 8, dstStride, c);
+            RENAME(dering)(dstBlock - dstStride - 8, dstStride, c, x<=8, 1, y<=0);
         }
 
         if((mode & TEMP_NOISE_FILTER)){

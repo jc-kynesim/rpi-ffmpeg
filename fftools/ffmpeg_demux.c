@@ -67,6 +67,7 @@ typedef struct DemuxStream {
     int                      reinit_filters;
     int                      autorotate;
     int                      apply_cropping;
+    int                      force_display_matrix;
 
 
     int                      wrap_correction_done;
@@ -912,9 +913,18 @@ static int ist_use(InputStream *ist, int decoding_needed,
 
     if (decoding_needed && ds->sch_idx_dec < 0) {
         int is_audio = ist->st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO;
+        int is_unreliable = !!(d->f.ctx->iformat->flags & AVFMT_NOTIMESTAMPS);
+        int64_t use_wallclock_as_timestamps;
+
+        ret = av_opt_get_int(d->f.ctx, "use_wallclock_as_timestamps", 0, &use_wallclock_as_timestamps);
+        if (ret < 0)
+            return ret;
+
+        if (use_wallclock_as_timestamps)
+            is_unreliable = 0;
 
         ds->dec_opts.flags |= (!!ist->fix_sub_duration * DECODER_FLAG_FIX_SUB_DURATION) |
-                              (!!(d->f.ctx->iformat->flags & AVFMT_NOTIMESTAMPS) * DECODER_FLAG_TS_UNRELIABLE) |
+                              (!!is_unreliable * DECODER_FLAG_TS_UNRELIABLE) |
                               (!!(d->loop && is_audio) * DECODER_FLAG_SEND_END_TS)
 #if FFMPEG_OPT_TOP
                               | ((ist->top_field_first >= 0) * DECODER_FLAG_TOP_FIELD_FIRST)
@@ -1159,6 +1169,7 @@ static int add_display_matrix_to_stream(const OptionsContext *o,
                                         AVFormatContext *ctx, InputStream *ist)
 {
     AVStream *st = ist->st;
+    DemuxStream *ds = ds_from_ist(ist);
     AVPacketSideData *sd;
     double rotation = DBL_MAX;
     int hflip = -1, vflip = -1;
@@ -1192,6 +1203,8 @@ static int add_display_matrix_to_stream(const OptionsContext *o,
     av_display_matrix_flip(buf,
                            hflip_set ? hflip : 0,
                            vflip_set ? vflip : 0);
+
+    ds->force_display_matrix = 1;
 
     return 0;
 }
@@ -1420,6 +1433,15 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
     av_dict_set_int(&ds->decoder_opts, "apply_cropping",
                     ds->apply_cropping && ds->apply_cropping != CROP_CONTAINER, 0);
 
+    if (ds->force_display_matrix) {
+        char buf[32];
+        if (av_dict_get(ds->decoder_opts, "side_data_prefer_packet", NULL, 0))
+            buf[0] = ',';
+        else
+            buf[0] = '\0';
+        av_strlcat(buf, "displaymatrix", sizeof(buf));
+        av_dict_set(&ds->decoder_opts, "side_data_prefer_packet", buf, AV_DICT_APPEND);
+    }
     /* Attached pics are sparse, therefore we would not want to delay their decoding
      * till EOF. */
     if (ist->st->disposition & AV_DISPOSITION_ATTACHED_PIC)
