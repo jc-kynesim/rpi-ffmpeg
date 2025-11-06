@@ -97,10 +97,13 @@ typedef struct V4L2RequestContextHEVC {
 
     int decode_mode;
     int start_code;
-    unsigned int max_slices;    // 0 => not wanted (frame mode)
+    // Max slices set to UINT_MAX (rather than 0) if no slice params as for
+    // much of the code that is equivalent to unlimited slices
+    unsigned int max_slices;
     unsigned int max_offsets;   // 0 => not wanted
 
     int bit_size_is_offset;  // Quirk for old RPi decodes (not worth an entire VX)
+    int has_scaling_matrix;  // Really should move HEVC only stuff off into decode_ctx
 
     req_decode_q decode_q;
 
