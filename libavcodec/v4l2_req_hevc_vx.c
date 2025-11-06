@@ -80,6 +80,8 @@
 #include "v4l2_req_media.h"
 #include "v4l2_req_utils.h"
 
+#define NO_SLICES 0xffffffff
+
 // Attached to buf[0] in frame
 // Pooled in hwcontext so generally create once - 1/frame
 typedef struct V4L2MediaReqDescriptor {
@@ -927,7 +929,7 @@ set_req_ctls(V4L2RequestContextHEVC *ctx, struct media_request * const mreq,
 #endif
     };
 
-    if (slices)
+    if (slices != NULL)
         control[n++] = (struct v4l2_ext_control) {
             .id = V4L2_CID_STATELESS_HEVC_SLICE_PARAMS,
             .ptr = slices,
@@ -1091,7 +1093,7 @@ static int send_slice(AVCodecContext * const avctx,
 #if HEVC_CTRLS_VERSION >= 2
                      &rd->dec,
 #endif
-                     rd->slice_params + i, j - i,
+                     ctx->max_slices == NO_SLICES ? NULL : rd->slice_params + i, j - i,
                      offsets, n_offsets)) {
         av_log(avctx, AV_LOG_ERROR, "%s: Failed to set req ctls\n", __func__);
         goto fail1;
@@ -1160,7 +1162,7 @@ static int v4l2_request_hevc_end_frame(AVCodecContext *avctx, V4L2RequestContext
         rc.tv = cvt_dpb_to_tv(rd->timestamp);
         fill_sps(&rc.sps, sps);
         fill_pps(&rc.pps, pps);
-        if (sl) {
+        if (sl && ctx->has_scaling_matrix) {
             rc.has_scaling = 1;
             fill_scaling_matrix(sl, &rc.scaling_matrix);
         }
@@ -1230,18 +1232,33 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         { .id = V4L2_CID_STATELESS_HEVC_DECODE_PARAMS },
 #endif
     };
+
+#if HEVC_CTRLS_VERSION >= 4
+#define REQ true
+#define OPT false
+#else
+#define REQ true
+#define OPT true
+#endif
+
     // Order & size must match!
-    static const size_t ctrl_sizes[] = {
-        sizeof(struct v4l2_ctrl_hevc_slice_params),
-        sizeof(int32_t),
-        sizeof(struct v4l2_ctrl_hevc_sps),
-        sizeof(struct v4l2_ctrl_hevc_pps),
-        sizeof(struct v4l2_ctrl_hevc_scaling_matrix),
+    static const struct {
+        bool required;
+        size_t size;
+    } cchecks [] = {
+        { OPT, sizeof(struct v4l2_ctrl_hevc_slice_params) },
+        { REQ, sizeof(int32_t) },
+        { REQ, sizeof(struct v4l2_ctrl_hevc_sps) },
+        { REQ, sizeof(struct v4l2_ctrl_hevc_pps) },
+        { OPT, sizeof(struct v4l2_ctrl_hevc_scaling_matrix) },
 #if HEVC_CTRLS_VERSION >= 2
-        sizeof(struct v4l2_ctrl_hevc_decode_params),
+        { REQ, sizeof(struct v4l2_ctrl_hevc_decode_params) },
 #endif
     };
     const unsigned int noof_ctrls = FF_ARRAY_ELEMS(qc);
+
+#undef REQ
+#undef OPT
 
 #if HEVC_CTRLS_VERSION == 2
     if (mediabufs_ctl_driver_version(ctx->mbufs) >= MEDIABUFS_DRIVER_VERSION(5, 18, 0))
@@ -1260,12 +1277,15 @@ probe(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
 #endif
     for (; i != noof_ctrls; ++i) {
         if (qc[i].type == 0) {
-            av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %#x missing\n", HEVC_CTRLS_VERSION, qc[i].id);
-            return AVERROR(EINVAL);
+            if (cchecks[i].required) {
+                av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %#x missing\n", HEVC_CTRLS_VERSION, qc[i].id);
+                return AVERROR(EINVAL);
+            }
+            av_log(avctx, AV_LOG_TRACE, "Optional control %#x missing\n", qc[i].id);
         }
-        if (ctrl_sizes[i] != (size_t)qc[i].elem_size) {
+        else if (cchecks[i].size != (size_t)qc[i].elem_size) {
             av_log(avctx, AV_LOG_DEBUG, "Probed V%d control %d size mismatch %zu != %zu\n",
-                   HEVC_CTRLS_VERSION, i, ctrl_sizes[i], (size_t)qc[i].elem_size);
+                   HEVC_CTRLS_VERSION, i, cchecks[i].size, (size_t)qc[i].elem_size);
             return AVERROR(EINVAL);
         }
     }
@@ -1292,6 +1312,7 @@ set_controls(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
         { .id = V4L2_CID_STATELESS_HEVC_SLICE_PARAMS, },
 #if HEVC_CTRLS_VERSION >= 4
         { .id = V4L2_CID_STATELESS_HEVC_ENTRY_POINT_OFFSETS, },
+        { .id = V4L2_CID_STATELESS_HEVC_SCALING_MATRIX },
 #endif
     };
 
@@ -1313,15 +1334,19 @@ set_controls(AVCodecContext * const avctx, V4L2RequestContextHEVC * const ctx)
 
     mediabufs_ctl_query_ext_ctrls(ctx->mbufs, querys, FF_ARRAY_ELEMS(querys));
 
-    ctx->max_slices = (!(querys[2].flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) ||
-                       querys[2].nr_of_dims != 1 || querys[2].dims[0] == 0) ?
-        1 : querys[2].dims[0];
+    ctx->max_slices =
+        (querys[2].type == 0) ?
+            NO_SLICES :
+        (!(querys[2].flags & V4L2_CTRL_FLAG_DYNAMIC_ARRAY) ||
+           querys[2].nr_of_dims != 1 || querys[2].dims[0] == 0) ?
+            1 : querys[2].dims[0];
     av_log(avctx, AV_LOG_DEBUG, "%s: Max slices %d\n", __func__, ctx->max_slices);
 
 #if HEVC_CTRLS_VERSION >= 4
     ctx->max_offsets = (querys[3].type == 0 || querys[3].nr_of_dims != 1) ?
         0 : querys[3].dims[0];
-    av_log(avctx, AV_LOG_DEBUG, "%s: Entry point offsets %d\n", __func__, ctx->max_offsets);
+    ctx->has_scaling_matrix = (querys[4].type != 0);
+    av_log(avctx, AV_LOG_DEBUG, "%s: Entry point offsets %d, has scaling_matrix %d\n", __func__, ctx->max_offsets, ctx->has_scaling_matrix);
 #else
     ctx->max_offsets = 0;
 #endif
