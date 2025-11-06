@@ -110,6 +110,9 @@ typedef struct V4L2MediaReqDescriptor {
 
 } V4L2MediaReqDescriptor;
 
+// Beware muckiness in multi-slice handling
+// The first si of a "slice group" (group of max_slices slices) has a len that
+// is the length of the entire slice-group rather than just the slice.
 struct slice_info {
     const uint8_t * ptr;
     size_t len; // bytes
