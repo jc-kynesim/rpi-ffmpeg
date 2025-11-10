@@ -264,9 +264,17 @@ class ConfCSVDialect(csv.Dialect):
 
 
 
-if __name__ == '__main__':
-
-    argp = argparse.ArgumentParser(description="FFmpeg h265 conformance tester")
+def main():
+    argp = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="FFmpeg H.265 conformance tester",
+        epilog="""\
+Return values:
+   0   Tests passed
+   1   Python crashed
+   2   Setup issue
+   3   Tests failed
+""")
     argp.add_argument("tests", nargs='*')
     argp.add_argument("--pi4", action='store_true', help="Force pi4 cmd line")
     argp.add_argument("--drm", action='store_true', help="Force v4l2 drm cmd line")
@@ -285,11 +293,11 @@ if __name__ == '__main__':
 
     if not os.path.isdir(args.test_root):
         print("Test root dir '%s' not found" % args.test_root)
-        exit(1)
+        return 2
 
     if args.csvgen:
         csv.writer(sys.stdout).writerows(scandir(args.test_root))
-        exit(0)
+        return 0
 
     with open(args.csv, 'rt') as csvfile:
         csva = [a for a in csv.reader(csvfile, ConfCSVDialect())]
@@ -325,18 +333,27 @@ if __name__ == '__main__':
         args.ffmpeg = os.path.join(args.ffmpeg, "ffmpeg")
     if not os.path.isfile(args.ffmpeg):
         print("FFmpeg file '%s' not found" % args.ffmpeg)
-        exit(1)
+        return 2
 
     if not dectype:
         print("No decode type selected and no h/w detected")
-        exit(1)
+        return 2
     print("Running test using decode:", dectype.textname)
 
+    errs = 0
     i = 0
-    while True:
+    while not errs:
         i = i + 1
         if args.loop:
             print("== Loop ", i)
-        if doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args) or (args.loop >= 0 and i > args.loop):
+        errs = doconf(csva, args.tests, args.test_root, args.vcodec, dectype, args)
+        if (args.loop >= 0 and i >= args.loop):
             break
+
+    if errs:
+        return 3
+    return 0
+
+if __name__ == '__main__':
+    exit(main())
 
