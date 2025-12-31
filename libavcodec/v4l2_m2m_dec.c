@@ -1442,3 +1442,4 @@ M2MDEC(h263,  "H.263", AV_CODEC_ID_H263,       NULL);
 M2MDEC(vc1 ,  "VC1",   AV_CODEC_ID_VC1,        NULL);
 M2MDEC(vp8,   "VP8",   AV_CODEC_ID_VP8,        NULL);
 M2MDEC(vp9,   "VP9",   AV_CODEC_ID_VP9,        NULL);
+M2MDEC(av1,   "AV1",   AV_CODEC_ID_AV1,        NULL);
