@@ -112,6 +112,9 @@ static const struct fmt_conversion {
 #ifdef V4L2_PIX_FMT_HEVC
     { AV_FMT(NONE),        AV_CODEC(HEVC),        V4L2_FMT(HEVC) },
 #endif
+#ifdef V4L2_PIX_FMT_AV1
+    { AV_FMT(NONE),        AV_CODEC(AV1),         V4L2_FMT(AV1) },
+#endif
 #ifdef V4L2_PIX_FMT_VC1_ANNEX_G
     { AV_FMT(NONE),        AV_CODEC(VC1),         V4L2_FMT(VC1_ANNEX_G) },
 #endif
