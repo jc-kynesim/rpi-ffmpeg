@@ -493,8 +493,9 @@ dq_buf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
     av_buffer_unref(&avbuf->ref_buf);
 
     if (V4L2_TYPE_IS_CAPTURE(ctx->type)) {
-        // Zero length cap buffer return == EOS
-        if ((is_mp ? buf.m.planes[0].bytesused : buf.bytesused) == 0) {
+        // Zero length cap buffer return == EOS unless marked as error
+        if ((buf.flags & V4L2_BUF_FLAG_ERROR) == 0 &&
+            (is_mp ? buf.m.planes[0].bytesused : buf.bytesused) == 0) {
             av_log(avctx, AV_LOG_DEBUG, "Buffer empty - reQ\n");
 
             // Must reQ so we don't leak
@@ -522,8 +523,11 @@ dq_buf(V4L2Context * const ctx, V4L2Buffer ** const ppavbuf)
  * handle resolution change event and end of stream event
  * Expects to be called after the stream has stopped
  *
- * returns 1 if reinit was successful, negative if it failed
- * returns 0 if reinit was not executed
+ * Returns:
+ *  1 if reinit was successful
+ *  0 if no reinit required
+ *  AVERROR_EOF on end of stream
+ *  other -ve value for error
  */
 static int
 get_event(V4L2m2mContext * const m)
@@ -535,7 +539,10 @@ get_event(V4L2m2mContext * const m)
         const int rv = AVERROR(errno);
         if (rv == AVERROR(EINTR))
             continue;
-        if (rv == AVERROR(EAGAIN)) {
+        // I'd expect trying to get a non-existant event would return EAGAIN
+        // but it actually returns ENOENT. Also take EAGAIN to mean the same
+        // in case this ever gets "fixed"
+        if (rv == AVERROR(EAGAIN) || rv == AVERROR(ENOENT)) {
             av_log(avctx, AV_LOG_WARNING, "V4L2 failed to get expected event - assume EOS\n");
             return AVERROR_EOF;
         }
