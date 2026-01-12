@@ -3581,6 +3581,7 @@ av1_nvenc_encoder_select="atsc_a53"
 av1_qsv_decoder_select="qsvdec"
 av1_qsv_encoder_deps="libvpl"
 av1_qsv_encoder_select="qsvenc"
+av1_v4l2m2m_decoder_deps="v4l2_m2m av1_v4l2_m2m"
 av1_vaapi_encoder_deps="VAEncPictureParameterBufferAV1"
 av1_vaapi_encoder_select="cbs_av1 vaapi_encode"
 av1_vulkan_encoder_deps="vulkan_1_4"
@@ -7624,6 +7625,7 @@ if enabled v4l2_m2m; then
     check_cc h264_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_H264;"
     check_cc vp8_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP8;"
     check_cc vp9_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_VP9;"
+    check_cc av1_v4l2_m2m linux/videodev2.h "int i = V4L2_PIX_FMT_AV1;"
 fi
 
 check_func_headers "linux/media.h linux/videodev2.h" v4l2_timeval_to_ns
