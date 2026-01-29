@@ -48,6 +48,9 @@
 #include <dirent.h>
 
 #if CONFIG_LIBV4L2
+#if HAVE_IOCTL_POSIX
+#define LIBV4L_HAVE_POSIX_IOCTL 1
+#endif
 #include <libv4l2.h>
 #endif
 
