@@ -121,6 +121,7 @@ $FFSRC/configure \
  --enable-vout-egl\
  --enable-vout-drm\
  --enable-gpl\
+ --enable-libdav1d\
  $SHARED_LIBS\
  $RPIOPTS\
  --extra-cflags="-ggdb $RPI_KEEPS $RPI_DEFINES $RPI_INCLUDES"\

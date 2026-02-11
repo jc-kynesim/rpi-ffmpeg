@@ -21,11 +21,15 @@
 
 #include <dav1d/dav1d.h>
 
+#include <stdbool.h>
+
 #include "libavutil/avassert.h"
 #include "libavutil/cpu.h"
 #include "libavutil/film_grain_params.h"
 #include "libavutil/hdr_dynamic_metadata.h"
+#include "libavutil/hwcontext_drm.h"
 #include "libavutil/mastering_display_metadata.h"
+#include "libavutil/mem.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
 
@@ -36,8 +40,11 @@
 #include "codec_internal.h"
 #include "decode.h"
 #include "dovi_rpu.h"
+#include "hwconfig.h"
 #include "internal.h"
 #include "itut35.h"
+
+#include "v4l2_req_dmabufs.h"
 
 #define FF_DAV1D_VERSION_AT_LEAST(x,y) \
     (DAV1D_API_VERSION_MAJOR > (x) || DAV1D_API_VERSION_MAJOR == (x) && DAV1D_API_VERSION_MINOR >= (y))
@@ -56,6 +63,9 @@ typedef struct Libdav1dContext {
     int apply_grain;
     int operating_point;
     int all_layers;
+
+    bool use_dmabuf;
+    struct dmabufs_ctl * dbsc;
 } Libdav1dContext;
 
 static const enum AVPixelFormat pix_fmt[][3] = {
@@ -69,12 +79,101 @@ static const enum AVPixelFormat pix_fmt_rgb[3] = {
     AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP10, AV_PIX_FMT_GBRP12,
 };
 
+#include <libdrm/drm_fourcc.h>
+
+#ifndef DRM_FORMAT_S010
+/*
+ * 3 plane YCbCr LSB aligned
+ * In order to use these formats in a similar fashion to MSB aligned ones
+ * implementation can multiply the values by 2^6=64. For that reason the padding
+ * must only contain zeros.
+ * index 0 = Y plane, [15:0] z:Y [6:10] little endian
+ * index 1 = Cr plane, [15:0] z:Cr [6:10] little endian
+ * index 2 = Cb plane, [15:0] z:Cb [6:10] little endian
+ */
+#define DRM_FORMAT_S010	fourcc_code('S', '0', '1', '0') /* 2x2 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
+#define DRM_FORMAT_S210	fourcc_code('S', '2', '1', '0') /* 2x1 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
+#define DRM_FORMAT_S410	fourcc_code('S', '4', '1', '0') /* non-subsampled Cb (1) and Cr (2) planes 10 bits per channel */
+
+/*
+ * 3 plane YCbCr LSB aligned
+ * In order to use these formats in a similar fashion to MSB aligned ones
+ * implementation can multiply the values by 2^4=16. For that reason the padding
+ * must only contain zeros.
+ * index 0 = Y plane, [15:0] z:Y [4:12] little endian
+ * index 1 = Cr plane, [15:0] z:Cr [4:12] little endian
+ * index 2 = Cb plane, [15:0] z:Cb [4:12] little endian
+ */
+#define DRM_FORMAT_S012	fourcc_code('S', '0', '1', '2') /* 2x2 subsampled Cb (1) and Cr (2) planes 12 bits per channel */
+#define DRM_FORMAT_S212	fourcc_code('S', '2', '1', '2') /* 2x1 subsampled Cb (1) and Cr (2) planes 12 bits per channel */
+#define DRM_FORMAT_S412	fourcc_code('S', '4', '1', '2') /* non-subsampled Cb (1) and Cr (2) planes 12 bits per channel */
+#endif
+
+static const uint32_t drm_fmt[][3] = {
+    [DAV1D_PIXEL_LAYOUT_I400] = { DRM_FORMAT_R8,     DRM_FORMAT_R10,  DRM_FORMAT_R12 },
+    [DAV1D_PIXEL_LAYOUT_I420] = { DRM_FORMAT_YUV420, DRM_FORMAT_S010, DRM_FORMAT_S012 },
+    [DAV1D_PIXEL_LAYOUT_I422] = { DRM_FORMAT_YUV422, DRM_FORMAT_S210, DRM_FORMAT_S212 },
+    [DAV1D_PIXEL_LAYOUT_I444] = { DRM_FORMAT_YUV444, DRM_FORMAT_S410, DRM_FORMAT_S412 },
+};
+
 static void libdav1d_log_callback(void *opaque, const char *fmt, va_list vl)
 {
     AVCodecContext *c = opaque;
 
     av_vlog(c, AV_LOG_ERROR, fmt, vl);
 }
+
+typedef struct libdav1d_drmprime_ctx_s {
+    AVDRMFrameDescriptor desc;
+    struct dmabuf_h * dh;
+    uint8_t * data;
+} libdav1d_drmprime_ctx_t;
+
+static void libdav1d_dmabuf_buf_free(void *opaque, uint8_t *data)
+{
+    libdav1d_drmprime_ctx_t * const bufc = (libdav1d_drmprime_ctx_t *)data;
+    dmabuf_free(bufc->dh);
+    av_free(bufc);
+}
+
+static AVBufferRef* libdav1d_dmabuf_alloc(void *opaque, size_t size)
+{
+    struct dmabufs_ctl * const dbsc = opaque;
+    libdav1d_drmprime_ctx_t * bufc = av_mallocz(sizeof(*bufc));
+    AVBufferRef * buf;
+
+    if (!bufc)
+        return NULL;
+
+    buf = av_buffer_create((uint8_t *)bufc, sizeof(*bufc), libdav1d_dmabuf_buf_free, NULL, 0);
+    if (!buf) {
+        av_free(bufc);
+        return NULL;
+    }
+
+    bufc->dh = dmabuf_alloc(dbsc, size);
+    if (!bufc->dh) {
+        av_buffer_unref(&buf);
+        return NULL;
+    }
+    bufc->desc.nb_objects = 1;
+    bufc->desc.objects[0].fd = dmabuf_fd(bufc->dh);
+
+    bufc->data = dmabuf_map(bufc->dh);
+    if (!bufc->data) {
+        av_buffer_unref(&buf);
+        return NULL;
+    }
+
+    return buf;
+}
+
+static void libdav1d_dmabuf_pool_free(void *opaque)
+{
+    struct dmabufs_ctl * dbsc = opaque;
+    dmabufs_ctl_unref(&dbsc);
+};
+
 
 static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
 {
@@ -91,7 +190,18 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
     if (ret != dav1d->pool_size) {
         av_buffer_pool_uninit(&dav1d->pool);
         // Use twice the amount of required padding bytes for aligned_ptr below.
-        dav1d->pool = av_buffer_pool_init(ret + DAV1D_PICTURE_ALIGNMENT * 2, NULL);
+        if (!dav1d->use_dmabuf) {
+            dav1d->pool = av_buffer_pool_init(ret + DAV1D_PICTURE_ALIGNMENT * 2, NULL);
+        }
+        else {
+            if (!dav1d->dbsc) {
+                dav1d->dbsc = dmabufs_ctl_new_vidbuf_cached();
+                if (!dav1d->dbsc)
+                    return AVERROR(ENOMEM);
+            }
+            dav1d->pool = av_buffer_pool_init2(ret + DAV1D_PICTURE_ALIGNMENT * 2,
+                                               dav1d->dbsc, libdav1d_dmabuf_alloc, libdav1d_dmabuf_pool_free);
+        }
         if (!dav1d->pool) {
             dav1d->pool_size = 0;
             return AVERROR(ENOMEM);
@@ -106,9 +216,28 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
     // doesn't guarantee for example when AVX is disabled at configure time.
     // Use the extra DAV1D_PICTURE_ALIGNMENT padding bytes in the buffer to align it
     // if required.
-    aligned_ptr = (uint8_t *)FFALIGN((uintptr_t)buf->data, DAV1D_PICTURE_ALIGNMENT);
-    ret = av_image_fill_arrays(data, linesize, aligned_ptr, format, w, h,
-                               DAV1D_PICTURE_ALIGNMENT);
+    if (!dav1d->use_dmabuf) {
+        aligned_ptr = (uint8_t *)FFALIGN((uintptr_t)buf->data, DAV1D_PICTURE_ALIGNMENT);
+        ret = av_image_fill_arrays(data, linesize, aligned_ptr, format, w, h,
+                                   DAV1D_PICTURE_ALIGNMENT);
+    }
+    else {
+        libdav1d_drmprime_ctx_t * const bufc = (libdav1d_drmprime_ctx_t *)buf->data;
+        unsigned int n;
+
+        ret = av_image_fill_arrays(data, linesize, bufc->data, format, w, h,
+                                   DAV1D_PICTURE_ALIGNMENT);
+        bufc->desc.nb_layers = 1;
+        bufc->desc.layers[0].format = drm_fmt[p->p.layout][p->seq_hdr->hbd];
+        for (n = 0; n != 4 && data[n] != NULL; ++n) {
+            bufc->desc.layers[0].planes[n] = (AVDRMPlaneDescriptor){
+                .object_index = 0,
+                .offset = data[n] - bufc->data,
+                .pitch = linesize[n]
+            };
+        }
+        bufc->desc.layers[0].nb_planes = n;
+    }
     if (ret < 0) {
         av_buffer_unref(&buf);
         return ret;
@@ -133,6 +262,8 @@ static void libdav1d_picture_release(Dav1dPicture *p, void *cookie)
 
 static void libdav1d_init_params(AVCodecContext *c, const Dav1dSequenceHeader *seq)
 {
+    Libdav1dContext *dav1d = c->priv_data;
+
     c->profile = seq->profile;
     c->level = ((seq->operating_points[0].major_level - 2) << 2)
                | seq->operating_points[0].minor_level;
@@ -157,6 +288,10 @@ static void libdav1d_init_params(AVCodecContext *c, const Dav1dSequenceHeader *s
         c->pix_fmt = pix_fmt_rgb[seq->hbd];
     else
         c->pix_fmt = pix_fmt[seq->layout][seq->hbd];
+    if (dav1d->use_dmabuf) {
+        c->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+        c->sw_pix_fmt = c->pix_fmt;
+    }
 
     c->framerate = ff_av1_framerate(seq->num_ticks_per_picture,
                                     (unsigned)seq->num_units_in_tick,
@@ -174,6 +309,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
 static av_cold int libdav1d_parse_extradata(AVCodecContext *c)
 {
+    Libdav1dContext *dav1d = c->priv_data;
     Dav1dSequenceHeader seq;
     size_t offset = 0;
     int res;
@@ -203,10 +339,27 @@ static av_cold int libdav1d_parse_extradata(AVCodecContext *c)
     if (res < 0)
         return 0; // Assume no seqhdr OBUs are present
 
+    dav1d->use_dmabuf = false;
     libdav1d_init_params(c, &seq);
     res = ff_set_dimensions(c, seq.max_width, seq.max_height);
     if (res < 0)
         return res;
+
+    if (c->pix_fmt != AV_PIX_FMT_NONE) {
+        const enum AVPixelFormat sw_fmt = c->pix_fmt;
+        enum AVPixelFormat fmt;
+        const enum AVPixelFormat fmts[3] = {
+            AV_PIX_FMT_DRM_PRIME,
+            c->pix_fmt,
+            AV_PIX_FMT_NONE
+        };
+        fmt = ff_get_format(c, fmts);
+        if (fmt == AV_PIX_FMT_DRM_PRIME) {
+            dav1d->use_dmabuf = true;
+            c->sw_pix_fmt = sw_fmt;
+            c->pix_fmt = fmt;
+        }
+    }
 
     return 0;
 }
@@ -486,6 +639,8 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
         return AVERROR(ENOMEM);
     }
 
+    frame->format = c->pix_fmt;
+
     frame->data[0] = p->data[0];
     frame->data[1] = p->data[1];
     frame->data[2] = p->data[2];
@@ -686,6 +841,11 @@ static const AVOption libdav1d_options[] = {
     { NULL }
 };
 
+static const AVCodecHWConfigInternal *libdav1d_hw_configs[] = {
+    HW_CONFIG_INTERNAL(DRM_PRIME),
+    NULL
+};
+
 static const AVClass libdav1d_class = {
     .class_name = "libdav1d decoder",
     .item_name  = av_default_item_name,
@@ -708,4 +868,5 @@ const FFCodec ff_libdav1d_decoder = {
                       FF_CODEC_CAP_AUTO_THREADS,
     .p.priv_class   = &libdav1d_class,
     .p.wrapper_name = "libdav1d",
+    .hw_configs     = libdav1d_hw_configs,
 };
