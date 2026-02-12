@@ -66,6 +66,8 @@ typedef struct Libdav1dContext {
 
     bool use_dmabuf;
     struct dmabufs_ctl * dbsc;
+    AVBufferRef *device_ref;
+    AVBufferRef *frames_ref;
 } Libdav1dContext;
 
 static const enum AVPixelFormat pix_fmt[][3] = {
@@ -82,28 +84,9 @@ static const enum AVPixelFormat pix_fmt_rgb[3] = {
 #include <libdrm/drm_fourcc.h>
 
 #ifndef DRM_FORMAT_S010
-/*
- * 3 plane YCbCr LSB aligned
- * In order to use these formats in a similar fashion to MSB aligned ones
- * implementation can multiply the values by 2^6=64. For that reason the padding
- * must only contain zeros.
- * index 0 = Y plane, [15:0] z:Y [6:10] little endian
- * index 1 = Cr plane, [15:0] z:Cr [6:10] little endian
- * index 2 = Cb plane, [15:0] z:Cb [6:10] little endian
- */
 #define DRM_FORMAT_S010	fourcc_code('S', '0', '1', '0') /* 2x2 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
 #define DRM_FORMAT_S210	fourcc_code('S', '2', '1', '0') /* 2x1 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
 #define DRM_FORMAT_S410	fourcc_code('S', '4', '1', '0') /* non-subsampled Cb (1) and Cr (2) planes 10 bits per channel */
-
-/*
- * 3 plane YCbCr LSB aligned
- * In order to use these formats in a similar fashion to MSB aligned ones
- * implementation can multiply the values by 2^4=16. For that reason the padding
- * must only contain zeros.
- * index 0 = Y plane, [15:0] z:Y [4:12] little endian
- * index 1 = Cr plane, [15:0] z:Cr [4:12] little endian
- * index 2 = Cb plane, [15:0] z:Cb [4:12] little endian
- */
 #define DRM_FORMAT_S012	fourcc_code('S', '0', '1', '2') /* 2x2 subsampled Cb (1) and Cr (2) planes 12 bits per channel */
 #define DRM_FORMAT_S212	fourcc_code('S', '2', '1', '2') /* 2x1 subsampled Cb (1) and Cr (2) planes 12 bits per channel */
 #define DRM_FORMAT_S412	fourcc_code('S', '4', '1', '2') /* non-subsampled Cb (1) and Cr (2) planes 12 bits per channel */
@@ -174,6 +157,53 @@ static void libdav1d_dmabuf_pool_free(void *opaque)
     dmabufs_ctl_unref(&dbsc);
 };
 
+static int libdav1d_hw_init(Libdav1dContext * const s,
+                            const unsigned int w, const unsigned int h, const enum AVPixelFormat format)
+{
+    AVHWFramesContext *hwframes;
+    int ret;
+
+    if (s->device_ref)
+        return 0;
+
+    s->device_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
+    if (!s->device_ref) {
+        ret = AVERROR(ENOMEM);
+        return ret;
+    }
+
+    ret = av_hwdevice_ctx_init(s->device_ref);
+    if (ret < 0)
+        return ret;
+
+    if (s->frames_ref != NULL) {
+        const AVHWFramesContext * const hwf = (AVHWFramesContext*)s->frames_ref->data;
+        if (hwf->sw_format == format && hwf->width == w && hwf->height == h)
+            return 0;
+        av_buffer_unref(&s->frames_ref);
+    }
+
+    s->frames_ref = av_hwframe_ctx_alloc(s->device_ref);
+    if (!s->frames_ref)
+        return AVERROR(ENOMEM);
+
+    hwframes = (AVHWFramesContext*)s->frames_ref->data;
+    hwframes->format = AV_PIX_FMT_DRM_PRIME;
+    hwframes->sw_format = format;
+    hwframes->width = w;
+    hwframes->height = h;
+    ret = av_hwframe_ctx_init(s->frames_ref);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Failed to create hwframes context: %s\n", av_err2str(ret));
+        av_buffer_unref(&s->frames_ref);
+        return ret;
+    }
+
+    av_log(NULL, AV_LOG_DEBUG, "%s: HWFramesContext set to %s, %dx%d\n", __func__,
+           av_get_pix_fmt_name(format), w, h);
+
+    return 0;
+}
 
 static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
 {
@@ -188,25 +218,38 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
         return ret;
 
     if (ret != dav1d->pool_size) {
+        const unsigned int size_req = ret;
+
         av_buffer_pool_uninit(&dav1d->pool);
         // Use twice the amount of required padding bytes for aligned_ptr below.
         if (!dav1d->use_dmabuf) {
-            dav1d->pool = av_buffer_pool_init(ret + DAV1D_PICTURE_ALIGNMENT * 2, NULL);
+            dav1d->pool = av_buffer_pool_init(size_req + DAV1D_PICTURE_ALIGNMENT * 2, NULL);
         }
         else {
+            struct dmabufs_ctl * dbsc;
+
+            if ((ret = libdav1d_hw_init(dav1d, w, h, format)) != 0)
+                return ret;
+
             if (!dav1d->dbsc) {
                 dav1d->dbsc = dmabufs_ctl_new_vidbuf_cached();
                 if (!dav1d->dbsc)
                     return AVERROR(ENOMEM);
             }
-            dav1d->pool = av_buffer_pool_init2(ret + DAV1D_PICTURE_ALIGNMENT * 2,
-                                               dav1d->dbsc, libdav1d_dmabuf_alloc, libdav1d_dmabuf_pool_free);
+            dbsc = dmabufs_ctl_ref(dav1d->dbsc);
+
+            dav1d->pool = av_buffer_pool_init2(size_req + DAV1D_PICTURE_ALIGNMENT,
+                                               dbsc, libdav1d_dmabuf_alloc, libdav1d_dmabuf_pool_free);
+
+            // Error doesn't call pool free
+            if (!dav1d->pool)
+                dmabufs_ctl_unref(&dbsc);
         }
         if (!dav1d->pool) {
             dav1d->pool_size = 0;
             return AVERROR(ENOMEM);
         }
-        dav1d->pool_size = ret;
+        dav1d->pool_size = size_req;
     }
     buf = av_buffer_pool_get(dav1d->pool);
     if (!buf)
@@ -237,6 +280,8 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
             };
         }
         bufc->desc.layers[0].nb_planes = n;
+
+        dmabuf_write_start(bufc->dh);
     }
     if (ret < 0) {
         av_buffer_unref(&buf);
@@ -354,6 +399,7 @@ static av_cold int libdav1d_parse_extradata(AVCodecContext *c)
             AV_PIX_FMT_NONE
         };
         fmt = ff_get_format(c, fmts);
+        av_log(c, AV_LOG_INFO, "Picked format: %s\n", av_get_pix_fmt_name(fmt));
         if (fmt == AV_PIX_FMT_DRM_PRIME) {
             dav1d->use_dmabuf = true;
             c->sw_pix_fmt = sw_fmt;
@@ -639,14 +685,22 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
         return AVERROR(ENOMEM);
     }
 
-    frame->format = c->pix_fmt;
-
-    frame->data[0] = p->data[0];
-    frame->data[1] = p->data[1];
-    frame->data[2] = p->data[2];
-    frame->linesize[0] = p->stride[0];
-    frame->linesize[1] = p->stride[1];
-    frame->linesize[2] = p->stride[1];
+    if (dav1d->use_dmabuf) {
+        const libdav1d_drmprime_ctx_t * const dpc = (libdav1d_drmprime_ctx_t *)frame->buf[0]->data;
+        frame->format = AV_PIX_FMT_DRM_PRIME;
+        frame->data[0] = (uint8_t *)&dpc->desc;
+        frame->data[1] = NULL;
+        frame->data[2] = NULL;
+        dmabuf_write_end(dpc->dh);
+    }
+    else {
+        frame->data[0] = p->data[0];
+        frame->data[1] = p->data[1];
+        frame->data[2] = p->data[2];
+        frame->linesize[0] = p->stride[0];
+        frame->linesize[1] = p->stride[1];
+        frame->linesize[2] = p->stride[1];
+    }
 
 #if FF_DAV1D_VERSION_AT_LEAST(5,1)
     dav1d_get_event_flags(dav1d->c, &event_flags);
@@ -657,6 +711,9 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
     res = ff_decode_frame_props(c, frame);
     if (res < 0)
         goto fail;
+
+    if (dav1d->frames_ref)
+        frame->hw_frames_ctx = av_buffer_ref(dav1d->frames_ref);
 
     frame->width = p->p.w;
     frame->height = p->p.h;
@@ -812,6 +869,11 @@ static av_cold int libdav1d_close(AVCodecContext *c)
     Libdav1dContext *dav1d = c->priv_data;
 
     av_buffer_pool_uninit(&dav1d->pool);
+
+    av_buffer_unref(&dav1d->device_ref);
+    av_buffer_unref(&dav1d->frames_ref);
+    dmabufs_ctl_unref(&dav1d->dbsc);
+
     ff_dovi_ctx_unref(&dav1d->dovi);
     dav1d_data_unref(&dav1d->data);
     dav1d_close(&dav1d->c);
