@@ -63,6 +63,7 @@ typedef struct Libdav1dContext {
     int apply_grain;
     int operating_point;
     int all_layers;
+    char * dmabuf_type;
 
     bool use_dmabuf;
     struct dmabufs_ctl * dbsc;
@@ -117,6 +118,7 @@ static void libdav1d_dmabuf_buf_free(void *opaque, uint8_t *data)
     libdav1d_drmprime_ctx_t * const bufc = (libdav1d_drmprime_ctx_t *)data;
     dmabuf_free(bufc->dh);
     av_free(bufc);
+    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
 }
 
 static AVBufferRef* libdav1d_dmabuf_alloc(void *opaque, size_t size)
@@ -155,6 +157,7 @@ static void libdav1d_dmabuf_pool_free(void *opaque)
 {
     struct dmabufs_ctl * dbsc = opaque;
     dmabufs_ctl_unref(&dbsc);
+    av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
 };
 
 static int libdav1d_hw_init(Libdav1dContext * const s,
@@ -232,9 +235,16 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
                 return ret;
 
             if (!dav1d->dbsc) {
-                dav1d->dbsc = dmabufs_ctl_new_vidbuf_cached();
+                if (dav1d->dmabuf_type != NULL &&
+                    strncmp(dav1d->dmabuf_type, "udmabuf", strlen(dav1d->dmabuf_type)) == 0) {
+                    dav1d->dbsc = dmabufs_ctl_new_udmabuf();
+                }
+                else {
+                    dav1d->dbsc = dmabufs_ctl_new_vidbuf_cached();
+                }
                 if (!dav1d->dbsc)
                     return AVERROR(ENOMEM);
+                av_log(NULL, AV_LOG_INFO, "%s\n", __func__);
             }
             dbsc = dmabufs_ctl_ref(dav1d->dbsc);
 
@@ -900,6 +910,7 @@ static const AVOption libdav1d_options[] = {
     { "filmgrain", "Apply Film Grain", OFFSET(apply_grain), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, VD | AV_OPT_FLAG_DEPRECATED },
     { "oppoint",  "Select an operating point of the scalable bitstream", OFFSET(operating_point), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 31, VD },
     { "alllayers", "Output all spatial layers", OFFSET(all_layers), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
+    { "dmabuf", "Select dmabuf type to use", OFFSET(dmabuf_type), AV_OPT_TYPE_STRING, {0}, 0, 0, VD },
     { NULL }
 };
 
