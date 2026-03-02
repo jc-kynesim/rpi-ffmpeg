@@ -19,17 +19,16 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <dav1d/dav1d.h>
-
 #include <stdbool.h>
 
+#include <dav1d/dav1d.h>
+
+#include "config.h"
 #include "libavutil/avassert.h"
 #include "libavutil/cpu.h"
 #include "libavutil/film_grain_params.h"
 #include "libavutil/hdr_dynamic_metadata.h"
-#include "libavutil/hwcontext_drm.h"
 #include "libavutil/mastering_display_metadata.h"
-#include "libavutil/mem.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
 
@@ -44,7 +43,17 @@
 #include "internal.h"
 #include "itut35.h"
 
+#if !CONFIG_LIBDRM
+#define OPT_DAV1D_DRM_PRIME 0
+#else
+#define OPT_DAV1D_DRM_PRIME 1
+
+#include "libavutil/hwcontext_drm.h"
+#include "libavutil/mem.h"
+
+#include <libdrm/drm_fourcc.h>
 #include "v4l2_req_dmabufs.h"
+#endif
 
 #define FF_DAV1D_VERSION_AT_LEAST(x,y) \
     (DAV1D_API_VERSION_MAJOR > (x) || DAV1D_API_VERSION_MAJOR == (x) && DAV1D_API_VERSION_MINOR >= (y))
@@ -65,10 +74,12 @@ typedef struct Libdav1dContext {
     int all_layers;
     char * dmabuf_type;
 
+#if OPT_DAV1D_DRM_PRIME
     bool use_dmabuf;
     struct dmabufs_ctl * dbsc;
     AVBufferRef *device_ref;
     AVBufferRef *frames_ref;
+#endif
 } Libdav1dContext;
 
 static const enum AVPixelFormat pix_fmt[][3] = {
@@ -82,8 +93,7 @@ static const enum AVPixelFormat pix_fmt_rgb[3] = {
     AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP10, AV_PIX_FMT_GBRP12,
 };
 
-#include <libdrm/drm_fourcc.h>
-
+#if OPT_DAV1D_DRM_PRIME
 #ifndef DRM_FORMAT_S010
 #define DRM_FORMAT_S010	fourcc_code('S', '0', '1', '0') /* 2x2 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
 #define DRM_FORMAT_S210	fourcc_code('S', '2', '1', '0') /* 2x1 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
@@ -99,13 +109,6 @@ static const uint32_t drm_fmt[][3] = {
     [DAV1D_PIXEL_LAYOUT_I422] = { DRM_FORMAT_YUV422, DRM_FORMAT_S210, DRM_FORMAT_S212 },
     [DAV1D_PIXEL_LAYOUT_I444] = { DRM_FORMAT_YUV444, DRM_FORMAT_S410, DRM_FORMAT_S412 },
 };
-
-static void libdav1d_log_callback(void *opaque, const char *fmt, va_list vl)
-{
-    AVCodecContext *c = opaque;
-
-    av_vlog(c, AV_LOG_ERROR, fmt, vl);
-}
 
 typedef struct libdav1d_drmprime_ctx_s {
     AVDRMFrameDescriptor desc;
@@ -143,6 +146,7 @@ static AVBufferRef* libdav1d_dmabuf_alloc(void *opaque, size_t size)
     }
     bufc->desc.nb_objects = 1;
     bufc->desc.objects[0].fd = dmabuf_fd(bufc->dh);
+    bufc->desc.objects[0].size = dmabuf_size(bufc->dh);
 
     bufc->data = dmabuf_map(bufc->dh);
     if (!bufc->data) {
@@ -207,6 +211,14 @@ static int libdav1d_hw_init(Libdav1dContext * const s,
 
     return 0;
 }
+#endif
+
+static void libdav1d_log_callback(void *opaque, const char *fmt, va_list vl)
+{
+    AVCodecContext *c = opaque;
+
+    av_vlog(c, AV_LOG_ERROR, fmt, vl);
+}
 
 static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
 {
@@ -224,11 +236,9 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
         const unsigned int size_req = ret;
 
         av_buffer_pool_uninit(&dav1d->pool);
+#if OPT_DAV1D_DRM_PRIME
         // Use twice the amount of required padding bytes for aligned_ptr below.
-        if (!dav1d->use_dmabuf) {
-            dav1d->pool = av_buffer_pool_init(size_req + DAV1D_PICTURE_ALIGNMENT * 2, NULL);
-        }
-        else {
+        if (dav1d->use_dmabuf) {
             struct dmabufs_ctl * dbsc;
 
             if ((ret = libdav1d_hw_init(dav1d, w, h, format)) != 0)
@@ -255,6 +265,12 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
             if (!dav1d->pool)
                 dmabufs_ctl_unref(&dbsc);
         }
+        else
+#endif
+        {
+            dav1d->pool = av_buffer_pool_init(size_req + DAV1D_PICTURE_ALIGNMENT * 2, NULL);
+        }
+
         if (!dav1d->pool) {
             dav1d->pool_size = 0;
             return AVERROR(ENOMEM);
@@ -269,12 +285,8 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
     // doesn't guarantee for example when AVX is disabled at configure time.
     // Use the extra DAV1D_PICTURE_ALIGNMENT padding bytes in the buffer to align it
     // if required.
-    if (!dav1d->use_dmabuf) {
-        aligned_ptr = (uint8_t *)FFALIGN((uintptr_t)buf->data, DAV1D_PICTURE_ALIGNMENT);
-        ret = av_image_fill_arrays(data, linesize, aligned_ptr, format, w, h,
-                                   DAV1D_PICTURE_ALIGNMENT);
-    }
-    else {
+#if OPT_DAV1D_DRM_PRIME
+    if (dav1d->use_dmabuf) {
         libdav1d_drmprime_ctx_t * const bufc = (libdav1d_drmprime_ctx_t *)buf->data;
         unsigned int n;
 
@@ -292,6 +304,13 @@ static int libdav1d_picture_allocator(Dav1dPicture *p, void *cookie)
         bufc->desc.layers[0].nb_planes = n;
 
         dmabuf_write_start(bufc->dh);
+    }
+    else
+#endif
+    {
+        aligned_ptr = (uint8_t *)FFALIGN((uintptr_t)buf->data, DAV1D_PICTURE_ALIGNMENT);
+        ret = av_image_fill_arrays(data, linesize, aligned_ptr, format, w, h,
+                                   DAV1D_PICTURE_ALIGNMENT);
     }
     if (ret < 0) {
         av_buffer_unref(&buf);
@@ -317,8 +336,6 @@ static void libdav1d_picture_release(Dav1dPicture *p, void *cookie)
 
 static void libdav1d_init_params(AVCodecContext *c, const Dav1dSequenceHeader *seq)
 {
-    Libdav1dContext *dav1d = c->priv_data;
-
     c->profile = seq->profile;
     c->level = ((seq->operating_points[0].major_level - 2) << 2)
                | seq->operating_points[0].minor_level;
@@ -343,10 +360,12 @@ static void libdav1d_init_params(AVCodecContext *c, const Dav1dSequenceHeader *s
         c->pix_fmt = pix_fmt_rgb[seq->hbd];
     else
         c->pix_fmt = pix_fmt[seq->layout][seq->hbd];
-    if (dav1d->use_dmabuf) {
+#if OPT_DAV1D_DRM_PRIME
+    if (((Libdav1dContext *)c->priv_data)->use_dmabuf) {
         c->pix_fmt = AV_PIX_FMT_DRM_PRIME;
         c->sw_pix_fmt = c->pix_fmt;
     }
+#endif
 
     c->framerate = ff_av1_framerate(seq->num_ticks_per_picture,
                                     (unsigned)seq->num_units_in_tick,
@@ -364,7 +383,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
 static av_cold int libdav1d_parse_extradata(AVCodecContext *c)
 {
-    Libdav1dContext *dav1d = c->priv_data;
     Dav1dSequenceHeader seq;
     size_t offset = 0;
     int res;
@@ -394,28 +412,33 @@ static av_cold int libdav1d_parse_extradata(AVCodecContext *c)
     if (res < 0)
         return 0; // Assume no seqhdr OBUs are present
 
-    dav1d->use_dmabuf = false;
     libdav1d_init_params(c, &seq);
     res = ff_set_dimensions(c, seq.max_width, seq.max_height);
     if (res < 0)
         return res;
 
-    if (c->pix_fmt != AV_PIX_FMT_NONE) {
-        const enum AVPixelFormat sw_fmt = c->pix_fmt;
-        enum AVPixelFormat fmt;
-        const enum AVPixelFormat fmts[3] = {
-            AV_PIX_FMT_DRM_PRIME,
-            c->pix_fmt,
-            AV_PIX_FMT_NONE
-        };
-        fmt = ff_get_format(c, fmts);
-        av_log(c, AV_LOG_INFO, "Picked format: %s\n", av_get_pix_fmt_name(fmt));
-        if (fmt == AV_PIX_FMT_DRM_PRIME) {
-            dav1d->use_dmabuf = true;
-            c->sw_pix_fmt = sw_fmt;
-            c->pix_fmt = fmt;
+#if OPT_DAV1D_DRM_PRIME
+    {
+        Libdav1dContext * const dav1d = c->priv_data;
+        dav1d->use_dmabuf = false;
+        if (c->pix_fmt != AV_PIX_FMT_NONE) {
+            const enum AVPixelFormat sw_fmt = c->pix_fmt;
+            enum AVPixelFormat fmt;
+            const enum AVPixelFormat fmts[3] = {
+                AV_PIX_FMT_DRM_PRIME,
+                c->pix_fmt,
+                AV_PIX_FMT_NONE
+            };
+            fmt = ff_get_format(c, fmts);
+            av_log(c, AV_LOG_DEBUG, "Picked format: %s\n", av_get_pix_fmt_name(fmt));
+            if (fmt == AV_PIX_FMT_DRM_PRIME) {
+                dav1d->use_dmabuf = true;
+                c->sw_pix_fmt = sw_fmt;
+                c->pix_fmt = fmt;
+            }
         }
     }
+#endif
 
     return 0;
 }
@@ -695,6 +718,7 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
         return AVERROR(ENOMEM);
     }
 
+#if OPT_DAV1D_DRM_PRIME
     if (dav1d->use_dmabuf) {
         const libdav1d_drmprime_ctx_t * const dpc = (libdav1d_drmprime_ctx_t *)frame->buf[0]->data;
         frame->format = AV_PIX_FMT_DRM_PRIME;
@@ -702,8 +726,12 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
         frame->data[1] = NULL;
         frame->data[2] = NULL;
         dmabuf_write_end(dpc->dh);
+
+        frame->hw_frames_ctx = av_buffer_ref(dav1d->frames_ref);
     }
-    else {
+    else
+#endif
+    {
         frame->data[0] = p->data[0];
         frame->data[1] = p->data[1];
         frame->data[2] = p->data[2];
@@ -721,9 +749,6 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
     res = ff_decode_frame_props(c, frame);
     if (res < 0)
         goto fail;
-
-    if (dav1d->frames_ref)
-        frame->hw_frames_ctx = av_buffer_ref(dav1d->frames_ref);
 
     frame->width = p->p.w;
     frame->height = p->p.h;
@@ -880,9 +905,11 @@ static av_cold int libdav1d_close(AVCodecContext *c)
 
     av_buffer_pool_uninit(&dav1d->pool);
 
+#if OPT_DAV1D_DRM_PRIME
     av_buffer_unref(&dav1d->device_ref);
     av_buffer_unref(&dav1d->frames_ref);
     dmabufs_ctl_unref(&dav1d->dbsc);
+#endif
 
     ff_dovi_ctx_unref(&dav1d->dovi);
     dav1d_data_unref(&dav1d->data);
@@ -910,14 +937,18 @@ static const AVOption libdav1d_options[] = {
     { "filmgrain", "Apply Film Grain", OFFSET(apply_grain), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, VD | AV_OPT_FLAG_DEPRECATED },
     { "oppoint",  "Select an operating point of the scalable bitstream", OFFSET(operating_point), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 31, VD },
     { "alllayers", "Output all spatial layers", OFFSET(all_layers), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
+#if OPT_DAV1D_DRM_PRIME
     { "dmabuf", "Select dmabuf type to use", OFFSET(dmabuf_type), AV_OPT_TYPE_STRING, {0}, 0, 0, VD },
+#endif
     { NULL }
 };
 
+#if OPT_DAV1D_DRM_PRIME
 static const AVCodecHWConfigInternal *libdav1d_hw_configs[] = {
     HW_CONFIG_INTERNAL(DRM_PRIME),
     NULL
 };
+#endif
 
 static const AVClass libdav1d_class = {
     .class_name = "libdav1d decoder",
@@ -941,5 +972,7 @@ const FFCodec ff_libdav1d_decoder = {
                       FF_CODEC_CAP_AUTO_THREADS,
     .p.priv_class   = &libdav1d_class,
     .p.wrapper_name = "libdav1d",
+#if OPT_DAV1D_DRM_PRIME
     .hw_configs     = libdav1d_hw_configs,
+#endif
 };
