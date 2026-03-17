@@ -1017,7 +1017,7 @@ static av_cold int init(AVFilterContext *ctx)
             av_log(ctx, AV_LOG_WARNING, "Multiple texts provided, will use text_source only\n");
             av_free(s->text);
         }
-        s->text = av_mallocz(AV_DETECTION_BBOX_LABEL_NAME_MAX_SIZE *
+        s->text = av_mallocz((AV_DETECTION_BBOX_LABEL_NAME_MAX_SIZE + 1) *
                              (AV_NUM_DETECTION_BBOX_CLASSIFY + 1));
         if (!s->text)
             return AVERROR(ENOMEM);
@@ -1394,8 +1394,7 @@ static int measure_text(AVFilterContext *ctx, TextMetrics *metrics)
 {
     DrawTextContext *s = ctx->priv;
     char *text = s->expanded_text.str;
-    char *textdup = NULL, *start = NULL;
-    int num_chars = 0;
+    char *textdup = NULL;
     int width64 = 0, w64 = 0;
     int cur_min_y64 = 0, first_max_y64 = -32000;
     int first_min_x64 = 32000, last_max_x64 = -32000;
@@ -1405,7 +1404,7 @@ static int measure_text(AVFilterContext *ctx, TextMetrics *metrics)
     Glyph *glyph = NULL;
 
     int i, tab_idx = 0, last_tab_idx = 0, line_offset = 0;
-    char* p;
+    uint8_t *start, *p;
     int ret = 0;
 
     // Count the lines and the tab characters
@@ -1458,7 +1457,7 @@ continue_on_failed2:
             TextLine *cur_line = &s->lines[line_count];
             HarfbuzzData *hb = &cur_line->hb_data;
             cur_line->cluster_offset = line_offset;
-            ret = shape_text_hb(s, hb, start, num_chars);
+            ret = shape_text_hb(s, hb, start, p - start);
             if (ret != 0) {
                 goto done;
             }
@@ -1516,14 +1515,12 @@ continue_on_failed2:
             if (w64 > width64) {
                 width64 = w64;
             }
-            num_chars = -1;
             start = p;
             ++line_count;
             line_offset = i + 1;
         }
 
         if (code == 0) break;
-        ++num_chars;
     }
 
     metrics->line_height64 = s->face->size->metrics.height;
