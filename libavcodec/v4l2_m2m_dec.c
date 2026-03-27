@@ -1410,7 +1410,7 @@ static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
 
 #define M2MDEC(NAME, LONGNAME, CODEC, bsf_name) \
     M2MDEC_CLASS(NAME) \
-    const FFCodec ff_ ## NAME ## _v4l2m2m_decoder = { \
+    FFCodec ff_ ## NAME ## _v4l2m2m_decoder = { \
         .p.name         = #NAME "_v4l2m2m" , \
         CODEC_LONG_NAME("V4L2 mem2mem " LONGNAME " decoder wrapper"), \
         .p.type         = AVMEDIA_TYPE_VIDEO, \
@@ -1426,10 +1426,6 @@ static const AVCodecHWConfigInternal *v4l2_m2m_hw_configs[] = {
         .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | \
                           FF_CODEC_CAP_INIT_CLEANUP, \
         .p.wrapper_name = "v4l2m2m", \
-        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
-                                                         AV_PIX_FMT_NV12, \
-                                                         AV_PIX_FMT_YUV420P, \
-                                                         AV_PIX_FMT_NONE}, \
         .hw_configs     = v4l2_m2m_hw_configs, \
     }
 
