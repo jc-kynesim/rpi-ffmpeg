@@ -398,6 +398,23 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
         NULL
     };
 
+    av_log(avctx, AV_LOG_INFO, "Hw dev ctx=%p\n", avctx->hw_device_ctx);
+    if (avctx->hw_device_ctx != NULL) {
+        AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)avctx->hw_device_ctx->data;
+        AVDRMDeviceContext *drm_ctx = dev_ctx->hwctx;
+        char * optstr = NULL;
+
+        if (dev_ctx->type != AV_HWDEVICE_TYPE_DRM) {
+            av_log(avctx, AV_LOG_ERROR, "Supplied hwcontext not DRM\n");
+            return AVERROR(EINVAL);
+        }
+
+
+        av_dict_get_string(drm_ctx->opts, &optstr, '=', ',');
+        av_log(NULL, AV_LOG_INFO, "%s: opts='%s'\n", __func__, optstr);
+        av_free(optstr);
+    }
+
     // Give up immediately if this is something that we have no code to deal with
     if (sps->chroma_format_idc != 1) {
         av_log(avctx, AV_LOG_WARNING, "chroma_format_idc(%d) != 1: Not implemented\n", sps->chroma_format_idc);

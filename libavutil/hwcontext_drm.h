@@ -164,6 +164,8 @@ typedef struct AVDRMDeviceContext {
      * If no device is required, set to -1.
      */
     int fd;
+
+    struct AVDictionary * opts;
 } AVDRMDeviceContext;
 
 #endif /* AVUTIL_HWCONTEXT_DRM_H */

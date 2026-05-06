@@ -50,7 +50,10 @@ static void drm_device_free(AVHWDeviceContext *hwdev)
 {
     AVDRMDeviceContext *hwctx = hwdev->hwctx;
 
-    close(hwctx->fd);
+    if (hwctx->fd != -1)
+        close(hwctx->fd);
+
+    av_dict_free(&hwctx->opts);
 }
 
 static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
@@ -58,6 +61,21 @@ static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
 {
     AVDRMDeviceContext *hwctx = hwdev->hwctx;
     drmVersionPtr version;
+    char * optstr = NULL;
+
+    av_dict_get_string(opts, &optstr, '=', ',');
+    av_log(NULL, AV_LOG_INFO, "%s: dev='%s', opts='%s'\n", __func__, device, optstr);
+    av_free(optstr);
+
+    hwctx->fd = -1;
+    hwctx->opts = NULL;
+    hwdev->free = &drm_device_free;
+
+    if (opts != NULL) {
+        int rv = av_dict_copy(&hwctx->opts, opts, 0);
+        if (rv != 0)
+            return rv;
+    }
 
     if (device == NULL) {
         hwctx->fd = -1;
@@ -82,8 +100,6 @@ static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
            version->version_patchlevel);
 
     drmFreeVersion(version);
-
-    hwdev->free = &drm_device_free;
 
     return 0;
 }

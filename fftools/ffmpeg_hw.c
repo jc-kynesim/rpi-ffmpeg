@@ -111,14 +111,18 @@ int hw_device_init_from_string(const char *arg, HWDevice **dev_out)
     const char *errmsg, *p, *q;
     size_t k;
 
+    av_log(NULL, AV_LOG_INFO, "String='%s'\n", arg);
+
     k = strcspn(arg, ":=@");
     p = arg + k;
 
     type_name = av_strndup(arg, k);
     if (!type_name) {
+        av_log(NULL, AV_LOG_INFO, "No Type\n");
         err = AVERROR(ENOMEM);
         goto fail;
     }
+    av_log(NULL, AV_LOG_INFO, "Type='%s'\n", type_name);
     type = av_hwdevice_find_type_by_name(type_name);
     if (type == AV_HWDEVICE_TYPE_NONE) {
         errmsg = "unknown device type";
@@ -147,7 +151,10 @@ int hw_device_init_from_string(const char *arg, HWDevice **dev_out)
         }
     }
 
+    av_log(NULL, AV_LOG_INFO, "Name='%s'\n", name);
+
     if (!*p) {
+        av_log(NULL, AV_LOG_INFO, "No param\n");
         // New device with no parameters.
         err = av_hwdevice_ctx_create(&device_ref, type,
                                      NULL, NULL, 0);
@@ -157,6 +164,7 @@ int hw_device_init_from_string(const char *arg, HWDevice **dev_out)
     } else if (*p == ':') {
         // New device with some parameters.
         ++p;
+        av_log(NULL, AV_LOG_INFO, "Params='%s'\n", p);
         q = strchr(p, ',');
         if (q) {
             if (q - p > 0) {
@@ -166,6 +174,7 @@ int hw_device_init_from_string(const char *arg, HWDevice **dev_out)
                     goto fail;
                 }
             }
+            av_log(NULL, AV_LOG_INFO, "Parse='%s'\n", q + 1);
             err = av_dict_parse_string(&options, q + 1, "=", ",", 0);
             if (err < 0) {
                 errmsg = "failed to parse options";
@@ -193,6 +202,7 @@ int hw_device_init_from_string(const char *arg, HWDevice **dev_out)
         if (err < 0)
             goto fail;
     } else if (*p == ',') {
+        av_log(NULL, AV_LOG_INFO, "Params2='%s'\n", p + 1);
         err = av_dict_parse_string(&options, p + 1, "=", ",", 0);
 
         if (err < 0) {
@@ -205,6 +215,7 @@ int hw_device_init_from_string(const char *arg, HWDevice **dev_out)
         if (err < 0)
             goto fail;
     } else {
+        av_log(NULL, AV_LOG_INFO, "Parse error\n");
         errmsg = "parse error";
         goto invalid;
     }
