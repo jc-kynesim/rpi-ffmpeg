@@ -146,19 +146,79 @@ int ff_v4l2_request_uninit(AVCodecContext *avctx)
     return 0;
 }
 
+struct fmt_accept_env_s {
+    int bit_depth;
+    uint32_t * fmts;
+};
+
+static uint32_t *
+mk_fmt_list(AVCodecContext *avctx)
+{
+    AVHWDeviceContext *dev_ctx;
+    AVDRMDeviceContext *drm_ctx;
+    AVDictionaryEntry * ent;
+    char * fmtsstr;
+    uint32_t * fmts = NULL;
+    uint32_t * d;
+    unsigned int n;
+    const char * p;
+    const char * e;
+
+    if (avctx->hw_device_ctx == NULL)
+        return NULL;
+
+    dev_ctx = (AVHWDeviceContext *)avctx->hw_device_ctx->data;
+    drm_ctx = dev_ctx->hwctx;
+
+    if ((ent = av_dict_get(drm_ctx->opts, "v4l2fmts", NULL, 0)) == NULL)
+        return NULL;
+    fmtsstr = ent->value;
+
+    n = strlen(fmtsstr);
+    if ((fmts = av_mallocz(((n + 6) / 5) * sizeof(*fmts))) == NULL)
+        return NULL;
+
+    p = fmtsstr;
+    d = fmts;
+    do {
+        if ((e = strchr(p, '/')) == NULL)
+            e = fmtsstr + n;
+
+        if (e - p == 4)
+            *d++ = v4l2_fourcc(p[0], p[1], p[2], p[3]);
+        else
+            av_log(avctx, AV_LOG_ERROR, "Bad V4L2 fourcc: '%.*s'\n", (int)(e - p), p);
+
+        p = e + 1;
+    } while (*e != 0);
+
+    if (d == fmts)
+        av_freep(&fmts);
+
+    return fmts;
+}
+
 static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
 {
-    const int bit_depth = *(int *)v;
+    const struct fmt_accept_env_s * const ae = v;
+
+    if (ae->fmts != NULL) {
+        const uint32_t * p = ae->fmts;
+        for (; *p != 0 && *p != fmtdesc->pixelformat; ++p)
+            /* Loop */;
+        if (*p == 0)
+            return 0;
+    }
 
     // SAND is currently confised as to whether it is s/w or hardware
     // *** Current usage is probably wrong - it shouldn't be a h/w fmt
     if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128 ||
         fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128M) {
-        return bit_depth == 8;
+        return ae->bit_depth == 8;
     }
     if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128 ||
         fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128M) {
-        return bit_depth == 10;
+        return ae->bit_depth == 10;
     }
     else {
         const enum AVPixelFormat fmt = ff_v4l2_format_v4l2_to_avfmt(fmtdesc->pixelformat, AV_CODEC_ID_RAWVIDEO);
@@ -167,7 +227,7 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
         if (fmt == AV_PIX_FMT_NONE || desc == NULL)
             return 0;
 
-        return bit_depth == desc->comp[0].depth;
+        return ae->bit_depth == desc->comp[0].depth;
     }
 }
 
@@ -185,6 +245,7 @@ int ff_v4l2_request_init(AVCodecContext *avctx,
     size_t src_size;
     enum mediabufs_memory src_memtype;
     enum mediabufs_memory dst_memtype;
+    struct fmt_accept_env_s fae = {.bit_depth = bit_depth};
 
     av_log(avctx, AV_LOG_DEBUG, "<<< %s (%dx%d %d bits src_size %zd dst_bufs %d\n", __func__,
            width, height, bit_depth, src_bufsize, dst_buffers);
@@ -201,6 +262,8 @@ int ff_v4l2_request_init(AVCodecContext *avctx,
     priv->cctx = ctx;
 
     decode_q_init(&ctx->decode_q);
+
+    fae.fmts = mk_fmt_list(avctx);
 
     if ((ret = devscan_build(avctx, &ctx->devscan)) != 0) {
         av_log(avctx, AV_LOG_WARNING, "Failed to find any V4L2 devices\n");
@@ -290,7 +353,7 @@ retry_src_memtype:
     av_log(avctx, AV_LOG_DEBUG, "%s probed successfully: driver v %#x\n",
            ctx->fns->name, mediabufs_ctl_driver_version(ctx->mbufs));
 
-    if (mediabufs_dst_fmt_set(ctx->mbufs, width, height, dst_fmt_accept_cb, (void*)&bit_depth)) {
+    if (mediabufs_dst_fmt_set(ctx->mbufs, width, height, dst_fmt_accept_cb, (void*)&fae)) {
         av_log(avctx, AV_LOG_ERROR, "Failed to set destination format: %dx%d %dbit\n", width, height, bit_depth);
         goto fail4;
     }
@@ -341,11 +404,12 @@ retry_src_memtype:
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
 
-    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s; swfmt=%s\n",
+    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s; swfmt=%s; V4L2fmt %s\n",
            ctx->fns->name,
            decdev_media_path(decdev), decdev_video_path(decdev),
            mediabufs_memory_name(src_memtype), mediabufs_memory_name(dst_memtype),
-           av_get_pix_fmt_name(avctx->sw_pix_fmt));
+           av_get_pix_fmt_name(avctx->sw_pix_fmt),
+           av_fourcc2str(mediabufs_dst_pixfmt(ctx->mbufs)));
 
     return 0;
 
@@ -356,6 +420,7 @@ fail3:
 fail2:
 fail1:
 fail0:
+    av_free(fae.fmts);
     priv->cctx = NULL;
     av_buffer_unref(&priv->cctx_buf);
     return ret;
