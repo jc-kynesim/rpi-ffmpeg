@@ -10,14 +10,25 @@ import csv
 from stat import *
 
 class DecodeType:
-    def __init__(self, textname, hwaccel):
+    def __init__(self, textname, hwaccel, nameprefix):
         self.textname = textname
         self.hwaccel = hwaccel
+        self.prefix = nameprefix
 
-hwaccel_rpi = DecodeType("RPI Test/Legacy", "rpi")
-hwaccel_sw = DecodeType("Software", None)
-hwaccel_drm = DecodeType("DRM Prime", "drm")
-hwaccel_vaapi = DecodeType("VAAPI", "vaapi")
+    def checkname(self, name):
+        for x in self.prefix:
+            if name.startswith(x):
+                return True;
+        return False
+
+hwaccel_rpi = DecodeType("RPI Test/Legacy", "rpi", [])
+hwaccel_sw = DecodeType("Software", None, ["yuv", "gray"])
+hwaccel_drm = DecodeType("DRM Prime", "drm", ["drm"])
+hwaccel_vaapi = DecodeType("VAAPI", "vaapi", [])
+
+allaccel = [
+    hwaccel_rpi, hwaccel_sw, hwaccel_drm, hwaccel_vaapi
+]
 
 def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     ffmpeg_exec = args.ffmpeg
@@ -81,18 +92,25 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     except:
         pass
 
-    if valgrind:
-        flog.seek(0)
-        leak = True
-        valerr = True
+    flog.seek(0)
+    leak = True
+    valerr = True
+    frametype = None
 
-        for line in flog:
-            if re.search("^==[0-9]+== All heap blocks were freed", line):
-                leak = False
-            if re.search("^==[0-9]+== ERROR SUMMARY: 0 errors", line):
-                valerr = False
-        if leak or valerr:
-            rv = 4
+    for line in flog:
+        sv = re.search(r'^ *Stream #[0-9]+:[0-9]+: Video: wrapped.+, ([A-Za-z0-9-_]+)\(', line)
+        if sv:
+            for a in allaccel:
+                if a.checkname(sv.group(1)):
+                    frametype = a
+                    break
+
+        if re.search("^==[0-9]+== All heap blocks were freed", line):
+            leak = False
+        if re.search("^==[0-9]+== ERROR SUMMARY: 0 errors", line):
+            valerr = False
+    if valgrind and (leak or valerr):
+        rv = 4
 
     if  m1 and m2 and m1.group() == m2.group():
         print("Match: " + m1.group(), file=flog)
@@ -106,7 +124,7 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
         print("****** Mismatch: " + m1.group() + " != " + m2.group(), file=flog)
         rv = 1
     flog.close()
-    return rv
+    return (rv, frametype)
 
 def scandir(root):
     aconf = []
@@ -143,6 +161,9 @@ def runtest(name, tests):
 def doconf(csva, tests, test_root, vcodec, dectype, args):
     unx_failures = []
     unx_success = []
+    unx_match = []
+    unx_nomatch = []
+
     failures = 0
     successes = 0
     for a in csva:
@@ -152,11 +173,29 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
             print ("==== ", name, end="")
             sys.stdout.flush()
 
-            rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, args=args)
+            (rv, frametype) = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, args=args)
+
             if (rv == 0):
                 successes += 1
             else:
                 failures += 1
+
+            sw_expected = int(a[5])
+            if frametype != dectype:
+                if frametype:
+                    if sw_expected:
+                        print(f" ({frametype.textname.lower()})", end = "")
+                    else:
+                        print(f" ({frametype.textname.upper()})", end = "")
+                        unx_nomatch.append(name)
+                else:
+                    print(" (????)", end = "")
+                    if exp_test == 0:
+                        unx_nomatch.append(name)
+
+            elif sw_expected and dectype != hwaccel_sw:
+                print(f" ({frametype.textname.upper()})", end = "")
+                unx_match.append(name)
 
             if (rv == 0):
                 if exp_test == 2:
@@ -184,13 +223,15 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
 
     print()
     print("Tested using decode type:", dectype.textname)
-    if unx_failures or unx_success:
+    if unx_failures or unx_success or unx_match or unx_nomatch:
         print("Unexpected Failures:", unx_failures)
         print("Unexpected Success: ", unx_success)
+        print("Unexpected Format Success: ", unx_match)
+        print("Unexpected Format Fail: ", unx_nomatch)
     else:
         print("All tests normal:", successes, "ok,", failures, "failed")
 
-    return unx_failures + unx_success
+    return len(unx_failures) + len(unx_success) + len(unx_nomatch)
 
 
 class ConfCSVDialect(csv.Dialect):
