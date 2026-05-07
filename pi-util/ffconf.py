@@ -63,6 +63,7 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
 
     ffargs = [ffmpeg_exec, "-flags", "unaligned"] +\
         ["-no_cvt_hw", "-flags", "output_corrupt"] +\
+        (["-init_hw_device", f"drm:,v4l2fmts={args.v4l2fmts}"] if args.v4l2fmts else []) +\
         (["-hwaccel", dectype.hwaccel] if dectype.hwaccel else []) +\
         ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
         ["-conform_corrupt", "1"] +\
@@ -252,6 +253,7 @@ if __name__ == '__main__':
     argp.add_argument("--pi4", action='store_true', help="Force pi4 cmd line")
     argp.add_argument("--drm", action='store_true', help="Force v4l2 drm cmd line")
     argp.add_argument("--sw", action='store_true', help="Use software decode")
+    argp.add_argument("--hwfmt", help="Force h/w format, default use 1st offered")
     argp.add_argument("--vaapi", action='store_true', help="Force vaapi cmd line")
     argp.add_argument("--test_root", default="/opt/conform/h265.2016", help="Root dir for test")
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
@@ -288,6 +290,18 @@ if __name__ == '__main__':
         dectype = hwaccel_vaapi
     elif args.sw:
         dectype = hwaccel_sw
+
+    args.v4l2fmts = None
+    if args.hwfmt:
+        if args.hwfmt == "sand":
+            args.v4l2fmts = "Nc12/Nc30"
+        elif args.hwfmt == "oldsand":
+            args.v4l2fmts = "NC12/NC30"
+        elif args.hwfmt == "nv":
+            args.v4l2fmts = "NV12/P010"
+        else:
+            printf("Unexpected hwfmt: sand, oldsand, nv expected")
+            exit(1)
 
     if os.path.isdir(args.ffmpeg):
         args.ffmpeg = os.path.join(args.ffmpeg, "ffmpeg")
