@@ -71,6 +71,13 @@
 #define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
 #endif
 
+#ifndef V4L2_PIX_FMT_NV12_COL128M
+#define V4L2_PIX_FMT_NV12_COL128M v4l2_fourcc('N', 'c', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+#define V4L2_PIX_FMT_NV12_10_COL128M v4l2_fourcc('N', 'c', '3', '0')
+								/* Y/CbCr 4:2:0 10bpc, 3x10 packed as 4 bytes in
+								 * a 128 bytes / 96 pixel wide column */
+#endif
+
 typedef struct V4L2Queue V4L2Queue;
 typedef struct DeintV4L2M2MContextShared DeintV4L2M2MContextShared;
 
@@ -252,6 +259,7 @@ fmt_v4l2_to_av(const uint32_t pixfmt)
         return AV_PIX_FMT_NV12;
 #if CONFIG_SAND
     case V4L2_PIX_FMT_NV12_COL128:
+    case V4L2_PIX_FMT_NV12_COL128M:
         return AV_PIX_FMT_RPI4_8;
 #endif
     default:
@@ -484,7 +492,7 @@ static int deint_v4l2m2m_prepare_context(DeintV4L2M2MContextShared *ctx)
     if (ctx->filter_type == FILTER_V4L2_SCALE &&
         strcmp("bcm2835-codec-isp", cap.card) != 0)
     {
-        av_log(ctx->logctx, AV_LOG_DEBUG, "Not ISP\n");
+        av_log(ctx->logctx, AV_LOG_DEBUG, "Not ISP (%.*s)\n", (int)sizeof(cap.card), cap.card);
         return AVERROR(EINVAL);
     }
 
@@ -873,14 +881,13 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
     // We really don't expect multiple layers
     // All formats that we currently cope with are single object
 
-    if (src->nb_layers != 1 || src->nb_objects != 1)
+    if (src->nb_layers != 1)
         return AVERROR(EINVAL);
 
     switch (drm_fmt) {
         case DRM_FORMAT_YUV420:
-            if (mod == DRM_FORMAT_MOD_LINEAR) {
-                if (src->layers[0].nb_planes != 3)
-                    break;
+            if (mod == DRM_FORMAT_MOD_LINEAR &&
+                    src->layers[0].nb_planes == 3 && src->nb_objects != 1) {
                 pix_fmt = V4L2_PIX_FMT_YUV420;
                 h = src->layers[0].planes[1].offset / bpl;
                 w = bpl;
@@ -888,30 +895,33 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
             break;
 
         case DRM_FORMAT_NV12:
-            if (mod == DRM_FORMAT_MOD_LINEAR) {
-                if (src->layers[0].nb_planes != 2)
-                    break;
+            if (mod == DRM_FORMAT_MOD_LINEAR &&
+                        src->layers[0].nb_planes == 2 && src->nb_objects == 1) {
                 pix_fmt = V4L2_PIX_FMT_NV12;
                 h = src->layers[0].planes[1].offset / bpl;
                 w = bpl;
             }
 #if CONFIG_SAND
-            else if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
-                if (src->layers[0].nb_planes != 2)
-                    break;
+            else if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128 &&
+                     src->layers[0].nb_planes == 2 && src->nb_objects == 1) {
                 pix_fmt = V4L2_PIX_FMT_NV12_COL128;
                 w = bpl;
                 h = src->layers[0].planes[1].offset / 128;
                 bpl = fourcc_mod_broadcom_param(mod);
+            }
+            else if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128 &&
+                     src->layers[0].nb_planes == 2 && src->nb_objects == 2) {
+                pix_fmt = V4L2_PIX_FMT_NV12_COL128M;
+                w = bpl;
+                h = src->objects[0].size / bpl;
             }
 #endif
             break;
 
         case DRM_FORMAT_P030:
 #if CONFIG_SAND
-            if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128) {
-                if (src->layers[0].nb_planes != 2)
-                    break;
+            if (fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128 &&
+                    src->layers[0].nb_planes == 2 && src->nb_objects == 1) {
                 pix_fmt =  V4L2_PIX_FMT_NV12_10_COL128;
                 w = bpl / 2;  // Matching lie to how we construct this
                 h = src->layers[0].planes[1].offset / 128;
@@ -929,12 +939,19 @@ static int set_src_fmt(V4L2Queue * const q, const AVFrame * const frame)
 
     if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
         struct v4l2_pix_format_mplane *const pix = &format->fmt.pix_mp;
+        unsigned int i;
 
         pix->width = w;
         pix->height = h;
         pix->pixelformat = pix_fmt;
-        pix->plane_fmt[0].bytesperline = bpl;
-        pix->num_planes = 1;
+        pix->num_planes = src->nb_objects;
+        for (i = 0; i != src->nb_objects; ++i) {
+            pix->plane_fmt[i].sizeimage = src->objects[i].size;
+            pix->plane_fmt[i].bytesperline = src->layers[0].planes[i].pitch;
+        }
+        // Override bpl[0] for sand
+        if (src->nb_objects == 1)
+            pix->plane_fmt[0].bytesperline = bpl;
     }
     else {
         struct v4l2_pix_format *const pix = &format->fmt.pix;
@@ -1642,19 +1659,24 @@ static uint32_t desc_pixelformat(const AVDRMFrameDescriptor * const drm_desc)
     const uint64_t mod = drm_desc->objects[0].format_modifier;
     const int is_linear = (mod == DRM_FORMAT_MOD_LINEAR || mod == DRM_FORMAT_MOD_INVALID);
 
-    // Only currently support single object things
-    if (drm_desc->nb_objects != 1)
-        return 0;
-
     switch (drm_desc->layers[0].format) {
     case DRM_FORMAT_YUV420:
-        return is_linear ? V4L2_PIX_FMT_YUV420 : 0;
+        if (is_linear && drm_desc->nb_objects == 1)
+            return V4L2_PIX_FMT_YUV420;
+        break;
+
     case DRM_FORMAT_NV12:
-        return is_linear ? V4L2_PIX_FMT_NV12 :
+        if (is_linear && drm_desc->nb_objects == 1)
+            return V4L2_PIX_FMT_NV12;
 #if CONFIG_SAND
-            fourcc_mod_broadcom_mod(mod) == DRM_FORMAT_MOD_BROADCOM_SAND128 ? V4L2_PIX_FMT_NV12_COL128 :
+        if (drm_desc->nb_objects == 1 &&
+                fourcc_mod_broadcom_mod(mod)== DRM_FORMAT_MOD_BROADCOM_SAND128)
+            return V4L2_PIX_FMT_NV12_COL128;
+        if (drm_desc->nb_objects == 2 &&
+                fourcc_mod_broadcom_mod(mod)== DRM_FORMAT_MOD_BROADCOM_SAND128)
+            return V4L2_PIX_FMT_NV12_COL128M;
 #endif
-            0;
+        break;
     default:
         break;
     }
