@@ -10,14 +10,25 @@ import csv
 from stat import *
 
 class DecodeType:
-    def __init__(self, textname, hwaccel):
+    def __init__(self, textname, hwaccel, nameprefix):
         self.textname = textname
         self.hwaccel = hwaccel
+        self.prefix = nameprefix
 
-hwaccel_rpi = DecodeType("RPI Test/Legacy", "rpi")
-hwaccel_sw = DecodeType("Software", None)
-hwaccel_drm = DecodeType("DRM Prime", "drm")
-hwaccel_vaapi = DecodeType("VAAPI", "vaapi")
+    def checkname(self, name):
+        for x in self.prefix:
+            if name.startswith(x):
+                return True;
+        return False
+
+hwaccel_rpi = DecodeType("RPI Test/Legacy", "rpi", [])
+hwaccel_sw = DecodeType("Software", None, ["yuv", "gray"])
+hwaccel_drm = DecodeType("DRM Prime", "drm", ["drm"])
+hwaccel_vaapi = DecodeType("VAAPI", "vaapi", [])
+
+allaccel = [
+    hwaccel_rpi, hwaccel_sw, hwaccel_drm, hwaccel_vaapi
+]
 
 def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     ffmpeg_exec = args.ffmpeg
@@ -52,6 +63,7 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
 
     ffargs = [ffmpeg_exec, "-flags", "unaligned"] +\
         ["-no_cvt_hw", "-flags", "output_corrupt"] +\
+        (["-init_hw_device", f"drm:,v4l2fmts={"/".join(args.v4l2fmts)}"] if args.v4l2fmts else []) +\
         (["-hwaccel", dectype.hwaccel] if dectype.hwaccel else []) +\
         ["-vcodec", "hevc", "-i", os.path.join(fileroot, es_file)] +\
         ["-conform_corrupt", "1"] +\
@@ -81,18 +93,30 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
     except:
         pass
 
-    if valgrind:
-        flog.seek(0)
-        leak = True
-        valerr = True
+    flog.seek(0)
+    leak = True
+    valerr = True
+    frametype = None
+    v4l2fmt = "????"
 
-        for line in flog:
-            if re.search("^==[0-9]+== All heap blocks were freed", line):
-                leak = False
-            if re.search("^==[0-9]+== ERROR SUMMARY: 0 errors", line):
-                valerr = False
-        if leak or valerr:
-            rv = 4
+    for line in flog:
+        sv = re.search(r'^ *Stream #[0-9]+:[0-9]+: Video: wrapped.+, ([A-Za-z0-9-_]+)\(', line)
+        if sv:
+            for a in allaccel:
+                if a.checkname(sv.group(1)):
+                    frametype = a
+                    break
+
+        sv = re.search(r'^\[hevc .*Hwaccel V4L2.*V4L2fmt (.+)$', line)
+        if sv:
+            v4l2fmt = sv.group(1)
+
+        if re.search("^==[0-9]+== All heap blocks were freed", line):
+            leak = False
+        if re.search("^==[0-9]+== ERROR SUMMARY: 0 errors", line):
+            valerr = False
+    if valgrind and (leak or valerr):
+        rv = 4
 
     if  m1 and m2 and m1.group() == m2.group():
         print("Match: " + m1.group(), file=flog)
@@ -106,7 +130,7 @@ def testone(fileroot, srcname, es_file, md5_file, pix, dectype, vcodec, args):
         print("****** Mismatch: " + m1.group() + " != " + m2.group(), file=flog)
         rv = 1
     flog.close()
-    return rv
+    return (rv, frametype, v4l2fmt)
 
 def scandir(root):
     aconf = []
@@ -143,6 +167,9 @@ def runtest(name, tests):
 def doconf(csva, tests, test_root, vcodec, dectype, args):
     unx_failures = []
     unx_success = []
+    unx_match = []
+    unx_nomatch = []
+
     failures = 0
     successes = 0
     for a in csva:
@@ -152,11 +179,42 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
             print ("==== ", name, end="")
             sys.stdout.flush()
 
-            rv = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, args=args)
+            (rv, frametype, v4l2fmt) = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, args=args)
+
             if (rv == 0):
                 successes += 1
             else:
                 failures += 1
+
+            comments = []
+            is_unx_nomatch = False
+
+            if args.v4l2fmts and frametype == hwaccel_drm and v4l2fmt not in args.v4l2fmts:
+                comments.append(v4l2fmt)
+                is_unx_nomatch = True
+
+            sw_expected = int(a[5])
+            if frametype != dectype:
+                if frametype:
+                    if sw_expected and frametype == hwaccel_sw:
+                        comments.append(frametype.textname.lower())
+                    else:
+                        comments.append(frametype.textname.upper())
+                        is_unx_nomatch = True
+                else:
+                    comments.append("????")
+                    if exp_test == 0:
+                        is_unx_nomatch = True
+
+            elif sw_expected and dectype != hwaccel_sw:
+                comments.append(frametype.textname.upper())
+                unx_match.append(name)
+
+            if is_unx_nomatch:
+                unx_nomatch.append(name)
+
+            if comments:
+                print(f" ({",".join(comments)})", end="")
 
             if (rv == 0):
                 if exp_test == 2:
@@ -184,13 +242,15 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
 
     print()
     print("Tested using decode type:", dectype.textname)
-    if unx_failures or unx_success:
+    if unx_failures or unx_success or unx_match or unx_nomatch:
         print("Unexpected Failures:", unx_failures)
         print("Unexpected Success: ", unx_success)
+        print("Unexpected Format Success: ", unx_match)
+        print("Unexpected Format Fail: ", unx_nomatch)
     else:
         print("All tests normal:", successes, "ok,", failures, "failed")
 
-    return unx_failures + unx_success
+    return len(unx_failures) + len(unx_success) + len(unx_nomatch)
 
 
 class ConfCSVDialect(csv.Dialect):
@@ -211,6 +271,7 @@ if __name__ == '__main__':
     argp.add_argument("--pi4", action='store_true', help="Force pi4 cmd line")
     argp.add_argument("--drm", action='store_true', help="Force v4l2 drm cmd line")
     argp.add_argument("--sw", action='store_true', help="Use software decode")
+    argp.add_argument("--hwfmt", help="Force h/w format (sand, oldsand, nv12), default is to use 1st offered")
     argp.add_argument("--vaapi", action='store_true', help="Force vaapi cmd line")
     argp.add_argument("--test_root", default="/opt/conform/h265.2016", help="Root dir for test")
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
@@ -247,6 +308,18 @@ if __name__ == '__main__':
         dectype = hwaccel_vaapi
     elif args.sw:
         dectype = hwaccel_sw
+
+    args.v4l2fmts = None
+    if args.hwfmt:
+        if args.hwfmt == "sand":
+            args.v4l2fmts = ["Nc12","Nc30"]
+        elif args.hwfmt == "oldsand":
+            args.v4l2fmts = ["NC12","NC30"]
+        elif args.hwfmt == "nv":
+            args.v4l2fmts = ["NV12","P010"]
+        else:
+            print("Unexpected hwfmt: sand, oldsand, nv expected")
+            exit(1)
 
     if os.path.isdir(args.ffmpeg):
         args.ffmpeg = os.path.join(args.ffmpeg, "ffmpeg")
