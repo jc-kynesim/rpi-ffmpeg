@@ -1342,6 +1342,12 @@ const struct v4l2_format *mediabufs_dst_fmt(struct mediabufs_ctl *const mbc)
     return &mbc->dst_fmt;
 }
 
+uint32_t mediabufs_dst_pixfmt(const struct mediabufs_ctl *const mbc)
+{
+    return V4L2_TYPE_IS_MULTIPLANAR(mbc->dst_fmt.type) ? mbc->dst_fmt.fmt.pix_mp.pixelformat : mbc->dst_fmt.fmt.pix.pixelformat;
+}
+
+
 MediaBufsStatus mediabufs_dst_fmt_set(struct mediabufs_ctl *const mbc,
                const unsigned int width,
                const unsigned int height,
