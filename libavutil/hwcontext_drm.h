@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "buffer.h"
+
 /**
  * @file
  * API-specific header for AV_HWDEVICE_TYPE_DRM.
@@ -165,5 +167,15 @@ typedef struct AVDRMDeviceContext {
      */
     int fd;
 } AVDRMDeviceContext;
+
+/**
+ * Test if a given V4L2 buffer fourcc is allowed in this DRM hardware device context.
+ *
+ * @param hw_device_ctx  AVBufferRef to an AVHWDeviceContext of type AV_HWDEVICE_TYPE_DRM,
+ *                       or NULL (returns 0 if NULL)
+ * @param fcc            V4L2 fourcc pixel format code to test
+ * @return               1 if the format is allowed, 0 otherwise
+ */
+int av_hwcontext_drm_v4l2_4cc_test(AVBufferRef *hw_device_ctx, uint32_t fcc);
 
 #endif /* AVUTIL_HWCONTEXT_DRM_H */
