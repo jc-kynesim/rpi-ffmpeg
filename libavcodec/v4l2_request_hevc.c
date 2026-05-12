@@ -28,6 +28,8 @@
 #include "v4l2_request_hevc.h"
 
 #include "libavutil/hwcontext_drm.h"
+#include "libavutil/hwcontext_drm_internal.h"
+#include "libavutil/hwcontext_drm.h"
 #include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 
@@ -145,19 +147,27 @@ int ff_v4l2_request_uninit(AVCodecContext *avctx)
     return 0;
 }
 
+struct fmt_accept_env_s {
+    AVCodecContext *avctx;
+    int bit_depth;
+};
+
 static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
 {
-    const int bit_depth = *(int *)v;
+    const struct fmt_accept_env_s * const ae = v;
+
+    if (!ff_hwcontext_drm_v4l2_4cc_test(ae->avctx->hw_device_ctx, fmtdesc->pixelformat))
+        return 0;
 
     // SAND is currently confised as to whether it is s/w or hardware
     // *** Current usage is probably wrong - it shouldn't be a h/w fmt
     if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128 ||
         fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_COL128M) {
-        return bit_depth == 8;
+        return ae->bit_depth == 8;
     }
     if (fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128 ||
         fmtdesc->pixelformat == V4L2_PIX_FMT_NV12_10_COL128M) {
-        return bit_depth == 10;
+        return ae->bit_depth == 10;
     }
     else {
         const enum AVPixelFormat fmt = ff_v4l2_format_v4l2_to_avfmt(fmtdesc->pixelformat, AV_CODEC_ID_RAWVIDEO);
@@ -166,7 +176,7 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
         if (fmt == AV_PIX_FMT_NONE || desc == NULL)
             return 0;
 
-        return bit_depth == desc->comp[0].depth;
+        return ae->bit_depth == desc->comp[0].depth;
     }
 }
 
@@ -184,6 +194,7 @@ int ff_v4l2_request_init(AVCodecContext *avctx,
     size_t src_size;
     enum mediabufs_memory src_memtype;
     enum mediabufs_memory dst_memtype;
+    struct fmt_accept_env_s fae = {.avctx = avctx, .bit_depth = bit_depth};
 
     av_log(avctx, AV_LOG_DEBUG, "<<< %s (%dx%d %d bits src_size %zd dst_bufs %d\n", __func__,
            width, height, bit_depth, src_bufsize, dst_buffers);
@@ -289,7 +300,7 @@ retry_src_memtype:
     av_log(avctx, AV_LOG_DEBUG, "%s probed successfully: driver v %#x\n",
            ctx->fns->name, mediabufs_ctl_driver_version(ctx->mbufs));
 
-    if (mediabufs_dst_fmt_set(ctx->mbufs, width, height, dst_fmt_accept_cb, (void*)&bit_depth)) {
+    if (mediabufs_dst_fmt_set(ctx->mbufs, width, height, dst_fmt_accept_cb, (void*)&fae)) {
         av_log(avctx, AV_LOG_ERROR, "Failed to set destination format: %dx%d %dbit\n", width, height, bit_depth);
         goto fail4;
     }
@@ -340,11 +351,12 @@ retry_src_memtype:
     // Set our s/w format
     avctx->sw_pix_fmt = ((AVHWFramesContext *)avctx->hw_frames_ctx->data)->sw_format;
 
-    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s; swfmt=%s\n",
+    av_log(avctx, AV_LOG_INFO, "Hwaccel %s; devices: %s,%s; buffers: src %s, dst %s; swfmt %s; V4L2fmt %s\n",
            ctx->fns->name,
            decdev_media_path(decdev), decdev_video_path(decdev),
            mediabufs_memory_name(src_memtype), mediabufs_memory_name(dst_memtype),
-           av_get_pix_fmt_name(avctx->sw_pix_fmt));
+           av_get_pix_fmt_name(avctx->sw_pix_fmt),
+           av_fourcc2str(mediabufs_dst_pixfmt(ctx->mbufs)));
 
     return 0;
 
@@ -396,6 +408,15 @@ static int v4l2_request_hevc_init(AVCodecContext *avctx)
 #endif
         NULL
     };
+
+    if (avctx->hw_device_ctx != NULL) {
+        AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)avctx->hw_device_ctx->data;
+
+        if (dev_ctx->type != AV_HWDEVICE_TYPE_DRM) {
+            av_log(avctx, AV_LOG_ERROR, "Supplied hwcontext not DRM\n");
+            return AVERROR(EINVAL);
+        }
+    }
 
     // Give up immediately if this is something that we have no code to deal with
     if (sps->chroma_format_idc != 1) {
