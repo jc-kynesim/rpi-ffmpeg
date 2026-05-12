@@ -39,6 +39,7 @@
 #include "hwcontext.h"
 #include "hwcontext_drm.h"
 #include "hwcontext_internal.h"
+#include "hwcontext_drm_internal.h"
 #include "imgutils.h"
 #include "mem.h"
 
@@ -46,23 +47,85 @@
 #include "libavutil/rpi_sand_fns.h"
 #endif
 
+typedef struct drm_dev_ctx {
+    AVDRMDeviceContext ctx;
+    AVDictionary * opts;
+    uint32_t *fmts;
+} drm_dev_ctx;
+
 static void drm_device_free(AVHWDeviceContext *hwdev)
 {
-    AVDRMDeviceContext *hwctx = hwdev->hwctx;
+    drm_dev_ctx *ctx = hwdev->hwctx;
+    AVDRMDeviceContext *hwctx = &ctx->ctx;
 
-    close(hwctx->fd);
+    if (hwctx->fd != -1)
+        close(hwctx->fd);
+
+    av_dict_free(&ctx->opts);
+    av_freep(&ctx->fmts);
+}
+
+static uint32_t *
+mk_fmt_list(AVHWDeviceContext *hwdev, AVDictionary * opts)
+{
+    AVDictionaryEntry * ent;
+    char * fmtsstr;
+    uint32_t * fmts = NULL;
+    uint32_t * d;
+    unsigned int n;
+    const uint8_t * p;
+    const uint8_t * e;
+
+    if ((ent = av_dict_get(opts, "v4l2fmts", NULL, 0)) == NULL)
+        return NULL;
+    fmtsstr = ent->value;
+
+    n = strlen(fmtsstr);
+    if ((fmts = av_mallocz(((n + 6) / 5) * sizeof(*fmts))) == NULL)
+        return NULL;
+
+    p = fmtsstr;
+    d = fmts;
+    do {
+        if ((e = strchr(p, '/')) == NULL)
+            e = fmtsstr + n;
+
+        if (e - p == 4)
+            *d++ = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+        else
+            av_log(hwdev, AV_LOG_ERROR, "Bad V4L2 fourcc: '%.*s'\n", (int)(e - p), p);
+
+        p = e + 1;
+    } while (*e != 0);
+
+    if (d == fmts)
+        av_freep(&fmts);
+
+    return fmts;
 }
 
 static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
                              AVDictionary *opts, int flags)
 {
-    AVDRMDeviceContext *hwctx = hwdev->hwctx;
+    drm_dev_ctx *ctx = hwdev->hwctx;
+    AVDRMDeviceContext *hwctx = &ctx->ctx;
     drmVersionPtr version;
 
-    if (device == NULL) {
-        hwctx->fd = -1;
-        return 0;
+    hwctx->fd = -1;
+    ctx->opts = NULL;
+    ctx->fmts = NULL;
+    hwdev->free = &drm_device_free;
+
+    if (opts != NULL) {
+        int rv = av_dict_copy(&ctx->opts, opts, 0);
+        if (rv != 0)
+            return rv;
+
+        ctx->fmts = mk_fmt_list(hwdev, ctx->opts);
     }
+
+    if (device == NULL)
+        return 0;
 
     hwctx->fd = open(device, O_RDWR);
     if (hwctx->fd < 0)
@@ -83,8 +146,33 @@ static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
 
     drmFreeVersion(version);
 
-    hwdev->free = &drm_device_free;
+    return 0;
+}
 
+int ff_hwcontext_drm_v4l2_4cc_test(AVBufferRef * hw_device_ctx, uint32_t fcc)
+{
+    AVHWDeviceContext * dev_ctx;
+    drm_dev_ctx * ctx;
+    const uint32_t * p;
+
+    if (hw_device_ctx == NULL)
+        return 0;
+
+    dev_ctx = (AVHWDeviceContext *)hw_device_ctx->data;
+    if (dev_ctx == NULL || dev_ctx->type != AV_HWDEVICE_TYPE_DRM)
+        return 0;
+
+    ctx = dev_ctx->hwctx;
+    if (ctx == NULL)
+        return 0;
+
+    // If unspecified then all are OK
+    if (ctx->fmts == NULL)
+        return 1;
+
+    for (p = ctx->fmts; *p != 0; ++p)
+        if (*p == fcc)
+            return 1;
     return 0;
 }
 
@@ -400,7 +488,7 @@ const HWContextType ff_hwcontext_type_drm = {
     .type                   = AV_HWDEVICE_TYPE_DRM,
     .name                   = "DRM",
 
-    .device_hwctx_size      = sizeof(AVDRMDeviceContext),
+    .device_hwctx_size      = sizeof(drm_dev_ctx),
 
     .device_create          = &drm_device_create,
 
