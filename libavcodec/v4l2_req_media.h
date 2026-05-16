@@ -107,6 +107,12 @@ MediaBufsStatus qent_dst_read_stop(struct qent_dst *const be);
 MediaBufsStatus qent_dst_import_fd(struct qent_dst *const be_dst,
                 unsigned int plane,
                 int fd, size_t size);
+typedef void qent_dst_done_fn(struct qent_dst *const be_dst, void *v);
+// Set callback fn for when buffer is done
+// Called from event loop - do not block
+// Called BEFORE buffer wait is signaled so will happen before qent_dst_wait returns
+// Reset on callback (needs set every time)
+void qent_dst_done_cb_set(struct qent_dst *const be_dst, qent_dst_done_fn *const fn, void *v);
 
 const char * mediabufs_memory_name(const enum mediabufs_memory m);
 
