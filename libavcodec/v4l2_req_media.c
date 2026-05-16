@@ -372,6 +372,10 @@ struct qent_dst {
     bool waiting;
     pthread_mutex_t lock;
     pthread_cond_t cond;
+
+    qent_dst_done_fn *done_fn;
+    void *done_v;
+
     struct ff_weak_link_client * mbc_wl;
 };
 
@@ -749,6 +753,14 @@ static struct qent_base * qe_dequeue(struct buf_pool *const bp,
 
 static void qe_dst_done(struct qent_dst * dst_be)
 {
+    qent_dst_done_fn * fn = dst_be->done_fn;
+    void * v = dst_be->done_v;
+
+    dst_be->done_fn = (qent_dst_done_fn *)0;
+    dst_be->done_v = NULL;
+    if (fn)
+        fn(dst_be, v);
+
     pthread_mutex_lock(&dst_be->lock);
     dst_be->waiting = false;
     pthread_cond_broadcast(&dst_be->cond);
@@ -1142,6 +1154,12 @@ MediaBufsStatus qent_dst_import_fd(struct qent_dst *const be_dst,
     return MEDIABUFS_STATUS_SUCCESS;
 }
 
+void qent_dst_done_cb_set(struct qent_dst *const be_dst, qent_dst_done_fn *const fn, void *v)
+{
+    be_dst->done_fn = fn;
+    be_dst->done_v = v;
+}
+
 // Returns noof buffers created, -ve for error
 static int create_dst_bufs(struct mediabufs_ctl *const mbc, unsigned int n, struct qent_dst * const qes[])
 {
@@ -1314,6 +1332,10 @@ struct qent_dst* mediabufs_dst_qent_alloc(struct mediabufs_ctl *const mbc, struc
             }
         }
     }
+
+    // Ensure callbacks are reset (will be null if newly alloced)
+    be_dst->done_fn = 0;
+    be_dst->done_v = NULL;
 
     if (mbc->dst->memtype == MEDIABUFS_MEMORY_MMAP) {
         if (qe_import_from_buf(mbc, &be_dst->base, &mbc->dst_fmt, be_dst->base.index, true)) {
