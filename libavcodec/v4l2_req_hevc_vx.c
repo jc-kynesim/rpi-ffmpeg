@@ -684,6 +684,14 @@ static void fill_pps(struct v4l2_ctrl_hevc_pps * const ctrl, const HEVCPPS * con
     }
 }
 
+static void frame_clear_refs(V4L2MediaReqDescriptor * const rd)
+{
+    AVBufferRef **p = rd->refs;
+
+    for (; *p != NULL; ++p)
+        av_buffer_unref(p);
+}
+
 static int frame_finish(V4L2MediaReqDescriptor * const rd)
 {
     int rv = 0;
@@ -694,12 +702,7 @@ static int frame_finish(V4L2MediaReqDescriptor * const rd)
             rv = -1;
     }
 
-    {
-        AVBufferRef **p = rd->refs;
-        for (; *p != NULL; ++p)
-            av_buffer_unref(p);
-    }
-
+    frame_clear_refs(rd);
     return rv;
 }
 
@@ -1052,6 +1055,15 @@ static void v4l2_request_hevc_abort_frame(AVCodecContext * const avctx, V4L2Requ
     }
 }
 
+static void
+rd_done_cb(struct qent_dst * qe_dst, void * v)
+{
+    V4L2MediaReqDescriptor * const rd = v;
+    (void)qe_dst;
+
+    frame_clear_refs(rd);
+}
+
 static int send_slice(AVCodecContext * const avctx,
                       V4L2RequestContextHEVC * const ctx,
                       V4L2MediaReqDescriptor * const rd,
@@ -1096,6 +1108,9 @@ static int send_slice(AVCodecContext * const avctx,
         av_log(avctx, AV_LOG_ERROR, "%s: Failed src param set\n", __func__);
         goto fail2;
     }
+
+    if (i == 0)
+        qent_dst_done_cb_set(rd->qe_dst, rd_done_cb, rd);
 
     stat = mediabufs_start_request(ctx->mbufs, &req, &src,
                                    i == 0 ? rd->qe_dst : NULL,
