@@ -562,9 +562,11 @@ static int avi_read_header(AVFormatContext *s)
                     avi->movi_end = avi->fsize;
                 av_log(s, AV_LOG_TRACE, "movi end=%"PRIx64"\n", avi->movi_end);
                 goto end_of_header;
-            } else if (tag1 == MKTAG('I', 'N', 'F', 'O'))
+            } else if (tag1 == MKTAG('I', 'N', 'F', 'O')) {
+                if (size < 4)
+                    return AVERROR_INVALIDDATA;
                 ff_read_riff_info(s, size - 4);
-            else if (tag1 == MKTAG('n', 'c', 'd', 't'))
+            } else if (tag1 == MKTAG('n', 'c', 'd', 't'))
                 avi_read_nikon(s, list_end);
 
             break;
@@ -1834,6 +1836,10 @@ static int avi_load_index(AVFormatContext *s)
             avi->index_loaded=2;
             ret = 0;
         }else if (tag == MKTAG('L', 'I', 'S', 'T')) {
+            if (size < 4) {
+                av_log(s, AV_LOG_WARNING, "Invalid size (%u) LIST in index\n", size);
+                break;
+            }
             uint32_t tag1 = avio_rl32(pb);
 
             if (tag1 == MKTAG('I', 'N', 'F', 'O'))
