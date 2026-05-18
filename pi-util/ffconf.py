@@ -240,7 +240,7 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
                     print(": * BANG *")
 
     print()
-    print("Tested using decode type:", dectype.textname)
+    print(f"Tested using decode: {dectype.textname}, Frame type: {args.hwfmt}")
     if unx_failures or unx_success or unx_match or unx_nomatch:
         print("Unexpected Failures:", unx_failures)
         print("Unexpected Success: ", unx_success)
@@ -278,7 +278,7 @@ Return values:
     argp.add_argument("--pi4", action='store_true', help="Force pi4 cmd line")
     argp.add_argument("--drm", action='store_true', help="Force v4l2 drm cmd line")
     argp.add_argument("--sw", action='store_true', help="Use software decode")
-    argp.add_argument("--hwfmt", help="Force h/w format (sand, oldsand, nv12), default is to use 1st offered")
+    argp.add_argument("--hwfmt", default="default", help="Force h/w format (sand, oldsand, nv12), default is to use 1st offered")
     argp.add_argument("--vaapi", action='store_true', help="Force vaapi cmd line")
     argp.add_argument("--test_root", default="/opt/conform/h265.2016", help="Root dir for test")
     argp.add_argument("--csvgen", action='store_true', help="Generate CSV file for dir")
@@ -316,17 +316,17 @@ Return values:
     elif args.sw:
         dectype = hwaccel_sw
 
-    args.v4l2fmts = None
-    if args.hwfmt:
-        if args.hwfmt == "sand":
-            args.v4l2fmts = ["Nc12","Nc30"]
-        elif args.hwfmt == "oldsand":
-            args.v4l2fmts = ["NC12","NC30"]
-        elif args.hwfmt == "nv":
-            args.v4l2fmts = ["NV12","P010"]
-        else:
-            print("Unexpected hwfmt: sand, oldsand, nv expected")
-            exit(1)
+    if args.hwfmt == "default":
+        args.v4l2fmts = None
+    elif args.hwfmt == "sand":
+        args.v4l2fmts = ["Nc12","Nc30"]
+    elif args.hwfmt == "oldsand":
+        args.v4l2fmts = ["NC12","NC30"]
+    elif args.hwfmt == "nv":
+        args.v4l2fmts = ["NV12","P010"]
+    else:
+        print("Unexpected hwfmt: sand, oldsand, nv expected")
+        exit(1)
 
     if os.path.isdir(args.ffmpeg):
         args.ffmpeg = os.path.join(args.ffmpeg, "ffmpeg")
@@ -337,7 +337,7 @@ Return values:
     if not dectype:
         print("No decode type selected and no h/w detected")
         return 2
-    print("Running test using decode:", dectype.textname)
+    print(f"Running test using decode: {dectype.textname}, Frame type: {args.hwfmt}")
 
     errs = 0
     i = 0
