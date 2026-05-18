@@ -28,8 +28,6 @@
 #include "v4l2_request_hevc.h"
 
 #include "libavutil/hwcontext_drm.h"
-#include "libavutil/hwcontext_drm_internal.h"
-#include "libavutil/hwcontext_drm.h"
 #include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 
@@ -157,7 +155,7 @@ static int dst_fmt_accept_cb(void * v, const struct v4l2_fmtdesc *fmtdesc)
 {
     const struct fmt_accept_env_s * const ae = v;
 
-    if (!ff_hwcontext_drm_v4l2_4cc_test(ae->avctx->hw_device_ctx, fmtdesc->pixelformat))
+    if (!av_hwcontext_drm_v4l2_4cc_test(ae->avctx->hw_device_ctx, fmtdesc->pixelformat))
         return 0;
 
     // SAND is currently confised as to whether it is s/w or hardware
