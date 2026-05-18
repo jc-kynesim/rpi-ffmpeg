@@ -39,7 +39,6 @@
 #include "hwcontext.h"
 #include "hwcontext_drm.h"
 #include "hwcontext_internal.h"
-#include "hwcontext_drm_internal.h"
 #include "imgutils.h"
 #include "mem.h"
 
@@ -149,7 +148,7 @@ static int drm_device_create(AVHWDeviceContext *hwdev, const char *device,
     return 0;
 }
 
-int ff_hwcontext_drm_v4l2_4cc_test(AVBufferRef * hw_device_ctx, uint32_t fcc)
+int av_hwcontext_drm_v4l2_4cc_test(AVBufferRef * hw_device_ctx, uint32_t fcc)
 {
     AVHWDeviceContext * dev_ctx;
     drm_dev_ctx * ctx;
