@@ -61,6 +61,8 @@
 #include "libswresample/swresample.h"
 #include "libswresample/version.h"
 
+#include "libpostproc/postprocess.h"
+#include "libpostproc/version.h"
 
 enum show_muxdemuxers {
     SHOW_DEFAULT,
@@ -190,6 +192,7 @@ static void print_all_libs_info(int flags, int level)
     PRINT_LIB_INFO(avfilter,   AVFILTER,   flags, level);
     PRINT_LIB_INFO(swscale,    SWSCALE,    flags, level);
     PRINT_LIB_INFO(swresample, SWRESAMPLE, flags, level);
+    PRINT_LIB_INFO(postproc,   POSTPROC,   flags, level);
 }
 
 static void print_program_info(int flags, int level)
