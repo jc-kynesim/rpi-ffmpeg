@@ -256,8 +256,10 @@ copy_extradata(AVCodecContext * const avctx,
         len = src_len < 0 ? AVERROR(EINVAL) : src_len;
 
     // Zero length is OK but we want to stop - -ve is error val
-    if (len <= 0)
-        return len;
+    if (len <= 0) {
+        av_log(avctx, AV_LOG_WARNING, "Extradata does not parse. Playback may fail\n");
+        return 0;
+    }
 
     if ((*pdst_data = av_malloc(len + AV_INPUT_BUFFER_PADDING_SIZE)) == NULL)
         return AVERROR(ENOMEM);
