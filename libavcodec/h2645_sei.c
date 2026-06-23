@@ -144,7 +144,7 @@ static int decode_registered_user_data_closed_caption(H2645SEIA53Caption *h,
 static int decode_registered_user_data(H2645SEI *h, GetByteContext *gb,
                                        enum AVCodecID codec_id, void *logctx)
 {
-    int country_code, provider_code;
+    int country_code, provider_code = -1;
 
     if (bytestream2_get_bytes_left(gb) < 3)
         return AVERROR_INVALIDDATA;
@@ -606,15 +606,15 @@ static int h2645_sei_to_side_data(AVCodecContext *avctx, H2645SEI *sei,
             return AVERROR(ENOMEM);
         }
 
+        dst_env->ambient_illuminance = av_make_q(env->ambient_illuminance, 10000);
+        dst_env->ambient_light_x     = av_make_q(env->ambient_light_x,     50000);
+        dst_env->ambient_light_y     = av_make_q(env->ambient_light_y,     50000);
+
         ret = ff_frame_new_side_data_from_buf_ext(avctx, sd, nb_sd,
                                                   AV_FRAME_DATA_AMBIENT_VIEWING_ENVIRONMENT, &buf);
 
         if (ret < 0)
             return ret;
-
-        dst_env->ambient_illuminance = av_make_q(env->ambient_illuminance, 10000);
-        dst_env->ambient_light_x     = av_make_q(env->ambient_light_x,     50000);
-        dst_env->ambient_light_y     = av_make_q(env->ambient_light_y,     50000);
     }
 
     if (sei->mastering_display.present) {

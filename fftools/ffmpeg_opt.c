@@ -546,6 +546,8 @@ static int opt_map(void *optctx, const char *opt, const char *arg)
             for (i = 0; i < o->nb_stream_maps; i++) {
                 m = &o->stream_maps[i];
                 if (file_idx == m->file_index &&
+                    m->stream_index >= 0 &&
+                    m->stream_index < input_files[m->file_index]->nb_streams &&
                     stream_specifier_match(&ss,
                                            input_files[m->file_index]->ctx,
                                            input_files[m->file_index]->ctx->streams[m->stream_index],
@@ -1009,6 +1011,12 @@ static int opt_preset(void *optctx, const char *opt, const char *arg)
     char filename[1000], line[1000], tmp_line[1000];
     const char *codec_name = NULL;
     int ret = 0;
+    int depth = o->depth;
+
+    if (depth > 2) {
+        av_log(NULL, AV_LOG_ERROR, "too deep recursion\n");
+        return AVERROR(EINVAL);
+    }
 
     codec_name = opt_match_per_type_str(&o->codec_names, *opt);
 
@@ -1020,6 +1028,7 @@ static int opt_preset(void *optctx, const char *opt, const char *arg)
         return AVERROR(ENOENT);
     }
 
+    o->depth ++;
     while (fgets(line, sizeof(line), f)) {
         char *key = tmp_line, *value, *endptr;
 
@@ -1047,6 +1056,7 @@ static int opt_preset(void *optctx, const char *opt, const char *arg)
     }
 
 fail:
+    o->depth = depth;
     fclose(f);
 
     return ret;

@@ -741,11 +741,13 @@ static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, in
     FT_Vector shift;
     struct AVTreeNode *node = NULL;
     int ret = 0;
+    int cached = 0;
 
     /* get glyph */
     dummy.code = code;
     dummy.fontsize = s->fontsize;
     glyph = av_tree_find(s->glyphs, &dummy, glyph_cmp, NULL);
+    cached = !!glyph;
     if (!glyph) {
         if (FT_Load_Glyph(s->face, code, s->ft_load_flags)) {
             return AVERROR(EINVAL);
@@ -762,11 +764,12 @@ static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, in
             goto error;
         }
         if (s->borderw) {
-            glyph->border_glyph = glyph->glyph;
-            if (FT_Glyph_StrokeBorder(&glyph->border_glyph, s->stroker, 0, 0)) {
+            FT_Glyph tmp = glyph->glyph;
+            if (FT_Glyph_StrokeBorder(&tmp, s->stroker, 0, 0)) {
                 ret = AVERROR_EXTERNAL;
                 goto error;
             }
+            glyph->border_glyph = tmp;
         }
         /* measure text height to calculate text_height (or the maximum text height) */
         FT_Glyph_Get_CBox(glyph->glyph, FT_GLYPH_BBOX_SUBPIXELS, &glyph->bbox);
@@ -777,13 +780,15 @@ static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, in
             goto error;
         }
         av_tree_insert(&s->glyphs, glyph, glyph_cmp, &node);
+        cached = 1;
     } else {
         if (s->borderw && !glyph->border_glyph) {
-            glyph->border_glyph = glyph->glyph;
-            if (FT_Glyph_StrokeBorder(&glyph->border_glyph, s->stroker, 0, 0)) {
+            FT_Glyph tmp = glyph->glyph;
+            if (FT_Glyph_StrokeBorder(&tmp, s->stroker, 0, 0)) {
                 ret = AVERROR_EXTERNAL;
                 goto error;
             }
+            glyph->border_glyph = tmp;
         }
     }
 
@@ -801,11 +806,11 @@ static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, in
                 goto error;
             }
             glyph->bglyph[idx] = (FT_BitmapGlyph)tmp_glyph;
-            if (glyph->bglyph[idx]->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
-                av_log(ctx, AV_LOG_ERROR, "Monocromatic (1bpp) fonts are not supported.\n");
-                ret = AVERROR(EINVAL);
-                goto error;
-            }
+        }
+        if (glyph->bglyph[idx]->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
+            av_log(ctx, AV_LOG_ERROR, "Monocromatic (1bpp) fonts are not supported.\n");
+            ret = AVERROR(EINVAL);
+            goto error;
         }
         if (s->borderw && !glyph->border_bglyph[idx]) {
             FT_Glyph tmp_glyph = glyph->border_glyph;
@@ -822,10 +827,13 @@ static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, in
     return 0;
 
 error:
-    if (glyph && glyph->glyph)
-        FT_Done_Glyph(glyph->glyph);
-
-    av_freep(&glyph);
+    if (glyph && !cached) {
+        if (glyph->border_glyph && glyph->border_glyph != glyph->glyph)
+            FT_Done_Glyph(glyph->border_glyph);
+        if (glyph->glyph)
+            FT_Done_Glyph(glyph->glyph);
+        av_freep(&glyph);
+    }
     av_freep(&node);
     return ret;
 }
@@ -1088,10 +1096,10 @@ static int glyph_enu_border_free(void *opaque, void *elem)
 
     if (glyph->border_glyph != NULL) {
         for (int t = 0; t < 16; ++t) {
-            if (glyph->border_bglyph[t] != NULL) {
-                FT_Done_Glyph((FT_Glyph)glyph->border_bglyph[t]);
-                glyph->border_bglyph[t] = NULL;
-            }
+            FT_Glyph bbg = (FT_Glyph)glyph->border_bglyph[t];
+            if (bbg && bbg != glyph->border_glyph)
+                FT_Done_Glyph(bbg);
+            glyph->border_bglyph[t] = NULL;
         }
         FT_Done_Glyph(glyph->border_glyph);
         glyph->border_glyph = NULL;
@@ -1103,16 +1111,17 @@ static int glyph_enu_free(void *opaque, void *elem)
 {
     Glyph *glyph = elem;
 
-    FT_Done_Glyph(glyph->glyph);
-    FT_Done_Glyph(glyph->border_glyph);
     for (int t = 0; t < 16; ++t) {
-        if (glyph->bglyph[t] != NULL) {
-            FT_Done_Glyph((FT_Glyph)glyph->bglyph[t]);
-        }
-        if (glyph->border_bglyph[t] != NULL) {
-            FT_Done_Glyph((FT_Glyph)glyph->border_bglyph[t]);
-        }
+        FT_Glyph bg  = (FT_Glyph)glyph->bglyph[t];
+        FT_Glyph bbg = (FT_Glyph)glyph->border_bglyph[t];
+        if (bg && bg != glyph->glyph && bg != glyph->border_glyph)
+            FT_Done_Glyph(bg);
+        if (bbg && bbg != glyph->glyph && bbg != glyph->border_glyph)
+            FT_Done_Glyph(bbg);
     }
+    if (glyph->border_glyph && glyph->border_glyph != glyph->glyph)
+        FT_Done_Glyph(glyph->border_glyph);
+    FT_Done_Glyph(glyph->glyph);
     av_free(elem);
     return 0;
 }
@@ -1434,8 +1443,13 @@ continue_on_failed:
     }
 
     s->line_count = line_count;
-    s->lines = av_mallocz(line_count * sizeof(TextLine));
-    s->tab_clusters = av_mallocz(s->tab_count * sizeof(uint32_t));
+    s->lines = av_calloc(line_count, sizeof(TextLine));
+    s->tab_clusters = av_calloc(s->tab_count, sizeof(uint32_t));
+    if ((line_count > 0 && !s->lines) ||
+        (s->tab_count > 0 && !s->tab_clusters)) {
+        ret = AVERROR(ENOMEM);
+        goto done;
+    }
     for (i = 0; i < s->tab_count; ++i) {
         s->tab_clusters[i] = -1;
     }
@@ -1451,13 +1465,14 @@ continue_on_failed:
             s->tab_clusters[tab_idx++] = i;
             *p = ' ';
         }
+        size_t len = p - start;
         GET_UTF8(code, *p ? *p++ : 0, code = 0xfffd; goto continue_on_failed2;);
 continue_on_failed2:
         if (ff_is_newline(code) || code == 0) {
             TextLine *cur_line = &s->lines[line_count];
             HarfbuzzData *hb = &cur_line->hb_data;
             cur_line->cluster_offset = line_offset;
-            ret = shape_text_hb(s, hb, start, p - start);
+            ret = shape_text_hb(s, hb, start, len);
             if (ret != 0) {
                 goto done;
             }
@@ -1544,6 +1559,15 @@ continue_on_failed2:
 
 done:
     av_free(textdup);
+    if (ret < 0) {
+        if (s->lines) {
+            for (int l = 0; l < s->line_count; ++l)
+                hb_destroy(&s->lines[l].hb_data);
+        }
+        av_freep(&s->lines);
+        av_freep(&s->tab_clusters);
+        s->line_count = 0;
+    }
     return ret;
 }
 
@@ -1734,7 +1758,7 @@ static int draw_text(AVFilterContext *ctx, AVFrame *frame)
 
             ret = load_glyph(ctx, &glyph, hb->glyph_info[t].codepoint, shift_x64, shift_y64);
             if (ret != 0) {
-                return ret;
+                goto fail;
             }
             g_info->code = hb->glyph_info[t].codepoint;
             g_info->x = (x64 + true_x) >> 6;
@@ -1796,23 +1820,25 @@ static int draw_text(AVFilterContext *ctx, AVFrame *frame)
         if (s->shadowx || s->shadowy) {
             if ((ret = draw_glyphs(s, frame, &shadowcolor, &metrics,
                     s->shadowx, s->shadowy, s->borderw)) < 0) {
-                return ret;
+                goto fail;
             }
         }
 
         if (s->borderw) {
             if ((ret = draw_glyphs(s, frame, &bordercolor, &metrics,
                     0, 0, s->borderw)) < 0) {
-                return ret;
+                goto fail;
             }
         }
 
         if ((ret = draw_glyphs(s, frame, &fontcolor, &metrics, 0,
                 0, 0)) < 0) {
-            return ret;
+            goto fail;
         }
     }
 
+    ret = 0;
+fail:
     // FREE data structures
     for (int l = 0; l < s->line_count; ++l) {
         TextLine *line = &s->lines[l];
@@ -1821,8 +1847,9 @@ static int draw_text(AVFilterContext *ctx, AVFrame *frame)
     }
     av_freep(&s->lines);
     av_freep(&s->tab_clusters);
+    s->line_count = 0;
 
-    return 0;
+    return ret;
 }
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *frame)

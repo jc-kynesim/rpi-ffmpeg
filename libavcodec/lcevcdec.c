@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "config_components.h"
-
 #include "libavutil/avassert.h"
 #include "libavutil/frame.h"
 #include "libavutil/imgutils.h"
@@ -26,7 +24,6 @@
 #include "decode.h"
 #include "lcevcdec.h"
 
-#if CONFIG_LIBLCEVC_DEC
 static LCEVC_ColorFormat map_format(int format)
 {
     switch (format) {
@@ -50,13 +47,12 @@ static int alloc_base_frame(void *logctx, FFLCEVCContext *lcevc,
 {
     LCEVC_PictureDesc desc;
     LCEVC_ColorFormat fmt = map_format(frame->format);
-    LCEVC_PictureLockHandle lock;
-    uint8_t *data[4] = { NULL };
-    int linesizes[4] = { 0 };
-    uint32_t planes;
+    LCEVC_PicturePlaneDesc planes[AV_VIDEO_MAX_PLANES] = { 0 };
+    int width = frame->width - frame->crop_left - frame->crop_right;
+    int height = frame->height - frame->crop_top - frame->crop_bottom;
     LCEVC_ReturnCode res;
 
-    res = LCEVC_DefaultPictureDesc(&desc, fmt, frame->width, frame->height);
+    res = LCEVC_DefaultPictureDesc(&desc, fmt, width, height);
     if (res != LCEVC_Success)
         return AVERROR_EXTERNAL;
 
@@ -67,36 +63,16 @@ static int alloc_base_frame(void *logctx, FFLCEVCContext *lcevc,
     desc.sampleAspectRatioNum  = frame->sample_aspect_ratio.num;
     desc.sampleAspectRatioDen  = frame->sample_aspect_ratio.den;
 
+    for (int i = 0; i < AV_VIDEO_MAX_PLANES; i++) {
+        planes[i].firstSample = frame->data[i];
+        planes[i].rowByteStride = frame->linesize[i];
+    }
+
     /* Allocate LCEVC Picture */
-    res = LCEVC_AllocPicture(lcevc->decoder, &desc, picture);
+    res = LCEVC_AllocPictureExternal(lcevc->decoder, &desc, NULL, planes, picture);
     if (res != LCEVC_Success) {
         return AVERROR_EXTERNAL;
     }
-    res = LCEVC_LockPicture(lcevc->decoder, *picture, LCEVC_Access_Write, &lock);
-    if (res != LCEVC_Success)
-        return AVERROR_EXTERNAL;
-
-    res = LCEVC_GetPicturePlaneCount(lcevc->decoder, *picture, &planes);
-    if (res != LCEVC_Success)
-        return AVERROR_EXTERNAL;
-
-    for (unsigned i = 0; i < planes; i++) {
-        LCEVC_PicturePlaneDesc plane;
-
-        res = LCEVC_GetPictureLockPlaneDesc(lcevc->decoder, lock, i, &plane);
-        if (res != LCEVC_Success)
-            return AVERROR_EXTERNAL;
-
-        data[i] = plane.firstSample;
-        linesizes[i] = plane.rowByteStride;
-    }
-
-    av_image_copy2(data, linesizes, frame->data, frame->linesize,
-                   frame->format, frame->width, frame->height);
-
-    res = LCEVC_UnlockPicture(lcevc->decoder, lock);
-    if (res != LCEVC_Success)
-        return AVERROR_EXTERNAL;
 
     return 0;
 }
@@ -132,6 +108,7 @@ static int lcevc_send_frame(void *logctx, FFLCEVCFrame *frame_ctx, const AVFrame
 {
     FFLCEVCContext *lcevc = frame_ctx->lcevc;
     const AVFrameSideData *sd = av_frame_get_side_data(in, AV_FRAME_DATA_LCEVC);
+    AVFrame *opaque;
     LCEVC_PictureHandle picture;
     LCEVC_ReturnCode res;
     int ret = 0;
@@ -139,7 +116,11 @@ static int lcevc_send_frame(void *logctx, FFLCEVCFrame *frame_ctx, const AVFrame
     if (!sd)
         return 1;
 
+#ifdef LCEVC_DEC_VERSION_MAJOR
+    res = LCEVC_SendDecoderEnhancementData(lcevc->decoder, in->pts, sd->data, sd->size);
+#else
     res = LCEVC_SendDecoderEnhancementData(lcevc->decoder, in->pts, 0, sd->data, sd->size);
+#endif
     if (res != LCEVC_Success)
         return AVERROR_EXTERNAL;
 
@@ -147,9 +128,29 @@ static int lcevc_send_frame(void *logctx, FFLCEVCFrame *frame_ctx, const AVFrame
     if (ret < 0)
         return ret;
 
-    res = LCEVC_SendDecoderBase(lcevc->decoder, in->pts, 0, picture, -1, NULL);
-    if (res != LCEVC_Success)
+    opaque = av_frame_clone(in);
+    if (!opaque) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
+        return AVERROR(ENOMEM);
+    }
+
+    res = LCEVC_SetPictureUserData(lcevc->decoder, picture, opaque);
+    if (res != LCEVC_Success) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
+        av_frame_free(&opaque);
         return AVERROR_EXTERNAL;
+    }
+
+#ifdef LCEVC_DEC_VERSION_MAJOR
+    res = LCEVC_SendDecoderBase(lcevc->decoder, in->pts, picture, -1, opaque);
+#else
+    res = LCEVC_SendDecoderBase(lcevc->decoder, in->pts, 0, picture, -1, opaque);
+#endif
+    if (res != LCEVC_Success) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
+        av_frame_free(&opaque);
+        return AVERROR_EXTERNAL;
+    }
 
     memset(&picture, 0, sizeof(picture));
     ret = alloc_enhanced_frame(logctx, frame_ctx, &picture);
@@ -157,8 +158,10 @@ static int lcevc_send_frame(void *logctx, FFLCEVCFrame *frame_ctx, const AVFrame
         return ret;
 
     res = LCEVC_SendDecoderPicture(lcevc->decoder, picture);
-    if (res != LCEVC_Success)
+    if (res != LCEVC_Success) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
         return AVERROR_EXTERNAL;
+    }
 
     return 0;
 }
@@ -176,8 +179,14 @@ static int generate_output(void *logctx, FFLCEVCFrame *frame_ctx, AVFrame *out)
         return AVERROR_EXTERNAL;
 
     res = LCEVC_GetPictureDesc(lcevc->decoder, picture, &desc);
-    if (res != LCEVC_Success)
+    if (res != LCEVC_Success) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
         return AVERROR_EXTERNAL;
+    }
+
+    av_frame_unref(out);
+    av_frame_copy_props(frame_ctx->frame, (AVFrame *)info.baseUserData);
+    av_frame_move_ref(out, frame_ctx->frame);
 
     out->crop_top = desc.cropTop;
     out->crop_bottom = desc.cropBottom;
@@ -185,11 +194,6 @@ static int generate_output(void *logctx, FFLCEVCFrame *frame_ctx, AVFrame *out)
     out->crop_right = desc.cropRight;
     out->sample_aspect_ratio.num = desc.sampleAspectRatioNum;
     out->sample_aspect_ratio.den = desc.sampleAspectRatioDen;
-
-    av_frame_copy_props(frame_ctx->frame, out);
-    av_frame_unref(out);
-    av_frame_move_ref(out, frame_ctx->frame);
-
     out->width = desc.width + out->crop_left + out->crop_right;
     out->height = desc.height + out->crop_top + out->crop_bottom;
 
@@ -200,18 +204,13 @@ static int generate_output(void *logctx, FFLCEVCFrame *frame_ctx, AVFrame *out)
     return 0;
 }
 
-static int lcevc_receive_frame(void *logctx, FFLCEVCFrame *frame_ctx, AVFrame *out)
+static int lcevc_flush_pictures(FFLCEVCContext *lcevc)
 {
-    FFLCEVCContext *lcevc = frame_ctx->lcevc;
     LCEVC_PictureHandle picture;
     LCEVC_ReturnCode res;
-    int ret;
-
-    ret = generate_output(logctx, frame_ctx, out);
-    if (ret < 0)
-        return ret;
 
     while (1) {
+        AVFrame *base = NULL;
         res = LCEVC_ReceiveDecoderBase (lcevc->decoder, &picture);
         if (res != LCEVC_Success && res != LCEVC_Again)
             return AVERROR_EXTERNAL;
@@ -219,12 +218,27 @@ static int lcevc_receive_frame(void *logctx, FFLCEVCFrame *frame_ctx, AVFrame *o
         if (res == LCEVC_Again)
             break;
 
+        LCEVC_GetPictureUserData(lcevc->decoder, picture, (void **)&base);
+        av_frame_free(&base);
+
         res = LCEVC_FreePicture(lcevc->decoder, picture);
         if (res != LCEVC_Success)
             return AVERROR_EXTERNAL;
     }
 
     return 0;
+}
+
+static int lcevc_receive_frame(void *logctx, FFLCEVCFrame *frame_ctx, AVFrame *out)
+{
+    FFLCEVCContext *lcevc = frame_ctx->lcevc;
+    int ret;
+
+    ret = generate_output(logctx, frame_ctx, out);
+    if (ret < 0)
+        return ret;
+
+    return lcevc_flush_pictures(lcevc);
 }
 
 static void event_callback(LCEVC_DecoderHandle dec, LCEVC_Event event,
@@ -243,15 +257,16 @@ static void event_callback(LCEVC_DecoderHandle dec, LCEVC_Event event,
 static void lcevc_free(FFRefStructOpaque unused, void *obj)
 {
     FFLCEVCContext *lcevc = obj;
-    if (lcevc->initialized)
+    if (lcevc->initialized) {
+        LCEVC_FlushDecoder(lcevc->decoder);
+        lcevc_flush_pictures(lcevc);
         LCEVC_DestroyDecoder(lcevc->decoder);
+    }
     memset(lcevc, 0, sizeof(*lcevc));
 }
-#endif
 
 static int lcevc_init(FFLCEVCContext *lcevc, void *logctx)
 {
-#if CONFIG_LIBLCEVC_DEC
     LCEVC_AccelContextHandle dummy = { 0 };
     const int32_t event = LCEVC_Log;
 
@@ -270,7 +285,6 @@ static int lcevc_init(FFLCEVCContext *lcevc, void *logctx)
         return AVERROR_EXTERNAL;
     }
 
-#endif
     lcevc->initialized = 1;
 
     return 0;
@@ -289,7 +303,6 @@ int ff_lcevc_process(void *logctx, AVFrame *frame)
             return ret;
     }
 
-#if CONFIG_LIBLCEVC_DEC
     av_assert0(frame_ctx->frame);
 
 
@@ -297,12 +310,11 @@ int ff_lcevc_process(void *logctx, AVFrame *frame)
     if (ret)
         return ret < 0 ? ret : 0;
 
-    lcevc_receive_frame(logctx, frame_ctx, frame);
+    ret = lcevc_receive_frame(logctx, frame_ctx, frame);
     if (ret < 0)
         return ret;
 
     av_frame_remove_side_data(frame, AV_FRAME_DATA_LCEVC);
-#endif
 
     return 0;
 }
@@ -310,11 +322,9 @@ int ff_lcevc_process(void *logctx, AVFrame *frame)
 int ff_lcevc_alloc(FFLCEVCContext **plcevc)
 {
     FFLCEVCContext *lcevc = NULL;
-#if CONFIG_LIBLCEVC_DEC
     lcevc = ff_refstruct_alloc_ext(sizeof(*lcevc), 0, NULL, lcevc_free);
     if (!lcevc)
         return AVERROR(ENOMEM);
-#endif
     *plcevc = lcevc;
     return 0;
 }

@@ -164,6 +164,12 @@ static av_cold int che_configure(AACDecContext *ac,
         }
     } else {
         if (ac->che[type][id]) {
+            for (int i = 0; i < FF_ARRAY_ELEMS(ac->tag_che_map); i++) {
+                for (int j = 0; j < MAX_ELEM_ID; j++) {
+                    if (ac->tag_che_map[i][j] == ac->che[type][id])
+                        ac->tag_che_map[i][j] = NULL;
+                }
+            }
             ac->proc.sbr_ctx_close(ac->che[type][id]);
         }
         av_freep(&ac->che[type][id]);
@@ -2373,6 +2379,12 @@ static int decode_frame_ga(AVCodecContext *avctx, AACDecContext *ac,
         avctx->sample_rate = ac->oc[1].m4ac.sample_rate << multiplier;
         avctx->frame_size = samples;
         ac->oc[1].status = OC_LOCKED;
+    }
+
+    if (samples && avctx->sample_rate <= 0) {
+        av_log(avctx, AV_LOG_ERROR,
+               "Cannot output a frame without a valid sample rate\n");
+        return AVERROR_INVALIDDATA;
     }
 
     if (!ac->frame->data[0] && samples) {

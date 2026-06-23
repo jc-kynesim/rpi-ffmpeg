@@ -632,6 +632,9 @@ static int piz_uncompress(const EXRContext *s, const uint8_t *src, int ssize,
                                max_non_zero - min_non_zero + 1);
     memset(td->bitmap + max_non_zero + 1, 0, BITMAP_SIZE - max_non_zero - 1);
 
+    if (bytestream2_get_bytes_left(&gb) < 4)
+        return AVERROR_INVALIDDATA;
+
     maxval = reverse_lut(td->bitmap, td->lut);
 
     bytestream2_skip(&gb, 4);
@@ -1458,7 +1461,8 @@ static int decode_block(AVCodecContext *avctx, void *tdata,
                 }
 
                 // Zero out the end if xmax+1 is not w
-                memset(ptr_x, 0, axmax);
+                if (s->desc->flags & AV_PIX_FMT_FLAG_PLANAR || !c)
+                    memset(ptr_x, 0, axmax);
                 channel_buffer[c] += td->channel_line_size;
             }
         }
@@ -1780,12 +1784,17 @@ static int decode_header(EXRContext *s, AVFrame *frame)
                     }
                 }
 
-                s->channels = av_realloc(s->channels,
-                                         ++s->nb_channels * sizeof(EXRChannel));
-                if (!s->channels) {
+                av_assert0(s->nb_channels < INT_MAX); // Impossible due to size of the bitstream
+                EXRChannel *new_channels = av_realloc_array(s->channels,
+                                                            s->nb_channels + 1,
+                                                            sizeof(EXRChannel));
+                if (!new_channels) {
                     ret = AVERROR(ENOMEM);
                     goto fail;
                 }
+                s->nb_channels ++;
+                s->channels = new_channels;
+
                 channel             = &s->channels[s->nb_channels - 1];
                 channel->pixel_type = current_pixel_type;
                 channel->xsub       = xsub;
@@ -1808,7 +1817,7 @@ static int decode_header(EXRContext *s, AVFrame *frame)
                 s->is_luma = 1;
             } else {
                 avpriv_request_sample(s->avctx, "Uncommon channel combination");
-                ret = AVERROR(AVERROR_PATCHWELCOME);
+                ret = AVERROR_PATCHWELCOME;
                 goto fail;
             }
 
@@ -2207,6 +2216,8 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *picture,
     }
 
     if (s->is_tile) {
+        if (s->tile_attr.ySize <= 0 || s->tile_attr.xSize <= 0)
+            return AVERROR_INVALIDDATA;
         nb_blocks = ((s->xdelta + s->tile_attr.xSize - 1) / s->tile_attr.xSize) *
         ((s->ydelta + s->tile_attr.ySize - 1) / s->tile_attr.ySize);
     } else { /* scanline */

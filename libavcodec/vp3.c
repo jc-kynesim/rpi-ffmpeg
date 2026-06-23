@@ -46,7 +46,6 @@
 #include "decode.h"
 #include "get_bits.h"
 #include "hpeldsp.h"
-#include "internal.h"
 #include "jpegquanttables.h"
 #include "mathops.h"
 #include "progressframe.h"
@@ -2458,7 +2457,7 @@ static av_cold int vp3_decode_init(AVCodecContext *avctx)
         }
     }
 
-    if (!avctx->internal->is_copy) {
+    if (ff_thread_sync_ref(avctx, offsetof(Vp3DecodeContext, coeff_vlc)) != FF_THREAD_IS_COPY) {
         CoeffVLCs *vlcs = ff_refstruct_alloc_ext(sizeof(*s->coeff_vlc), 0,
                                                  NULL, free_vlc_tables);
         if (!vlcs)
@@ -2526,8 +2525,6 @@ static int vp3_update_thread_context(AVCodecContext *dst, const AVCodecContext *
     Vp3DecodeContext *s = dst->priv_data;
     const Vp3DecodeContext *s1 = src->priv_data;
     int qps_changed = 0;
-
-    ff_refstruct_replace(&s->coeff_vlc, s1->coeff_vlc);
 
     // copy previous frame data
     ref_frames(s, s1);
@@ -2899,6 +2896,8 @@ static int theora_decode_header(AVCodecContext *avctx, GetBitContext *gb)
     if (av_image_check_size(visible_width, visible_height, 0, avctx) < 0 ||
         visible_width  + offset_x > s->width ||
         visible_height + offset_y > s->height ||
+        visible_width  + 512 < s->width  ||
+        visible_height + 512 < s->height ||
         visible_width < 18
     ) {
         av_log(avctx, AV_LOG_ERROR,

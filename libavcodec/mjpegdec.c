@@ -150,7 +150,7 @@ av_cold int ff_mjpeg_decode_init(AVCodecContext *avctx)
     if ((ret = init_default_huffman_tables(s)) < 0)
         return ret;
 
-    if (s->extern_huff) {
+    if (s->extern_huff && avctx->extradata) {
         av_log(avctx, AV_LOG_INFO, "using external huffman table\n");
         if ((ret = init_get_bits(&s->gb, avctx->extradata, avctx->extradata_size * 8)) < 0)
             return ret;
@@ -344,9 +344,11 @@ int ff_mjpeg_decode_sof(MJpegDecodeContext *s)
     if (av_image_check_size(width, height, 0, s->avctx) < 0)
         return AVERROR_INVALIDDATA;
 
-    // A valid frame requires at least 1 bit for DC + 1 bit for AC for each 8x8 block.
-    if (s->buf_size && (width + 7) / 8 * ((height + 7) / 8) > s->buf_size * 4LL)
-        return AVERROR_INVALIDDATA;
+    if (!s->progressive && !s->ls) {
+        // A valid frame requires at least 1 bit for DC + 1 bit for AC for each 8x8 block.
+        if (s->buf_size && (width + 7) / 8 * ((height + 7) / 8) > s->buf_size * 4LL)
+            return AVERROR_INVALIDDATA;
+    }
 
     nb_components = get_bits(&s->gb, 8);
     if (nb_components <= 0 ||

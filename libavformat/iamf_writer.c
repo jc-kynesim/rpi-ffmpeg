@@ -125,9 +125,14 @@ static int fill_codec_config(IAMFContext *iamf, const AVStreamGroup *stg,
     }
     populate_audio_roll_distance(codec_config);
     if (st->codecpar->extradata_size) {
-        codec_config->extradata = av_memdup(st->codecpar->extradata, st->codecpar->extradata_size);
+        if (st->codecpar->extradata_size > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE)
+            return AVERROR_INVALIDDATA;
+
+        codec_config->extradata = av_malloc(st->codecpar->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
         if (!codec_config->extradata)
             return AVERROR(ENOMEM);
+        memcpy(codec_config->extradata, st->codecpar->extradata, st->codecpar->extradata_size);
+        memset(codec_config->extradata + st->codecpar->extradata_size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
         codec_config->extradata_size = st->codecpar->extradata_size;
         ret = update_extradata(codec_config);
         if (ret < 0)
@@ -583,11 +588,15 @@ static int ambisonics_config(const IAMFAudioElement *audio_element,
                              AVIOContext *dyn_bc)
 {
     const AVIAMFAudioElement *element = audio_element->celement;
+    const IAMFLayer *ilayer = &audio_element->layers[0];
     const AVIAMFLayer *layer = element->layers[0];
 
+    if (audio_element->nb_substreams != ilayer->substream_count)
+        return AVERROR(EINVAL);
+
     ffio_write_leb(dyn_bc, 0); // ambisonics_mode
-    ffio_write_leb(dyn_bc, layer->ch_layout.nb_channels); // output_channel_count
-    ffio_write_leb(dyn_bc, audio_element->nb_substreams); // substream_count
+    avio_w8(dyn_bc, layer->ch_layout.nb_channels); // output_channel_count
+    avio_w8(dyn_bc, audio_element->nb_substreams); // substream_count
 
     if (layer->ch_layout.order == AV_CHANNEL_ORDER_AMBISONIC)
         for (int i = 0; i < layer->ch_layout.nb_channels; i++)
@@ -1109,7 +1118,7 @@ int ff_iamf_write_audio_frame(const IAMFContext *iamf, AVIOContext *pb,
                                                                AV_PKT_DATA_NEW_EXTRADATA,
                                                                &new_extradata_size);
 
-        if (!new_extradata)
+        if (!new_extradata || new_extradata_size > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE)
             return AVERROR_INVALIDDATA;
         audio_element = get_audio_element(iamf, audio_substream_id);
         if (!audio_element)
@@ -1119,11 +1128,13 @@ int ff_iamf_write_audio_frame(const IAMFContext *iamf, AVIOContext *pb,
             return AVERROR(EINVAL);
 
         av_free(codec_config->extradata);
-        codec_config->extradata = av_memdup(new_extradata, new_extradata_size);
+        codec_config->extradata = av_malloc(new_extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
         if (!codec_config->extradata) {
             codec_config->extradata_size = 0;
             return AVERROR(ENOMEM);
         }
+        memcpy(codec_config->extradata, new_extradata, new_extradata_size);
+        memset(codec_config->extradata + new_extradata_size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
         codec_config->extradata_size = new_extradata_size;
 
         return update_extradata(codec_config);

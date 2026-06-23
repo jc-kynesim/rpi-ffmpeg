@@ -1136,8 +1136,11 @@ static int skipped_transform_tree_unit(VVCLocalContext *lc)
     const CodingUnit *cu   = lc->cu;
     int ret;
 
-    if (cu->tree_type != DUAL_TREE_CHROMA)
-        set_qp_y(lc, cu->x0, cu->y0, 0);
+    if (cu->tree_type != DUAL_TREE_CHROMA) {
+        ret = set_qp_y(lc, cu->x0, cu->y0, 0);
+        if (ret < 0)
+            return ret;
+    }
     if (rsps->sps_chroma_format_idc && cu->tree_type != DUAL_TREE_LUMA)
         set_qp_c(lc);
     ret = skipped_transform_tree(lc, cu->x0, cu->y0, cu->cb_width, cu->cb_height);
@@ -1778,12 +1781,15 @@ static int inter_data(VVCLocalContext *lc)
         pu->general_merge_flag = ff_vvc_general_merge_flag(lc);
 
     if (pu->general_merge_flag) {
-        hls_merge_data(lc);
+        ret = hls_merge_data(lc);
     } else if (cu->pred_mode == MODE_IBC){
         ret = mvp_data_ibc(lc);
     } else {
         ret = mvp_data(lc);
     }
+
+    if (ret)
+        return ret;
 
     if (cu->pred_mode == MODE_IBC)
     {
@@ -2286,6 +2292,7 @@ static void alf_params(VVCLocalContext *lc, const int rx, const int ry)
     ALFParams *alf                = &CTB(fc->tab.alf, rx, ry);
 
     alf->ctb_flag[LUMA] = alf->ctb_flag[CB] = alf->ctb_flag[CR] = 0;
+    alf->ctb_cc_idc[0] = alf->ctb_cc_idc[1] = 0;
     if (sh->sh_alf_enabled_flag) {
         alf->ctb_flag[LUMA] = ff_vvc_alf_ctb_flag(lc, rx, ry, LUMA);
         if (alf->ctb_flag[LUMA]) {
@@ -2316,7 +2323,6 @@ static void alf_params(VVCLocalContext *lc, const int rx, const int ry)
         const uint8_t cc_enabled[] = { sh->sh_alf_cc_cb_enabled_flag, sh->sh_alf_cc_cr_enabled_flag };
         const uint8_t cc_aps_id[]  = { sh->sh_alf_cc_cb_aps_id, sh->sh_alf_cc_cr_aps_id };
         for (int i = 0; i < 2; i++) {
-            alf->ctb_cc_idc[i] = 0;
             if (cc_enabled[i]) {
                 const VVCALF *aps = fc->ps.alf_list[cc_aps_id[i]];
                 alf->ctb_cc_idc[i] = ff_vvc_alf_ctb_cc_idc(lc, rx, ry, i, aps->num_cc_filters[i]);

@@ -70,6 +70,8 @@ typedef struct SnowEncContext {
     uint64_t encoding_error[SNOW_MAX_PLANES];
 } SnowEncContext;
 
+#define PTR_ADD(ptr, off) ((ptr) ? (ptr) + (off) : NULL)
+
 static void init_ref(MotionEstContext *c, const uint8_t *const src[3],
                      uint8_t *const ref[3], uint8_t *const ref2[3],
                      int x, int y, int ref_index)
@@ -82,7 +84,7 @@ static void init_ref(MotionEstContext *c, const uint8_t *const src[3],
     };
     for (int i = 0; i < 3; i++) {
         c->src[0][i] = src [i];
-        c->ref[0][i] = ref [i] + offset[i];
+        c->ref[0][i] = PTR_ADD(ref[i], offset[i]);
     }
     av_assert2(!ref_index);
 }
@@ -400,8 +402,8 @@ static int encode_q_branch(SnowEncContext *enc, int level, int x, int y)
     const int stride= s->current_picture->linesize[0];
     const int uvstride= s->current_picture->linesize[1];
     const uint8_t *const current_data[3] = { s->input_picture->data[0] + (x + y*  stride)*block_w,
-                                s->input_picture->data[1] + ((x*block_w)>>s->chroma_h_shift) + ((y*uvstride*block_w)>>s->chroma_v_shift),
-                                s->input_picture->data[2] + ((x*block_w)>>s->chroma_h_shift) + ((y*uvstride*block_w)>>s->chroma_v_shift)};
+                                PTR_ADD(s->input_picture->data[1], ((x*block_w)>>s->chroma_h_shift) + ((y*uvstride*block_w)>>s->chroma_v_shift)),
+                                PTR_ADD(s->input_picture->data[2], ((x*block_w)>>s->chroma_h_shift) + ((y*uvstride*block_w)>>s->chroma_v_shift))};
     int P[10][2];
     int16_t last_mv[3][2];
     int qpel= !!(s->avctx->flags & AV_CODEC_FLAG_QPEL); //unused
@@ -697,13 +699,15 @@ static int get_dc(SnowEncContext *enc, int mb_x, int mb_y, int plane_index)
 
         for(y2= FFMAX(y, 0); y2<FFMIN(h, y+block_h); y2++){
             for(x2= FFMAX(x, 0); x2<FFMIN(w, x+block_w); x2++){
-                int index= x2-(block_w*mb_x - block_w/2) + (y2-(block_h*mb_y - block_h/2))*obmc_stride;
+                int col= x2-(block_w*mb_x - block_w/2);
+                int row= y2-(block_h*mb_y - block_h/2);
+                int index= col + row*obmc_stride;
                 int obmc_v= obmc[index];
                 int d;
-                if(y<0) obmc_v += obmc[index + block_h*obmc_stride];
-                if(x<0) obmc_v += obmc[index + block_w];
-                if(y+block_h>h) obmc_v += obmc[index - block_h*obmc_stride];
-                if(x+block_w>w) obmc_v += obmc[index - block_w];
+                if(y<0)                              obmc_v += obmc[index + block_h*obmc_stride];
+                if(x<0)                              obmc_v += obmc[index + block_w];
+                if(y+block_h>h  && row-block_h >= 0) obmc_v += obmc[index - block_h*obmc_stride];
+                if(x+block_w>w  && col-block_w >= 0) obmc_v += obmc[index - block_w];
                 //FIXME precalculate this or simplify it somehow else
 
                 d = -dst[index] + (1<<(FRAC_BITS-1));
@@ -714,6 +718,9 @@ static int get_dc(SnowEncContext *enc, int mb_x, int mb_y, int plane_index)
         }
     }
     *b= backup;
+
+    if (!aa)
+        return 0;
 
     return av_clip_uint8( ROUNDED_DIV((int64_t)ab<<LOG2_OBMC_MAX, aa) ); //FIXME we should not need clipping
 }
@@ -812,13 +819,14 @@ static int get_block_rd(SnowEncContext *enc, int mb_x, int mb_y,
         && (mb_x == 0 || mb_x == b_stride-1)
         && (mb_y == 0 || mb_y == b_height-1)){
         if(mb_x == 0)
-            x1 = block_w;
+            x1 = FFMIN(x1, block_w);
         else
-            x0 = block_w;
+            x0 = FFMAX(x0, block_w);
         if(mb_y == 0)
-            y1 = block_h;
+            y1 = FFMIN(y1, block_h);
         else
-            y0 = block_h;
+            y0 = FFMAX(y0, block_h);
+        x0 = FFMIN(x0, x1);
         for(y=y0; y<y1; y++)
             memcpy(dst + sx+x0 + (sy+y)*ref_stride, cur + x0 + y*ref_stride, x1-x0);
     }

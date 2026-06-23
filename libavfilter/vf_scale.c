@@ -693,8 +693,8 @@ static int config_props(AVFilterLink *outlink)
 
     if (outlink->w > INT_MAX ||
         outlink->h > INT_MAX ||
-        (outlink->h * inlink->w) > INT_MAX ||
-        (outlink->w * inlink->h) > INT_MAX)
+        (outlink->h * (uint64_t)inlink->w) > INT_MAX ||
+        (outlink->w * (uint64_t)inlink->h) > INT_MAX)
         av_log(ctx, AV_LOG_ERROR, "Rescaled value for width or height is too big.\n");
 
     /* TODO: make algorithm configurable */
@@ -1119,7 +1119,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
         goto err;
 
     av_assert0(out);
-    out->pts = av_rescale_q(fs->pts, fs->time_base, outlink->time_base);
+    out->pts = av_rescale_q_rnd(fs->pts, fs->time_base, outlink->time_base, AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
     return ff_filter_frame(outlink, out);
 
 err:

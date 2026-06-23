@@ -131,7 +131,7 @@ static void xor_block(void *p1, void *p2, unsigned size, int key, unsigned *key_
     size >>= 2;
 
     while (size > 0) {
-        *d2 = *d1 ^ (HAVE_BIGENDIAN ? av_bswap32(k) : k);
+        AV_WN32(d2, AV_RN32(d1) ^ (HAVE_BIGENDIAN ? av_bswap32(k) : k));
         k += key;
         d1++;
         d2++;
@@ -588,7 +588,9 @@ static int viv_read_header(AVFormatContext *s)
         block_type = avio_r8(pb);
 
         if (block_type == 22) {
-            avio_read(pb, keybuffer, 187);
+            ret = ffio_read_size(pb, keybuffer, 187);
+            if (ret < 0)
+                return ret;
             b22_key = decode_key(keybuffer);
             b22_size = avio_rl32(pb);
         }
@@ -722,8 +724,10 @@ static int viv_read_packet(AVFormatContext *s,
         }
         last_start =
         viv->audio_subpackets[viv->n_audio_subpackets].start = (int)(off - avio_tell(pb));
-        if (last_start < last)
+        if (last_start < last) {
+            viv->n_audio_subpackets = 0;
             return AVERROR_INVALIDDATA;
+        }
         viv->current_audio_subpacket = 0;
 
     } else {

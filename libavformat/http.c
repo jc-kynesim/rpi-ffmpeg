@@ -22,6 +22,7 @@
 #include "config.h"
 #include "config_components.h"
 
+#include <string.h>
 #include <time.h>
 #if CONFIG_ZLIB
 #include <zlib.h>
@@ -143,6 +144,7 @@ typedef struct HTTPContext {
     unsigned int retry_after;
     int reconnect_max_retries;
     int reconnect_delay_total_max;
+    int max_redirects;
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -188,6 +190,7 @@ static const AVOption options[] = {
     { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
     { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
     { "short_seek_size", "Threshold to favor readahead over seek.", OFFSET(short_seek_size), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, D },
+    { "max_redirects", "Maximum number of redirects", OFFSET(max_redirects), AV_OPT_TYPE_INT, { .i64 = MAX_REDIRECTS }, 0, INT_MAX, D },
     { NULL }
 };
 
@@ -212,7 +215,7 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
     const char *path, *proxy_path, *lower_proto = "tcp", *local_path;
     char *env_http_proxy, *env_no_proxy;
     char *hashmark;
-    char hostname[1024], hoststr[1024], proto[10];
+    char hostname[1024], hoststr[1024], proto[10], tmp_host[1024];
     char auth[1024], proxyauth[1024] = "";
     char path1[MAX_URL_SIZE], sanitized_path[MAX_URL_SIZE + 1];
     char buf[1024], urlbuf[MAX_URL_SIZE];
@@ -222,7 +225,14 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
     av_url_split(proto, sizeof(proto), auth, sizeof(auth),
                  hostname, sizeof(hostname), &port,
                  path1, sizeof(path1), s->location);
-    ff_url_join(hoststr, sizeof(hoststr), NULL, NULL, hostname, port, NULL);
+
+    av_strlcpy(tmp_host, hostname, sizeof(tmp_host));
+    // In case of an IPv6 address, we need to strip the Zone ID,
+    // if any. We do it at the first % sign, as percent encoding
+    // can be used in the Zone ID itself.
+    if (strchr(tmp_host, ':'))
+        tmp_host[strcspn(tmp_host, "%")] = '\0';
+    ff_url_join(hoststr, sizeof(hoststr), NULL, NULL, tmp_host, port, NULL);
 
     env_http_proxy = getenv_utf8("http_proxy");
     proxy_path = s->http_proxy ? s->http_proxy : env_http_proxy;
@@ -243,7 +253,11 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
             if (err < 0)
                 goto end;
         }
+    } else if (strcmp(proto, "http")) {
+        err = AVERROR(EINVAL);
+        goto end;
     }
+
     if (port < 0)
         port = 80;
 
@@ -374,6 +388,9 @@ redo:
 
     cached = redirect_cache_get(s);
     if (cached) {
+        if (redirects++ >= s->max_redirects)
+            return AVERROR(EIO);
+
         av_free(s->location);
         s->location = av_strdup(cached);
         if (!s->location) {
@@ -442,7 +459,7 @@ redo:
         s->new_location) {
         /* url moved, get next */
         ffurl_closep(&s->hd);
-        if (redirects++ >= MAX_REDIRECTS)
+        if (redirects++ >= s->max_redirects)
             return AVERROR(EIO);
 
         if (!s->expires) {
@@ -1128,6 +1145,8 @@ static int process_line(URLContext *h, char *line, int line_count, int *parsed_h
             method = p;
             while (*p && !av_isspace(*p))
                 p++;
+            if (!av_isspace(*p))
+                return ff_http_averror(400, AVERROR(EIO));
             *(p++) = '\0';
             av_log(h, AV_LOG_TRACE, "Received method: %s\n", method);
             if (s->method) {
@@ -1154,6 +1173,8 @@ static int process_line(URLContext *h, char *line, int line_count, int *parsed_h
             resource = p;
             while (*p && !av_isspace(*p))
                 p++;
+            if (!av_isspace(*p))
+                return ff_http_averror(400, AVERROR(EIO));
             *(p++) = '\0';
             av_log(h, AV_LOG_TRACE, "Requested resource: %s\n", resource);
             if (!(s->resource = av_strdup(resource)))

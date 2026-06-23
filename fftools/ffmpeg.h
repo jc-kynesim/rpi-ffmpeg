@@ -254,6 +254,8 @@ typedef struct OptionsContext {
     SpecifierOptList enc_stats_pre_fmt;
     SpecifierOptList enc_stats_post_fmt;
     SpecifierOptList mux_stats_fmt;
+
+    int depth;
 } OptionsContext;
 
 enum IFilterFlags {
@@ -420,7 +422,7 @@ typedef struct Decoder {
 
     enum AVMediaType type;
 
-    const uint8_t   *subtitle_header;
+    uint8_t         *subtitle_header;
     int              subtitle_header_size;
 
     // number of frames/samples retrieved from the decoder

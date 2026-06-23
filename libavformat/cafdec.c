@@ -288,6 +288,10 @@ static void read_info_chunk(AVFormatContext *s, int64_t size)
     AVIOContext *pb = s->pb;
     unsigned int i;
     unsigned int nb_entries = avio_rb32(pb);
+
+    if (3LL * nb_entries > size)
+        return;
+
     for (i = 0; i < nb_entries && !avio_feof(pb); i++) {
         char key[32];
         char value[1024];
@@ -501,6 +505,8 @@ static int read_seek(AVFormatContext *s, int stream_index,
         frame_cnt  = caf->frames_per_packet * packet_cnt;
     } else if (sti->nb_index_entries) {
         packet_cnt = av_index_search_timestamp(st, timestamp, flags);
+        if (packet_cnt < 0)
+            return -1;
         frame_cnt  = sti->index_entries[packet_cnt].timestamp;
         pos        = sti->index_entries[packet_cnt].pos;
     } else {

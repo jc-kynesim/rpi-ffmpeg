@@ -213,18 +213,33 @@ static int decode_usac_element_pair(AACDecContext *ac,
 
     if (e->stereo_config_index) {
         e->mps.freq_res = get_bits(gb, 3); /* bsFreqRes */
+        if (!e->mps.freq_res)
+            return AVERROR_INVALIDDATA; /* value 0 is reserved */
+        int numBands = ((int[]){0,28,20,14,10,7,5,4})[e->mps.freq_res]; // ISO/IEC 23003-1:2007, 5.2, Table 39
+
         e->mps.fixed_gain = get_bits(gb, 3); /* bsFixedGainDMX */
         e->mps.temp_shape_config = get_bits(gb, 2); /* bsTempShapeConfig */
         e->mps.decorr_config = get_bits(gb, 2); /* bsDecorrConfig */
         e->mps.high_rate_mode = get_bits1(gb); /* bsHighRateMode */
         e->mps.phase_coding = get_bits1(gb); /* bsPhaseCoding */
 
-        if (get_bits1(gb)) /* bsOttBandsPhasePresent */
-            e->mps.otts_bands_phase = get_bits(gb, 5); /* bsOttBandsPhase */
+        int otts_bands_phase = ((int[]){0,10,10,7,5,3,2,2})[e->mps.freq_res]; // Table 109 — Default value of bsOttBandsPhase
+        if (get_bits1(gb)) { /* bsOttBandsPhasePresent */
+            otts_bands_phase = get_bits(gb, 5); /* bsOttBandsPhase */
+            if (otts_bands_phase > numBands)
+                return AVERROR_INVALIDDATA;
+        }
+        e->mps.otts_bands_phase = otts_bands_phase;
 
         e->mps.residual_coding = e->stereo_config_index >= 2; /* bsResidualCoding */
         if (e->mps.residual_coding) {
-            e->mps.residual_bands = get_bits(gb, 5); /* bsResidualBands */
+            int residual_bands = get_bits(gb, 5); /* bsResidualBands */
+            if (residual_bands > numBands)
+                return AVERROR_INVALIDDATA;
+            e->mps.residual_bands = residual_bands;
+
+            e->mps.otts_bands_phase = FFMAX(e->mps.otts_bands_phase,
+                                            e->mps.residual_bands);
             e->mps.pseudo_lr = get_bits1(gb); /* bsPseudoLr */
         }
         if (e->mps.temp_shape_config == 2)
@@ -315,7 +330,7 @@ int ff_aac_usac_reset_state(AACDecContext *ac, OutputConfiguration *oc)
                 ff_aac_sbr_config_usac(ac, che, e);
 
             for (int j = 0; j < ch; j++) {
-                SingleChannelElement *sce = &che->ch[ch];
+                SingleChannelElement *sce = &che->ch[j];
                 AACUsacElemData *ue = &sce->ue;
 
                 memset(ue, 0, sizeof(*ue));
@@ -358,6 +373,8 @@ int ff_aac_usac_config_decode(AACDecContext *ac, AVCodecContext *avctx,
     freq_idx = get_bits(gb, 5); /* usacSamplingFrequencyIndex */
     if (freq_idx == 0x1f) {
         samplerate = get_bits(gb, 24); /* usacSamplingFrequency */
+        if (samplerate == 0)
+            return AVERROR(EINVAL);
     } else {
         samplerate = ff_aac_usac_samplerate[freq_idx];
         if (samplerate < 0)
@@ -1288,7 +1305,8 @@ static void spectrum_decode(AACDecContext *ac, AACUSACConfig *usac,
         SingleChannelElement *sce = &cpe->ch[ch];
         AACUsacElemData *ue = &sce->ue;
 
-        spectrum_scale(ac, sce, ue);
+        if (!ue->core_mode)
+            spectrum_scale(ac, sce, ue);
     }
 
     if (nb_channels > 1 && us->common_window) {
@@ -1338,8 +1356,9 @@ static void spectrum_decode(AACDecContext *ac, AACUSACConfig *usac,
         if (sce->tns.present && ((nb_channels == 1) || (us->tns_on_lr)))
             ac->dsp.apply_tns(sce->coeffs, &sce->tns, &sce->ics, 1);
 
-        ac->oc[1].m4ac.frame_length_short ? ac->dsp.imdct_and_windowing_768(ac, sce) :
-                                            ac->dsp.imdct_and_windowing(ac, sce);
+        if (!sce->ue.core_mode)
+            ac->oc[1].m4ac.frame_length_short ? ac->dsp.imdct_and_windowing_768(ac, sce) :
+                                                ac->dsp.imdct_and_windowing(ac, sce);
     }
 }
 
