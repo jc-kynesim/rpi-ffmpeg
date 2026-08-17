@@ -425,7 +425,7 @@ xlat_pending(const V4L2m2mContext * const s)
             break;
     }
 
-    if (first_dts != AV_NOPTS_VALUE && now != AV_NOPTS_VALUE && interval != 0 && s->reorder_size != 0) {
+    if (first_dts != AV_NOPTS_VALUE && now != AV_NOPTS_VALUE && interval != 0 && s->reorder_size > 0) {
         const int iframes = (first_dts - now) / (int)interval;
         const int t = iframes - s->reorder_size + no_dts_count;
 
@@ -617,13 +617,15 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     int src_rv = -1;
     int dst_rv = 1;  // Non-zero (done), non-negative (error) number
     unsigned int i = 0;
+    const int low_delay = (avctx->flags & AV_CODEC_FLAG_LOW_DELAY) != 0;
 
     do {
-        const int pending = xlat_pending(s);
+        int pending = xlat_pending(s);
         const int prefer_dq = (pending > 4);
         const int last_src_rv = src_rv;
 
-        av_log(avctx, AV_LOG_TRACE, "Pending=%d, src_rv=%d, req_pkt=%d\n", pending, src_rv, s->req_pkt);
+        av_log(avctx, AV_LOG_INFO, "[%d] Pending=%d, src_rv=%d, req_pkt=%d, low_delay=%d, reorder=%d\n",
+               i, pending, src_rv, s->req_pkt, low_delay, s->reorder_size);
 
         // Enqueue another pkt for decode if
         // (a) We don't have a lot of stuff in the buffer already OR
@@ -631,18 +633,22 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         // (c) We've dequeued a lot of frames without asking for input
         src_rv = try_enqueue_src(avctx, s, !(!prefer_dq || i != 0 || s->req_pkt > 2));
 
+        if (src_rv == NQ_OK)
+            ++pending;
+
         // If we got a frame last time or we've already tried to get a frame and
         // we have nothing to enqueue then return now. rv will be AVERROR(EAGAIN)
         // indicating that we want more input.
         // This should mean that once decode starts we enter a stable state where
         // we alternately ask for input and produce output
-        if ((i != 0 || s->req_pkt) && src_rv == NQ_SRC_EMPTY)
+        if ((i != 0 || (!low_delay && s->req_pkt)) && src_rv == NQ_SRC_EMPTY)
             break;
 
         if (src_rv == NQ_Q_FULL && last_src_rv == NQ_Q_FULL) {
             av_log(avctx, AV_LOG_WARNING, "Poll thinks src Q has space; none found\n");
             break;
         }
+
 
         // Try to get a new frame if
         // (a) we haven't already got one AND
@@ -656,6 +662,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
             const int t =
                 src_rv == NQ_Q_FULL ? -1 :
                 src_rv == NQ_DRAINING ? 300 :
+                low_delay && s->reorder_size == 0 && (pending == -15 || pending == 1) ? 100 :
                 prefer_dq ? (s->running && pending > 31 ? 100 : 5) : 0;
 
             // Dequeue frame will unref any previous contents of frame
@@ -664,6 +671,7 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
             // This returns AVERROR(EAGAIN) on timeout or if
             // there is room in the input Q and timeout == -1
             dst_rv = ff_v4l2_context_dequeue_frame(&s->capture, frame, t);
+            av_log(avctx, AV_LOG_INFO, "t=%d, dst_rv=%d, pending=%d\n", t, dst_rv, pending);
 
             // Failure due to no buffer in Q?
             if (dst_rv == AVERROR(ENOSPC)) {
@@ -724,6 +732,8 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         }
     }
 #endif
+
+    av_log(avctx, AV_LOG_INFO, "dst_rv=%d, src_rv=%d\n", dst_rv, src_rv);
 
     return dst_rv == 0 ? 0 :
         src_rv < 0 ? src_rv :
@@ -1061,7 +1071,7 @@ static uint32_t max_coded_size(const AVCodecContext * const avctx)
 static void
 parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
 {
-    s->reorder_size = 0;
+    s->reorder_size = -1;
 
     if (!avctx->extradata || !avctx->extradata_size)
         return;
@@ -1093,6 +1103,7 @@ parse_extradata(AVCodecContext * const avctx, V4L2m2mContext * const s)
                     avctx->profile = ff_h264_get_profile(sps);
                     avctx->level = sps->level_idc;
                     s->reorder_size = sps->num_reorder_frames;
+                    av_log(avctx, AV_LOG_INFO, "SPS: max_reorder=%d\n", s->reorder_size);
                 }
             }
             ff_h264_ps_uninit(&ps);
