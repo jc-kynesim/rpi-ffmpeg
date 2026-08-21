@@ -617,13 +617,15 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     int src_rv = -1;
     int dst_rv = 1;  // Non-zero (done), non-negative (error) number
     unsigned int i = 0;
+    const int low_delay = (avctx->flags & AV_CODEC_FLAG_LOW_DELAY) != 0;
 
     do {
-        const int pending = xlat_pending(s);
+        int pending = xlat_pending(s);
         const int prefer_dq = (pending > 4);
         const int last_src_rv = src_rv;
 
-        av_log(avctx, AV_LOG_TRACE, "Pending=%d, src_rv=%d, req_pkt=%d\n", pending, src_rv, s->req_pkt);
+        av_log(avctx, AV_LOG_TRACE, "[%d] Pending=%d, src_rv=%d, req_pkt=%d, low_delay=%d, reorder=%d\n",
+               i, pending, src_rv, s->req_pkt, low_delay, s->reorder_size);
 
         // Enqueue another pkt for decode if
         // (a) We don't have a lot of stuff in the buffer already OR
@@ -631,12 +633,15 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         // (c) We've dequeued a lot of frames without asking for input
         src_rv = try_enqueue_src(avctx, s, !(!prefer_dq || i != 0 || s->req_pkt > 2));
 
+        if (src_rv == NQ_OK)
+            ++pending;
+
         // If we got a frame last time or we've already tried to get a frame and
         // we have nothing to enqueue then return now. rv will be AVERROR(EAGAIN)
         // indicating that we want more input.
         // This should mean that once decode starts we enter a stable state where
         // we alternately ask for input and produce output
-        if ((i != 0 || s->req_pkt) && src_rv == NQ_SRC_EMPTY)
+        if ((i != 0 || (!low_delay && s->req_pkt)) && src_rv == NQ_SRC_EMPTY)
             break;
 
         if (src_rv == NQ_Q_FULL && last_src_rv == NQ_Q_FULL) {
