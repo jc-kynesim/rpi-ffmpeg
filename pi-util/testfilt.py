@@ -10,24 +10,14 @@ import csv
 from stat import *
 
 class validator:
-    def __init__(self, ok=False):
-        self.ok = ok
-        self.fail_msg = "Failed"
+    def __init__(self):
+        self.ok = False
 
     def isok(self):
         return self.ok
 
     def setok(self):
         self.ok = True
-
-    def setfail(self):
-        self.ok = False
-
-    def setmsg(self, msg):
-        self.fail_msg = msg[:]
-
-    def failmsg(self):
-        return self.fail_msg
 
 class valid_regex(validator):
     def __init__(self, regex):
@@ -38,38 +28,18 @@ class valid_regex(validator):
         if self.isok() or self.regex.search(line):
             self.setok()
 
-class invalid_regex(validator):
-    def __init__(self, regex, fail_msg):
-        super().__init__(True)
-        self.setmsg(fail_msg)
-        self.regex = re.compile(regex)
-
-    def scanline(self, line):
-        if not self.isok():
-            return
-        if self.regex.search(line):
-            self.setfail()
 
 def validate(validators, flog):
     for line in flog:
         for v in validators:
             v.scanline(line)
 
-    ok = True
     for v in validators:
         if not v.isok():
-            ok = False
-            # complain
-            print(v.failmsg())
-            break
+            return False
+    return True
 
-    if ok:
-        print("OK")
-    return ok
-
-def runtest(name, ffmpeg, args, suffix, validators):
-
-    print(f'==== {name}: ', end="", flush=True)
+def runtest2(name, ffmpeg, args, suffix, validators):
 
     log_root = os.path.join("/tmp", "testfilt", name)
     ofilename = os.path.join(log_root, name + suffix)
@@ -91,15 +61,30 @@ def runtest(name, ffmpeg, args, suffix, validators):
     flog = open(os.path.join(log_root, name + ".log"), "rt")
     return validate(validators, flog)
 
+def runtest(name, ffmpeg, args, suffix, validators):
+
+    print (f'==== {name}: ', end="")
+    sys.stdout.flush()
+
+    rv = runtest2(name, ffmpeg, args, suffix, validators)
+
+    if rv:
+        print("ok")
+    else:
+        print("FAIL")
+
+    return rv
+
+
+def sayok(log_root, flog):
+    print("Woohoo")
+    return True
+
 def main():
     argp = argparse.ArgumentParser(description="FFmpeg filter tester")
-    argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name")
-    argp.add_argument("--test_root", default="../streams", help="Root dir for test")
+    argp.add_argument("--ffmpeg", default="./ffmpeg", help="ffmpeg exec name or build directory")
+    argp.add_argument("--test_root", default="../streams", help="directory with 3mbit h264/265 jellyfish files")
     args = argp.parse_args()
-
-    if not os.path.isdir(args.test_root):
-        print("Test root dir '%s' not found" % args.test_root)
-        return 2
 
     if os.path.isdir(args.ffmpeg):
         args.ffmpeg = os.path.join(args.ffmpeg, "ffmpeg")
@@ -107,15 +92,37 @@ def main():
         print("FFmpeg file '%s' not found" % args.ffmpeg)
         return 2
 
-    src_file = os.path.join(args.test_root, "jellyfish-3-mbps-hd-h264.mkv")
-    if not os.path.isfile(src_file):
-        print("Test source file '%s' not found" % src_file)
+    if not os.path.isdir(args.test_root):
+        print("Jellyfish source dir '%s' not found" % args.test_root)
         return 2
+    h264_src = os.path.join(args.test_root, "jellyfish-3-mbps-hd-h264.mkv")
+    h265_src = os.path.join(args.test_root, "jellyfish-3-mbps-hd-hevc.mkv")
+    if not os.path.isfile(h264_src):
+        print(f"Jellyfish 3Mbit H264 source file {h264_src} not found")
+    if not os.path.isfile(h265_src):
+        print(f"Jellyfish 3Mbit H265 source file {h265_src} not found")
 
-    runtest("ATest", args.ffmpeg, ["-v", "verbose", "-no_cvt_hw", "-an", "-c:v", "h264_v4l2m2m", "-i",
-                                   src_file, "-c:v", "h264_v4l2m2m", "-b:v", "2M"], ".mkv",
-            [invalid_regex(r'Could not find a valid device', "Device not found (not Pi4?)"),
-             valid_regex(r'Output stream #0:0 \(video\): 900 frames encoded; 900 packets muxed')])
+    rv = runtest("H264H264", args.ffmpeg, ["-v", "verbose", "-no_cvt_hw", "-an", "-c:v", "h264_v4l2m2m",
+                                   "-i", h264_src,
+                                   "-c:v", "h264_v4l2m2m", "-b:v", "2M"], ".mkv",
+            [valid_regex(r'Output stream #0:0 \(video\): 900 frames encoded; 900 packets muxed')])
+
+    rv = runtest("H265H264", args.ffmpeg, ["-v", "verbose", "-no_cvt_hw", "-an",
+                                   "-hwaccel", "drm", "-init_hw_device", "drm:,v4l2fmts=NC12", "-c:v", "hevc",
+                                   "-i", h265_src,
+                                   "-c:v", "h264_v4l2m2m", "-b:v", "2M"], ".mkv",
+            [valid_regex(r'Output stream #0:0 \(video\): 900 frames encoded; 900 packets muxed')])
+
+    rv = runtest("H265ScaleH264", args.ffmpeg, ["-v", "verbose", "-no_cvt_hw", "-an",
+                                   "-hwaccel", "drm", "-init_hw_device", "drm:,v4l2fmts=NC12", "-c:v", "hevc",
+                                   "-i", h265_src,
+                                   "-vf", "scale_v4l2m2m=w=1280:h=720:format=nv12",
+                                   "-c:v", "h264_v4l2m2m", "-b:v", "2M"], ".mkv",
+            [valid_regex(r'Output stream #0:0 \(video\): 900 frames encoded; 900 packets muxed')])
+
+
+    if not rv:
+        return 3
     return 0
 
 if __name__ == '__main__':
