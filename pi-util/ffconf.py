@@ -176,7 +176,7 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
         exp_test = int(a[0])
         if (exp_test and runtest(a[1], tests)):
             name = a[1]
-            print ("==== ", name, end="")
+            print (f'==== {name}: ', end="", flush=True)
             sys.stdout.flush()
 
             (rv, frametype, v4l2fmt) = testone(os.path.join(test_root, name), name, a[2], a[3], a[4], dectype=dectype, vcodec=vcodec, args=args)
@@ -214,31 +214,31 @@ def doconf(csva, tests, test_root, vcodec, dectype, args):
                 unx_nomatch.append(name)
 
             if comments:
-                print(f" ({",".join(comments)})", end="")
+                print(f"({",".join(comments)}) ", end="")
 
             if (rv == 0):
                 if exp_test == 2:
-                    print(": * OK *")
+                    print("* OK *")
                     unx_success.append(name)
                 else:
-                    print(": ok")
+                    print("ok")
             elif exp_test == 2 and rv == 1:
-                print(": fail")
+                print("fail")
             elif exp_test == 3 and rv == 2:
                 # Call an expected "crash" an abort
-                print(": abort")
+                print("abort")
             else:
                 unx_failures.append(name)
                 if rv == 1:
-                    print(": * FAIL *")
+                    print("* FAIL *")
                 elif (rv == 2) :
-                    print(": * CRASH *")
+                    print("* CRASH *")
                 elif (rv == 3) :
-                    print(": * MD5 MISSING *")
+                    print("* MD5 MISSING *")
                 elif (rv == 4) :
-                    print(": * VALGRIND *")
+                    print("* VALGRIND *")
                 else :
-                    print(": * BANG *")
+                    print("* BANG *")
 
     print()
     print(f"Tested using decode: {dectype.textname}, Frame type: {args.hwfmt}")
