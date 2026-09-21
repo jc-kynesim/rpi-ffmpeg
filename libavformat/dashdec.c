@@ -1537,8 +1537,11 @@ static void move_segments(struct representation *rep_src, struct representation 
         free_fragment_list(rep_dest);
         if (rep_src->start_number > (rep_dest->start_number + rep_dest->n_fragments))
             rep_dest->cur_seq_no = 0;
-        else
+        else {
             rep_dest->cur_seq_no += rep_src->start_number - rep_dest->start_number;
+            if (rep_dest->cur_seq_no < 0)
+                rep_dest->cur_seq_no = 0;
+        }
         rep_dest->fragments    = rep_src->fragments;
         rep_dest->n_fragments  = rep_src->n_fragments;
         rep_dest->parent  = rep_src->parent;
@@ -1595,7 +1598,7 @@ static int refresh_manifest(AVFormatContext *s)
     for (i = 0; i < n_videos; i++) {
         struct representation *cur_video = videos[i];
         struct representation *ccur_video = c->videos[i];
-        if (cur_video->timelines) {
+        if (cur_video->timelines && cur_video->fragment_timescale > 0) {
             // calc current time
             int64_t currentTime = get_segment_start_time_based_on_timeline(cur_video, cur_video->cur_seq_no) / cur_video->fragment_timescale;
             // update segments
@@ -1611,7 +1614,7 @@ static int refresh_manifest(AVFormatContext *s)
     for (i = 0; i < n_audios; i++) {
         struct representation *cur_audio = audios[i];
         struct representation *ccur_audio = c->audios[i];
-        if (cur_audio->timelines) {
+        if (cur_audio->timelines && cur_audio->fragment_timescale > 0) {
             // calc current time
             int64_t currentTime = get_segment_start_time_based_on_timeline(cur_audio, cur_audio->cur_seq_no) / cur_audio->fragment_timescale;
             // update segments
@@ -1658,7 +1661,7 @@ static struct fragment *get_current_fragment(struct representation *pls)
     int reload_count = 0;
 
     while (( !ff_check_interrupt(c->interrupt_callback)&& pls->n_fragments > 0)) {
-        if (pls->cur_seq_no < pls->n_fragments) {
+        if (pls->cur_seq_no >= 0 && pls->cur_seq_no < pls->n_fragments) {
             seg_ptr = pls->fragments[pls->cur_seq_no];
             seg = av_mallocz(sizeof(struct fragment));
             if (!seg) {

@@ -1,6 +1,182 @@
 Entries are sorted chronologically from oldest to youngest within each release,
 releases are sorted from youngest to oldest.
 
+version 9.0.2:
+ Update for 9.0.2
+ avcodec/ppc/vp8dsp: store the 16 pixel wide rows at any alignment
+ avfilter/vf_decimate: reject blocks smaller than one chroma sample
+ avformat/genh: check for unsupported interlaved size 1 typ1 THP
+ lavc/vvc: Prevent OOB write in sh_entry_points
+ avcodec/vulkan_hevc: bound the per category reference counts in vk_hevc_start_frame
+ avcodec/vulkan_hevc: bound the reference count in vk_hevc_start_frame
+ avformat/pdvenc: add the AVClass pointer to PDVMuxContext
+ avcodec/fflcms2: fix memory leak after cmsDeleteContext(NULL)
+ avcodec/cbs_h266_syntax_template: fix ph_recovery_poc_cnt range
+ avformat/http: free cookie parameters on parse failure
+ avutil/opt: fix av_opt_is_set_to_default() on default-NAN options
+ fftools: reject negative -t durations
+ avcodec/hevc: don't error out on remaining slices of a skipped picture
+ avcodec/vvc: Skip over the current picture in find_ref_idx
+ avcodec/mips/vc1dsp_msa: Fix mspel functions
+ avcodec/mips/hevcpred_msa: Fix compilation
+ avcodec/vc1_block: don't drop the last macroblock when 1 bit remains
+ avcodec/dovi_rpudec: strip zero padding
+ avformat/dashdec: check fragment_timescale before division in refresh_manifest
+ avutil/encryption_info: reject init info with zero-sized key IDs
+ avformat/genh: check thp extradata read and allocation
+ avformat/oggdec: check for integer overflow in buf_realloc
+ vulkan_av1: fix out-of-bounds write of tile_sizes
+ avcodec/cfhd: reject header tags after the frame buffer was allocated
+ avcodec/cfhd: check the channel number after every tag
+ avcodec/cfhd: reset the allocated band sizes when freeing the buffers
+ avcodec/cook: require the channel mask to cover every subpacket channel
+ avcodec/dvdsubenc: account for the byte alignment of each RLE line
+ avfilter/vf_colorconstancy: free only allocated buffers on setup failure
+ avcodec/hap: do not hide the failure of the chunk table allocation
+ avformat/mov: Allocate the array without clearing before read
+ avformat/mov: do not zero a key string before reading it
+ avformat/mov: bound the keys atom entry count by the atom size
+ avcodec/vvc/dec: compare the CTU area in ibc_tl_init()
+ avcodec/vvc/dec: free the tabs when pic_arrays_init() fails
+ avcodec/vvc/thread: clear fc->ft when the frame thread is freed
+ avfilter/vf_uspp: Fix qpcount
+ avcodec/codec_internal: clarify docs for FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM
+ avfilter/f_metadata: avoid overread on long formatted output
+ avformat/tls_mbedtls: set the expected hostname for numeric hosts
+ libswscale/ppc/yuv2rgb_altivec: Fix heap buffer overflow in yuv2packedX
+ swscale/ops_dispatch: account for the vertical filter taps in the tail copy
+ swscale/ops_dispatch: pass the line strides to copy_lines() as ptrdiff_t
+ swscale/uops: pad the horizontal filter weights to whole blocks
+ avcodec/apac: reset bitstream_index unconditionally to avoid integer overflow
+ avcodec/vorbisenc: dont assert on non finite input
+ avcodec/rv34: do not copy an unused reference line in the edge emulation
+ avcodec/rv34: do not await a negative reference-frame row
+ avcodec/vp9: unref next_refs in vp9_decode_flush
+ avcodec/vp8: do not await a negative reference-frame row
+ avformat/vpk: Check the channel count before dividing in the last block
+ avformat: Restore the container channel layout after a failed decoder open
+ avcodec/dcadec: ignore reserved speaker positions in coded channel order
+ avformat/matroskaenc: reserve space for BlockAdditionMapping even if Matroska muxer isn't enabled
+ (fforge/pr/24457) ffmpeg: fix matching of non-apic stream specifiers
+ avformat/cbs: move AV1 feature definition to their own header
+ (fforge/pr/24399) avcodec/bsf/dca_core: clear profile value on init()
+ avformat/sierravmd: require a 6bit palette in the probe
+ libswscale: use unaligned read/write macros in planarCopyWrapper
+ avformat/binka: reject truncated packet reads
+ avfilter/acrossover: reject non-finite parameters
+ avfilter/aiir: reject non-finite parameters
+ avfilter/firequalizer: reject overflowing delays
+ avcodec/wavpackenc: handle INT32_MIN samples
+ avfilter/aecho: reject non-finite delays and decays
+ libswresample/aarch64: Fix sign extension in audio conversion
+ avcodec/audiotoolbox: use 64-bit channel masks
+ avfilter/aarch64/vf_bwdif_init: Fix stride bound check
+ avformat/dashenc: free http options on avio_open_dyn_buf failure
+ avcodec/bmp: fix misaligned read in 16-bit decoding
+ avcodec/huffyuv: seed the median predictor endian independently
+ avformat/wvdec: convert flags to defines
+ (fforge/pr/24299) avformat/iamf_writer: don't discard skip samples signaled through side data for Opus
+ (fforge/pr/24295) avformat/movenc: fix crash when flushing a fragment with no data
+ swscale/loongarch: fix buffer underflow in yuv2plane1_8_lsx/lasx
+ (fforge/pr/24279) avcodec/h264_direct: do not read the other field's rows of colocated mb_type
+ avcodec/h264_slice: clear the ER picture when starting a second field
+ Revert "fftools/ffmpeg_sched: allow throttling decoder outputs"
+ avcodec/libdav1d: fix leak of frames on failure
+ avcodec/mips/cabac: Fix building on OpenBSD/mips64
+ avcodec/pthread_frame: sync decoded side data to all worker threads
+ (fforge/pr/24146) avcodec/h264_direct: await both fields of a colocated field pair
+ avcodec/h264_direct: move check before loading things
+
+
+version 9.0.1:
+ Bump for 9.0.1
+ avcodec/lcldec: clear what the multithread chunks leave undecoded
+ avformat/mlv: end the LJ92 packet where its data ends
+ avformat/mpegts: reject a max_packet_size below one TS payload
+ avformat/mpegts: keep the PES payload within max_packet_size
+ avfilter/spectrumsynth: negotiate one pixel format for both inputs
+ avfilter/afir: bound the crossfades by the samples of the input frame
+ Update for 9.0.1
+ avformat/webp_anim_dec: use ffio_read_size for ICCP and EXIF chunk
+ avformat/webp_anim_dec: use ffio_read_size for ICCP and EXIF chunks
+ avformat/rtpenc_av1: do not narrow the OBU size to (long)
+ avformat/rtpenc_av1: Check num_lebs
+ avformat/rtpenc_av1: bound OBU size in the keyframe search loop
+ avformat/gopher: Fix CRLF injection
+ avformat/rtpenc_vc2hq: reject data units larger than the RTP payload buffer
+ avformat/dashdec: reject a negative fragment index
+ avformat/hevc: reject hvcC NAL arrays that overflow the 16-bit count
+ avformat/mpegenc: reject stream counts that overflow the system header
+ avformat/mpegenc: pass buffer size into put_system_header()
+ avformat/librist: honor the caller buffer size in librist_read
+ avformat/scd: reject zero-channel tracks
+ avcodec/dolby_e: Add error recovery when parse_mantissas run out of bits
+ avfilter/af_pan: check the id of named input channels before use
+ swscale: avoid overflow in fast bilinear edge handling
+ avformat/shared: Use correct printf specifier
+ Revert "lavfi/bwdif: fix heap-buffer-overflow with small height videos"
+ avfilter/vf_bwdif: fix line boundary checks for >8 bits content
+ avformat/rawutils: reject raw RGB frames that do not fit an AVPacket
+ avcodec/nvenc: write AV1 timecode metadata in AV1 syntax
+ avcodec/utils: add ff_alloc_timecode_metadata_av1()
+ avcodec/utils: factor the timecode fields out of ff_alloc_timecode_sei
+ vulkan_encode_av1: set primary_ref_frame to a reference name, not a slot
+ avformat/mov: reject a trun sample count the input cannot hold
+ RELEASE_NOTES: Based on the version from 8.0
+ avformat/mp3enc: fix underflow of the LAME encoder delay
+ avformat/os_support: fix return value of win32_rename
+ vulkan_encode: fix leak and swallowed errors in init_base_units()
+ avfilter/dnn: fix async teardown race condition in all backends
+ avcodec/tiff: reject inflate output shorter than the strip
+ avformat/dashdec: check NULL pointer before use str_end_offset
+ avformat/dashdec: check NULL pointer of av_strtok value before use it
+ avfilter/vf_scale_cuda: fix non-scaling format conversion
+ fftools/opt_common: fix format string bug in print_program_info
+ avformat/dashdec: fix integer truncation in calc_max_seg_no()
+ swscale/x86: fix SIGILL in u8 SCALE on SSE4-only CPUs
+ avdevice/android_camera: fix OOB read in metadata parsing
+ avformat/dashdec: don't stop at the first input EOF
+ avformat/iamf_parse: check that num_sub_mixes and num_audio_elements in Mix Presentations are not zero
+ avformat/iamf_parse: bound the output mix gain duration by the audio elements
+ avcodec/cbs_h266: size vps_direct_ref_layer_flag for the full layer range
+ avcodec/vulkan/ffv1_dec_setup: act on the slice header rejection
+ avcodec/ffv1dec: reject a remap that produces zero entries
+ avcodec/ffv1dec: mark the slice damaged when its remap fails
+ avcodec/vulkan/ffv1_dec_setup: bound the fltmap write
+ avcodec/vulkan/ffv1_dec_setup: test mul_count as unsigned
+ avcodec/vulkan/ffv1_dec_setup: reject a remap that produces zero entries
+ avcodec/pgssubdec: always give an output rect a palette
+ scale_d3d11: Fix hw_frame_ctx reference leak
+ avcodec/cfhd: reject transform-2 output wider than the plane
+ avformat/rtsp: clear authentication on cross-origin redirects
+ avcodec/dovi_rpuenc: normalize vdr_dm_metadata_present to 0/1
+ avcodec/dovi_rpuenc: validate vdr_rpu_id from the input metadata
+ avcodec/bsf/dovi_rpu: handle update_rpu() returning no RPU
+ avcodec/dovi_rpudec: bound num_x/y_partitions
+ avcodec/dovi_rpuenc: validate the data mapping before generation
+ avfilter/af_arnndn: pad the DCT input buffers to the read length
+ doc/nut.texi: point at the latest spec in the git repository
+ avformat/mov: bound sgpd sync entry_count by the atom size
+ avcodec/rscc: do not leave uninitilized data when the input is too short
+ avcodec/dvbsub_parser: avoid signed overflow in the capacity check
+ avformat/tls_openssl: bind peer identity for numeric-IP verify
+ avformat/codec2: avoid integer overflow in packet size and duration
+ avfilter/vf_xpsnr: avoid a zero block size on small frames
+ avcodec/cbs_av1: pad the ITU-T T.35 payload buffer
+ avcodec/screenpresso: reject deflate output shorter than the frame
+ avformat/hls: Enforce protocol checks when opening child playlists
+ avformat/hlsenc: Fix heap buffer overflow in parse_playlist()
+ avformat/hlsenc: Handle extensionless URIs in extract_segment_number()
+ avfilter/vf_lut3d: do not compute size*size before the size is validated
+ avfilter/vf_hqdn3d: support dynamic frame sizes
+ avfilter/vf_hqdn3d: reject unsupported frame parameter changes
+ avcodec/bsf/truehd_core: clear profile value on init()
+ avcodec/bsf/eac3_core: clear profile value on init()
+ avformat/iamf_parse: fix inverted subblock duration validation
+ avcodec/get_buffer: use frame pixel format instead of context
+ avformat/lcevc: add a log context parameter to all functions
+
+
 version 9.0:
 - Extend AMF Color Converter (vf_vpp_amf) HDR capabilities
 - LCEVC track muxing support in MP4 muxer
