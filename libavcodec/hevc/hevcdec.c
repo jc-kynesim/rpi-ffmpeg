@@ -3290,6 +3290,11 @@ static int hevc_frame_start(HEVCContext *s, HEVCLayerContext *l,
         }
     }
 
+    // set_sps() runs before get_format(), so avctx->hwaccel is not yet known
+    // there and the s/w decode helper arrays get allocated regardless
+    if (s->avctx->hwaccel && l->tab_mvf_pool)
+        pic_arrays_free(l);
+
     if (l->horizontal_bs) {
         memset(l->horizontal_bs, 0, l->bs_width * l->bs_height);
         memset(l->vertical_bs,   0, l->bs_width * l->bs_height);
